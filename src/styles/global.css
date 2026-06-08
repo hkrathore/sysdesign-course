@@ -1,0 +1,205 @@
+@layer base, starlight, theme, components, utilities;
+
+@import '@astrojs/starlight-tailwind';
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import '@fontsource-variable/inter';
+
+/* Make Tailwind's `dark:` variant follow Starlight's theme toggle
+   (`<html data-theme="dark">`), so embedded React widgets can theme
+   themselves with `dark:` utilities instead of being hardcoded dark. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+	/* Starlight Tailwind theme overrides go here (none needed yet). */
+}
+
+/* ================================================================== *
+ * Professional editorial theme — emerald brand accent + Inter type.
+ * Replaces Starlight's default purple-blue accent and system font for a
+ * refined look cohesive with the widgets' emerald (#2dd4a7).
+ * Starlight convention: :root = dark theme; :root[data-theme='light'].
+ * ================================================================== */
+:root {
+	--sl-font: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+	/* dark theme accent (Starlight default) */
+	--sl-color-accent-low: #103d2e;
+	--sl-color-accent: #2dd4a7;
+	--sl-color-accent-high: #bdf5de;
+}
+:root[data-theme='light'] {
+	--sl-color-accent-low: #c7efdc;
+	--sl-color-accent: #0c976a; /* darker emerald for AA contrast on white */
+	--sl-color-accent-high: #053627;
+}
+
+/* Editorial typography — refined hierarchy, rhythm, and links. */
+body {
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+.sl-markdown-content :is(h1, h2, h3, h4),
+.content-panel h1 {
+	letter-spacing: -0.02em;
+	font-weight: 650;
+}
+/* Section dividers — an editorial hairline under each H2 in long lessons. */
+.sl-markdown-content h2 {
+	margin-top: 2.5rem;
+	padding-bottom: 0.3rem;
+	border-bottom: 1px solid var(--sl-color-gray-5);
+}
+.sl-markdown-content a {
+	text-underline-offset: 0.2em;
+	text-decoration-thickness: 0.06em;
+}
+::selection {
+	background: color-mix(in srgb, var(--sl-color-accent) 28%, transparent);
+}
+
+/* ================================================================== *
+ * Theme-aware neutral palette for embedded widgets.
+ * Widgets use these vars for structural surfaces (bg / panel / border /
+ * text) so they FLIP with the selected Starlight theme. Accent colors
+ * (emerald / amber / sky / rose) stay fixed — they read on both themes.
+ * ================================================================== */
+:root,
+[data-theme='light'] {
+	--w-bg: #ffffff;
+	--w-panel: #f1f5f9; /* slate-100 */
+	--w-panel-2: #e2e8f0; /* slate-200 */
+	--w-border: #cbd5e1; /* slate-300 */
+	--w-border-soft: #e2e8f0;
+	--w-text: #1e293b; /* slate-800 */
+	--w-heading: #0f172a; /* slate-900 */
+	--w-muted: #64748b; /* slate-500 */
+	--w-faint: #94a3b8; /* slate-400 */
+	--w-slot: #e2e8f0; /* neutral cell */
+	--w-shadow: 0 10px 30px -12px rgba(2, 6, 23, 0.25);
+}
+[data-theme='dark'] {
+	--w-bg: rgba(15, 23, 42, 0.8); /* slate-900/80 */
+	--w-panel: rgba(30, 41, 59, 0.4); /* slate-800/40 */
+	--w-panel-2: #1e293b;
+	--w-border: #334155; /* slate-700 */
+	--w-border-soft: rgba(51, 65, 85, 0.6);
+	--w-text: #e2e8f0; /* slate-200 */
+	--w-heading: #ffffff;
+	--w-muted: #94a3b8; /* slate-400 */
+	--w-faint: #64748b; /* slate-500 */
+	--w-slot: #334155;
+	--w-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* ================================================================== *
+ * Widget pill / toggle buttons — keep each pill content-height and
+ * vertically centered in its flex row. Flex's default `align-items:
+ * stretch` (plus a stray `h-full` left over from earlier equal-height
+ * attempts) was stretching the FIRST pill in each row ~16px taller than
+ * its siblings, so preset/toggle rows looked misaligned. align-self +
+ * height:auto makes every pill size to its single line of text.
+ * Scoped to widget islands and to <button> only — the equal-height card
+ * GRIDS use <div>, and ShardingVisualizer's bars use items-end, so both
+ * are untouched. This is the single source of truth so the bug can't
+ * recur in future widgets. (CLAUDE.md §8: pills = centered, not stretched.)
+ * ================================================================== */
+.sl-markdown-content astro-island button {
+	align-self: center;
+	height: auto;
+}
+
+/* ================================================================== *
+ * Tables — restore clear, readable styling. The Tailwind layer strips
+ * Starlight's cell padding/borders (cells end up with 0 horizontal
+ * padding). Unlayered rules so they win the cascade; theme-aware.
+ * ================================================================== */
+.sl-markdown-content table {
+	display: block;
+	width: max-content;
+	max-width: 100%;
+	overflow-x: auto;
+	border-collapse: collapse;
+	margin-block: 1.25rem;
+	font-size: 0.875rem;
+	line-height: 1.45;
+}
+.sl-markdown-content table :is(th, td) {
+	border: 1px solid var(--sl-color-gray-5);
+	padding: 0.5rem 0.85rem;
+	text-align: left;
+	vertical-align: top;
+}
+.sl-markdown-content table thead th {
+	background: var(--sl-color-gray-6);
+	font-weight: 600;
+}
+
+/* ================================================================== *
+ * Mermaid — clickable, zoomable diagrams (script: /mermaid-zoom.js).
+ * ================================================================== */
+.sl-markdown-content :is(.mermaid, pre.mermaid) {
+	cursor: zoom-in;
+	text-align: center;
+	overflow-x: auto;
+	/* Solid theme-aware surface so edges/arrows/connectors are always visible.
+	   !important overrides astro-mermaid's high-specificity faint-bg rule
+	   ([data-theme=...] pre.mermaid[data-processed]). */
+	background: var(--w-bg) !important;
+	border: 1px solid var(--w-border-soft) !important;
+	border-radius: 0.75rem !important;
+	padding: 1.25rem 1rem !important;
+	margin-block: 1.25rem;
+}
+.sl-markdown-content :is(.mermaid, pre.mermaid) svg {
+	max-width: 100%;
+	height: auto;
+}
+.mermaid-zoom-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	background: rgba(2, 6, 23, 0.88);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	touch-action: none;
+}
+.mermaid-zoom-content {
+	/* Fit-to-screen on open (contain) — the diagram never opens larger than the
+	   viewport; wheel-zoom then scales up from this fitted baseline. */
+	width: 94vw;
+	height: 90vh;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--w-bg);
+	border-radius: 0.75rem;
+	padding: 1rem;
+	cursor: grab;
+	will-change: transform;
+	transform-origin: center center;
+}
+.mermaid-zoom-content:active {
+	cursor: grabbing;
+}
+.mermaid-zoom-content svg {
+	max-width: 100%;
+	max-height: 100%;
+	width: auto;
+	height: auto;
+}
+.mermaid-zoom-hint {
+	position: fixed;
+	bottom: 1rem;
+	left: 50%;
+	transform: translateX(-50%);
+	color: #cbd5e1;
+	font-size: 0.75rem;
+	font-family: var(--sl-font-mono, ui-monospace, monospace);
+	background: rgba(15, 23, 42, 0.85);
+	border: 1px solid #334155;
+	border-radius: 0.5rem;
+	padding: 0.35rem 0.75rem;
+	pointer-events: none;
+}
