@@ -5,48 +5,39 @@ sidebar:
   order: 1
 ---
 
-> Lesson 2.1 surveyed DNS inside the request lifecycle (the root→TLD→authoritative *walk* exists, TTL trades failover speed against lookup load, GeoDNS/anycast steer globally, failover isn't instant). This lesson is the **building-block deep-dive**: the resolution *mechanics*, the cache hierarchy with real TTLs, the four steering policies as distinct mechanisms, anycast internals, propagation math, named failure modes, and — the Director angle — DNS as a **global control plane** and an **outage blast-radius**.
+> Lesson 2.1 surveyed DNS inside the request lifecycle (the root→TLD→authoritative *walk* exists, TTL trades failover speed against lookup load, GeoDNS/anycast steer globally, failover isn't instant). This lesson is the **building-block deep-dive** at decision altitude: TTL as the operational knob, the four steering policies as distinct mechanisms, anycast's real semantics, and — the Director angle — DNS as a **global control plane** and an **outage blast-radius**.
 
 ### Learning objectives
-- Distinguish a **recursive** query from an **iterative** one, and say exactly which actor does the iterating.
-- Reason about the **layered DNS cache** and use **TTL as a deliberate failover / rollback / cost knob**, with numbers.
+- State who does the work in resolution (the recursive resolver, not the client) and why caching makes DNS viable at internet scale.
+- Use **TTL as a deliberate failover / rollback / cost knob**, with numbers.
 - Classify the four DNS traffic-steering mechanisms (round-robin, geolocation, latency-based, weighted) and pick one from a requirement.
 - Explain **anycast** (BGP-nearest, not geo-nearest) and why it fits DNS but not every protocol.
 - Treat DNS as a **control plane** and bound its **blast radius** — multi-provider redundancy, the Dyn 2016 lesson, and why DNS failover is a best-effort floor.
 
 ### Intuition first
-DNS is the **directory-assistance operator for the internet** — but a very particular kind. You (the **stub resolver** in your OS) call **one** operator (your **recursive resolver**) and say "give me the final number for `api.example.com`, do whatever legwork it takes." That operator then makes a series of *its own* short calls to a chain of specialist directories: first the **root** ("who handles `.com`?"), which doesn't know the number but **refers** the operator onward; then the **`.com` TLD** directory ("who's authoritative for `example.com`?"), another **referral**; finally the **authoritative** server for `example.com`, which actually holds the answer. You made **one** request and got **one** answer (that's *recursive*). The operator made a chain of *referral-only* calls (that's *iterative*) and did the walking for you.
-
-Two more facts make DNS what it is. First, **everyone keeps a sticky-note copy of recent answers** with an expiry on it (the **TTL**) — so most lookups never reach the authoritative server at all. Second, **the authoritative server can hand back different numbers to different callers** (nearest region, a weighted slice, a region for compliance) — which is what turns a phonebook into a **traffic-steering control plane**.
+DNS is the **directory-assistance operator for the internet**. You (your OS) call **one** operator (your **recursive resolver**) and say "get me the final number for `api.example.com`, do whatever legwork it takes" — and the operator works a chain of specialist directories (root, `.com`, your domain's own nameserver) on your behalf. Two more facts make DNS what it is. First, **everyone keeps a sticky-note copy of recent answers** with an expiry on it (the **TTL**) — so most lookups never reach the authoritative server at all. Second, **the authoritative server can hand back different numbers to different callers** (nearest region, a weighted slice, a region for compliance) — which is what turns a phonebook into a **traffic-steering control plane**.
 
 ### Deep explanation
 
 #### The hierarchy and who owns what
-DNS is a delegated tree. No single server knows everything; each level **delegates** the next:
-- **Root zone** — answers "where do I find the TLD servers?" Served by **13 named root server *letters* (a–m.root-servers.net)**. The "13" is a historical artifact of the **old 512-byte UDP DNS response limit**, *not* 13 machines — each letter is an **anycast cloud of well over 1,000 instances** worldwide. Operated by 12 organizations (Verisign, ICANN, universities, etc.).
-- **TLD servers** — authoritative for a top-level domain (`.com`, `.org`, `.io`, ccTLDs like `.uk`). `.com`/`.net` are run by **Verisign**. They don't hold your records; they **refer** to your domain's authoritative nameservers.
-- **Authoritative nameservers** — hold the actual records for *your* zone (`example.com`). This is what a managed provider like **AWS Route 53, Cloudflare, NS1, or Google Cloud DNS** runs for you. The buck stops here — this server *answers*, it doesn't refer.
+DNS is a delegated tree; no single server knows everything. The **root** points at the **TLD** servers (`.com`/`.net` run by Verisign), the TLD **refers** to your domain's **authoritative nameservers** — what a managed provider like Route 53 or Cloudflare runs for you — and only the authoritative server *answers* rather than refers. (The famous "13 root servers" are 13 anycast *clouds* of 1,000+ instances each, a relic of the old 512-byte UDP limit, not 13 machines.)
 
-**Record types a Director should name without hesitation:** `A` (name→IPv4), `AAAA` (name→IPv6), `CNAME` (alias one name to another), `NS` (delegation — which nameservers are authoritative), `SOA` (zone metadata, incl. the negative-cache TTL), `MX` (mail), `TXT` (SPF/DKIM/verification). One sharp trap: **a `CNAME` cannot sit at the zone apex** (`example.com` itself) and cannot coexist with other records on the same name — the apex must carry the `SOA`/`NS` records. That's why pointing `example.com` at an ELB/CloudFront hostname requires a provider feature — **Route 53 `ALIAS`** records, or **ANAME / CNAME-flattening** elsewhere — rather than a bare `CNAME`.
+**Record types a Director should name without hesitation:** `A`/`AAAA` (name→IP), `CNAME` (alias), `NS` (delegation), `SOA` (zone metadata, incl. the negative-cache TTL), `MX` (mail), `TXT` (SPF/DKIM/verification). Footnote: a `CNAME` is illegal at the zone apex — pointing `example.com` itself at an ELB/CloudFront hostname needs a provider `ALIAS`/ANAME/flattening feature, not a bare `CNAME`.
 
-#### Recursive vs iterative — the most-muddled point, stated crisply
-This is the distinction interviewers use to separate "has read the RFC" from "has a vague mental picture."
+#### Resolution — who does the work
+Your client makes **one recursive query** ("hand me the final answer") to its recursive resolver (ISP, `8.8.8.8`, `1.1.1.1`), and the **resolver iterates the tree — root → TLD → authoritative — on the client's behalf**, then caches the result. A cache-cold lookup costs the resolver ~3 upstream round trips; every lookup within the TTL costs **zero** — and answers are cached at every layer (browser, OS stub, recursive resolver), with most hits landing at the shared recursive resolver. That caching is why DNS survives at internet scale; the root and TLD servers would melt otherwise.
 
-- **Recursive query:** *stub resolver → recursive resolver.* The contract is "**do all the work and hand me the final answer.**" The recursive resolver (your ISP's, or `8.8.8.8` / `1.1.1.1`) owns the whole job.
-- **Iterative queries:** *recursive resolver → root → TLD → authoritative.* Each of these returns a **referral** ("I don't have it, ask *them*"), **not** the answer — except the authoritative server, which returns the record. **The recursive resolver does the iterating.** The client never talks to root/TLD/authoritative directly.
+<details>
+<summary>Go deeper — recursive vs iterative mechanics (IC depth, optional)</summary>
 
-So in one cache-cold lookup the client makes **1** request; the recursive resolver makes **~3** iterative round trips. Every subsequent lookup within the TTL is **0** upstream round trips — served from cache.
+- **Recursive query:** *stub resolver → recursive resolver.* The contract is "do all the work and hand me the final answer." The recursive resolver owns the whole job.
+- **Iterative queries:** *recursive resolver → root → TLD → authoritative.* Each upstream server returns a **referral** ("I don't have it, ask *them*"), not the answer — except the authoritative server, which returns the record. The recursive resolver does the iterating; the client never talks to root/TLD/authoritative directly.
+- Cache layers and their behavior: browser (per-process, often clamped to ~60 s in Chrome), OS stub (`nscd`/`systemd-resolved`, honors record TTL), recursive resolver (the big shared cache — most hits land here), authoritative (source of truth; the only non-cached layer — it *sets* the TTL).
+- Cold path ≈ 1 client request + ~3 upstream RTTs; warm path = 0 upstream RTTs.
 
-#### The cache hierarchy and TTL as a knob (this is the building-block insight)
-Caching is why DNS survives at internet scale — the root and TLD servers would melt otherwise. A cached answer can live in **every** layer:
+</details>
 
-| Layer | Cache lives where | Typical TTL respected | Notes |
-|---|---|---|---|
-| Browser | per-tab/process DNS cache | seconds–1 min | Chrome caps low, often ~60 s |
-| OS stub resolver | `nscd`/`systemd-resolved` | honors record TTL | the `getaddrinfo` cache |
-| Recursive resolver | ISP / `8.8.8.8` / `1.1.1.1` | honors record TTL | the big shared cache; most hits land here |
-| Authoritative | source of truth | sets the TTL | the only non-cached layer |
-
+#### TTL as a knob (this is the building-block insight)
 **TTL is the single most important operational lever in DNS, and it is not just about latency.** It is a three-way decision:
 
 1. **Failover / rollback speed.** TTL bounds how fast a record change actually takes effect. A **30–60 s** TTL lets you repoint a dead region or **roll back a bad DNS change** within a minute. A **24 h** TTL means a mistake — or a region outage — lingers for up to a day in resolver caches you don't control.
@@ -63,7 +54,7 @@ The authoritative server can return **different answers to different resolvers**
 - **Latency-based** (Route 53 *Latency*) — return the region with the **lowest measured network latency** to the resolver. This is the **performance** policy for a multi-region service.
 - **Weighted** (Route 53 *Weighted*) — split traffic by assigned weights (e.g., 95/5). The control-plane primitive for **canary releases, blue-green cutovers, and gradual migrations** — shift a percentage at the DNS layer.
 
-**The subtlety that trips people up:** geolocation and latency steering key off the **resolver's IP, not the end-user's**. A user on `8.8.8.8` can be routed as if they were wherever Google's resolver egressed. The fix is **EDNS Client Subnet (ECS)**: the resolver forwards a **truncated** client subnet so the authoritative server can steer accurately. **Google Public DNS sends ECS; Cloudflare `1.1.1.1` by default does *not*** (privacy stance — Cloudflare argues its dense anycast already lands users close, so the geo distortion is small and not worth leaking subnet data; where it does participate it anonymizes the subnet). So "GeoDNS is accurate" is conditional on ECS — a real-world miss for the large public-resolver population.
+**The subtlety that trips people up:** geolocation and latency steering key off the **resolver's IP, not the end-user's**. A user on `8.8.8.8` can be routed as if they were wherever Google's resolver egressed. The fix is **EDNS Client Subnet (ECS)** — the resolver forwards a truncated client subnet so the authoritative server can steer accurately. **Google Public DNS sends ECS; Cloudflare `1.1.1.1` by default does not** (privacy stance). So "GeoDNS is accurate" is conditional on ECS — a real-world miss for the large public-resolver population.
 
 #### Anycast — BGP-nearest, not geo-nearest
 **Anycast advertises the same IP from many physical locations** and lets **BGP** route each client to the "nearest" instance. Critical precision: **"nearest" means fewest AS hops / best BGP path, not geographically closest and not guaranteed lowest-latency** — BGP optimizes for routing policy, not your latency.
@@ -73,7 +64,7 @@ Anycast is **ideal for DNS** specifically because DNS is **short, stateless UDP*
 #### Propagation and failure modes
 - **"Propagation" is a misnomer — there is no push.** Changing a record doesn't *send* anything anywhere; it just means new lookups get the new answer once **old cached entries expire**. Worst-case propagation ≈ **the TTL that was in effect when the entry was cached** + resolver slop. Lower the TTL *before* the change, not during.
 - **Negative caching.** `NXDOMAIN` (name doesn't exist) is **also cached**, governed by the **`SOA` minimum/negative TTL**. So a freshly created record can be invisible for the negative-cache window if something queried it too early.
-- **Failure modes that cause real outages:** (1) **authoritative provider down** → if it's your *only* provider, your entire domain is unresolvable regardless of how healthy your servers are (the Dyn lesson, below); (2) **misconfigured `NS`/delegation** → resolvers can't find your authoritative servers; (3) **expired domain registration**; (4) **DNSSEC misconfiguration** → validating resolvers reject your signed-but-broken zone and you go dark for exactly the security-conscious users. (Aside: **DNSSEC provides authenticity/integrity via signed records — it does *not* encrypt**; encrypted *transport* is a separate thing, **DoT/DoH**. Don't conflate them.)
+- **Failure modes that cause real outages:** (1) **authoritative provider down** → if it's your *only* provider, your entire domain is unresolvable regardless of how healthy your servers are (the Dyn lesson, below); (2) **misconfigured `NS`/delegation**; (3) **expired domain registration**; (4) **botched DNSSEC**. On DNSSEC: it **signs records (authenticity), it doesn't encrypt** — and a managed provider should own it; encrypted transport is DoT/DoH, a separate thing.
 
 ### Diagram — recursive resolution flow
 ```mermaid
@@ -123,14 +114,11 @@ Requirement (the R/E of RESHADED): a service in **us-east-1, eu-west-1, ap-south
 - **Treating round-robin DNS as load balancing.** It's blind distribution; without health checks, dead nodes stay in rotation.
 - **Believing GeoDNS sees the user's location.** It sees the resolver's, unless ECS is in play.
 - **Assuming "DNS propagation" is a push, or instant.** It's cache expiry, bounded by TTL + resolver slop; lower TTL *before* a change.
-- **Designing a hard RTO around DNS failover alone.** It's a best-effort floor — pair with anycast/global LB for tight SLAs.
-- **Running a single authoritative DNS provider for a critical domain.** That's the Dyn blast radius; use secondary DNS.
-- **Conflating DNSSEC (integrity, not encryption) with DoT/DoH (encrypted transport).**
-- **Putting a CNAME at the zone apex** — it's invalid; use ALIAS/ANAME/flattening.
+- **Designing a hard RTO around DNS failover alone, or running a single authoritative provider.** DNS failover is a best-effort floor (pair with anycast/global LB for tight SLAs), and a single provider is the Dyn blast radius — use secondary DNS.
 
 ### Practice questions
 **Q1.** Explain recursive vs iterative resolution and say which actor makes which kind of query.
-> *Model:* The **stub resolver** makes exactly **one recursive** query to its **recursive resolver** — "do all the work, return the final answer." The **recursive resolver** then makes a sequence of **iterative** queries to **root → TLD → authoritative**; each upstream server returns a **referral** ("ask them"), *not* the answer, except the authoritative server, which returns the record. So the recursive resolver does the iterating; the client never contacts root/TLD/authoritative directly. Cold path ≈ 1 client request + ~3 upstream RTTs; warm path = 0 upstream RTTs (served from cache within the TTL).
+> *Model:* The client makes **one recursive** query to its **recursive resolver** ("do all the work, return the final answer"); the resolver then makes the **iterative** referral walk root → TLD → authoritative on the client's behalf — only the authoritative server *answers*, the rest *refer*. Cold path ≈ 1 client request + ~3 upstream RTTs; warm path = 0 upstream RTTs (served from cache within the TTL).
 
 **Q2.** You need to fail a region over within ~1 minute. What TTL do you set, what does it cost you, and why isn't it a guarantee?
 > *Model:* Set TTL to **30–60 s** so resolver caches expire (and re-resolve to a healthy region) within ~a minute. **Cost:** roughly 10–50× more queries hitting your authoritative provider vs a 3600 s TTL → higher per-query bill (e.g., Route 53 ~$0.40/M) and a larger query-load surface. **Not a guarantee** because many resolvers/clients ignore or clamp TTL (resolver slop), so DNS failover is a **best-effort floor**, not a hard RTO mechanism — for a strict SLA, pair it with **anycast withdrawal** or a **global L7 LB** that fails over independently of DNS caching. Practical pattern: keep TTL moderate (300 s) day-to-day and pre-lower it before planned failover.
@@ -140,9 +128,6 @@ Requirement (the R/E of RESHADED): a service in **us-east-1, eu-west-1, ap-south
 
 **Q4.** Twitter, GitHub, and Spotify all went down on the same day in 2016 without their own servers failing. What happened, and how do you prevent it?
 > *Model:* The **Dyn DNS outage (Oct 21, 2016)** — a **Mirai IoT-botnet DDoS** overwhelmed **Dyn's authoritative DNS**. Those companies used Dyn as their **sole authoritative provider**, so even though their application servers were healthy, **no one could resolve their names** → effectively down. **Prevention: multi-provider / secondary DNS** — run two independent authoritative providers (e.g., Route 53 + NS1) as co-equal `NS` records, so one provider's outage doesn't take the domain dark. **The rejected alternative — a single provider — is cheaper and simpler to operate, but it makes DNS a single point of failure with internet-wide blast radius.** For a Director, DNS redundancy is a cheap insurance premium against a catastrophic, self-inflicted outage.
-
-**Q5.** Your team wants the apex `example.com` to point at a CloudFront/ELB hostname and is confused why a CNAME "doesn't work." What's going on and what's the fix?
-> *Model:* **A `CNAME` is illegal at the zone apex** — the apex must hold the `SOA` and `NS` records, and a `CNAME` can't coexist with other records on the same name. The fix is a provider-specific feature that resolves the target to addresses at query time: **Route 53 `ALIAS` records**, or **ANAME / CNAME-flattening** (Cloudflare, NS1). These behave like a CNAME at the apex but return `A`/`AAAA` answers, keeping the zone valid. It's a small mechanic, but getting it wrong blocks the most common "point our root domain at a managed endpoint" task.
 
 ### Key takeaways
 - **One recursive query in, ~3 iterative referral hops out** — the **recursive resolver** walks root→TLD→authoritative; the client never does.

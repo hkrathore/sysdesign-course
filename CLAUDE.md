@@ -105,6 +105,20 @@ import EstimationCalculator from '@components/widgets/EstimationCalculator.jsx';
 - Diagrams: Mermaid fenced blocks (rendered by the configured mermaid integration; **click-to-zoom site-wide** via `public/mermaid-zoom.js`). Keep them **readable inline** — component-focused, few boxes, short labels, no step-number clutter or dense detail (zoom is a fallback, not an excuse for an unreadable diagram).
 - Update the Starlight sidebar (in `astro.config.mjs`) when adding a lesson.
 - Keep each lesson’s body in prose + tables; no marketing tone; no filler; no repetition across lessons.
+- **"Go deeper" convention (June 2026 Director-altitude pass):** optional IC-level depth (algorithm internals, formula derivations, full schemas, tuning tables, vendor comparisons) lives in collapsible blocks, never in the visible body:
+
+  ```html
+  <details>
+  <summary>Go deeper — <topic> (IC depth, optional)</summary>
+
+  (condensed content; blank lines around it so markdown renders)
+
+  </details>
+  ```
+
+  Max 1–3 per lesson; widgets and Mermaid diagrams stay **outside** these blocks. The visible body must read complete without them.
+- **Visible-body word budgets** (excluding Go-deeper content): Module 1/2 concept lessons ~1.2–4k; Module 3 building blocks ~3–5k; Module 5 RESHADED walkthroughs ~4–6k (a 45-min interview answer is ~3–5k words — the lesson must not be 2× the interview). Common-mistakes lists: 4–5 bullets. The Director move replaces moved depth: one crisp sentence + a delegation line with a stated prior.
+- Cheat sheets are **decision references, not mini-lessons**: per concept, decision → trade-off → the number; ≤150 words per building block; skimmable in ~5 min.
 
 ## 8. Widget inventory (build as self-contained components)
 
@@ -112,26 +126,22 @@ import EstimationCalculator from '@components/widgets/EstimationCalculator.jsx';
 |---|---|---|
 | Estimation Calculator | 1.3 | ✅ built (`EstimationCalculator.jsx`) |
 | Latency Numbers visualizer | 1.4 | ✅ built (`LatencyVisualizer.jsx`) |
-| Sharding/partitioning visualizer (range/hash/directory + hot-spotting) | 2.5, 3.x | ⬜ to build |
-| Consistent Hashing ring (add/remove nodes → live remap) | 2.6, 3.x | ⬜ |
-| CAP / PACELC explorer (pick P → C vs A, real DB examples) | 2.7 | ⬜ |
-| Quorum calculator (N/W/R sliders → strong-consistency + availability) | 2.8 | ⬜ |
-| Caching strategies simulator (cache-aside/write-through/write-back; hits/misses/staleness) | 2.10, 3.x | ⬜ |
-| Load-balancing comparison (round-robin/least-conn/hashing; animated) | 3.2 | ⬜ |
+| Sharding/partitioning visualizer (range/hash/directory + hot-spotting) | 2.5, 3.x | ✅ built (`ShardingVisualizer.jsx`) |
+| Consistent Hashing ring (add/remove nodes → live remap) | 2.6, 3.x | ✅ built (`ConsistentHashingRing.jsx`) |
+| CAP / PACELC explorer (pick P → C vs A, real DB examples) | 2.7 | ✅ built (`CapPacelcExplorer.jsx`) |
+| Quorum calculator (N/W/R sliders → strong-consistency + availability) | 2.8 | ✅ built (`QuorumCalculator.jsx`) |
+| Caching strategies simulator (cache-aside/write-through/write-back; hits/misses/staleness) | 2.10, 3.x | ✅ built (`CachingStrategiesSimulator.jsx`) |
+| Load-balancing comparison (round-robin/least-conn/hashing; animated) | 3.2 | ✅ built (`LoadBalancerComparison.jsx`) |
 
 Visual style for widgets: **theme-aware — must match the selected Starlight light/dark theme** (use the global `--w-*` CSS variables in `src/styles/global.css` for structural surfaces — bg/panel/border/text/muted/slot — and keep accent colors emerald/amber/sky/rose, which read on both themes; do **not** hardcode `slate-900`/dark backgrounds). Monospace, log/relative bars where useful, formula shown under each output, presets where helpful. **Cards in a row must be equal height** (`items-stretch` on the row + `h-full` on each card). **The widget's root `<div>` MUST include the `not-content` class** (e.g. `className="not-content w-full max-w-3xl mx-auto font-mono …"`) — Starlight's prose opt-out; without it Starlight's `* + *` prose margin leaks onto the widget's grid/flex items (every non-first item gets a 1rem top margin), dropping the 2nd item in a row ~16px and breaking pill/card alignment. Match the existing widgets.
 
 ## 9. Course status & remaining work
 
-**Done:** Module 0 (syllabus), Module 1 (1.1–1.5 + 2 widgets + cheat sheet), Module 2 lessons 2.1–2.4.
+**Done:** All modules built — Module 0 (syllabus + Director's Fast Path), Modules 1–3 (all lessons), Module 4 (TinyURL walkthrough), Module 5 (15 RESHADED walkthroughs, 5.1–5.15), Module 6 (capstone + rubric), all cheat sheets + Master RESHADED.
 
-**Remaining:**
-- Module 2: **2.5** Partitioning/sharding *(+ Sharding visualizer)*, **2.6** Consistent hashing *(+ ring)*, **2.7** CAP & PACELC *(+ explorer)*, **2.8** Consistency models + quorum W+R>N *(+ Quorum calculator)*, **2.9** Bloom filters / latency vs throughput / batch vs stream, **2.10** REST vs RPC vs GraphQL; stateful vs stateless *(+ Caching simulator)*.
-- Module 3 (one lesson each, 16): DNS, Load Balancers *(+ LB comparison)*, Databases, Key-Value Store, CDN, Sequencer, Distributed Caching, Distributed Messaging Queue, Publish-Subscribe, Rate Limiter, Blob Store, Distributed Search, Distributed Logging, Distributed Monitoring, Distributed Task Scheduler, Sharded Counters.
-- Module 4: full RESHADED walkthrough on one warm-up problem.
-- Module 5 (full RESHADED each, 16): TinyURL, Pastebin, Rate limiter, Instagram, Twitter+feed, WhatsApp, Typeahead, Uber/proximity, Dropbox/Drive, YouTube/Netflix, Google Maps, Web crawler, Notification system, Ticketmaster, Distributed job scheduler, ChatGPT/LLM serving.
-- Module 6: capstone (candidate drives, AI critiques) + red-flags/strong-signals rubric.
-- Cheat sheets: one per module + a Master RESHADED cheat sheet.
+**June 2026 Director-altitude pass (complete):** all lessons trimmed from Staff-IC depth to Director altitude (~251k → ~205k visible words); IC depth preserved in "Go deeper" collapsibles (see §7); cheat sheets 2–3 rewritten as decision references; "Director's Fast Path" navigation added to the course home. Any future lesson edits must honor the §7 Go-deeper convention and word budgets.
+
+**Remaining (optional):** widgets not yet built (see §8 inventory); 5.16 ChatGPT/LLM-serving exists as 5.15 — numbering is one lower than the original syllabus list.
 
 ## 10. How to generate the next lesson (procedure for Claude Code)
 
@@ -146,7 +156,7 @@ Visual style for widgets: **theme-aware — must match the selected Starlight li
 
 ## 11. Voice & quality bar / self-check before committing
 
-- Senior/staff depth: real numbers, real technologies, real failure modes.
+- Director altitude with senior credibility: real numbers, real technologies, real failure modes — but decisions and trade-offs in the visible body, mechanics in "Go deeper" blocks (§7).
 - Did every decision name its trade-off and the rejected alternative?
 - Is the math shown (no unquantified "it scales")?
 - Is "what interviewers probe" pitched at Director altitude, not IC trivia?

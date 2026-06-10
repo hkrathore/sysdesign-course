@@ -100,7 +100,7 @@ RESHADED step 3. What must persist, matched to access pattern, with real systems
 **Role 1 — the buffer / pipeline backbone (the load-bearing choice).**
 - **Need:** durably absorb a bursty ~60k/s (spiking to ~150k/s under blasts) of fan-out work, **decoupling** ingestion from delivery; replay on worker crash; per-priority and per-channel separation; high sustained throughput.
 - **Choice:** a **distributed log — Kafka** (or Pulsar). Producers (ingestion + fan-out) append; consumer groups of channel workers pull at their own pace; **partitions** give parallelism and ordering-within-key; **retention** gives replay if a worker dies mid-batch. Separate **topics per priority class** (`txn`, `marketing`) so OTPs never queue behind a campaign.
-- **Rejected — a simpler managed queue (AWS SQS):** genuinely attractive (no brokers to run, auto-scales, dead-letter queues built in) and a perfectly good answer for **lower scale**. We reject it as the *primary* backbone at this scale because we want **replayable, ordered, high-throughput-per-partition** streams and the ability to have **many consumer groups** read the same stream (analytics + delivery) — Kafka's log model fits fan-out pipelines better, and per-message cost favors Kafka at billions/day. **Trade-off named:** Kafka is **operationally heavier** (you run/patch a cluster) — a real cost we accept for throughput, replay, and multi-consumer fan-out. (At a tenth the scale, I'd start on SQS/SNS and not apologize.)
+- **Rejected — a simpler managed queue (AWS SQS):** Kafka wins at this scale for **replay, ordering-within-partition, and multiple consumer groups** reading the same stream (delivery + analytics), at the accepted cost of running a cluster. Below billions/day, SQS/SNS is the right ops-light answer and I'd take it without apology.
 - **Rejected — send synchronously, no queue at all:** couples ingestion to gateway uptime; one slow courier stalls the API. Non-starter given the reliability NFR.
 
 **Role 2 — user preferences, quiet-hours, device tokens (config, read on every fan-out).**
@@ -212,32 +212,17 @@ A **per-channel kill switch** and a campaign **rate cap** are operational must-h
 
 ## D - Data model
 
-RESHADED step 6. Schema, keys, indexes, and — the decisions that matter — the **partition keys**.
+RESHADED step 6. Keys and partition strategy — the decisions that matter, in five rows:
 
-**Preferences (Postgres source of truth; Redis cache).** Partition/lookup key: **`user_id`**.
-```
-user_preferences {
-  user_id (PK), category, push_enabled, sms_enabled, email_enabled, inapp_enabled,
-  quiet_start, quiet_end, timezone, updated_at
-}
-user_devices { user_id (PK), platform, push_token, last_seen, active }
-```
-Read by **`user_id`** on every fan-out → cache-aside in Redis; invalidate on `PUT`.
+| Store | Data | Key / partition strategy |
+|---|---|---|
+| **Postgres + Redis cache** | preferences, quiet-hours, device tokens | lookup by **`user_id`** — cache-aside, invalidate on `PUT` |
+| **Cassandra** | delivery tracking (the firehose: channel, state, gateway msg id, timestamps) | partition **`user_id`**, cluster by **`notification_id`** (time-ordered) |
+| **Redis** | dedup / idempotency | **`idempotency_key`** → `SETNX` + TTL = dedup window (memory stays flat) |
+| **Redis** | rate-limit counters | **`(user_id, window)`** anti-spam cap; **`(gateway, window)`** outbound throttle |
+| **Kafka** | work in flight | topic per **priority class** and per **channel** |
 
-**Delivery tracking (Cassandra) — the firehose.** This is where the **partition key choice matters.**
-```
-notification_status {
-  user_id          // partition key  -> all of a user's notifications co-located
-  notification_id  // clustering key (time-ordered)
-  channel, state, template_id, gateway_msg_id, error, created_at, updated_at
-}
-```
-- **Chosen partition key: `user_id`.** The dominant query is **support/inbox: "show notifications for this user"**, which becomes a single-partition read. Status updates for a notification also land in that user's partition. **Trade-off named:** a single very-high-volume user (a system account, or a power user) could create a **hot partition / wide row**. *Mitigation:* bucket extreme partitions by `(user_id, month)` and keep per-partition rows bounded with TTL.
-- **Rejected — partition by `notification_id`:** perfectly uniform load (it's a UUID) and great for the point lookup "status of notification X", but it **scatters a user's notifications across the ring**, making the common "this user's recent notifications" query a cross-partition scatter-gather. We optimize for the **frequent** query (per-user) and accept that "by notification id" needs a secondary lookup. **Rejected — partition by `(channel, day)`:** good for analytics ("all SMS today") but melts into a hot partition for the busy channel and is wrong for per-user reads; we serve analytics by **streaming status into a warehouse/ES** instead of shaping the primary table around it.
-
-**Idempotency / dedup (Redis).** Key: **`idempotency_key` (or a hash of it)** → `SETNX` with a TTL equal to the dedup window. The key *is* the shard key (Redis hashes it across the cluster). Bounded to recent keys by TTL, so memory stays flat.
-
-**Rate-limit counters (Redis).** Key: **`(user_id, window)`** for per-user anti-spam caps, and **`(gateway, window)`** for our outbound rate into each provider. Token-bucket via `INCR`/Lua. Co-located by key hash; naturally sharded.
+**The partition-key decision worth defending (tracking table): `user_id`.** The dominant query is support/inbox — "show this user's notifications" — which becomes a single-partition read. **Trade-off named:** a very-high-volume user (a system account) can create a hot/wide partition; mitigate by bucketing extreme partitions as `(user_id, month)` with TTL-bounded rows. **Rejected — `notification_id`:** uniform load (a UUID), but it scatters a user's notifications across the ring, making the *frequent* per-user query a scatter-gather. **Rejected — `(channel, day)`:** analytics-shaped, but a hot partition on the busy channel and wrong for per-user reads — we serve analytics by streaming status into a warehouse/ES instead of shaping the primary table around it.
 
 **Where data lives, in one line:** config (preferences/devices) in **Postgres + Redis**, the work-in-flight in **Kafka**, dedup/rate state in **Redis**, the durable delivery log in **Cassandra**, analytics mirror in a **warehouse / Elasticsearch**.
 
@@ -259,7 +244,7 @@ RESHADED step 7. Stress the design against the NFRs, find the bottlenecks, and *
 
 **Bottleneck 5 — Tracking-store hot partition / write amplification.** 1B+ status writes/day, and a system/power-user partition can go wide. *Fix:* Cassandra (LSM) absorbs the append/update volume; **bucket** extreme partitions by `(user_id, month)`; **TTL** old rows out of the hot table; stream a copy to a **warehouse/ES** for analytics so we never run heavy aggregate scans against the serving table. *Trade-off:* more pipelines (CDC → warehouse) and eventual-consistency on analytics — fine, analytics tolerates lag.
 
-**Bottleneck 6 — Quiet-hours / timezone correctness.** A naïve "don't send 22:00–08:00 UTC" wrongs everyone outside UTC. *Fix:* store the user's **timezone** and evaluate quiet-hours **in their local time**; defer (re-enqueue via scheduler), don't drop, non-urgent notifications that land in the window. *Trade-off:* a scheduler + per-user tz math, and a decision rule for "urgent overrides quiet-hours" (OTP ignores DND; promo respects it) — a product call we encode explicitly.
+**Bottleneck 6 — Quiet-hours / timezone correctness.** One sentence: store the user's **timezone**, evaluate quiet-hours **in their local time**, and **defer** (re-enqueue via the scheduler) rather than drop non-urgent sends — with the explicit product rule that urgent traffic (OTP) overrides DND while promos respect it.
 
 ---
 

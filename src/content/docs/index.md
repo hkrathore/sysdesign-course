@@ -192,6 +192,25 @@ Two weeks from beginner-stated to Director-ready is tight. The plan below priori
 
 ---
 
+## Director's Fast Path
+
+An honest accounting: the full course is ~250k words — 100+ hours of reading. On a 2-week runway you must **not** read it all; trying to is itself a triage failure. Here is the triage.
+
+**Must do (full reads):**
+- **Module 1** — interview mechanics and estimation reps.
+- **Module 4** — the complete RESHADED walkthrough; it's the template every Module 5 problem reuses.
+- **Module 6** — the capstone plus the red-flags/strong-signals rubric. Read the rubric *before* your first mock.
+- **All cheat sheets** — they're the spaced-repetition layer; re-skim daily.
+- **Deep-read these Module 5 problems** — the clusters that show up most in Director loops: **5.1–5.4** (Pastebin, rate limiter, Instagram, Twitter/feed), **5.6** (Typeahead), **5.7** (Uber/proximity), and **5.13–5.15** (Ticketmaster, job scheduler, LLM serving).
+
+**Crux-only: 5.8–5.12** (Dropbox, YouTube, Maps, web crawler, notifications — the storage/streaming deep-dives, rarer in Director loops). Read each one's crux row in the Module 5 cheat sheet and rehearse defending it out loud; open the full lesson only where the defense doesn't come.
+
+**Skim: Modules 2–3.** If your distributed-systems background is solid — at this level it should be — skim the lessons for unfamiliar terms and rely on the Module 2 and Module 3 cheat sheets as your working reference. Open a full lesson only when a cheat-sheet line isn't already obvious to you.
+
+**One convention to know:** lessons park optional IC-level detail in collapsible **"Go deeper"** blocks. Skip them by default; open one only when a decision you're defending turns on that detail. They exist for depth-on-demand, not for the first pass.
+
+---
+
 ## 8. The thing the system-design course can't give you
 
 Your project includes a leadership-interview deck, and it's right: at Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority** — far more than whether you can shard a counter. The deck's S·T·A·R·L formula (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED.

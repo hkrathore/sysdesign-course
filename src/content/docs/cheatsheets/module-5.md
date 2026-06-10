@@ -9,6 +9,8 @@ sidebar:
 
 > For each problem: **the crux** (the single decision the round turns on) + **the canonical answer**. Everything else is plumbing. Spot the read:write skew first — it pre-decides the architecture.
 
+**Skim vs deep-read (2-week runway).** Deep-read **5.1–5.4** (Pastebin, rate limiter, Instagram, Twitter/feed), **5.6** (Typeahead), **5.7** (Uber/proximity), and **5.13–5.15** (Ticketmaster, job scheduler, LLM serving) — those clusters carry most Director loops. Treat **5.8–5.12** (Dropbox, YouTube, Maps, crawler, notifications — the storage/streaming deep-dives, rarer at this level) as **crux-only**: memorize the row below, rehearse defending it out loud, and open the full lesson only where the defense doesn't hold. Whatever you skip, the crux table and numbers table are non-negotiable — they're the 5-minute pre-loop warm-up.
+
 ---
 
 ## The 15 cruxes (memorize the right column)

@@ -5,109 +5,98 @@ sidebar:
   order: 9
 ---
 
-> Video looks like a streaming problem and is actually a **batch-encoding-plus-static-file-delivery** problem. The mental flip that separates a Director answer from a junior one is this: **you do not stream video from a server.** You **pre-chop** each source video, offline, into a *ladder* of small static segments — one rung per resolution, several columns per codec — and the client **adaptively pulls** those segments from a CDN like any other static file, switching rungs as its bandwidth changes. The engine that builds that ladder is a **transcoding pipeline** (one source → N resolutions × M codecs, run as parallel async jobs on chunks); the thing that forces the whole architecture is **bandwidth** — a real video service pushes **terabits per second** of egress, more bytes than almost any other system on earth. Lesson 3.11 (Blob / Object Store) built the byte plane, 3.5 (CDN) built the delivery tier, 3.8/3.9 (queues / pub-sub) built the async job fabric, and 3.16 (Sharded Counters) built the view-count machinery. This walkthrough assembles them into a video platform, drives it through **RESHADED**, and keeps returning to the one number that dominates the budget and the design: **~125 Tbps of egress.** We build **YouTube** (upload-driven, user-generated, hot view counts) as the primary system, and bring in **Netflix** (finite curated catalog, encoded once, pre-positioned at the ISP edge) as the contrast in Design evolution.
+> Video looks like a streaming problem and is actually a **batch-encoding-plus-static-file-delivery** problem. The mental flip that separates a Director answer from a junior one: **you do not stream video from a server.** You **pre-chop** each source, offline, into a *ladder* of small static segments — one rung per resolution, several per codec — and the client **adaptively pulls** them from a CDN like any other static file. The engine is a **transcoding pipeline** (one source → N resolutions × M codecs, run as parallel async jobs on chunks); the thing that forces the whole architecture is **bandwidth** — **~125 Tbps of egress**. Lessons 3.11 (blob store), 3.5 (CDN), 3.8/3.9 (queues/pub-sub), and 3.16 (sharded counters) built the parts. We build **YouTube** (upload-driven UGC, hot view counts) as the primary system, with **Netflix** (finite curated catalog, pre-positioned at the ISP edge) as the contrast in Design evolution.
 
 ### Learning objectives
 - Run a full **RESHADED** pass on a video platform, deriving every structural decision from a stated requirement and its rejected alternative.
-- Quantify the system from first principles — **~500 hours uploaded/min**, **~1B watch-hours/day**, a **~1,400:1 watch:upload skew**, **~125 Tbps egress**, **~2 EB/year** of media — and use those numbers to *force* the architecture, not decorate it.
-- Make the pivotal **delivery + encode** decision: **adaptive-bitrate (HLS/DASH) over a pre-built static ladder** vs server-side transcode-on-the-fly vs single-bitrate progressive download — and design the transcode pipeline as **chunked parallel jobs**, not whole-file serial encodes.
-- Reason about **codec economics** (H.264 universal / VP9 / AV1) where AV1 saves **~30% of bytes** (~37 Tbps at our scale) but costs far more encode compute — a budget trade a Director owns.
-- Handle **view counts at hot-key scale with fraud/dedup**, split the **upload path** (resumable multipart + object store + async transcode) from the **metadata store**, and know where to **delegate** — the codec matrix, the recommendation model, the ABR player heuristics — like a Director, not solve them like an IC.
+- Quantify the system from first principles — **~500 hours uploaded/min**, **~1B watch-hours/day**, a **~1,400:1 watch:upload skew**, **~125 Tbps egress**, **~2 EB/year** of media — and use those numbers to *force* the architecture.
+- Make the pivotal **delivery + encode** decision: **adaptive bitrate (HLS/DASH) over a pre-built static ladder** vs transcode-on-the-fly vs single-bitrate download — and design the transcode pipeline as **chunked parallel jobs**.
+- Make the **codec-economics call as a budget owner**: AV1 saves ~30% of bytes (~37 Tbps at our scale) but costs far more encode compute — gate expensive codecs behind popularity and delegate the ladder.
+- Handle **view counts at hot-key scale with fraud/dedup**, split the **upload path** from the **metadata store**, and know where to **delegate** — codec matrix, recommendation model, ABR heuristics.
 
 ### Intuition first
-Forget "streaming" — picture a **printing-and-distribution operation for a magazine that has to be readable on a billboard, a laptop, and a cracked phone screen on a subway with one bar of signal.** When an author submits one master manuscript (you upload one source video), the plant does **not** keep the master and re-typeset a custom edition for each reader on demand — that would melt the presses. Instead, **once, up front and in the background, it prints the same content at every size and on every paper stock it might ever need**: a giant billboard version, a crisp laptop version, a tiny low-ink subway version, and a few of each on different printing technologies (codecs) because not every newsstand can display every stock. It **cuts each edition into small numbered pages** and ships pallets of those pages out to **thousands of local newsstands** (CDN edge servers) close to readers. Now when you sit down to read, your **reader app looks at how good your light is** (your current bandwidth) and **grabs the next page at whatever size you can currently handle** from the nearest newsstand — and if the train enters a tunnel, the *next page* it grabs is the tiny low-ink one, seamlessly, mid-article. That is **adaptive bitrate**: the content is pre-cut into a *ladder* of static pages at many sizes, sitting on local shelves, and the client picks the right rung page-by-page.
+Forget "streaming" — picture a **printing-and-distribution operation for a magazine** that must be readable on a billboard, a laptop, and a cracked phone on a subway with one bar of signal. When an author submits one master manuscript (your uploaded source), the plant does **not** re-typeset a custom edition per reader on demand — that would melt the presses. **Once, up front and in the background, it prints the content at every size and paper stock it might ever need** (the resolution × codec ladder), **cuts each edition into small numbered pages** (segments), and ships pallets to **thousands of local newsstands** (CDN edges). Your reader app looks at how good your light is (current bandwidth) and **grabs the next page at whatever size you can handle** from the nearest newsstand — entering a tunnel, it grabs the tiny low-ink page, seamlessly, mid-article. That is **adaptive bitrate**.
 
-Hold that image, because three consequences fall straight out of it and drive the entire design. First, the expensive, slow work (**printing every edition** = transcoding into the full resolution × codec ladder) happens **once, offline, on a job queue** — never on the reader's request path. Second, the thing readers actually pull is **dumb static pages on local shelves** (segments on a CDN), so the read path is a file server, not a smart per-user video stream — which is the only way to serve a billion watch-hours a day. Third, **the pallets of paper are the cost** — at our scale the egress of those pages is **~125 terabits per second**, orders of magnitude more bytes than the records describing the videos, so bytes and bandwidth dominate every decision and the records are an afterthought by comparison. Everything below is a consequence of "pre-cut the ladder, ship it to the edge, let the client adapt," plus the brutal arithmetic of moving that many bytes.
+Three consequences fall out and drive the entire design: the expensive work (**printing every edition** = transcoding) happens **once, offline, on a job queue**, never on the request path; readers pull **dumb static pages from local shelves**, so the read path is a file server — the only way to serve a billion watch-hours a day; and **the pallets of paper are the cost** — ~125 terabits per second of egress, orders of magnitude more bytes than the records describing the videos.
 
 ---
 
 ## R — Requirements
 
-RESHADED starts by scoping *before* building. The signal here is not listing features — it's **cutting** to a defensible core and naming the watch:upload reality and the bandwidth dominance that dictate everything downstream.
+RESHADED starts by scoping *before* building — the signal is **cutting** to a defensible core and naming the watch:upload reality and bandwidth dominance that dictate everything downstream.
 
 **Functional (the core we will actually build):**
-1. **Upload a video** (with title, description, tags, thumbnail) — and have it transcoded into the full streaming ladder.
-2. **Watch a video** — adaptive-bitrate playback that adjusts to the client's network, served from near the user.
-3. **View count** per video (and basic engagement — likes), displayed with acceptable lag.
-4. **Browse / search / recommend** — surface videos to watch (search and the recommendation model treated as a **side path**, mostly delegated).
+1. **Upload a video** (with metadata + thumbnail) — transcoded into the full streaming ladder.
+2. **Watch a video** — adaptive-bitrate playback, served from near the user.
+3. **View count** per video (plus likes), displayed with acceptable lag.
+4. **Browse / search / recommend** — treated as a **side path**, mostly delegated.
 
-**Explicitly cut (state these out loud, so the interviewer knows it's a choice, not an omission):**
-- **Live streaming** — a genuinely different beast (real-time/low-latency transcode, LL-HLS, sub-segment chunking, no offline ladder). I'd reuse the byte plane and CDN but rebuild the encode path; I treat it as a Design-evolution extension, not v1.
-- **DRM / content protection** (Widevine / FairPlay / PlayReady) — non-negotiable for *Netflix* (studios won't license without it) but a bolt-on for UGC YouTube. I name it as a **delegated workstream** (the player-security team owns key exchange + license servers; my pipeline produces encrypted segments + manifests) so the omission reads as scope control, not ignorance.
-- **The recommendation model itself** — I build the system that *serves* recommendations and logs the signals (watch time, completion, co-views), and treat the ranking model as a **delegated deep-dive**. That delegation *is* the Director move.
-- **Comments, channels/monetization, Shorts** — comments are the Instagram pattern (5.3), Shorts is the same pipeline with a vertical aspect ratio and a different feed, monetization is a separate billing system. Cut for time, reuse known parts.
+**Explicitly cut (stated out loud, so it reads as choice, not omission):**
+- **Live streaming** — real-time/low-latency transcode, LL-HLS, no offline ladder; I'd reuse the byte plane and CDN but rebuild the encode path. A Design-evolution extension, not v1.
+- **DRM** (Widevine/FairPlay/PlayReady) — non-negotiable for *Netflix* (studios won't license without it), a bolt-on for UGC. Named as a **delegated workstream** (player-security team owns key exchange; my pipeline produces encrypted segments) so the omission reads as scope control.
+- **The recommendation model itself** — I build the serving system and log the signals; the ranking model is a **delegated deep-dive**.
+- **Comments, channels/monetization, Shorts** — known patterns (5.3) or separate systems; cut for time.
 
-**Clarifying questions I would actually ask** (and the assumptions I'll proceed on if waved on):
-- *Scale?* Assume FAANG-YouTube: **~2B monthly users**, **~500 hours of video uploaded every minute**, **~1B watch-hours/day**.
-- *Latency target — is this video-on-demand or live?* Assume **VOD**. This single answer is what *permits* the entire offline-ladder approach; if it were live, real-time encode would force a completely different pipeline.
-- *Start-up latency budget?* Assume **time-to-first-frame p99 ≲ 2 s**, and **rebuffer ratio < ~0.5%** of watch time — the quality bars ABR + CDN proximity exist to hit.
-- *View-count semantics?* Assume **eventually-consistent display counts are fine**, but counts must be **deduplicated and fraud-filtered** (a view counts roughly once per session; bots are filtered) — because view counts drive creator payouts and trending, so they are *not* a casual `+1`. This distinction is what forces a separate exact reconciliation path.
+**Clarifying questions (and assumptions if waved on):**
+- *Scale?* **~2B monthly users, ~500 hours uploaded/min, ~1B watch-hours/day.**
+- *VOD or live?* **VOD.** This single answer *permits* the entire offline-ladder approach.
+- *Start-up latency?* **Time-to-first-frame p99 ≲ 2 s, rebuffer < ~0.5%** of watch time.
+- *View-count semantics?* **Eventually-consistent display is fine**, but counts must be **deduplicated and fraud-filtered** — they drive creator payouts and trending, so a view is *not* a casual `+1`. This forces a separate exact reconciliation path.
 
-**Non-functional requirements (what I'll grade my own design against in Evaluation):**
-- **Read-heavy, extreme.** Watch dominates upload by **~1,400:1** (derived next) — even more lopsided than Instagram's 100:1. The system is a byte-delivery machine with a tiny upload pipeline and a huge encode pipeline behind it.
-- **Bandwidth is the dominant constraint.** **~125 Tbps average egress** (peak ~2.5×) is the headline number; it forces CDN/edge offload and is the single biggest budget line a Director owns. No other NFR comes close in cost.
-- **Playback quality:** time-to-first-frame p99 ≲ 2 s, rebuffer < 0.5%. These are delivered by ABR (client picks a sustainable rung) + CDN proximity (segments served from near the user), not by a faster origin.
-- **Durability of source + renditions** — losing a creator's upload is unforgivable; **11 nines** on the object store (Lesson 3.11). The *source* is the irreplaceable master; renditions are regenerable but expensive to rebuild.
-- **Availability over strict consistency** for the watch path. A view count that lags, or a brand-new upload not yet watchable until transcode finishes, is fine; an *unavailable* watch path is not. **AP** lean (Lesson 2.7) for delivery; the *upload commit* and *billing-grade view count* want stronger guarantees, so the system is not uniformly AP.
+**Non-functional requirements:**
+- **Read-heavy, extreme:** watch dominates upload **~1,400:1** (derived next) — a byte-delivery machine with a tiny upload pipeline and a huge encode pipeline behind it.
+- **Bandwidth is the dominant constraint:** **~125 Tbps average egress** (peak ~2.5×) — the single biggest budget line a Director owns.
+- **Playback quality:** TTFF p99 ≲ 2 s, rebuffer < 0.5% — delivered by ABR + CDN proximity, not a faster origin.
+- **Durability:** losing a creator's upload is unforgivable; **11 nines** on the object store (3.11). The *source* is the irreplaceable master.
+- **Availability over strict consistency** on the watch path (AP lean, 2.7); the *upload commit* and *billing-grade count* want stronger guarantees.
 
-> The requirement that secretly licenses the whole architecture is **"VOD, and a new upload need not be instantly watchable."** It is what makes **offline, asynchronous, chunked transcode** legal. I flag it explicitly because juniors skip it and then can't justify why the expensive encode is allowed to be slow.
+> The requirement that secretly licenses the whole architecture is **"VOD, and a new upload need not be instantly watchable."** It is what makes offline, asynchronous, chunked transcode legal. Juniors skip it and then can't justify why the expensive encode is allowed to be slow.
 
 ---
 
 ## E — Estimation
 
-RESHADED's E step is "enough math to make a defensible call," rounded aggressively, assumptions stated. The discipline that keeps the numbers consistent: pick **three anchors** and derive everything from them — **(1) 500 hours uploaded/min, (2) 1B watch-hours/day, (3) ~7 GB stored per source-hour across the full ladder×codecs.** I compute the numbers that change decisions: upload vs watch QPS (and the skew), **egress** (the headline), media storage, and the transcode compute fleet.
+Enough math to make a defensible call. Three anchors, everything derived from them: **(1) 500 hours uploaded/min, (2) 1B watch-hours/day, (3) ~7 GB stored per source-hour across the full ladder×codecs.**
 
-**Upload (write) side — tiny:**
-- 500 hours/min × 60 × 24 = **~720,000 hours uploaded/day.** At ~5 min average length that's ~8.6M videos/day ÷ 86,400 ≈ **~100 video uploads/s average**, peak ~2× ≈ **~200/s.** Uploads are *not* the scaling problem — they're a trickle. (The scaling problem is what each upload *triggers*: the encode, and later the watching.)
+**Upload (write) side — tiny:** 500 hrs/min → **~720,000 hours/day**; at ~5 min average length, ~8.6M videos/day ≈ **~100 uploads/s** (peak ~200/s). Uploads are a trickle — the scaling problem is what each upload *triggers*.
 
-**Watch (read) side — enormous:**
-- **1B watch-hours/day.** **Watch:upload (in hours) = 1B : 720k ≈ ~1,400:1.** This is the headline ratio: the system is overwhelmingly a **read/delivery** system. It justifies a CDN absorbing nearly all bytes, pre-built static segments, and edge proximity.
-- **Average concurrent streams:** 1B watch-hours/day ÷ 24 = **~42M streams in flight at any instant** (on average). Peak is materially higher (evenings, big drops).
+**Watch (read) side — enormous:** 1B watch-hours/day → **watch:upload ≈ 1,400:1**, the headline ratio; and ÷24 → **~42M concurrent streams** on average.
 
 **Egress bandwidth (the number that dominates everything):**
-- Blended ABR bitrate served ≈ **3 Mbps** (a mix of 240p phones to 4K TVs; assumption, stated). 42M concurrent × 3 Mbps = **~125 Tbps average egress**, peak ~2.5× ≈ **~310 Tbps.**
-- Per day: 1B watch-hours × 3,600 s × 3 Mbps ÷ 8 = **~1.35 EB/day of video egress** (~1.3 exabytes *per day*). **This is the system.** Serving even a fraction of it from origin is both latency-fatal and budget-fatal — the CDN/edge is not an optimization, it *is* the read architecture.
-- **CDN offload:** at a **95% edge hit ratio** (Lesson 3.5), the origin/object store sees only ~5% = **~70 PB/day**; the CDN/edge absorbs **~1,280 PB/day.** At terabit scale, every point of hit ratio is a multi-million-dollar line item.
+- Blended ABR bitrate ≈ **3 Mbps** (stated assumption). 42M × 3 Mbps = **~125 Tbps average**, peak ~2.5× ≈ **~310 Tbps**; per day, **~1.35 EB of video egress**. **This is the system.** Serving it from origin is latency-fatal and budget-fatal — the CDN/edge *is* the read architecture.
+- **CDN offload:** at a **95% edge hit ratio** (3.5), origin sees ~5% = **~70 PB/day**; the edge absorbs ~1,280 PB/day. Every point of hit ratio is a multi-million-dollar line item.
 
-**Media storage (the big, ever-growing one):**
-- One source-hour, transcoded into the full ladder (≈6–8 resolution rungs × 2–3 codecs), stores **~7 GB** of renditions (assumption, stated; the source mezzanine is extra and kept cold). 720k hours/day × 7 GB = **~5 PB/day usable** → **~1.8 EB/year**, and it **only grows** (UGC is kept ~forever).
-- Durability overhead via **erasure coding (~1.4×)** instead of 3× replication: ~2.5 EB/year raw vs ~5.4 EB/year — the erasure-coding choice (Lesson 3.11) saves on the order of **~3 EB/year of raw disk** at our volume. That is a budget number, not a footnote; justified in S.
+**Media storage:** 720k hrs/day × ~7 GB/source-hour = **~5 PB/day → ~1.8 EB/year**, growing forever (UGC is kept ~indefinitely). **Erasure coding (~1.4×) over 3× replication** saves on the order of **~3 EB/year of raw disk** — a budget number, justified in S.
 
-**Metadata storage (the deliberate contrast):**
-- A video's *record* — id, owner, title, description, tags, rendition/manifest pointers, status — is **~2 KB.** 8.6M/day × 2 KB ≈ **~17 GB/day** → **~6 TB/year.**
-- **Media is ~5 orders of magnitude larger than metadata** (~2 EB/year vs ~6 TB/year, a ratio in the hundreds of thousands). Even more extreme than Instagram's ~1,500×. That gulf is the entire justification for splitting bytes (object store + CDN) from records (a database) — they are not even remotely the same class of problem.
+**Metadata storage (the deliberate contrast):** ~2 KB/video × 8.6M/day ≈ **~6 TB/year**. **Media is ~5 orders of magnitude larger than metadata** (~2 EB vs ~6 TB) — the entire justification for splitting bytes (object store + CDN) from records (a database).
 
-**Transcode compute (the hidden fleet):**
-- Every uploaded hour must be encoded into the whole ladder, and encoding is **slower than real time** — modern codecs especially (AV1 can be **10–100× slower than real time** per rendition on CPU). Summing across ~6 rungs × ~3 codecs, encoding one source-hour over the **full ladder** can cost on the order of **tens to >100 CPU-hours.** At 720k source-hours/day, the full-ladder math is brutal: 720k × ~50 CPU-hrs ÷ 24 ≈ **~1.5M cores running continuously** (range ~0.9M–3M for ~30–100 CPU-hrs/source-hr) — a nine-figure compute line, *not* "tens of thousands." This is **precisely why we don't encode the full ladder for everything**: we run a **cheap H.264 pass for every upload** (a few CPU-hours/source-hour → a fleet ~an order of magnitude smaller) so the video is watchable fast, and **backfill the expensive VP9/AV1 rungs only for content that earns views** (most uploads get a handful of views — encoding AV1 for them is pure waste). That popularity-gated backfill is what keeps the steady-state fleet sane, and it's the reason the pipeline must be **chunked and parallel** (next, in H) so wall-clock latency stays minutes, not hours, and a single failure doesn't restart a whole movie.
+**Transcode compute (the hidden fleet):** encoding is slower than real time, and naively encoding the **full ladder × 3 codecs for every upload works out to ~1.5M cores running continuously — a nine-figure compute line.** That is precisely why we don't: run a **cheap H.264 pass for every upload** (fleet ~an order of magnitude smaller) so the video is watchable fast, and **backfill expensive VP9/AV1 rungs only for content that earns views** — most uploads get a handful of views, and encoding AV1 for them is pure waste. The popularity-gated backfill keeps the fleet sane, and it's why the pipeline must be **chunked and parallel** (H) so wall-clock latency stays minutes and a failure doesn't restart a movie.
 
-> The three numbers I carry into every later decision: **~1,400:1 watch:upload** (→ edge-served static segments, CDN absorbs ~all bytes), **~125 Tbps egress** (→ the dominant cost; CDN/Open-Connect-style edge is the read architecture), and **media ≫ metadata by ~5 orders of magnitude** (→ two completely different stores). Everything else is downstream.
+> The three numbers I carry into every later decision: **~1,400:1 watch:upload** (→ edge-served static segments), **~125 Tbps egress** (→ the dominant cost), and **media ≫ metadata by ~5 orders of magnitude** (→ two completely different stores).
 
 ---
 
 ## S — Storage
 
-The S step matches each kind of data to a store *type* and names real systems. Per the gulf above, this problem has **five distinct data shapes**, each with a different access pattern. Naming them separately — and rejecting the temptation to jam them into one database — is the signal.
+Five distinct data shapes, each with a different access pattern — naming them separately, and rejecting one-database-for-everything, is the signal.
 
 | Data | Shape & access pattern | Store **type** | Real system | Rejected alternative (and why) |
 |---|---|---|---|---|
-| **Video segments + manifests** (the ladder: `.ts`/`.m4s` chunks, `.m3u8`/`.mpd`) | Enormous, immutable, write-once read-many-billions, whole-segment GETs from near the user | **Object/blob store + CDN/edge** | **S3 / GCS** behind **CloudFront / a private edge CDN** (Netflix: **Open Connect** appliances inside ISPs) | A database BLOB column or an NFS file server — melts at EB scale, can't reach 11 nines economically, can't sit at the edge. (Lesson 3.11.) |
-| **Source / mezzanine masters** | Huge, immutable, *cold* (read only to re-encode), irreplaceable | **Object store, cold/archive tier** | **S3 Glacier-class** | Keeping sources on hot storage — pure waste; a source is read maybe once after upload (to encode) and rarely again. |
-| **Video & channel metadata** | Small (~2 KB) structured rows, keyed point reads by `video_id`, very high read rate, partitionable | **Wide-column / partitioned KV** | **Cassandra** (or **Bigtable** / DynamoDB) | A single Postgres instance — fine at 6 TB *total*, but it can't absorb the metadata read rate or partition cleanly across regions without sharding work I'd rather the store own. |
-| **View counts (+ likes)** | Hot write keys (a viral video), display-tolerant lag, but need exact reconciliation for payouts | **Sharded counters in-memory + exact recompute from a log** | **Redis** shards + **Kafka** event log → batch recompute (Spark/Flink) | A single `UPDATE count=count+1` row — a hot-key throughput wall on a viral video (Lesson 3.16), and no fraud/dedup hook. |
-| **Watch events / signals** | Append-only firehose (every play, seek, completion), huge volume, consumed by analytics + recommendations | **Append-only log → columnar warehouse** | **Kafka** → **BigQuery / S3 + Spark** | Writing watch events into the OLTP metadata DB — pollutes the serving store with analytics write load. |
-
-The headline storage decision and its trade: **segments + manifests go in an object store fronted by an edge CDN; sources go cold; records go in a partitioned wide-column DB; counts live in Redis with an exact log behind them; watch events go to a log/warehouse.** I'm rejecting the "one database for everything" answer not because the DB is bad — at 6 TB of metadata it would *hold* the records — but because (a) it cannot host ~2 EB/year of bytes durably or economically, and (b) nothing but a CDN can serve ~125 Tbps from near the user. The store choice is forced by the **three numbers** from Estimation, exactly as it should be.
+| **Video segments + manifests** | Enormous, immutable, write-once read-many-billions | **Object store + CDN/edge** | **S3 / GCS** behind **CloudFront** / private CDN (Netflix: **Open Connect** in ISPs) | DB BLOBs / NFS — melts at EB scale, can't reach 11 nines economically, can't sit at the edge (3.11). |
+| **Source / mezzanine masters** | Huge, immutable, *cold*, irreplaceable | **Object store, archive tier** | **S3 Glacier-class** | Hot storage for sources — read maybe once after upload; pure waste. |
+| **Video & channel metadata** | Small (~2 KB) rows, keyed point reads, very high read rate | **Wide-column / partitioned KV** | **Cassandra** / Bigtable / DynamoDB | A single Postgres — holds 6 TB fine, but can't absorb the read rate or partition across regions without sharding work the store should own. |
+| **View counts (+ likes)** | Hot write keys, display-tolerant lag, exact for payouts | **Sharded counters + exact recompute from a log** | **Redis** shards + **Kafka** → batch recompute | A single `UPDATE count+1` row — hot-key wall on a viral video (3.16), no fraud/dedup hook. |
+| **Watch events / signals** | Append-only firehose, analytics + recommendations | **Log → columnar warehouse** | **Kafka** → BigQuery / S3+Spark | Writing events into the OLTP store — pollutes serving with analytics load. |
 
 Two sub-decisions worth defending:
-- **Edge durability/cost via erasure coding vs 3× replication** (Lesson 3.11): erasure coding reaches ~11 nines at **~1.4× overhead instead of 3×**, saving on the order of **~3 EB/year of raw disk** at our volume — I take it for the warm/cold bulk, accepting slower reconstruction on the rare degraded read. *Rejected:* 3× everywhere — simpler/faster reconstruct, but at EB scale the 200% overhead is a budget I won't sign.
-- **Keep the source as a cold mezzanine, encode renditions from it.** *Rejected:* discarding the source after encoding to save storage — tempting, but if I add a new codec (say AV1 later, or a new rung) I'd have to re-encode from a lossy rendition (quality loss) or can't at all. The source is the irreplaceable master; cold storage is cheap; keep it.
+- **Erasure coding vs 3× replication** (3.11): ~11 nines at **~1.4× overhead instead of 3×** — **~3 EB/year of raw disk saved** — accepting slower reconstruction on the rare degraded read. *Rejected:* 3× everywhere; at EB scale the 200% overhead is a budget I won't sign.
+- **Keep the source as a cold mezzanine.** *Rejected:* discarding it after encode — adding a new codec or rung later would mean re-encoding from a lossy rendition, or not at all. Cold storage is cheap; keep the master.
 
 ---
 
 ## H — High-level design
 
-The H step is "think in components": a box diagram plus the happy path in prose. Three flows matter — the **upload path**, the **transcode pipeline** (the engine, where I go deep), and the **watch path** — and the key architectural statement is that **transcode happens offline as chunked parallel jobs, and the watch path is a dumb CDN of static segments.**
+Three flows matter — **upload**, the **transcode pipeline** (the engine, where I go deep), and **watch** — and the key statement is that **transcode happens offline as chunked parallel jobs, and the watch path is a dumb CDN of static segments.**
 
 ```mermaid
 flowchart TD
@@ -143,17 +132,17 @@ flowchart TD
     style MUX fill:#e8a13a,color:#000
 ```
 
-**Happy-path: upload (write).** The creator's client initiates a **resumable multipart upload** and PUTs the source **directly to the object store** in chunks (the app servers never touch the bytes — a 10 GB source over a flaky connection would crush them; resumability means a dropped connection retries one chunk, not the whole file). The completed source fires a **`source-uploaded` event** to the **transcode orchestrator**, and the API **commits a metadata row** (`status: processing`) so the video exists in the catalog immediately, just not yet watchable.
+**Upload.** A **resumable multipart upload** PUTs the source **directly to the object store** (app servers never touch the bytes; a dropped connection retries one chunk, not a 10 GB file). Completion fires a `source-uploaded` event and commits a metadata row (`status: processing`) — the video exists immediately, just not yet watchable.
 
-**Happy-path: transcode (the engine — go deep here).** The orchestrator **splits the source into independent chunks at GOP/keyframe boundaries** (so each chunk is self-contained and decodable alone), and emits one **transcode job per (chunk × rung × codec)** onto a Kafka job queue. A **fleet of stateless workers** pulls jobs and encodes in parallel — chunk 7 at 1080p/H.264 on one worker, chunk 12 at 4K/AV1 on another. Because the work is chunked, a 2-hour movie's full ladder finishes in **minutes of wall-clock, not hours**, and a single worker crash re-queues **one chunk**, not the whole encode (idempotent per chunk id). When all chunks for a rung are done, a **packager** stitches them, cuts the final **streaming segments** (2–6 s `.m4s`/`.ts` each), and writes the **HLS/DASH manifests** (the playlists that list every rung and its segment URLs) back to the object store, where the CDN can pull them. Finally it flips the metadata row to `ready`. **This chunked-parallel DAG is the heart of the problem** — it's why encode is fast, fault-tolerant, and elastically scalable.
+**Transcode (the engine — go deep here).** The orchestrator **splits the source at GOP/keyframe boundaries** (each chunk independently decodable) and emits one job per **(chunk × rung × codec)** onto a Kafka queue; a **stateless worker fleet** encodes in parallel. Because the work is chunked, a 2-hour movie's ladder finishes in **minutes of wall-clock, not hours**, and a worker crash re-queues **one chunk**, idempotent by chunk id. A **packager** stitches completed rungs, cuts 2–6 s streaming segments, writes the **HLS/DASH manifests**, and flips the row to `ready`. **This chunked-parallel DAG is the heart of the problem** — fast, fault-isolated, elastically scalable.
 
-**Happy-path: watch (read).** The viewer's client hits the **playback/metadata service**, which returns video metadata plus the **manifest URL**. The client fetches the **manifest from the CDN**, sees the available rungs (240p…4K) and codecs, **measures its own bandwidth, and pulls segments adaptively** — starting low for a fast first frame, climbing rungs as throughput allows, dropping instantly if the network degrades. **Every byte of video comes from the CDN edge, never from us** — that's the only way to serve 125 Tbps. In parallel the client fires **watch events** (play, seek, completion) to a Kafka log; the **view-count service** consumes them, **dedups and fraud-filters**, and updates the (sharded) count. This split — tiny metadata call to us, all bytes from the edge, ABR on the client — is what makes p99-first-frame ≲ 2 s feasible at this scale.
+**Watch.** The client gets metadata plus a **manifest URL** from us, then fetches the manifest and **segments adaptively from the CDN** — starting low for a fast first frame, climbing as throughput allows. **Every byte of video comes from the edge, never from us.** In parallel the client fires watch events to Kafka; the view-count service **dedups, fraud-filters**, and updates the sharded count. Tiny metadata call to us, all bytes from the edge, ABR on the client — that's what makes p99 TTFF ≲ 2 s feasible.
 
 ---
 
 ## A — API design
 
-The A step defines the interface. Keep it small; the non-obvious choices are the **resumable multipart upload** (a 10 GB source must survive a flaky connection), the **manifest-based playback** (we hand out a manifest URL, not a byte stream), and the **fire-and-forget watch-event beacon**.
+Keep it small; the non-obvious choices are the **resumable multipart upload**, **manifest-based playback**, and the **fire-and-forget watch beacon**.
 
 ```
 # --- Upload (resumable / multipart) ---
@@ -162,7 +151,7 @@ POST /v1/uploads:init
   -> { upload_id, part_urls[], part_size }          # client PUTs source chunks straight to object store
 
 POST /v1/uploads/{upload_id}:complete
-  body: { parts:[{part_number, etag}] }              # assembles the multipart source
+  body: { parts:[{part_number, etag}] }
   -> { video_id, status: "processing" }              # returns BEFORE transcode finishes
 
 POST /v1/videos
@@ -171,185 +160,172 @@ POST /v1/videos
 
 GET  /v1/videos/{video_id}
   -> { video_id, title, channel, status, manifest_url, thumbnails, view_count, created_at }
-                                                      # status flips processing -> ready when packaged
 
 # --- Playback (we return a MANIFEST URL; bytes come from the CDN) ---
 GET /v1/videos/{video_id}/manifest
   -> 302 redirect to  https://cdn.example.com/<video_id>/master.m3u8   (HLS) or /manifest.mpd (DASH)
-  # the client then GETs the manifest + segments directly from the CDN, choosing rungs adaptively
 
 # --- Watch events (fire-and-forget beacon; powers counts + recommendations) ---
 POST /v1/videos/{video_id}/events           body: { session_id, type: play|seek|heartbeat|complete, position_ms }
   -> 202                                            # never on the critical playback path
 
-# --- Engagement ---
+# --- Engagement / browse ---
 POST /v1/videos/{video_id}/likes            -> 202   # idempotent per (user, video)
-
-# --- Browse / search / recommend (recommendation model delegated) ---
 GET /v1/search?q=&cursor=&limit=20          -> { results:[...], next_cursor }
-GET /v1/recommendations?cursor=&limit=20    -> { videos:[...], next_cursor }    # candidate set; ranking owned by ML team
+GET /v1/recommendations?cursor=&limit=20    -> { videos:[...], next_cursor }    # ranking owned by ML team
 ```
 
-Three decisions worth defending. **Resumable multipart upload, not a single presigned PUT:** Instagram's 1.5 MB photo (5.3) is fine with one PUT, but a multi-GB source over mobile *will* drop mid-upload; multipart + resume retries one part, not the whole file. *Rejected:* single-shot PUT — simpler, but a failed upload of a 10 GB source is a furious creator and wasted bandwidth. **Playback returns a manifest URL (a 302 to the CDN), not a video byte stream:** the manifest is the entire ABR mechanism — it lists every rung and codec and lets the *client* adapt. *Rejected:* a `GET /video/{id}/stream` that proxies bytes through us — that puts us in the 125 Tbps path and defeats the CDN; we must hand off to the edge. **Watch events are 202 fire-and-forget:** they feed counts and recommendations but must **never** block or slow playback. *Rejected:* a synchronous "register view" call that returns the new count — it would put a hot, sharded, fraud-checked counter on the critical playback path (the exact anti-pattern of Lesson 3.16).
+Three decisions worth defending. **Resumable multipart, not a single presigned PUT:** a multi-GB source over mobile *will* drop mid-upload; multipart retries one part. *Rejected:* single-shot PUT — a failed 10 GB upload is a furious creator. **Playback returns a manifest URL (302 to the CDN), not a byte stream:** the manifest *is* the ABR mechanism. *Rejected:* proxying bytes through us — that puts us in the 125 Tbps path and defeats the CDN. **Watch events are 202 fire-and-forget.** *Rejected:* a synchronous "register view" returning the new count — a hot, fraud-checked counter on the critical playback path (the 3.16 anti-pattern).
 
 ---
 
 ## D — Data model
 
-The D step is "know where data lives": schema, keys, and — the part that matters at scale — the **partition/shard key**, because the partition key is what decides whether your hottest query hits one node or fans across the cluster.
+**Partition keys, not column inventories, are the load-bearing detail:**
+- `videos` — **PK `video_id`** for point reads, with a second query-shaped table **`videos_by_chan` (PK `channel_id`, clustered by `created_at DESC`)** — the denormalize-by-query Cassandra idiom (2.3), not secondary indexes. Manifest/rendition fields are **object-store paths; the bytes are never in the DB.**
+- `transcode_jobs` — **PK `video_id`**, clustered **(rung, codec, chunk_idx)**: all of one video's job state in one bounded partition, and idempotency per `(video_id, rung, codec, chunk_idx)` — a re-run overwrites the same output key.
+- **View counts** — *not* a column you `UPDATE`: **N sharded sub-counters per `video_id`** in Redis, summed on read, with **dedup per `session_id` applied before the increment** — plus the authoritative count recomputed from the event log (3.16).
+- `watch_events` — Kafka, **keyed by `video_id`** (a hot video streams through a bounded set of partitions; videos parallelize) — and the log is what lets the exact count be recomputed independently of the display counter.
 
-**`videos` (Cassandra) — the metadata row.** Partition key `video_id` for point reads; a second query-shaped table for a channel's video list.
+<details>
+<summary>Go deeper — full table layouts (IC depth, optional)</summary>
+
 ```
 videos:          PK = video_id
                  (channel_id, title, description, tags, status,
                   manifest_keys{hls,dash}, rendition_keys[], thumbnail_keys[], created_at)
 videos_by_chan:  PK = channel_id, clustering key = created_at DESC   # "show me a channel's uploads"
-```
-`manifest_keys`/`rendition_keys` are just object-store paths (e.g. `s3://renditions/ab/cd/<video_id>/1080p_h264/seg_0007.m4s`); **the bytes are not in the DB.** The two-table pattern (denormalize by query) is the Cassandra idiom from Lesson 2.3 — a table per access path rather than secondary indexes.
 
-**Transcode job tracking (orchestrator state).** A small store tracking each chunk job so the packager knows when a rung is complete and crashes are idempotent:
-```
 transcode_jobs:  PK = video_id, clustering = (rung, codec, chunk_idx)
                  (status: queued|running|done|failed, attempt, worker_id, output_key)
-```
-Keyed by `video_id` so all of one video's job state is one partition (a bounded ~tens-of-thousands-of-rows partition — a 2-hour movie at 6 s chunks × 6 rungs × 3 codecs is ~20,000 rows, fine). Idempotency is per `(video_id, rung, codec, chunk_idx)` — re-running a failed chunk overwrites the same output key.
+                 # a 2-hour movie at 6 s chunks × 6 rungs × 3 codecs ≈ 20,000 rows — a bounded partition
 
-**View counts — sharded, with an exact log (Lesson 3.16).** The count is **not** a column you `UPDATE`; a viral video is a hot write key. It is **N sub-counters summed on read**, *plus* a separate exact figure recomputed from the watch-event log for payouts:
-```
 view_count:{video_id}:{shard}   shard in 0..N-1     # increment a deduped shard; sum on read for display
-# authoritative count = recompute from the Kafka watch-event log (deduped per session, bot-filtered) in batch
-```
-Partition/shard key for the display counter = `video_id` hashed into N Redis shards. The **dedup** (count once per `session_id` within a window) lives in the view-count service *before* the increment — this is the load-bearing difference from a like counter.
+# authoritative count = batch recompute from the Kafka watch-event log (deduped per session, bot-filtered)
 
-**Watch events (Kafka → warehouse).** Append-only, partitioned by `video_id` (so all events for a hot video stream through a bounded set of partitions but parallelize across videos):
-```
 watch_events:  key = video_id, value = {session_id, user_id, type, position_ms, ts}
 ```
-The **partition-key choices are the load-bearing detail**: `video_id`/`channel_id` spread point reads and event streams evenly, while the *viral video's counter key* is the one hot spot the next step exists to fix — and the watch-event log is what lets the exact count be recomputed independently of the fast display counter.
+
+Rendition keys look like `s3://renditions/ab/cd/<video_id>/1080p_h264/seg_0007.m4s`.
+
+</details>
 
 ---
 
 ## E — Evaluation
 
-The second E is where you **stress your own design**: re-check against the NFRs and hunt the bottlenecks — hot keys, single points, tail latency, write amplification — and **fix each, naming the trade the fix makes.** This is the highest-signal section for a Director; an architecture with no self-identified failure modes reads as untested.
+Stress your own design: re-check the NFRs, hunt the bottlenecks, fix each **naming the trade**. An architecture with no self-identified failure modes reads as untested.
 
-**Bottleneck 1 — Egress cost and origin meltdown (the headline failure).** ~125 Tbps (peak ~310 Tbps) cannot be served from origin — it would be both latency-fatal and budget-fatal, and a single popular new video could saturate origin egress.
-> **Fix — push ~all bytes to the edge, and raise the hit ratio relentlessly.** Pre-built **static segments on a CDN** (Lesson 3.5) take 95%+ of traffic; **origin shielding / tiered caches** keep a viral video's first-views from stampeding origin; **predictive pre-positioning** pushes anticipated-hot content to edges before demand (this is exactly Netflix Open Connect's model — appliances *inside* ISPs). **Trade:** more storage at the edge and a pre-positioning system (and stale-content invalidation complexity) in exchange for collapsing ~1.3 EB/day to ~70 PB/day at origin and serving from near the user. *Rejected:* serving from a few big origin regions — simpler, but the egress bill and the cross-ocean latency both make it impossible.
+**Bottleneck 1 — Egress cost and origin meltdown (the headline failure).** ~125 Tbps (peak ~310) cannot be served from origin; a single popular video could saturate origin egress.
+> **Fix — push ~all bytes to the edge, and raise the hit ratio relentlessly.** Static segments on a CDN take 95%+; **origin shielding / tiered caches** stop a viral first-view stampede; **predictive pre-positioning** pushes anticipated-hot content to edges (the Open Connect model — appliances *inside* ISPs). **Trade:** edge storage + a pre-positioning system for collapsing ~1.3 EB/day to ~70 PB/day at origin. *Rejected:* a few big origin regions — the egress bill and cross-ocean latency both kill it.
 
-**Bottleneck 2 — Transcode throughput, latency, and cost.** Whole-file serial encoding of a 2-hour 4K source across ~6 rungs × ~3 codecs takes *hours*, and one failure restarts the lot — unacceptable for "video watchable in minutes," and the AV1 compute alone is a fleet.
-> **Fix — chunked parallel transcode (the engine from H).** Split at GOP boundaries, fan thousands of independent chunk jobs across a stateless worker fleet, idempotent per chunk, packaged when complete. **Trade:** orchestration complexity (split/track/stitch, the `transcode_jobs` table) and a packaging step for **minutes-not-hours latency, fault isolation (a crash re-queues one chunk), and elastic scaling**. On the codec axis: **encode the cheap universal H.264 first** so the video is watchable on anything within minutes, then **backfill VP9/AV1 asynchronously** for the bandwidth savings — so first-watchability never waits on slow AV1. *Rejected:* whole-file serial encode — simplest, but hours of latency and an all-or-nothing failure mode.
+**Bottleneck 2 — Transcode throughput, latency, and cost.** Whole-file serial encoding of a 2-hour 4K source takes *hours*, and one failure restarts the lot.
+> **Fix — chunked parallel transcode** (the engine from H): split at GOP boundaries, fan independent chunk jobs across a stateless fleet, idempotent per chunk, package when complete. **H.264 first** so the video is watchable on anything within minutes; **VP9/AV1 backfill asynchronously**, so first-watchability never waits on slow codecs. **Trade:** orchestration complexity (split/track/stitch) for minutes-not-hours latency and fault isolation. *Rejected:* whole-file serial — simplest, but hours of latency and all-or-nothing failure.
 
-**Bottleneck 3 — Codec economics (a bandwidth/compute trade worth real money).** Single-codec H.264 is universally playable but ~30% more bytes than AV1; at 125 Tbps that "30%" is **~37 Tbps** of egress (and the matching CDN/transit bill). Pure AV1 saves it but is far slower to encode and won't play on old devices.
-> **Fix — multi-codec ladder, serve the best the client supports.** Encode **H.264 (universal floor), VP9 (broad modern support), AV1 (best compression for capable clients)**; the manifest advertises all, the client picks. **Trade:** ~2–3× the encode compute and storage for **up to ~30% egress reduction on the (large, modern) share of traffic that can take AV1** — and at terabit scale the egress savings dwarf the encode/storage cost. *Rejected:* one codec — either you overpay egress forever (H.264-only) or you break old devices (AV1-only).
+**Bottleneck 3 — Codec economics (a bandwidth/compute trade worth real money).** The Director call: **AV1 saves ~30% of bytes ≈ ~37 Tbps at our scale, but costs far more encode compute — so serve a multi-codec ladder (H.264 universal floor, VP9/AV1 for capable clients), gate the expensive codecs behind popularity so the savings land where the egress is, and delegate the ladder design to the media team with a cost SLA.** *Rejected:* one codec either way — H.264-only overpays egress forever; AV1-only breaks old devices and melts the encode fleet.
 
-**Bottleneck 4 — Hot view-count key + fraud.** A viral video takes views faster than one Redis key or DB row can serialize (`count = count + 1` is one lock/partition; Lesson 3.16), *and* naive counting is trivially gamed (bots, replays inflating payouts).
-> **Fix — dedup + sharded display counter + exact log reconciliation.** The view-count service **dedups per `session_id`** and applies **fraud heuristics** before counting; the display count is **N sharded sub-counters summed on read** (a viral video needs only a handful of Redis shards at ~100k ops/s/key); the **payout-grade count is recomputed exactly and offline from the Kafka watch-event log**, fully deduped and bot-filtered. **Trade:** the display count is **eventually consistent and approximate** (acceptable per R) while the money number is **exact but delayed** — two numbers on purpose. *Rejected:* one atomic counter — a hot-key throughput wall *and* no place to put fraud logic.
+<details>
+<summary>Go deeper — the codec comparison (IC depth, optional)</summary>
 
-**Bottleneck 5 — Tail latency: time-to-first-frame and rebuffering.** A cold/distant segment, or a client that opens at too high a rung, spikes startup time and causes rebuffers — the quality NFRs (p99 TTFF ≲ 2 s, rebuffer < 0.5%) live here.
-> **Fix:** **start low, climb fast** (the player requests a low rung first for an instant first frame, then ramps), **short initial segments**, **edge proximity** (segment served from the nearest PoP), and a **healthy buffer-ahead** so a momentary dip doesn't stall. **Trade:** a slightly-lower-quality first few seconds for a fast, stall-free start — exactly the ABR bargain. The player heuristic itself I'd **delegate** to the client/media team with a stated prior (buffer-based + throughput-estimate hybrid).
+- **H.264:** plays on effectively every device ever made; cheapest to encode (a few CPU-hours per source-hour across a ladder); ~30% more bytes than AV1 for the same quality. The universal floor and the v1 watchability gate.
+- **VP9:** broad modern support (Chrome, Android, most smart TVs); ~20–25% better compression than H.264; moderate encode cost. The middle rung.
+- **AV1:** best compression (~30% under H.264, ~10–15% under VP9) but **10–100× slower than real time per rendition on CPU** — summed across a 6-rung ladder, tens to >100 CPU-hours per source-hour. At 720k source-hours/day, full-ladder AV1 for everything ≈ ~1.5M continuous cores (range ~0.9–3M) — the math that forces popularity gating. GPU/ASIC encode shifts the curve but not the conclusion.
+- **Per-title / per-scene encoding** (Netflix's refinement): instead of one fixed bitrate ladder, analyze each title (or shot) and spend bits only where complexity demands — worth it when each title is watched millions of times, so the extra encode amortizes to nothing per view. YouTube applies it only to the popular head for the same reason.
+- The manifest advertises all codecs; the client picks the best it supports. Encode cost ~2–3×, storage ~2–3×, egress −~30% on the modern share of traffic — at terabit scale egress savings dwarf both.
 
-**Bottleneck 6 — Single points / availability.** Object store + CDN are managed/multi-region by design. The risks are the **transcode orchestrator** and the **view-count path.** Transcode is **stateless and replayable from Kafka** — if it falls behind, new uploads go watchable late (degraded, not broken), and chunk jobs are idempotent. View counting is **replayable from the event log** — a lost Redis counter is **recomputed from Kafka**, so a cache failure never loses the authoritative number. **Trade:** late-appearing uploads / briefly-stale counts under failure for the guarantee that **no source bytes and no payout-grade view is ever lost** — Redis and the encode fleet are accelerators, never the source of truth.
+</details>
 
-**Re-check vs NFRs:** ~1,400:1 watch skew + ~125 Tbps — met by static segments on a CDN/edge absorbing ~95% (origin ~70 PB/day). TTFF ≲ 2 s / rebuffer < 0.5% — met by ABR (start-low-climb-fast) + edge proximity. Durability 11 nines — met by object store + erasure coding, source kept cold as the master. Availability/AP watch path — met by Kafka-replayable transcode + counts and CDN delivery. Cost — edge offload + AV1 (~37 Tbps saved) + erasure coding (~3 EB/yr raw saved) are the levers a budget owner pulls.
+**Bottleneck 4 — Hot view-count key + fraud.** A viral video takes views faster than one Redis key or row can serialize, *and* naive counting is trivially gamed — counts drive payouts.
+> **Fix — dedup + sharded display counter + exact log reconciliation** (3.16): dedup per `session_id` and fraud-filter *before* counting; display = N sub-counters summed on read; the **payout-grade count is recomputed exactly, offline, from the Kafka event log**, bot-filtered. **Trade:** the display number is approximate and lagging (allowed by R) while the money number is exact but delayed — two numbers on purpose. *Rejected:* one atomic counter — a hot-key wall *and* no place for fraud logic.
+
+**Bottleneck 5 — Tail latency: TTFF and rebuffering.** A cold segment or an over-ambitious first rung spikes startup and stalls.
+> **Fix:** **start low, climb fast**, short initial segments, edge proximity, healthy buffer-ahead. **Trade:** a slightly-lower-quality first few seconds for a stall-free start — the ABR bargain. The player heuristic itself I **delegate** to the client/media team (prior: buffer-based + throughput-estimate hybrid).
+
+**Bottleneck 6 — Single points / availability.** Object store and CDN are managed/multi-region; the risks are the **orchestrator** and the **count path**. Both are **stateless and replayable from Kafka**: a backlogged transcode means uploads go watchable late (degraded, not broken); a lost Redis counter is recomputed from the log. **Trade:** late uploads / briefly-stale counts under failure, in exchange for never losing source bytes or a payout-grade view — Redis and the encode fleet are accelerators, never the source of truth.
+
+**Re-check vs NFRs:** 1,400:1 + 125 Tbps → static segments on CDN absorbing ~95% ✓; TTFF/rebuffer → ABR + edge proximity ✓; 11-nines durability → erasure-coded object store, cold source master ✓; availability → Kafka-replayable transcode + counts ✓; cost → edge offload, AV1 (~37 Tbps), erasure coding (~3 EB/yr raw) are the levers a budget owner pulls ✓.
 
 ---
 
 ## D — Design evolution
 
-The final D justifies the trade-offs and pushes past v1: **how it scales at 10×, the Netflix contrast, the hardest trade-offs, what I'd revisit, and where I'd delegate** — the Director's "think past v1."
-
 **At 10× (~1.25 Pbps egress, ~10B watch-hours/day):**
-- **Egress is the wall, and it's a physical/commercial one, not just software.** The lever stops being "add servers" and becomes **own the edge**: deploy **ISP-embedded caching appliances** (the Open Connect model) so bytes never traverse expensive transit, push the **CDN hit ratio toward 99%** with predictive pre-positioning of anticipated-hot content, and **lean harder on AV1** (every point of AV1 adoption is terabits saved). At 1.25 Pbps these are nine-figure budget lines a Director defends to finance, and I'd **delegate the edge-placement/peering strategy to the network/infra team** with the prior "embed at the ISP for the top-N titles by region; CDN for the tail."
-- **Transcode scales out cheaply** (it's embarrassingly parallel) — the lever is **encode efficiency**: per-title / per-scene encoding (spend more bits only on complex shots), and prioritizing the codec backfill toward the most-watched content so AV1 savings land where the egress actually is.
-- **Storage lifecycle-tiers aggressively** — most UGC is watched heavily for days then almost never; tier cold renditions and sources to archive class (an order of magnitude cheaper). At ~2 EB/year the tiering decision is itself a multi-million-dollar/year budget line (Lesson 3.11).
+- **Egress is the wall, and it's physical/commercial, not just software.** The lever becomes **owning the edge**: ISP-embedded appliances (Open Connect model) so bytes never traverse paid transit, hit ratio pushed toward 99% with predictive pre-positioning, and harder AV1 adoption (every point is terabits). Nine-figure budget lines a Director defends to finance; I'd **delegate edge placement/peering to the network team** with the prior "embed at the ISP for the top-N regional titles; CDN for the tail."
+- **Transcode scales out cheaply** (embarrassingly parallel); the lever is **encode efficiency** — per-title encoding and prioritizing codec backfill toward the most-watched content.
+- **Storage lifecycle-tiers aggressively** — most UGC is hot for days then near-never watched; at ~2 EB/year the tiering policy is itself a multi-million-dollar/year line (3.11).
 
 **The Netflix contrast (same byte plane, opposite encode/serve economics — the "new constraint" lens):**
-- **Finite, curated catalog, not a UGC firehose.** No 500-hours-a-minute ingest and **no hot view-count problem** (a fixed catalog, counts are not the product). So the upload pipeline shrinks to an **internal ingest** of studio masters.
-- **Encode once, optimize obsessively.** With a finite catalog you can afford **per-title and per-shot encoding** — bespoke bitrate ladders per title — because each title is watched millions of times; the encode cost amortizes to nothing per view. (YouTube can't: most uploads get a handful of views, so it uses a cheaper one-size ladder and only re-encodes the long tail's winners.)
-- **Pre-position the whole catalog at the ISP edge (Open Connect).** Because the catalog is finite and demand is predictable, Netflix ships appliances into ISPs and **pre-loads tonight's likely-watched titles overnight** — so peak-evening traffic is served from a box inside your ISP. YouTube's catalog is too large/long-tail to fully pre-position, so it leans on a general CDN + caching.
-- **DRM and recommendations move to the core.** Studio licensing **mandates DRM** (the scope cut I flagged in R becomes central), and with a finite catalog the **recommendation model is the product** (it decides what the limited shelf surfaces), not a side path.
+- **Finite, curated catalog, not a UGC firehose.** No 500-hours-a-minute ingest and **no hot view-count problem** (a fixed catalog; counts aren't the product). The upload pipeline shrinks to an **internal ingest** of studio masters.
+- **Encode once, optimize obsessively.** With a finite catalog you can afford **per-title and per-shot encoding** — bespoke ladders per title — because each title is watched millions of times; the encode cost amortizes to nothing per view. (YouTube can't: most uploads get a handful of views, so it uses a cheaper one-size ladder and only re-encodes the winners.)
+- **Pre-position the whole catalog at the ISP edge (Open Connect).** Demand is predictable, so Netflix ships appliances into ISPs and **pre-loads tonight's likely-watched titles overnight** — peak-evening traffic is served from a box inside your ISP. YouTube's long-tail catalog can't be fully pre-positioned, so it leans on a general CDN + caching.
+- **DRM and recommendations move to the core.** Studio licensing **mandates DRM** (the scope cut from R becomes central), and with a finite shelf the **recommendation model is the product**, not a side path.
 
 **The hardest trade-offs (genuinely contested):**
-1. **How rich a ladder, and which codecs, per content tier.** Encoding the full ladder × 3 codecs for a video that gets 12 views is pure waste; under-encoding a viral hit overpays egress forever. The senior answer is **adaptive**: cheap H.264 ladder for everything, **backfill richer rungs/AV1 only for content that earns views** — a monitored, content-popularity-driven policy, not a constant.
-2. **Pre-positioning vs on-demand caching at the edge.** Pre-positioning cuts peak egress and latency but wastes edge storage on content that isn't watched; it pays off only for predictable demand (Netflix) and partially for YouTube's head. A per-region, per-tier call, not global.
-3. **Erasure coding vs replication for *hot* renditions.** Erasure coding saves EB-scale disk but makes a **degraded read slower** (reconstruct from parity); for the hottest, newest renditions I might replicate and only erasure-code the warm/cold bulk — per-tier, not global.
+1. **How rich a ladder, which codecs, per content tier.** Full ladder × 3 codecs for a 12-view video is pure waste; under-encoding a viral hit overpays egress forever. The senior answer is **adaptive**: cheap H.264 for everything, richer rungs/AV1 backfilled by popularity — a monitored policy, not a constant.
+2. **Pre-positioning vs on-demand edge caching.** Pays off for predictable demand (Netflix, YouTube's head); wastes edge storage on the tail. A per-region, per-tier call.
+3. **Erasure coding vs replication for *hot* renditions.** Erasure coding saves EB-scale disk but slows degraded reads; replicate the hottest, erasure-code the warm/cold bulk — per-tier, not global.
 
-**What I'd revisit first:** the **view-count fraud pipeline** (it feeds creator payouts and trending — adversaries actively game it, so the exact, log-reconciled, bot-filtered path is a security surface, not a nice-to-have), and the **codec-backfill prioritization** (getting AV1 onto the *right* content is where the terabits actually get saved).
+**What I'd revisit first:** the **view-count fraud pipeline** (it feeds payouts and trending; adversaries actively game it — a security surface, not a nice-to-have), and **codec-backfill prioritization** (getting AV1 onto the *right* content is where the terabits are).
 
-**Where I'd delegate a deep-dive (explicit Director signal):**
-- **Codec/encoder matrix + per-title encoding** → the media/encoding team — codec selection, rung design, GPU-vs-CPU encode economics. My prior: chunked, idempotent, H.264-first-then-backfill.
-- **ABR player heuristic** → the client/media team — buffer-based vs throughput-estimate switching. My prior: a hybrid that starts low and climbs.
-- **Recommendation model + ranking** → the ML team. My architecture delivers the candidate set + logs the watch signals; the model is theirs.
-- **Edge placement / ISP peering / Open Connect** → the network team — "benchmark ISP-embedded appliances vs third-party CDN for the top-N regional titles; my prior is embed for the head, CDN for the tail."
-
-Naming *what* I'd delegate, *to whom*, and *with what prior* is the altitude this round is scoring — I go deep where the decision turns (the chunked-parallel transcode pipeline and the edge/codec cost levers) and hand off the rest credibly.
+**Where I'd delegate (explicit Director signal):** the **codec/encoder matrix + per-title encoding** → media team (prior: chunked, idempotent, H.264-first-then-backfill, with a cost SLA); the **ABR player heuristic** → client team (prior: hybrid start-low-climb); the **recommendation model** → ML team (my system delivers candidates and logs signals); **edge placement / ISP peering** → network team (prior: embed for the head, CDN for the tail). Going deep on the transcode DAG and the edge/codec cost levers — and handing off the rest with a stated prior — is the altitude this round scores.
 
 ---
 
 ## Trade-offs table — the pivotal decisions
 
-| Decision | Option A | Option B | Option C (chosen, usually) | Use A when… / Use B when… / Use C when… |
+| Decision | Option A | Option B | Option C (chosen, usually) | Use when… |
 |---|---|---|---|---|
-| **Delivery model** | **Server-side transcode-on-the-fly** (encode per request) | **Single-bitrate progressive download** (one file, byte-range) | **Adaptive bitrate (HLS/DASH) over a pre-built static ladder** | A: ~never at scale (uncacheable, melts compute). B: tiny scale, uniform fast networks, short clips. **C: any real VOD platform — pre-cut ladder + CDN + client adaptation is the default.** |
-| **Encode pipeline** | **Whole-file serial transcode** (simple) | — | **Chunked parallel transcode** (split at GOP, fan out, stitch) | A: short clips, low volume, latency-insensitive. **C: anything longer than a clip — minutes-not-hours latency, fault isolation, elastic scale.** |
-| **Codecs** | **Single codec (H.264)** universal, simple | **Single codec (AV1)** best compression | **Multi-codec (H.264 + VP9 + AV1), serve best supported** | A: must play on everything, egress not the bottleneck. B: closed modern-only ecosystem. **C: huge egress + mixed device base — pay encode compute to save ~30% bytes (~37 Tbps).** |
-| **View count** | **Single atomic counter** (strong, simple) | **Sharded display counter** (write÷N, approximate) | **Dedup + sharded display + exact log reconciliation** | A: low write rate, no fraud concern. B: viral, display-only. **C: viral counts that feed payouts/trending and must resist fraud — the YouTube case.** |
-
-(Two more decisions argued inline above, each with its rejected alternative: **resumable multipart upload** vs single presigned PUT, and **manifest-URL playback (302 to CDN)** vs proxying the byte stream through our servers.)
+| **Delivery model** | **Transcode-on-the-fly** | **Single-bitrate progressive download** | **ABR (HLS/DASH) over a pre-built static ladder** | A: ~never at scale (uncacheable, melts compute). B: tiny scale, uniform networks. **C: any real VOD platform.** |
+| **Encode pipeline** | **Whole-file serial** | — | **Chunked parallel (split at GOP, fan out, stitch)** | A: short clips, low volume. **C: anything longer than a clip — minutes-not-hours, fault isolation, elastic scale.** |
+| **Codecs** | **H.264 only** | **AV1 only** | **Multi-codec, serve best supported, popularity-gated backfill** | A: egress not the bottleneck. B: closed modern-only ecosystem. **C: huge egress + mixed devices — pay encode compute to save ~30% of bytes.** |
+| **View count** | **Single atomic counter** | **Sharded display counter** | **Dedup + sharded display + exact log reconciliation** | A: low write rate, no fraud. B: viral, display-only. **C: counts that feed payouts/trending and must resist fraud.** |
 
 ---
 
 ## What interviewers probe here (Director altitude)
 
-At Director altitude they are not checking whether you can name HLS. They're checking whether you grasp that video is offline-encode + static-edge-delivery, can **price** the bandwidth, and know what to delegate.
+They are not checking whether you can name HLS — they're checking that you grasp video as offline-encode + static-edge-delivery, can **price** the bandwidth, and know what to delegate.
 
-- **"How does video actually get from upload to a viewer's screen?"** — *Strong signal:* "we don't stream from a server" — pre-built ABR ladder of static segments on a CDN, offline **chunked-parallel** transcode into resolutions × codecs, client pulls segments adaptively via a manifest; names ~125 Tbps as why the edge is the architecture. *Red flag:* "the server streams the video to the client" with no ladder, no CDN, no encode pipeline.
-- **"Walk me through the transcode pipeline."** — *Strong:* split at keyframes → fan out chunk jobs across a stateless fleet → idempotent per chunk → package + manifest → H.264-first then backfill AV1; names the minutes-vs-hours and fault-isolation wins. *Red flag:* "run ffmpeg on the file" — whole-file, serial, no fault model, hours of latency.
-- **"What's your egress, and what does it cost you?"** *(the cost signal that defines this problem)* — *Strong:* ~125 Tbps avg (peak ~310), 95% CDN offload → ~70 PB/day origin, AV1 saves ~37 Tbps, Open-Connect-style edge for the head — read as both a latency and a nine-figure budget story. *Red flag:* "use a CDN, it's faster" with no bytes, no offload ratio, no cost.
-- **"A video goes viral — what breaks?"** — *Strong:* names the **hot view-count write key** (shard it, dedup per session, fraud-filter, exact recompute from the log for payouts) *and* the **origin egress stampede** (origin shielding / pre-positioning). *Red flag:* "add read replicas" (replicas don't relieve a hot *write* key, and the bytes are on the CDN anyway).
-- **"What would you not build yourself?"** *(delegation signal)* — *Strong:* the codec/encoder matrix + per-title encoding, the ABR player heuristic, the recommendation model, the ISP-edge peering strategy — each handed off **with a stated prior**. *Red flag:* trying to hand-tune an AV1 encoder or design the ranking model live (too deep, wrong altitude) — or "the team handles it" with no prior.
+- **"How does video get from upload to a viewer's screen?"** — *Strong:* "we don't stream from a server" — pre-built ABR ladder of static segments on a CDN, offline chunked-parallel transcode, client adapts via a manifest; names ~125 Tbps as why the edge is the architecture. *Red flag:* "the server streams the video" with no ladder, no CDN.
+- **"Walk me through the transcode pipeline."** — *Strong:* split at keyframes → idempotent chunk jobs across a stateless fleet → package + manifest → H.264-first then backfill. *Red flag:* "run ffmpeg on the file" — serial, no fault model, hours of latency.
+- **"What's your egress, and what does it cost?"** — *Strong:* ~125 Tbps avg, 95% offload → ~70 PB/day origin, AV1 ≈ −37 Tbps, Open-Connect-style edge for the head — a latency *and* nine-figure budget story. *Red flag:* "use a CDN, it's faster" with no numbers.
+- **"A video goes viral — what breaks?"** — *Strong:* the **hot view-count write key** (shard, dedup, fraud-filter, log-reconcile) *and* the **origin stampede** (shielding/pre-positioning). *Red flag:* "add read replicas" — replicas don't relieve a hot *write* key, and the bytes are on the CDN anyway.
+- **"What would you not build yourself?"** — *Strong:* codec matrix, ABR heuristic, recommendation model, ISP peering — each with **a stated prior**. *Red flag:* hand-tuning an AV1 encoder live, or "the team handles it" with no prior.
 
 ---
 
 ## Common mistakes
 
-- **Thinking video is "streamed" from a server.** It's **pre-encoded into a static ladder** and served as files from a CDN; the client adapts. Missing this means missing the whole problem.
-- **Transcode-on-the-fly or whole-file serial encode.** On-the-fly is uncacheable and melts compute; whole-file serial is hours of latency with all-or-nothing failure. Use **chunked parallel** jobs off a queue.
-- **Putting the app servers (or origin) in the byte path.** Proxying 125 Tbps through your servers, or serving it from a few origins, is self-inflicted and impossible. Hand bytes to the **edge**.
-- **Storing video bytes in the database.** EB-scale, can't reach 11 nines economically, can't sit at the edge. Bytes → object store + CDN; records → DB.
-- **A single bitrate / single codec.** No adaptation means buffering on bad networks; one codec means either egress overpayment (H.264-only) or broken old devices (AV1-only).
-- **Counting views with one atomic counter and no dedup.** A hot-key write wall *and* trivially gamed — shard it, **dedup per session, fraud-filter**, and keep an **exact log-reconciled** number for payouts (Lesson 3.16).
-- **Synchronous transcode or synchronous "register view" on the request path.** Both belong **off the critical path** on a queue/beacon; upload returns in ms with `status: processing`, playback never waits on counting.
-- **Discarding the source after encoding.** You can't add a new codec/rung later without it (or only from a lossy rendition). Keep the source as a **cold master**.
-- **No quantification.** "Use a CDN, it scales" with no Tbps, EB, or offload-ratio math reads as not-technical-enough-to-lead — and bandwidth *is* this problem.
+- **Thinking video is "streamed" from a server.** It's pre-encoded into a static ladder served as files from a CDN; the client adapts. Missing this misses the whole problem.
+- **Transcode-on-the-fly or whole-file serial encode.** Uncacheable / hours of latency with all-or-nothing failure. Chunked parallel jobs off a queue.
+- **Putting app servers, the origin, or the database in the byte path.** 125 Tbps through your servers — or EB-scale bytes in a DB — is self-inflicted and impossible. Bytes → object store + edge; records → DB.
+- **Counting views with one atomic counter and no dedup.** A hot-key wall *and* trivially gamed — shard, dedup per session, fraud-filter, keep an exact log-reconciled number for payouts.
+- **Discarding the source after encoding.** You can't add a new codec/rung later without the master. Keep it cold.
 
 ---
 
 ## Interviewer follow-up questions (with model answers)
 
-**Q1. A user uploads a 2-hour 4K film. Walk me from the PUT to it being watchable, and where does the time go?**
-> *Model:* Resumable multipart PUT of the source **straight to the object store** (app servers out of the byte path); on completion, a `source-uploaded` event hits the orchestrator and the metadata row is committed as `processing` — the video exists immediately. The orchestrator **splits the source at GOP boundaries** and fans **thousands of chunk-encode jobs** (chunk × rung × codec) across a stateless worker fleet via Kafka; this parallelism is why a 2-hour film's ladder finishes in **minutes, not hours**. To minimize *time-to-watchable*, I encode the **universal H.264 ladder first** and flip the row to `ready` the moment that's packaged into segments + a manifest; **VP9/AV1 backfill asynchronously**. The time goes into encode CPU (AV1 especially is far slower than real time), which is exactly why it's chunked and parallel and why the cheap codec gates watchability. A single worker crash re-queues **one chunk** (idempotent), not the film.
+**Q1. A user uploads a 2-hour 4K film. Walk me from the PUT to it being watchable — where does the time go?**
+> *Model:* Resumable multipart PUT straight to the object store (app servers out of the byte path); completion fires `source-uploaded` and commits a `processing` metadata row. The orchestrator splits at GOP boundaries and fans **thousands of (chunk × rung × codec) jobs** across a stateless fleet via Kafka — that parallelism is why the ladder finishes in **minutes, not hours**. To minimize time-to-watchable, the **universal H.264 ladder encodes first** and the row flips to `ready` when it's packaged; VP9/AV1 backfill asynchronously. The time goes into encode CPU — exactly why it's chunked, and why the cheap codec gates watchability. A worker crash re-queues one idempotent chunk, not the film.
 
 **Q2. Your CDN bill is the biggest line in the budget. Where do you cut without hurting playback?**
-> *Model:* Three levers, biggest first. (1) **Raise the edge hit ratio** toward 99% — tiered caching, origin shielding, and **pre-positioning anticipated-hot content** to edges (the Open Connect model: appliances *inside* ISPs so bytes skip transit). Every point of hit ratio at ~125 Tbps is huge. (2) **Drive AV1 adoption** on the traffic that can take it — ~30% fewer bytes is **~37 Tbps** off the bill; prioritize the AV1 backfill toward the **most-watched** content so the savings land where the egress is. (3) **Per-title / per-scene encoding** for popular titles — spend bits only on complex shots. I would *not* drop rungs that hurt low-bandwidth users or shrink the buffer (that spikes rebuffering). The cuts target **bytes-on-the-wire efficiency and edge placement**, where the cost lives and the viewer never notices.
+> *Model:* Three levers, biggest first. (1) **Raise the edge hit ratio** toward 99 — tiered caching, origin shielding, pre-positioning anticipated-hot content (ISP-embedded appliances so bytes skip transit); every point at ~125 Tbps is huge. (2) **Drive AV1 adoption** where clients support it — ~30% fewer bytes ≈ **~37 Tbps**, prioritizing backfill toward the most-watched content so savings land where the egress is. (3) **Per-title encoding** for popular titles. I would *not* drop low-bandwidth rungs or shrink the buffer — that spikes rebuffering. Cut bytes-on-the-wire and placement, where the cost lives and the viewer never notices.
 
 **Q3. How do you count views accurately when a video is viral and people are gaming the counter for payouts?**
-> *Model:* Two numbers on purpose (Lesson 3.16). The **display count** is fast and approximate: the view-count service **dedups per `session_id`** within a window and applies fraud heuristics *before* incrementing a **sharded** counter (N Redis shards so a viral video's writes don't serialize on one key), summed on read. The **payout-grade count** is **exact and offline**: recomputed in batch from the **Kafka watch-event log**, fully deduped, bot-filtered (rate/behavior/device-fingerprint signals — itself a **delegated** anti-fraud workstream), and that's the number that touches money and trending. The display count can lag and be approximate (R allowed it); the money number must be exact, so it's a separate pipeline reading the immutable event log — never the live counter.
+> *Model:* Two numbers on purpose (3.16). **Display:** dedup per `session_id`, apply fraud heuristics *before* incrementing a **sharded** counter, sum on read — fast, approximate, allowed to lag. **Payout-grade:** recomputed exactly, in batch, from the **Kafka watch-event log**, fully deduped and bot-filtered (the anti-fraud models themselves are a delegated workstream) — that's the number that touches money and trending. The live counter is an accelerator; the immutable log is the source of truth.
 
-**Q4. The same blockbuster drops globally at 8pm and everyone hits play at once. What happens, and how is it not an outage?**
-> *Model:* Two stampedes to absorb. **Bytes:** the segments are static and **already on the edge** — if it's a planned drop (Netflix-style), I **pre-position** the title to ISP-embedded appliances overnight, so 8pm traffic is served from inside each ISP, never from origin. For an unplanned spike, **origin shielding + tiered caches** mean the first edge miss pulls once and every subsequent viewer is served from cache; origin sees a trickle, not the flood. **Metadata/counts:** the metadata read is tiny and cache-served; the **view-count writes are sharded and async** (a beacon, off the playback path), so a spike of counts can't slow playback. The watch path degrades gracefully — worst case a slightly slower first segment for the first few viewers in a region — but it doesn't fall over, because the heavy bytes were positioned ahead of demand and the counting is off the critical path.
-
-**Q5. How does YouTube differ from Netflix architecturally, and why?**
-> *Model:* Same **byte plane** (object store + ladder + edge), opposite **encode/serve economics**, driven by **catalog shape**. YouTube is a **UGC firehose** — 500 hours/min, most uploads get few views — so it uses a **cheap one-size ladder**, re-encodes richer/AV1 only for content that earns views, can't fully pre-position a long-tail catalog (general CDN + caching), and has a **hot view-count + fraud** problem because counts drive payouts. Netflix has a **finite curated catalog** — no upload firehose, **no hot-count problem** — so it can afford **per-title/per-shot encoding** (amortized over millions of views), **pre-position the whole likely-watched catalog at the ISP edge (Open Connect)** because demand is predictable, and it makes **DRM and the recommendation model core** (studios mandate DRM; a finite shelf makes recommendation the product). The decision driver is catalog size and demand predictability, not the streaming tech — which is shared.
+**Q4. The same blockbuster drops globally at 8pm and everyone hits play at once. Why is that not an outage?**
+> *Model:* Two stampedes. **Bytes:** the segments are static and **already at the edge** — for a planned drop, pre-positioned overnight to ISP-embedded appliances; for an unplanned spike, origin shielding means the first edge miss pulls once and everyone after is served from cache. Origin sees a trickle. **Metadata/counts:** the metadata read is tiny and cached; view-count writes are sharded and async (a beacon, off the playback path). Worst case is a slightly slower first segment for the first viewers in a region — the heavy bytes were positioned ahead of demand and the counting never blocks playback.
 
 ---
 
 ## Key takeaways
 
-- **Video is offline-encode + static-edge-delivery, not server-side streaming.** Pre-chop each source into a **ladder of static segments** (resolutions × codecs), put them on a **CDN/edge**, and let the **client adapt** (HLS/DASH) — the read path is a file server, not a streaming server, which is the only way to serve ~1B watch-hours/day.
-- **Drive it with three numbers:** **~1,400:1 watch:upload** (→ edge serves ~all bytes), **~125 Tbps egress** (→ the dominant cost; the edge *is* the read architecture; AV1 saves ~37 Tbps), and **media ≫ metadata by ~5 orders of magnitude** (~2 EB/yr vs ~6 TB/yr → bytes in an object store + CDN, records in a partitioned DB). The architecture falls out of the arithmetic.
-- **The transcode pipeline is the engine — make it chunked and parallel.** Split at GOP boundaries, fan thousands of idempotent chunk jobs across a stateless fleet, package + manifest, **H.264-first then backfill AV1** — minutes-not-hours latency, fault isolation, elastic scale.
-- **Keep heavy work off the critical paths:** **resumable multipart** uploads straight to the object store, **async transcode** on a queue, **fire-and-forget watch beacons** — upload returns in ms (`processing`), and playback never waits on counting.
-- **At Director altitude, name the trade and delegate:** go deep on the transcode DAG and the edge/codec cost levers (where the decision turns), price the egress as a budget owner, **shard + dedup + fraud-filter** the view count with an exact log-reconciled number for payouts, and hand the **codec matrix, ABR player heuristic, recommendation model, and ISP-edge peering** to their teams **with a stated prior**.
+- **Video is offline-encode + static-edge-delivery, not server-side streaming.** Pre-chop into a **ladder of static segments** (resolutions × codecs) on a **CDN/edge**, and let the **client adapt** (HLS/DASH) — the read path is a file server, the only way to serve ~1B watch-hours/day.
+- **Drive it with three numbers:** **~1,400:1 watch:upload**, **~125 Tbps egress** (the dominant cost; AV1 ≈ −37 Tbps), and **media ≫ metadata by ~5 orders of magnitude** (~2 EB/yr vs ~6 TB/yr). The architecture falls out of the arithmetic.
+- **The transcode pipeline is the engine — chunked and parallel:** split at GOP boundaries, idempotent chunk jobs on a stateless fleet, package + manifest, **H.264-first then popularity-gated backfill**.
+- **Keep heavy work off the critical paths:** resumable multipart straight to the object store, async transcode on a queue, fire-and-forget watch beacons.
+- **Director moves:** price the egress as a budget owner, **shard + dedup + fraud-filter** the count with an exact log-reconciled number for payouts, and delegate the **codec matrix, ABR heuristic, recommendation model, and ISP peering** with stated priors.
 
-> **Spaced-repetition recap:** A printing plant that prints every edition (resolution × codec) **once, offline**, cuts each into numbered pages (segments), and ships pallets to local newsstands (the **CDN/edge**); your reader app grabs the right-size next page based on your signal (**adaptive bitrate**). The expensive encode is a **chunked-parallel** job fabric off the request path; the watch path is a **dumb CDN of static files** because egress is **~125 Tbps** — orders of magnitude more bytes (~2 EB/yr) than the records (~6 TB/yr). **Multi-codec** (H.264 floor, AV1 saves ~30%), **sharded + deduped + fraud-filtered** view counts with an exact log behind them. **YouTube** = UGC firehose + hot counts; **Netflix** = finite catalog, per-title encode, **pre-positioned at the ISP edge**, DRM + recommendations core. Drive it all through **RESHADED** and name every trade + what you'd delegate.
+> **Spaced-repetition recap:** A printing plant prints every edition (resolution × codec) **once, offline**, cuts it into numbered pages (segments), and ships pallets to local newsstands (**CDN/edge**); your reader grabs the right-size next page for its signal (**ABR**). Encode is a **chunked-parallel** job fabric off the request path; the watch path is a **dumb CDN of static files**, because egress is **~125 Tbps** and media outweighs metadata by ~5 orders of magnitude. **Multi-codec** (H.264 floor; AV1 −30%, popularity-gated), **sharded + deduped + fraud-filtered** counts with an exact log behind them. **YouTube** = UGC firehose + hot counts; **Netflix** = finite catalog, per-title encode, **pre-positioned at the ISP edge**, DRM + recommendations core.
