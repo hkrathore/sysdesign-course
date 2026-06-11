@@ -90,17 +90,9 @@ Built as self-contained React artifacts, no network calls, at the module where e
 
 ---
 
-## 5. Delivery protocol
+## 5. A realistic 2-week study plan
 
-- **One module per turn.** Never the whole course at once.
-- Each module ends with a prompt to say **"continue"** or to go deeper.
-- Oversized modules get split lesson-by-lesson, and I'll always tell you where we are.
-
----
-
-## 6. A realistic 2-week study plan
-
-Two weeks from beginner-stated to Director-ready is tight. The plan below prioritizes ruthlessly, and reserves time for the thing that usually decides Director loops (see §7).
+Two weeks from beginner-stated to Director-ready is tight. The plan below prioritizes ruthlessly, and reserves time for the thing that usually decides Director loops (see §6).
 
 | Day | Focus | Modules |
 |---|---|---|
@@ -141,7 +133,7 @@ An honest accounting: the full course is ~250k words, 100+ hours of reading. On 
 
 ---
 
-## 7. The other half of the loop: leadership (now Module 10)
+## 6. The other half of the loop: leadership (now Module 10)
 
 At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority**, far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is now a full track: **Module 10, Leadership**, fourteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 10.2 generalizes it into the **four answer shapes**, STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
 
