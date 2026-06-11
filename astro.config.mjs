@@ -42,8 +42,8 @@ export default defineConfig({
 				{ tag: 'script', attrs: { src: `${base}/mermaid-zoom.js`, defer: true } },
 			],
 			customCss: ['./src/styles/global.css'],
-			// Sidebar = Modules 0–6. Module 0 is the syllabus home (index.mdx);
-			// Modules 1–6 autogenerate from their directories by frontmatter sidebar.order.
+			// Sidebar = Modules 0–9. Module 0 is the syllabus home (index.mdx);
+			// Modules 1–9 autogenerate from their directories by frontmatter sidebar.order.
 			sidebar: [
 				{ label: 'Module 0 · Course Overview', link: '/' },
 				{ label: 'Module 1 · Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-1' } }] },
@@ -52,6 +52,10 @@ export default defineConfig({
 				{ label: 'Module 4 · RESHADED Walkthrough', collapsed: true, items: [{ autogenerate: { directory: 'module-4' } }] },
 				{ label: 'Module 5 · System Design Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-5' } }] },
 				{ label: 'Module 6 · Capstone & Rubric', collapsed: true, items: [{ autogenerate: { directory: 'module-6' } }] },
+				{ label: 'Module 7 · LLD & OOD Curveballs', collapsed: true, items: [{ autogenerate: { directory: 'module-7' } }] },
+				{ label: 'Module 8 · Architecture & Org Strategy', collapsed: true, items: [{ autogenerate: { directory: 'module-8' } }] },
+				{ label: 'Module 9 · Business-Domain Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-9' } }] },
+				{ label: 'Module 10 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-10' } }] },
 				{ label: 'Cheat Sheets', collapsed: true, items: [{ autogenerate: { directory: 'cheatsheets' } }] },
 			],
 		}),

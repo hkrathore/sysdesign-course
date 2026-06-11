@@ -132,16 +132,26 @@ import EstimationCalculator from '@components/widgets/EstimationCalculator.jsx';
 | Quorum calculator (N/W/R sliders → strong-consistency + availability) | 2.8 | ✅ built (`QuorumCalculator.jsx`) |
 | Caching strategies simulator (cache-aside/write-through/write-back; hits/misses/staleness) | 2.10, 3.x | ✅ built (`CachingStrategiesSimulator.jsx`) |
 | Load-balancing comparison (round-robin/least-conn/hashing; animated) | 3.2 | ✅ built (`LoadBalancerComparison.jsx`) |
+| Story-coverage matrix (leadership story × category, gap highlighting + mandatory slots) | 10.3 | ✅ built (`StoryCoverageMatrix.jsx`) |
+| Probe simulator (3-levels-deep follow-up drill per leadership question) | 10.2 | ✅ built (`ProbeSimulator.jsx`) |
 
 Visual style for widgets: **theme-aware — must match the selected Starlight light/dark theme** (use the global `--w-*` CSS variables in `src/styles/global.css` for structural surfaces — bg/panel/border/text/muted/slot — and keep accent colors emerald/amber/sky/rose, which read on both themes; do **not** hardcode `slate-900`/dark backgrounds). Monospace, log/relative bars where useful, formula shown under each output, presets where helpful. **Cards in a row must be equal height** (`items-stretch` on the row + `h-full` on each card). **The widget's root `<div>` MUST include the `not-content` class** (e.g. `className="not-content w-full max-w-3xl mx-auto font-mono …"`) — Starlight's prose opt-out; without it Starlight's `* + *` prose margin leaks onto the widget's grid/flex items (every non-first item gets a 1rem top margin), dropping the 2nd item in a row ~16px and breaking pill/card alignment. Match the existing widgets.
 
 ## 9. Course status & remaining work
 
-**Done:** All modules built — Module 0 (syllabus + Director's Fast Path), Modules 1–3 (all lessons), Module 4 (TinyURL walkthrough), Module 5 (15 RESHADED walkthroughs, 5.1–5.15), Module 6 (capstone + rubric), all cheat sheets + Master RESHADED.
+**Done:** All modules built — Module 0 (syllabus + Director's Fast Path), Modules 1–3 (all lessons), Module 4 (TinyURL walkthrough), Module 5 (15 RESHADED walkthroughs, 5.1–5.15), Module 6 (capstone + rubric), all cheat sheets (Modules 1–10) + Master RESHADED.
 
-**June 2026 Director-altitude pass (complete):** all lessons trimmed from Staff-IC depth to Director altitude (~251k → ~205k visible words); IC depth preserved in "Go deeper" collapsibles (see §7); cheat sheets 2–3 rewritten as decision references; "Director's Fast Path" navigation added to the course home. Any future lesson edits must honor the §7 Go-deeper convention and word budgets.
+**June 2026 Director-altitude pass (complete):** all lessons trimmed from Staff-IC depth to Director altitude (~251k → ~205k visible words); IC depth preserved in "Go deeper" collapsibles (see §7); cheat sheets 2–3 rewritten as decision references; "Director's Fast Path" navigation added to the course home.
 
-**Remaining (optional):** widgets not yet built (see §8 inventory); 5.16 ChatGPT/LLM-serving exists as 5.15 — numbering is one lower than the original syllabus list.
+**June 2026 expansion pass (complete):** added the *non-canonical* problem set the canonical Module 5 leaves out, plus the leadership half of the loop, all at Director altitude under the §7 conventions:
+- **Module 7 — LLD & OOD curveballs** (7.1–7.10): parking lot, elevator, vending machine, LRU cache, rate-limiter LLD, meeting scheduler, Splitwise, movie-ticket seat-locking, chess, Amazon Locker. RESHADED adapted for low-level design (E collapses to capacity sizing; A = class interfaces; D = entity model).
+- **Module 8 — Architecture & org strategy** (8.1–8.11): monolith→microservices, legacy modernization, zero-downtime migration, multi-region DR, cost-cut 30–50%, build-vs-buy, internal developer platform, org+architecture (Conway), competing proposals, defend-your-design, fleet OTA. Spine adapted (E = risk/cost/team math; back-end steps carry the answer).
+- **Module 9 — Business-domain HLDs** (9.1–9.14): payments, wallet, hotel booking, auction, food delivery, stock exchange, ad-click aggregator, top-K/leaderboard, live comments, Google Docs, online judge, metrics platform, design-Kafka, distributed-cache deep-dive (9.14 is `.mdx`, embeds ConsistentHashingRing + QuorumCalculator).
+- **Module 10 — Leadership track** (10.1–10.14): 2026 recalibration, the four answer frameworks (STAR-L / clarify-options-decide / position-mechanism-number-limit / SCQA), story portfolio, then nine category lessons (philosophy, hiring, hard people calls, managing managers, operating system, execution, influence, efficiency-era, AI-era) + company calibration + a demonstrate-don't-describe capstone. Every category lesson carries an explicit **2015-vs-2026 calibration** (the track's promise). Two widgets: `StoryCoverageMatrix.jsx` (10.3), `ProbeSimulator.jsx` (10.2). Layoff legal content is jurisdiction-neutral with US/India/UAE Go-deeper sidebars.
+
+Provenance note: 8.10, 8.11, 9.1–9.6 were authored on Sonnet (validated template, spot-checked); everything else in 7–10 on Opus. Site is 111 pages, builds clean.
+
+**Remaining (optional):** personalized leadership story-bank working session (extract the user's real stories against the 10.3 matrix); a few Module 8 lessons (8.8, 8.9) run ~6k words, slightly over budget — trim if revisited.
 
 ## 10. How to generate the next lesson (procedure for Claude Code)
 

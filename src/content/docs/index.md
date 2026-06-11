@@ -166,9 +166,20 @@ Built as self-contained React artifacts, no network calls, at the module where e
 ### ☐ Module 6 — Capstone
 - [ ] **6** — Fresh problem, you drive / I critique like an interviewer + red-flags & strong-signals rubric
 
+### ☐ Module 7 — LLD & OOD curveballs (the *unmemorizable* design questions)
+- [ ] **7.1** Parking lot · **7.2** Elevator · **7.3** Vending machine · **7.4** LRU cache · **7.5** Rate limiter (LLD) · **7.6** Meeting scheduler · **7.7** Splitwise · **7.8** Movie-ticket seat-locking · **7.9** Chess · **7.10** Amazon Locker (cold-open drill)
+
+### ☐ Module 8 — Architecture & org strategy (the Director-distinctive round)
+- [ ] **8.1** Monolith → microservices · **8.2** Inherited legacy · **8.3** Zero-downtime migration · **8.4** Multi-region DR · **8.5** Cut cost 30–50% · **8.6** Build vs buy · **8.7** Internal developer platform · **8.8** Org + architecture (Conway) · **8.9** Competing proposals · **8.10** Defend your own design · **8.11** Fleet upgrade on the moon
+
+### ☐ Module 9 — Business-domain problems (the non-canonical HLD set)
+- [ ] **9.1** Payments · **9.2** Digital wallet · **9.3** Hotel booking · **9.4** Online auction · **9.5** Food delivery · **9.6** Stock exchange · **9.7** Ad-click aggregator · **9.8** Top-K / leaderboard · **9.9** Live comments · **9.10** Google Docs · **9.11** Online judge · **9.12** Metrics platform · **9.13** Design Kafka · **9.14** Distributed cache deep-dive
+
+### ☐ Module 10 — Leadership track (~40% of the Director loop)
+- [ ] **10.1** Recalibrated for 2026 · **10.2** The four answer frameworks · **10.3** Story portfolio · **10.4** Philosophy & style · **10.5** Hiring · **10.6** Hard people calls · **10.7** Managing managers · **10.8** Operating system & metrics · **10.9** Execution under pressure · **10.10** Influence & exec comms · **10.11** Efficiency-era (layoffs/cuts) · **10.12** AI-era leadership · **10.13** Company calibration · **10.14** Demonstrate-don't-describe capstone
+
 ### Cheat sheets (delivered alongside modules)
-- [ ] One Markdown cheat-sheet per module
-- [ ] **Master RESHADED cheat-sheet**
+- [ ] One Markdown cheat-sheet per module (Modules 1–10) + **Master RESHADED cheat-sheet**
 
 ---
 
@@ -207,15 +218,21 @@ An honest accounting: the full course is ~250k words — 100+ hours of reading. 
 
 **Skim: Modules 2–3.** If your distributed-systems background is solid — at this level it should be — skim the lessons for unfamiliar terms and rely on the Module 2 and Module 3 cheat sheets as your working reference. Open a full lesson only when a cheat-sheet line isn't already obvious to you.
 
+**The expanded problem set (Modules 7–9) — pick by the loop you're walking into.** These are the questions the canonical Module 5 set leaves out: **Module 7** the LLD/OOD curveballs (parking lot, elevator, Splitwise — restraint and clean modeling, not infra depth), **Module 8** the architecture-and-org-strategy round that is *most* Director-distinctive (monolith breakup, migrations, build-vs-buy, Conway org design), **Module 9** the non-canonical business-domain HLDs (payments, auctions, Google Docs, "design Kafka"). Don't read all 35 — let the company tell you: Amazon/Adobe lean LLD (Module 7), Director/Head-of-Eng loops lean strategy (Module 8), fintech/marketplace targets lean Module 9. Each module's cheat sheet carries the crux of every problem in ~5 minutes; deep-read only the 3–4 closest to your target.
+
+**Module 10 — the leadership track is not optional.** ~40% of a Director loop is leadership, and it's where most strong system designers lose the offer. Read **10.1–10.3** (the calibration, the four answer frameworks, the story portfolio) first — they're the spine — then the category lessons that match your gaps. Use the **probe simulator** (10.2) and **story-coverage matrix** (10.3) as drill tools, and build your real story bank early; a quantified, probe-resistant portfolio is the single highest-ROI prep on this whole site.
+
 **One convention to know:** lessons park optional IC-level detail in collapsible **"Go deeper"** blocks. Skip them by default; open one only when a decision you're defending turns on that detail. They exist for depth-on-demand, not for the first pass.
 
 ---
 
-## 8. The thing the system-design course can't give you
+## 8. The other half of the loop: leadership (now Module 10)
 
-Your project includes a leadership-interview deck, and it's right: at Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority** — far more than whether you can shard a counter. The deck's S·T·A·R·L formula (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED.
+At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority** — far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is now a full track: **Module 10 — Leadership**, fourteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 10.2 generalizes it into the **four answer shapes** — STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
 
-**Recommendation:** spend ~40% of your two weeks here (system design), and reserve serious time for four prepared leadership stories — a *people* story, a *judgment* story, an *influence* story, and a *pivot/failure* story. Say the word and I'll run a parallel leadership-story track in the same module-by-module format.
+The track's defining promise is **currency**: every category lesson carries an explicit *2015-vs-2026* calibration, because the answers that won offers a decade ago (servant-leadership labels, "hire great people and get out of the way," coach-a-low-performer-forever) now read as out of level in a post-founder-mode, post-ZIRP, AI-era, hybrid world.
+
+**Recommendation:** spend serious time building a **quantified, probe-resistant story portfolio** (Lesson 10.3) covering the mandatory slots interviewers check — an up-chart disagreement you won *and* one you lost and committed to, a termination you ran, a layoff or hard constraint you owned, a decision you got wrong, an incident you commanded. Drill it against the **probe simulator** (10.2) until each story survives three levels of follow-up. When you're ready, we can run a live working session to extract and pressure-test your real stories against the matrix.
 
 ---
 
