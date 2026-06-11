@@ -4,11 +4,11 @@ import {
   StepForward, RotateCcw, Flame, Server as ServerIcon, AlertTriangle,
 } from "lucide-react";
 
-// --- deterministic 32-bit hash — no crypto, no Math.random -------------------
+// --- deterministic 32-bit hash, no crypto, no Math.random -------------------
 // FNV-1a accumulate + a MurmurHash3 finalizer. The avalanche in the finalizer
 // scatters near-identical inputs ("c12","c13"); plain FNV-1a clusters them. The
 // whole sim is a PURE function of a tick counter T, so the SSR render (T=0) and
-// the client:load hydration agree — any Math.random would desync them. Every
+// the client:load hydration agree, any Math.random would desync them. Every
 // "random-looking" value below is hash32(i)-derived instead.
 function mix32(h) {
   h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
@@ -41,11 +41,11 @@ const SLOW_SERVER = 1;      // under the skewed preset, server 1 is a DEGRADED b
 const SLOW_FACTOR = 3;      // ...that holds every request 3× longer (the only thing LC can exploit)
 
 // Per-server static weights (capacity) for weighted round-robin. Heterogeneous
-// on purpose — else WRR == plain RR. Server 0 is a "big box" (3×). Sliced to N.
+// on purpose, else WRR == plain RR. Server 0 is a "big box" (3×). Sliced to N.
 const SERVER_WEIGHTS = [3, 1, 2, 1, 2, 1, 1, 1];
 
 // Client keys. The skewed preset funnels ~45% of the stream onto HOT_KEY. It is
-// chosen so hash(HOT_KEY) % N never equals SLOW_SERVER for any N≤8 — so the hash
+// chosen so hash(HOT_KEY) % N never equals SLOW_SERVER for any N≤8, so the hash
 // hot-spot and the slow-server effect always land on DIFFERENT bars (legible).
 const CLIENT_KEYS = Array.from({ length: 16 }, (_, i) => `c${10 + i}`);
 const HOT_KEY = "c12";
@@ -55,25 +55,25 @@ const ALGOS = {
     label: "Round-robin",
     icon: Repeat,
     rule: "server = i mod N",
-    blurb: "Cycle servers in order, ignoring how busy each one is. Perfectly even request COUNTS — but blind to load: a slow or degraded server keeps getting its full share.",
+    blurb: "Cycle servers in order, ignoring how busy each one is. Perfectly even request COUNTS, but blind to load: a slow or degraded server keeps getting its full share.",
   },
   wrr: {
     label: "Weighted RR",
     icon: Weight,
     rule: "server = expand([w₀×s₀, w₁×s₁, …])[i mod Σw]",
-    blurb: "Round-robin over a list where server j appears wⱼ times. Sends proportionally more to bigger boxes — still blind to LIVE load and to a server that's silently struggling.",
+    blurb: "Round-robin over a list where server j appears wⱼ times. Sends proportionally more to bigger boxes, still blind to LIVE load and to a server that's silently struggling.",
   },
   lc: {
     label: "Least-connections",
     icon: Activity,
     rule: "server = argminⱼ active_connections[j]",
-    blurb: "Route to whichever server has the fewest in-flight requests right now. The only algorithm here that adapts to uneven duration — it stops sending to a server whose requests are stacking up.",
+    blurb: "Route to whichever server has the fewest in-flight requests right now. The only algorithm here that adapts to uneven duration, it stops sending to a server whose requests are stacking up.",
   },
   hash: {
     label: "IP / key hash",
     icon: Hash,
     rule: "server = hash(key) mod N",
-    blurb: "Same client key always maps to the same server (stickiness — sessions, cache affinity). But a skewed key distribution hot-spots one server, and changing N reshuffles every key.",
+    blurb: "Same client key always maps to the same server (stickiness, sessions, cache affinity). But a skewed key distribution hot-spots one server, and changing N reshuffles every key.",
   },
 };
 
@@ -103,12 +103,12 @@ function buildStream(skewed) {
 }
 
 // Actual holding time once a request lands on a server. Under the skewed preset
-// the degraded server takes SLOW_FACTOR× longer — this is the "uneven duration"
+// the degraded server takes SLOW_FACTOR× longer, this is the "uneven duration"
 // that correlates with PLACEMENT, the one situation least-connections can win.
 const holdTime = (req, server, skewed) =>
   skewed && server === SLOW_SERVER ? req.cost * SLOW_FACTOR : req.cost;
 
-// --- the simulation — PURE function of (algorithm, N, preset, T) -------------
+// --- the simulation, PURE function of (algorithm, N, preset, T) -------------
 // Admits ADMIT_PER_TICK requests per tick. Tracks per-server *active* connections
 // (requests whose [arrival, arrival+hold) window still covers the current tick).
 // RR/WRR/hash are closed-form per request; least-connections must scan live state
@@ -182,7 +182,7 @@ export default function LoadBalancerComparison() {
   const stream = useMemo(() => buildStream(skewed), [skewed]);
   const activePreset = skewed ? "Skewed key + 1 slow server" : "Uniform · healthy servers";
 
-  // play loop — increment T on an interval, stop at the end. Effects never run
+  // play loop, increment T on an interval, stop at the end. Effects never run
   // on the server, so SSR stays at T=0 and hydrates clean.
   useEffect(() => {
     if (!playing) return;
@@ -220,7 +220,7 @@ export default function LoadBalancerComparison() {
   const maxActive = Math.max(1, ...actives);
   const avgActive = totalActive / n;
   const peakRatio = avgActive > 0 ? maxActive / avgActive : 1;
-  // WRR is *intentionally* uneven (proportional to capacity) — don't flag that as
+  // WRR is *intentionally* uneven (proportional to capacity), don't flag that as
   // a failure. For WRR, judge balance against each server's fair weighted share.
   const wrrExpectedPeak = (() => {
     const sum = weights.reduce((a, w) => a + w, 0);
@@ -251,7 +251,7 @@ export default function LoadBalancerComparison() {
         </div>
         <p className="text-xs text-[var(--w-muted)] mb-4">
           One fixed stream of {STREAM_LEN} requests, four algorithms. Bars are <span className="text-[var(--w-text)]">live (active) connections</span>.
-          Pause mid-stream and switch algorithm — the <span className="text-[var(--w-text)]">same</span> requests re-route, so the differences are exact, not anecdotal.
+          Pause mid-stream and switch algorithm, the <span className="text-[var(--w-text)]">same</span> requests re-route, so the differences are exact, not anecdotal.
         </p>
 
         {/* algorithm toggle */}
@@ -427,17 +427,17 @@ export default function LoadBalancerComparison() {
           </div>
           {skewed && (
             <div className="text-[10px] text-rose-300/80 mt-1.5 flex items-center gap-1">
-              <AlertTriangle size={10} /> srv {SLOW_SERVER} is degraded — it holds each request {SLOW_FACTOR}× longer.
+              <AlertTriangle size={10} /> srv {SLOW_SERVER} is degraded, it holds each request {SLOW_FACTOR}× longer.
               Only least-connections notices.
             </div>
           )}
         </div>
 
-        {/* governing rule — switches per algorithm (like ShardingVisualizer) */}
+        {/* governing rule, switches per algorithm (like ShardingVisualizer) */}
         <div className="rounded-lg border border-[var(--w-border-soft)] p-4 mb-3" style={{ background: "var(--w-panel)" }}>
           <div className="flex items-center gap-1.5 mb-1.5" style={{ color: SERVER_COLORS[0] }}>
             <Algo.icon size={14} />
-            <span className="text-[11px] uppercase tracking-wide text-[var(--w-muted)]">{Algo.label} — routing rule</span>
+            <span className="text-[11px] uppercase tracking-wide text-[var(--w-muted)]">{Algo.label}, routing rule</span>
           </div>
           <code className="block text-sm font-bold text-[var(--w-heading)] mb-2 break-words">{Algo.rule}</code>
           <p className="text-[11px] text-[var(--w-muted)] leading-snug">{Algo.blurb}</p>
@@ -446,7 +446,7 @@ export default function LoadBalancerComparison() {
             <div className="mt-2 text-[10px] text-[var(--w-faint)] leading-snug">
               "Consistent" here = <span className="text-[var(--w-text)]">sticky</span>: a key always lands on the same server. Plain
               <code className="text-[var(--w-text)]"> mod N</code> remaps <span className="text-[var(--w-text)]">every</span> key when N changes
-              (move the slider) — the disruption a consistent-hashing <span className="text-[var(--w-text)]">ring</span> exists to bound.
+              (move the slider), the disruption a consistent-hashing <span className="text-[var(--w-text)]">ring</span> exists to bound.
             </div>
           )}
           {algo === "wrr" && (
@@ -455,7 +455,7 @@ export default function LoadBalancerComparison() {
                 <span key={j} className="mr-1.5">
                   srv{j}=<span style={{ color: SERVER_COLORS[j % SERVER_COLORS.length] }} className="font-semibold">{w}</span>
                 </span>
-              ))} — server 0 is a bigger box, so its taller bar is <span className="text-[var(--w-text)]">intended</span>, not a hot-spot.
+              ))}, server 0 is a bigger box, so its taller bar is <span className="text-[var(--w-text)]">intended</span>, not a hot-spot.
             </div>
           )}
         </div>
@@ -463,28 +463,28 @@ export default function LoadBalancerComparison() {
         {/* trade-off cards, the selected one highlighted */}
         <div className="grid grid-cols-1 sm:grid-cols-2 items-stretch gap-2 text-[11px] mb-4">
           <Cost c="#2dd4a7" t="Round-robin" on={algo === "rr"}
-            s="Even request COUNT, zero state, trivial. Cost: blind to load — a degraded or slow server keeps getting its full share until something else trips." />
+            s="Even request COUNT, zero state, trivial. Cost: blind to load, a degraded or slow server keeps getting its full share until something else trips." />
           <Cost c="#38bdf8" t="Weighted RR" on={algo === "wrr"}
-            s="Respects heterogeneous capacity (big vs small boxes). Cost: weights are static config — still blind to live load and to a server silently struggling right now." />
+            s="Respects heterogeneous capacity (big vs small boxes). Cost: weights are static config, still blind to live load and to a server silently struggling right now." />
           <Cost c="#e8a13a" t="Least-connections" on={algo === "lc"}
-            s="Adapts to uneven duration — in-flight requests stop stacking on the slow node, so it self-heals around a degraded server. Cost: the LB must track live per-server connection state." />
+            s="Adapts to uneven duration, in-flight requests stop stacking on the slow node, so it self-heals around a degraded server. Cost: the LB must track live per-server connection state." />
           <Cost c="#f87171" t="IP / key hash" on={algo === "hash"}
             s="Stickiness for free: session affinity, cache locality. Cost: a skewed key (a celebrity) pins to ONE server and hot-spots it; and mod-N reshuffles all keys on resize (use a hash ring)." />
         </div>
 
-        {/* closing interpretation — ties to the skew toggle */}
+        {/* closing interpretation, ties to the skew toggle */}
         <p className="text-[11px] text-[var(--w-faint)] leading-relaxed">
           Flip to <span className="text-amber-300">Skewed key + 1 slow server</span> and run it.
           <span className="text-emerald-300"> Round-robin</span> and <span className="text-sky-300">weighted RR</span> keep feeding the
           degraded <span className="text-rose-300">srv {SLOW_SERVER}</span>, whose in-flight requests pile into the red.
-          Switch to <span className="text-amber-300">least-connections</span> on the same stream and the bars flatten — it sees the
+          Switch to <span className="text-amber-300">least-connections</span> on the same stream and the bars flatten, it sees the
           backup and routes around it. Switch to <span className="text-rose-300">hash</span> and the hot key
           (<span className="text-amber-300">{HOT_KEY}</span>, <Flame size={9} className="inline -mt-0.5 text-rose-300" />)
           slams its own server regardless of load. Under <span className="text-emerald-300">Uniform · healthy servers</span>, round-robin and
-          least-connections become <span className="text-[var(--w-text)]">indistinguishable</span> — LC buys nothing when every server is identical and fast;
+          least-connections become <span className="text-[var(--w-text)]">indistinguishable</span>, LC buys nothing when every server is identical and fast;
           weighted RR still tilts to the big box <span className="text-[var(--w-text)]">by design</span>; and hash stays lumpy because 16 keys don't divide
           evenly into N buckets. The Director-altitude point: there is no
-          "best" algorithm — pick for your <span className="text-[var(--w-text)]">failure mode</span> (uneven duration / flaky backends → least-conn;
+          "best" algorithm, pick for your <span className="text-[var(--w-text)]">failure mode</span> (uneven duration / flaky backends → least-conn;
           session or cache affinity → hash, with a ring to survive resizing; known fixed capacity skew → weighted) and name the cost of the one you chose.
         </p>
       </div>

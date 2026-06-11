@@ -287,7 +287,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 |---|---|---|---|---|
 | **Routing: precompute vs query** | **Raw Dijkstra at query** | **Plain CH** (precomputed shortcuts) | **CRP / customizable CH** (topology precompute + metric customization) | Dijkstra: tiny/dynamic graphs. Plain CH: **static** weights only. **CRP/CCH: live-traffic routing at scale - the right call here.** |
 | **Tiles: precompute vs query** | **Pre-render 100%** | **Render 100% on demand** | **Hybrid: pre-render hot set + on-demand-cache the tail, as vector tiles** | Pre-render-all: small static map (~15 PB/style globally - prohibitive). On-demand-all: every pan renders. **Hybrid: planet-scale - the right call.** |
-| **Tile store** | **Object store + CDN** | **Database-served tiles** | — | Object store + CDN: immutable blobs keyed by a tuple → ~99% edge hit (the right call). DB-served: never. |
+| **Tile store** | **Object store + CDN** | **Database-served tiles** |, | Object store + CDN: immutable blobs keyed by a tuple → ~99% edge hit (the right call). DB-served: never. |
 
 ---
 

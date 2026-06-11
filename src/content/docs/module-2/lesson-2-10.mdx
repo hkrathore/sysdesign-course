@@ -105,7 +105,7 @@ The widget below is a single-writer **caching write-strategy simulator**. The **
 - **Write-through (sync both):** on write, the app updates **cache and database together**, both before acknowledging. Reads-after-writes always **hit** and are always **fresh** - cache-aside's post-write miss disappears - but you pay the **highest write latency** (cache + DB on the critical path) and churn the cache for write-heavy, rarely-read keys.
 - **Write-back (write-behind):** on write, the app updates the **cache only** and acknowledges immediately; the database is flushed later, asynchronously. Lowest write latency, absorbs bursts - but write-back loses unflushed writes on crash; use it only for reconstructable data.
 
-Pick a strategy and a **workload** and step or auto-run the operation stream, watching the **hit/miss rate**, the per-key **cache-vs-db version skew** (the staleness meter), and the **write-latency bars** (~1 ms cache write vs ~10 ms database write). The discriminating move: run the **write-heavy** preset, hit **Crash** mid-stream, and watch only **write-back** report lost versions — the durability half of the trade made tangible.
+Pick a strategy and a **workload** and step or auto-run the operation stream, watching the **hit/miss rate**, the per-key **cache-vs-db version skew** (the staleness meter), and the **write-latency bars** (~1 ms cache write vs ~10 ms database write). The discriminating move: run the **write-heavy** preset, hit **Crash** mid-stream, and watch only **write-back** report lost versions, the durability half of the trade made tangible.
 
 <CachingStrategiesSimulator client:load />
 

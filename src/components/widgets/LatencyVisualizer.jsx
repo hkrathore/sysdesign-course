@@ -53,7 +53,7 @@ export default function LatencyVisualizer() {
     <div className="not-content w-full max-w-3xl mx-auto font-mono text-[var(--w-text)]" style={{ background: "transparent" }}>
       <div className="rounded-xl border border-[var(--w-border)] p-5 shadow-2xl" style={{ background: "var(--w-bg)" }}>
         <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
-          <h2 className="text-lg font-bold tracking-tight text-[var(--w-heading)]">Latency Numbers — a Map of Distances</h2>
+          <h2 className="text-lg font-bold tracking-tight text-[var(--w-heading)]">Latency Numbers, a Map of Distances</h2>
           <button
             onClick={() => setHuman((h) => !h)}
             className={`px-3 py-1.5 rounded-md text-xs border transition ${
@@ -66,7 +66,7 @@ export default function LatencyVisualizer() {
           </button>
         </div>
         <p className="text-xs text-[var(--w-muted)] mb-4">
-          Bars are <span className="text-[var(--w-text)]">log-scale</span> — each is ~10× the previous. Internalize the ratios, not the digits.
+          Bars are <span className="text-[var(--w-text)]">log-scale</span>, each is ~10× the previous. Internalize the ratios, not the digits.
         </p>
 
         {/* legend */}
@@ -102,7 +102,7 @@ export default function LatencyVisualizer() {
         <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 items-stretch gap-2 text-[11px]">
           <Reflex c="#38bdf8" t="Cache aggressively" s="RAM is ~5,000× faster than a same-DC round trip." />
           <Reflex c="#f87171" t="No cross-region on hot path" s="~150 ms blows almost any user p99 budget alone." />
-          <Reflex c="#e8a13a" t="Sequentialize I/O" s="Random disk is catastrophic — the reason LSM-trees exist." />
+          <Reflex c="#e8a13a" t="Sequentialize I/O" s="Random disk is catastrophic, the reason LSM-trees exist." />
         </div>
 
         <p className="text-[11px] text-[var(--w-faint)] mt-4 leading-relaxed">

@@ -151,7 +151,7 @@ value RecurrenceRule {               // freq, interval, byDay, until|count
 **Time zones, the quiet sub-trap:** concrete bookings store UTC instants, but the series anchor stores **local wall-clock time + a named zone** - "9am every Tuesday" must stay 9am across DST shifts, so expansion converts to UTC per occurrence. Storing the anchor in UTC is the bug every homegrown calendar ships first.
 
 <details>
-<summary>Go deeper — RRULE mechanics and the expansion algorithm (IC depth, optional)</summary>
+<summary>Go deeper, RRULE mechanics and the expansion algorithm (IC depth, optional)</summary>
 
 RFC 5545 RRULE grammar (the parts that matter): `FREQ` (DAILY/WEEKLY/MONTHLY/YEARLY), `INTERVAL` (every n-th period), `BYDAY` (e.g. `MO,WE`; with ordinals in monthly rules - `2TH` = second Thursday), `BYMONTHDAY`, `BYSETPOS` (select the n-th candidate after BY-filters - "last weekday of month" = `BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1`), `UNTIL` or `COUNT` (absence = infinite), `WKST` (week-start, changes `BYWEEKNO`/interval-weekly results). `EXDATE` lists skipped instants; real systems extend this with override rows (a moved occurrence = EXDATE + a standalone booking linked to the series).
 
@@ -182,7 +182,7 @@ Why materialization also fails *operationally*, beyond row count: a horizon job 
 **Remaining NFR re-check:** availability reads hit a replica lock-free; recurrence edits are 2-row series splits; DST handled at the anchor; the invariant lives in two independent layers. The design holds.
 
 <details>
-<summary>Go deeper — the Postgres mechanics of the lock and the tripwire (IC depth, optional)</summary>
+<summary>Go deeper, the Postgres mechanics of the lock and the tripwire (IC depth, optional)</summary>
 
 Range type and constraint: store the interval as `tstzrange(start_ts, end_ts, '[)')` - the `[)` half-open bound encodes the back-to-back rule in the type itself. The tripwire: `ALTER TABLE bookings ADD CONSTRAINT no_double_book EXCLUDE USING gist (room_id WITH =, range WITH &&);` - a GiST index where any two rows with equal `room_id` and overlapping (`&&`) ranges reject the second insert with a serialization-safe error you map to 409.
 

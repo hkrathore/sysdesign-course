@@ -64,11 +64,11 @@ That asymmetry - **a cheap parallel read (prefill) feeding a slow sequential gen
 The KV-cache stores attention keys/values for every token already seen, so generating token *N+1* doesn't re-read tokens 1..*N* - and it lives in HBM next to the weights. For a 70B model the result is **~320 KB/token with GQA** (the modern default), i.e. **~1.3 GB per 4K-token sequence**. At fp16 weights (140 GB) only ~20 GB of HBM is left → **~15 concurrent sequences - too few to keep the GPUs busy**. **Quantization + paging + GQA together grow the batch ~15 → ~65 sequences**, which is what saturates the node. This is a real decision with a rejected alternative (fp16 quality purity), eval-gated - see S and Trade-offs.
 
 <details>
-<summary>Go deeper — KV-cache byte math, MHA vs GQA (IC depth, optional)</summary>
+<summary>Go deeper, KV-cache byte math, MHA vs GQA (IC depth, optional)</summary>
 
 KV bytes per token = `2 (K and V) × layers × kv_dim × bytes_per_value`. For a 70B-class model (80 layers, 8K hidden, fp16): full multi-head attention (MHA) keeps a K and V vector per attention head → ~`2 × 80 × 8192 × 2 B ≈ 2.5 MB/token`. **Grouped-query attention (GQA)** shares each K/V head across a group of ~8 query heads, shrinking `kv_dim` ~8× → **~320 KB/token**. A 4,096-token sequence: `320 KB × 4,096 ≈ 1.3 GB` (GQA) vs ~10 GB (MHA).
 
-HBM budget per 2×H100 node: 160 GB total. fp16 weights (140 GB) leave ~20 GB → `20 GB ÷ 1.3 GB ≈ 15` concurrent 4K sequences. fp8/int8 weights (~70 GB) leave ~90 GB → `90 ÷ 1.3 ≈ 65-67` sequences — ~4× the batch for a small, eval-gated accuracy cost. PagedAttention's defragmentation adds another ~2-4× *effective* capacity on top, because real sequences rarely use their full reserved length.
+HBM budget per 2×H100 node: 160 GB total. fp16 weights (140 GB) leave ~20 GB → `20 GB ÷ 1.3 GB ≈ 15` concurrent 4K sequences. fp8/int8 weights (~70 GB) leave ~90 GB → `90 ÷ 1.3 ≈ 65-67` sequences, ~4× the batch for a small, eval-gated accuracy cost. PagedAttention's defragmentation adds another ~2-4× *effective* capacity on top, because real sequences rarely use their full reserved length.
 
 </details>
 
@@ -101,9 +101,9 @@ The binding resource is **GPU HBM**, not disk - so the S step is about *what liv
 - *Rejected:* contiguous per-sequence KV allocation - it reserves for the *max* sequence length up front, so a 4K-capacity slot holding a 200-token reply wastes ~95% of its memory to fragmentation. HBM is the scarce resource; fragmentation is pure waste of it.
 
 <details>
-<summary>Go deeper — PagedAttention block-table mechanics (IC depth, optional)</summary>
+<summary>Go deeper, PagedAttention block-table mechanics (IC depth, optional)</summary>
 
-PagedAttention manages KV like OS virtual memory: HBM is divided into fixed-size **blocks** (e.g. 16 tokens of KV each), and each sequence carries a **block table** mapping logical token positions → physical blocks. Memory is allocated block-by-block as the sequence grows, never reserved for the max length, and freed blocks return to a shared pool instantly on eviction. The cost is one level of indirection (a block-table lookup per KV access) and slightly more complex attention kernels; the win is near-zero internal/external fragmentation, which in practice packs ~2-4× more concurrent sequences into the same HBM. Shared prefixes (system prompts) can also map multiple sequences' block tables to the same physical blocks — copy-on-write — which is the mechanism behind prefix caching.
+PagedAttention manages KV like OS virtual memory: HBM is divided into fixed-size **blocks** (e.g. 16 tokens of KV each), and each sequence carries a **block table** mapping logical token positions → physical blocks. Memory is allocated block-by-block as the sequence grows, never reserved for the max length, and freed blocks return to a shared pool instantly on eviction. The cost is one level of indirection (a block-table lookup per KV access) and slightly more complex attention kernels; the win is near-zero internal/external fragmentation, which in practice packs ~2-4× more concurrent sequences into the same HBM. Shared prefixes (system prompts) can also map multiple sequences' block tables to the same physical blocks, copy-on-write, which is the mechanism behind prefix caching.
 
 </details>
 

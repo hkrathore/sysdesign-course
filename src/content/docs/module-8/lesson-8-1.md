@@ -23,7 +23,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 ---
 
-## R — Requirements
+## R: Requirements
 
 > **Adaptation, said out loud:** in a product design, R scopes features. Here R is the **pain inventory**, demanded quantified - "the monolith is slow" is not a requirement. If the pain can't be measured, the answer is *don't migrate*.
 
@@ -48,7 +48,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 ---
 
-## E — Estimation
+## E: Estimation
 
 > **Adaptation, said out loud:** no QPS here - E becomes **velocity and cost math**: before/after deploy numbers, coordination cost, the migration's price tag. Same discipline as Lesson 1.3: round aggressively, let the numbers make the call.
 
@@ -70,7 +70,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 ---
 
-## S — Storage
+## S: Storage
 
 > **Adaptation, said out loud:** S picks databases in a product design. Here it is the **shared-database breakup** - the hardest, most-skipped step, and the one that decides whether you get microservices or a distributed monolith. Code is easy to move; **data ownership is the migration.**
 
@@ -83,10 +83,10 @@ And there is a third character, worse than the monolith: the **distributed monol
 4. **Cut over writes.** The service becomes the writer; the *monolith* consumes the CDC stream for legacy read paths until those die. The **outbox pattern** keeps the DB write and the published event atomic.
 5. **Drop the old tables.** Only now is the seam done. A seam stuck at step 3 for a year is a smell worth naming.
 
-**Rejected — keep the shared DB "temporarily":** the temporary becomes permanent, and it *is* the distributed-monolith trap - independent deploys in name only. **Rejected — app-level dual writes:** no atomicity, guaranteed drift; the outbox/CDC pattern exists precisely to avoid this. **Rejected — 2PC across seams:** availability coupling on hot paths; cross-service workflows become **sagas** - local transactions with compensations - and you accept eventual consistency at seams (Lesson 2.7's trade, made at the org level). A workflow that truly can't tolerate that is evidence the seam is misplaced - move the boundary, don't add 2PC.
+**Rejected, keep the shared DB "temporarily":** the temporary becomes permanent, and it *is* the distributed-monolith trap - independent deploys in name only. **Rejected, app-level dual writes:** no atomicity, guaranteed drift; the outbox/CDC pattern exists precisely to avoid this. **Rejected, 2PC across seams:** availability coupling on hot paths; cross-service workflows become **sagas** - local transactions with compensations - and you accept eventual consistency at seams (Lesson 2.7's trade, made at the org level). A workflow that truly can't tolerate that is evidence the seam is misplaced - move the boundary, don't add 2PC.
 
 <details>
-<summary>Go deeper — outbox, CDC, and backfill mechanics (IC depth, optional)</summary>
+<summary>Go deeper, outbox, CDC, and backfill mechanics (IC depth, optional)</summary>
 
 **Outbox:** the service writes its business row and an event row to an `outbox` table *in the same local transaction*; a relay (or Debezium tailing the WAL/binlog) publishes outbox rows to Kafka and marks them sent. Consumers are idempotent (event IDs deduped), because the relay guarantees at-least-once.
 
@@ -102,7 +102,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 ---
 
-## H — High-level design
+## H: High-level design
 
 > **Adaptation, said out loud:** the "architecture diagram" here is not the end-state service mesh - it's the **strangler-fig facade and the phase machine**. The end state is an output, not a blueprint.
 
@@ -130,7 +130,7 @@ The first extraction should be **deliberately low-stakes** - high churn, low dat
 
 ---
 
-## A — API design
+## A: API design
 
 > **Adaptation, said out loud:** no public API to design - the deliverable is the **seam contracts**: each service's interface treated with public-API discipline (versioned, backward-compatible, owned), because its consumers are the monolith and every future service.
 
@@ -151,7 +151,7 @@ UserUpdated{userId, fields, v1}
 
 ---
 
-## D — Data model
+## D: Data model
 
 > **Adaptation, said out loud:** the "schema" here is the **ownership map** - which team owns which tables, services, and pager. This is Conway's law as a design tool: **the service boundaries you can sustain are the team boundaries you have.** Design the org chart and the architecture together or watch them fight.
 
@@ -169,35 +169,35 @@ Two readings matter. **Fan-in is destiny**: a table everyone joins (users, catal
 
 ---
 
-## E — Evaluation
+## E: Evaluation
 
 > **Adaptation, said out loud:** you stress the **migration** against its failure modes, not an architecture against NFRs - this step and the next carry the lesson, because a strategy answer is judged on how it fails.
 
-**Failure mode 1 — the distributed monolith (the most likely outcome).**
+**Failure mode 1, the distributed monolith (the most likely outcome).**
 *Symptom:* services that deploy together, share a database, or break together. *Detection:* track **% of deploys touching exactly one service** (target >90%) and lockstep changes per quarter. *Fix:* stop extracting, fix the seams you have. *Rejected: pushing on to a service-count milestone* - service count is a cost, not a KPI.
 
-**Failure mode 2 — operational immaturity.**
+**Failure mode 2, operational immaturity.**
 The monolith debugged with a stack trace; 15 services need distributed tracing, centralized logs, per-service dashboards and pagers (Lessons 3.13-3.14) - **none of which exist yet**. *Fix:* the platform investment lands **before** extraction #2, not after incident #5. *Trade-off:* ~6 engineers of spend producing zero features - name it in the budget; hiding it is how migrations get cancelled at month 9.
 
-**Failure mode 3 — the latency and consistency tax.**
+**Failure mode 3, the latency and consistency tax.**
 In-process calls (~1 µs) become network calls (~1-5 ms); transactions become sagas; read-your-own-write stops being free at seams. *Fix:* sync-call budgets per request path, async-first seams, seams placed where eventual consistency is tolerable. *Rejected: 2PC across services* - if you need it, the seam is wrong, as argued in S.
 
-**Failure mode 4 — the stalled migration (half-out is the worst state).**
+**Failure mode 4, the stalled migration (half-out is the worst state).**
 Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *Fix:* **finish or revert each seam** - phase 4 (delete the old path) is part of the work; a seam parked at phase 3 for two quarters triggers an explicit finish-or-roll-back decision. *Trade-off:* slower starts on new seams; accepted - three finished seams beat eight half-done ones on every R-metric.
 
 **Re-check vs R:** deploys/week per team is measured quarterly, not asserted; blast radius shrinks per finished seam; coordination cost is re-surveyed. Two quarters without movement means the plan - not the teams - is wrong.
 
 ---
 
-## D — Design evolution
+## D: Design evolution
 
 > **Adaptation, said out loud:** not "what if 10× traffic" - design evolution here is the **migration sequence itself**, the stopping condition, and the kill criteria. An interviewer who hears a static end-state diagram with no path to it has heard nothing.
 
 **The sequence (each gate is a go/no-go with a metric):**
-- **Quarter 0 — prerequisites:** in-monolith severing of the first seams (step-2 work from S); platform basics. *Gate:* a walking-skeleton service through the real pipeline.
-- **Quarters 1-2 — first seam (notifications):** full lifecycle through phase 4, including deleting monolith code. *Gate:* the team deploys daily, independently, for a quarter.
-- **Quarters 3-6 — the paying seams:** the high-churn domains where the release-train pain lives (per the D-matrix). *Gate per seam:* deploys/week up, lockstep changes near zero.
-- **Quarters 7-8 — the hard seam (checkout):** only with proven muscle, the 25-join breakup pre-paid by in-monolith severing.
+- **Quarter 0, prerequisites:** in-monolith severing of the first seams (step-2 work from S); platform basics. *Gate:* a walking-skeleton service through the real pipeline.
+- **Quarters 1-2, first seam (notifications):** full lifecycle through phase 4, including deleting monolith code. *Gate:* the team deploys daily, independently, for a quarter.
+- **Quarters 3-6, the paying seams:** the high-churn domains where the release-train pain lives (per the D-matrix). *Gate per seam:* deploys/week up, lockstep changes near zero.
+- **Quarters 7-8, the hard seam (checkout):** only with proven muscle, the 25-join breakup pre-paid by in-monolith severing.
 - **Then: stop.**
 
 **The stopping condition (say it unprompted - the strongest signal in the answer):** catalog, identity, and every stable low-change module **stay in the monolith permanently** - perhaps 50-60% of today's code. They change rarely, so they pay no release-train tax; extracting them buys nothing R asked for. The end state is **8-12 services around a modular-monolith core**, not 100 services. Stop when the R-metrics are under the bar, not when the monolith is gone. **The monolith's death is not the goal; the deploy-velocity number is.**
@@ -211,7 +211,7 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 
 ---
 
-## Trade-offs table — the pivotal decisions
+## Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|

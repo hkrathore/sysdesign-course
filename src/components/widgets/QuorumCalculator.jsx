@@ -4,7 +4,7 @@ import { Database, ShieldCheck, ShieldAlert, PenLine, BookOpen, Timer, Layers } 
 // --- palette (verbatim from the sibling widgets) --------------------------
 const C = {
   emerald: "#2dd4a7", // write set
-  amber: "#e8a13a",   // overlap — the consistency guarantee
+  amber: "#e8a13a",   // overlap, the consistency guarantee
   sky: "#38bdf8",     // read set
   rose: "#f87171",    // danger / not-strong
 };
@@ -81,11 +81,11 @@ export default function QuorumCalculator() {
       <div className="rounded-xl border p-5 shadow-2xl" style={{ background: "var(--w-bg)", borderColor: "var(--w-border)" }}>
         <div className="flex items-center gap-2 mb-1">
           <Database size={20} style={{ color: C.emerald }} />
-          <h2 className="text-lg font-bold tracking-tight text-[var(--w-heading)]">Quorum Calculator — N / W / R</h2>
+          <h2 className="text-lg font-bold tracking-tight text-[var(--w-heading)]">Quorum Calculator, N / W / R</h2>
         </div>
         <p className="text-xs text-[var(--w-muted)] mb-4">
           Tune the replica count and the write/read quorums. The single rule that buys read-your-writes is{" "}
-          <span className="text-amber-300 font-semibold">W + R &gt; N</span> — predict the verdict before you move a slider.
+          <span className="text-amber-300 font-semibold">W + R &gt; N</span>, predict the verdict before you move a slider.
         </p>
 
         {/* presets */}
@@ -107,9 +107,9 @@ export default function QuorumCalculator() {
 
         {/* sliders */}
         <div className="grid grid-cols-1 sm:grid-cols-3 items-stretch gap-x-6 gap-y-4 mb-6">
-          <Slider label="N — replicas" value={N} min={N_MIN} max={N_MAX} onChange={onN} accent="accent-[var(--w-text)]" valueColor="text-[var(--w-heading)]" />
-          <Slider label="W — write quorum" value={W} min={1} max={N} onChange={onW} accent="accent-emerald-400" valueColor="text-emerald-300" />
-          <Slider label="R — read quorum" value={R} min={1} max={N} onChange={onR} accent="accent-sky-400" valueColor="text-sky-300" />
+          <Slider label="N, replicas" value={N} min={N_MIN} max={N_MAX} onChange={onN} accent="accent-[var(--w-text)]" valueColor="text-[var(--w-heading)]" />
+          <Slider label="W, write quorum" value={W} min={1} max={N} onChange={onW} accent="accent-emerald-400" valueColor="text-emerald-300" />
+          <Slider label="R, read quorum" value={R} min={1} max={N} onChange={onR} accent="accent-sky-400" valueColor="text-sky-300" />
         </div>
 
         {/* slot diagram */}
@@ -117,7 +117,7 @@ export default function QuorumCalculator() {
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-[var(--w-muted)]">
               <Layers size={14} style={{ color: C.amber }} />
-              Worst-case overlap — write set and read set pushed to opposite ends
+              Worst-case overlap, write set and read set pushed to opposite ends
             </div>
             <div className="flex flex-wrap items-stretch gap-3 text-[10px]">
               <Legend c={C.emerald} t="write set (W)" />
@@ -161,12 +161,12 @@ export default function QuorumCalculator() {
             {m.strong
               ? "Any read quorum (chosen anywhere) is therefore guaranteed to include at least one replica from the latest write quorum."
               : m.adjacent
-              ? "At W + R = N the sets are adjacent but disjoint — a read quorum can entirely miss the latest write. Not strong."
-              : "The sets fall short of touching — reads can easily miss the latest write. Not strong."}
+              ? "At W + R = N the sets are adjacent but disjoint, a read quorum can entirely miss the latest write. Not strong."
+              : "The sets fall short of touching, reads can easily miss the latest write. Not strong."}
           </p>
         </div>
 
-        {/* verdict — the headline */}
+        {/* verdict, the headline */}
         <div
           className="rounded-lg border p-4 mb-3"
           style={{
@@ -181,7 +181,7 @@ export default function QuorumCalculator() {
             <span className="text-[11px] uppercase tracking-wide text-[var(--w-muted)]">Consistency verdict</span>
           </div>
           <div className="text-xl font-bold leading-tight" style={{ color: m.strong ? C.emerald : C.rose }}>
-            {W} + {R} {m.strong ? ">" : m.adjacent ? "=" : "<"} {N} &nbsp;—&nbsp;
+            {W} + {R} {m.strong ? ">" : m.adjacent ? "=" : "<"} {N} &nbsp;, &nbsp;
             {m.strong ? "Strong read/write overlap" : "Eventually consistent (no guaranteed overlap)"}
           </div>
           <div className="text-[11px] text-[var(--w-muted)] mt-1 leading-relaxed">
@@ -218,7 +218,7 @@ export default function QuorumCalculator() {
             value={W >= R ? "write-heavy tail" : "read-heavy tail"}
             formula={`waits on max(W=${W}, R=${R})-th replica`}
             accent={C.amber}
-            sub="set by the W-th / R-th fastest replica — higher quorum waits on slower nodes → higher tail latency"
+            sub="set by the W-th / R-th fastest replica, higher quorum waits on slower nodes → higher tail latency"
           />
         </div>
 
@@ -231,14 +231,14 @@ export default function QuorumCalculator() {
               ? `W=${W} > ${N}/2 → two conflicting writes can't both commit.`
               : `W=${W} ≤ ${N}/2 → concurrent writes may both succeed on disjoint sets (conflict).`}
           />
-          <Reflex c={C.sky} t="Tune R for read-your-writes" s="Cheap reads (R=1) need W=N to stay strong — fine for read-mostly, brittle on writes." />
-          <Reflex c={C.amber} t="Dynamo defaults" s="Cassandra/Dynamo expose N,W,R per query — most pick W=R=majority for strong, or W=R=1 for speed + eventual." />
+          <Reflex c={C.sky} t="Tune R for read-your-writes" s="Cheap reads (R=1) need W=N to stay strong, fine for read-mostly, brittle on writes." />
+          <Reflex c={C.amber} t="Dynamo defaults" s="Cassandra/Dynamo expose N,W,R per query, most pick W=R=majority for strong, or W=R=1 for speed + eventual." />
         </div>
 
         <p className="text-[11px] text-[var(--w-faint)] mt-4 leading-relaxed">
-          The Director-altitude point isn't the arithmetic — it's the <span className="text-[var(--w-text)]">defensible call</span>:
+          The Director-altitude point isn't the arithmetic, it's the <span className="text-[var(--w-text)]">defensible call</span>:
           "this path is read-mostly and tolerates staleness, so W=1/R=1 (eventual) maximizes availability and cuts tail latency,"
-          versus "balances/payments need read-your-writes, so W=R=majority — I accept the latency hit and the lost availability when ⌊N/2⌋+1 replicas aren't reachable."
+          versus "balances/payments need read-your-writes, so W=R=majority, I accept the latency hit and the lost availability when ⌊N/2⌋+1 replicas aren't reachable."
         </p>
       </div>
     </div>

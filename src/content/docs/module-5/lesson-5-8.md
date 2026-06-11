@@ -272,7 +272,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
 | **Chunking strategy** | **Whole-file** | **Fixed-size 4MB blocks** (content-addressed) | **Content-defined chunking (CDC)** | Whole-file: tiny immutable files only. **Fixed-4MB: the right v1 - simple, dedup + delta work for in-place edits (Dropbox's choice).** CDC: prepend/insert-heavy workloads where fixed boundaries shift. |
-| **Sync mechanism** | **Full-tree diff / polling** | **Per-namespace cursor + journal** | — | Full-tree: never at this scale - O(tree) across 200M devices. **Cursor/journal: O(changes), ordered, long-poll-driven - the right call.** |
+| **Sync mechanism** | **Full-tree diff / polling** | **Per-namespace cursor + journal** |, | Full-tree: never at this scale - O(tree) across 200M devices. **Cursor/journal: O(changes), ordered, long-poll-driven - the right call.** |
 | **Conflict resolution** | **Silent last-write-wins** | **LWW + conflicted copy** | **In-file merge (OT/CRDT)** | Silent LWW: never - silent loss is unforgivable. **Conflicted-copy: the right call for opaque blobs (Dropbox's choice).** OT/CRDT: structured text with real-time co-editing - that's *Docs*, out of scope. |
 
 ---

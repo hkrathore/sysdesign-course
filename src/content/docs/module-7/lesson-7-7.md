@@ -154,7 +154,7 @@ class ExpenseService {
 **The remainder rule (state it explicitly).** `200000 / 3` leaves 2 cents. Rule: **sort participants by user id; the first `remainder` participants get one extra cent.** Which rule is *almost* irrelevant - payer-eats-it is equally fine - but it must be **deterministic and stated**: retries, reconciliation, and "why does Alice owe one cent more?" tickets all depend on same input → same allocation. *Rejected: random assignment or float-then-round* - non-determinism breaks idempotent retries; rounding breaks conservation. **Percent splits** get the same discipline via **largest remainder**: floor every share, give leftover cents to the largest fractional remainders (tie-break by id). Exact-amount splits don't allocate - they *validate* that the amounts sum to total, and reject otherwise.
 
 <details>
-<summary>Go deeper — full schema DDL and strategy class sketches (IC depth, optional)</summary>
+<summary>Go deeper, full schema DDL and strategy class sketches (IC depth, optional)</summary>
 
 ```sql
 CREATE TABLE expenses (
@@ -210,7 +210,7 @@ allocate(total, users, pcts):           // validate: sum(pcts) == 10000 bps
   give 1 cent to first `rem` users in order
 ```
 
-Posting pseudocode: `BEGIN; INSERT expenses; INSERT entries (assert sum==0); UPDATE balances += entry per user; COMMIT;` — the idempotency key's unique index turns a retried `addExpense` into a clean conflict you map to "already posted, here's the id".
+Posting pseudocode: `BEGIN; INSERT expenses; INSERT entries (assert sum==0); UPDATE balances += entry per user; COMMIT;`, the idempotency key's unique index turns a retried `addExpense` into a clean conflict you map to "already posted, here's the id".
 
 </details>
 
@@ -247,7 +247,7 @@ Posting pseudocode: `BEGIN; INSERT expenses; INSERT entries (assert sum==0); UPD
 Four signals in one breath: the algorithm, its complexity class, its severability, and suggestion ≠ posting.
 
 <details>
-<summary>Go deeper — min-cash-flow greedy and why exact-minimum is NP-hard (IC depth, optional)</summary>
+<summary>Go deeper, min-cash-flow greedy and why exact-minimum is NP-hard (IC depth, optional)</summary>
 
 Compute net balance per user from the ledger (sum of signed entries). Creditors (net > 0) and debtors (net < 0) go into two max-heaps by magnitude. Loop: pop the largest creditor C and largest debtor D, transfer `m = min(|C|, |D|)` from D to C, push back whichever has residue. Each iteration zeroes out at least one participant, so it terminates in ≤ n−1 transfers, O(n log n). Note the greedy operates only on *net* balances - pairwise history is irrelevant to settlement, which is itself an insight: simplification may route Alice's repayment to Carol even though Alice's debt was "to" Bob.
 

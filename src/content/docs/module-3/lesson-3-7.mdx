@@ -58,7 +58,7 @@ A cache is finite memory; the **working set** almost never fits the whole keyspa
 The decision rule: **LRU is the safe default; switch to LFU for a stable, skewed-popularity catalog; always set TTLs as the freshness dial.** One honest caveat worth naming in an interview: production caches don't track a perfect global ordering - Redis *approximates* LRU/LFU by sampling, and Memcached's LRU is per-slab - so neither is exact, and that's a deliberate hot-path cost trade.
 
 <details>
-<summary>Go deeper — eviction internals (IC depth, optional)</summary>
+<summary>Go deeper, eviction internals (IC depth, optional)</summary>
 
 - **Redis approximated eviction:** maintaining a true global LRU/LFU order over millions of keys on every access is too expensive, so Redis **samples** a handful of keys (default 5, tunable via `maxmemory-samples`) and evicts the best candidate among them - close to true LRU/LFU at a fraction of the cost.
 - **`maxmemory-policy` variants:** `allkeys-lru`, `allkeys-lfu`, `volatile-lru`, `volatile-lfu`, `volatile-ttl`, `allkeys-random`, `noeviction`. `volatile-*` only evicts keys that have a TTL set (so keys without expiry are pinned). `noeviction` **rejects writes** when full - correct for Redis-as-primary-store, dangerous for a pure cache.
@@ -75,7 +75,7 @@ The naive rule, `hash(key) mod N`, has a fatal property for a cache: change `N` 
 Two implementations, and the choice is architectural: **Memcached** keeps servers dumb and puts **sharding in the client library** - simple, but every client must share the same ring config and the client owns rebalancing. **Redis Cluster** shards **server-side** with managed hash slots and redirects clients - server-coordinated, fine-grained rebalancing, plus Redis's data structures, at the cost of more moving parts. Reject cluster mode when a single primary + replica meets your throughput and memory needs - it adds operational weight you don't need yet.
 
 <details>
-<summary>Go deeper — Redis Cluster slots and client-side rings (IC depth, optional)</summary>
+<summary>Go deeper, Redis Cluster slots and client-side rings (IC depth, optional)</summary>
 
 - **Redis Cluster:** 16,384 hash slots, `slot = CRC16(key) mod 16384`, slots assigned to nodes; clients are redirected with `MOVED`/`ASK` to the right node. Slots are the unit of online rebalancing. **Multi-key operations only work within one slot** - use hash tags (`{user123}:timeline`, `{user123}:counts`) to co-locate related keys.
 - **Memcached client-side:** ketama-style consistent hashing in the client library; all clients must agree on the ring (a config-drift hazard), and Memcached stores only opaque blobs - no structures.

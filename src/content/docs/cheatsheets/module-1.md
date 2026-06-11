@@ -10,13 +10,13 @@ sidebar:
 ---
 
 ## The 5 scoring axes (Director weighting)
-1. **Requirements & scoping** *(heavy)* — clarify first; cut to 3–5 core features.
-2. **Estimation** *(medium)* — small fleet or hyperscale? Order of magnitude only.
-3. **High-level design** *(medium)* — clean components + data flow. Diminishing returns past a point.
-4. **Trade-offs & decision-making** *(heaviest)* — name 2–3 options, decide, defend.
-5. **Communication & leadership** *(heavy)* — structure, drive, handle pushback, delegate credibly.
+1. **Requirements & scoping** *(heavy)*, clarify first; cut to 3-5 core features.
+2. **Estimation** *(medium)*, small fleet or hyperscale? Order of magnitude only.
+3. **High-level design** *(medium)*, clean components + data flow. Diminishing returns past a point.
+4. **Trade-offs & decision-making** *(heaviest)*, name 2-3 options, decide, defend.
+5. **Communication & leadership** *(heavy)*, structure, drive, handle pushback, delegate credibly.
 
-**Altitude dial:** *"Does the decision turn on this detail?"* → Yes: go deep 1–2 levels. No: state a default and delegate ("I'd have the storage team benchmark X vs Y; my prior is Y because…").
+**Altitude dial:** *"Does the decision turn on this detail?"* → Yes: go deep 1-2 levels. No: state a default and delegate ("I'd have the storage team benchmark X vs Y; my prior is Y because…").
 
 **Two failure directions:** *too high* (no mechanism, can't name a downside of own choice) = not technical enough to lead · *too deep* (tuning detail, no decision) = not operating at level.
 
@@ -40,11 +40,11 @@ sidebar:
 
 ## Estimation (≤3 min, round hard)
 - **avg QPS** = DAU × req/user/day ÷ 86,400 *(≈10⁵)*
-- **peak QPS** = avg × **2–10×**
+- **peak QPS** = avg × **2-10×**
 - **read/write split** via ratio: write-frac = 1/(R+1)
 - **storage/yr** = writes/day × payload × 365 × replication *(writes, not reads)*
 - **bandwidth** = QPS × payload *(media systems: egress is the binding cost)*
-- **servers** = peak QPS ÷ per-server capacity *(~1k req/s baseline — state it)*
+- **servers** = peak QPS ÷ per-server capacity *(~1k req/s baseline, state it)*
 
 Bytes: KB 10³ · MB 10⁶ · GB 10⁹ · TB 10¹² · PB 10¹⁵.
 The number exists only to justify **one architectural sentence.**

@@ -132,7 +132,7 @@ The **entry** carries key, value, weight, optional expiry, and **a handle to the
 **The O(1) result, in one sentence:** a hash map gives O(1) lookup, a doubly-linked recency list gives O(1) move-to-front and O(1) evict-from-tail, and the entry's node pointer ties them - **hash map for *finding*, linked list for *ordering*, neither doing the other's job.** State that, offer depth if wanted, and spend your minutes on the contract. Reciting the pointer surgery unprompted is the too-deep failure mode from Lesson 1.1.
 
 <details>
-<summary>Go deeper — HashMap + DLL mechanics and the LFU variant (IC depth, optional)</summary>
+<summary>Go deeper, HashMap + DLL mechanics and the LFU variant (IC depth, optional)</summary>
 
 **LRU structures:** `map: K → Node`, `Node {key, value, prev, next}` in a doubly-linked list with sentinel head/tail.
 
@@ -164,7 +164,7 @@ A singly-linked list fails because unlinking needs the predecessor - O(n) to fin
 **Option C - striped/segmented locking.** Shard the keyspace into N independently-locked segments (16 is classic - Guava's design). Throughput scales toward N× (~30-80M ops/s at 16); the costs are real: **LRU becomes per-segment approximate** (typically a point or two of hit rate - usually fine, but say it), `size()` and stats turn into racy aggregates, and a global weight budget needs cross-segment care. **Use when measurement demands it** - the escape hatch we pre-paid for by hiding locking behind the facade.
 
 <details>
-<summary>Go deeper — lock-free reads and the Caffeine design (IC depth, optional)</summary>
+<summary>Go deeper, lock-free reads and the Caffeine design (IC depth, optional)</summary>
 
 The production state of the art (Caffeine, successor to Guava's cache) goes past striping: `get` reads a `ConcurrentHashMap` with **no lock**, and instead of splicing the recency list synchronously, appends the access to a **lossy ring buffer** per thread-stripe; a maintenance thread drains the buffers and replays them against the ordering structure (windowed **TinyLFU** admission over segmented LRU, not plain LRU). Recency becomes *eventually accurate* - buffers may drop entries under pressure, costing a sliver of hit rate and buying reads that scale with cores (~10-30× a synchronized LinkedHashMap at 8 threads). The through-line: **strict LRU is fundamentally hostile to concurrency because reads write; every scalable design relaxes recency precision** - striping relaxes it spatially, Caffeine temporally. Choose how to be approximately-LRU; you cannot scale while being exactly-LRU.
 

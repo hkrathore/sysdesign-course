@@ -219,8 +219,8 @@ Two riders must not be offered the same car, and a crashed matcher mid-dispatch 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
 | **Geo-index structure** | **Uniform grid / fixed geohash** - dead simple | **Quadtree** - adaptive split on capacity | **S2 / H3** - hierarchical cells / hexagons | Grid: uniform density / prototype. Quadtree: skewed density, in-memory. **S2/H3: production geo at scale (H3 = Uber's choice).** |
-| **Live-location store** | **In-memory (Redis-geo / sharded service)** | **Disk-backed durable DB** | — | In-memory: positions are ephemeral, rewritten every 4 s (the right call). Durable DB: only if you need position *history* (you don't, for matching). |
-| **Shard key for the index** | **Geographic region / cell** | **`driverId` hash** | — | Region: matching is local → one-shard reads + regional isolation (the right call). driverId-hash: rejected - scatter-gathers every nearby query. |
+| **Live-location store** | **In-memory (Redis-geo / sharded service)** | **Disk-backed durable DB** |, | In-memory: positions are ephemeral, rewritten every 4 s (the right call). Durable DB: only if you need position *history* (you don't, for matching). |
+| **Shard key for the index** | **Geographic region / cell** | **`driverId` hash** |, | Region: matching is local → one-shard reads + regional isolation (the right call). driverId-hash: rejected - scatter-gathers every nearby query. |
 
 ---
 

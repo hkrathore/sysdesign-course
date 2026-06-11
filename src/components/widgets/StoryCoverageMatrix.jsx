@@ -9,16 +9,16 @@ const C = {
   rose: "#f87171",    // gap (0)
 };
 
-// 9 leadership categories — short labels + a hover hint.
+// 9 leadership categories, short labels + a hover hint.
 const CATEGORIES = [
   { key: "philosophy", label: "Philosophy", hint: "Leadership philosophy & values under pressure" },
   { key: "hiring", label: "Hiring", hint: "Raising the bar, closing seniors, building pipelines" },
-  { key: "people", label: "People Calls", hint: "Hard people decisions — perf, exits, promotions" },
+  { key: "people", label: "People Calls", hint: "Hard people decisions, perf, exits, promotions" },
   { key: "mom", label: "Mgr-of-Mgrs", hint: "Leading through managers; growing leaders" },
   { key: "opsys", label: "Operating Sys", hint: "Planning, reviews, metrics, on-call, cadence" },
   { key: "execution", label: "Execution", hint: "Delivery under constraint; turnarounds; incidents" },
   { key: "influence", label: "Influence", hint: "Cross-org wins without authority; exec alignment" },
-  { key: "efficiency", label: "Efficiency Era", hint: "Doing more with less — cost, layoffs, focus" },
+  { key: "efficiency", label: "Efficiency Era", hint: "Doing more with less, cost, layoffs, focus" },
   { key: "ai", label: "AI Era", hint: "AI adoption, productivity bets, org implications" },
 ];
 
@@ -29,8 +29,8 @@ const PLACEHOLDERS = [
   "Re-org that unblocked 3 stuck teams",
   "Hired 5 seniors during a hiring freeze",
   "Managed out a brilliant-but-toxic staff eng",
-  "Disagreed with VP on replatform — was right",
-  "Disagreed, lost, committed — with a tripwire",
+  "Disagreed with VP on replatform, was right",
+  "Disagreed, lost, committed, with a tripwire",
   "Ran the Sev-1 that took checkout down 4h",
   "Owned a 15% layoff in my org",
   "Killed my own pet project to fund the winner",
@@ -42,7 +42,7 @@ const PLACEHOLDERS = [
 
 // The 8 mandatory portfolio slots.
 const MANDATORY_SLOTS = [
-  "A disagreement you WON — chart went up after",
+  "A disagreement you WON, chart went up after",
   "A disagreement you LOST + committed, with a tripwire you set",
   "A termination you personally ran",
   "A layoff or hard constraint you owned end-to-end",
@@ -92,14 +92,14 @@ export default function StoryCoverageMatrix() {
       <div className="rounded-xl border p-5 shadow-2xl" style={{ background: "var(--w-bg)", borderColor: "var(--w-border)" }}>
         <div className="flex items-center gap-2 mb-1">
           <Grid3X3 size={20} style={{ color: C.emerald }} />
-          <h2 className="text-lg font-bold tracking-tight text-[var(--w-heading)]">Story Coverage Matrix — leadership portfolio</h2>
+          <h2 className="text-lg font-bold tracking-tight text-[var(--w-heading)]">Story Coverage Matrix, leadership portfolio</h2>
         </div>
         <p className="text-xs text-[var(--w-muted)] mb-1">
           List your stories, then click cells to mark which categories each one can credibly answer.
-          A strong story covers 2–3 columns; a strong <span className="font-semibold" style={{ color: C.sky }}>portfolio</span> leaves no column at zero.
+          A strong story covers 2-3 columns; a strong <span className="font-semibold" style={{ color: C.sky }}>portfolio</span> leaves no column at zero.
         </p>
         <p className="text-[10px] text-[var(--w-faint)] mb-4">
-          Scratchpad only — entries live in page state and reset on reload. Copy your matrix out when done.
+          Scratchpad only, entries live in page state and reset on reload. Copy your matrix out when done.
         </p>
 
         {/* summary strip */}
@@ -208,9 +208,9 @@ export default function StoryCoverageMatrix() {
             <Plus size={13} /> Add story
           </button>
           <div className="flex flex-wrap items-stretch gap-3 text-[10px]">
-            <Legend c={C.rose} t="0 — gap" />
-            <Legend c={C.amber} t="1 — thin" />
-            <Legend c={C.emerald} t="2+ — covered" />
+            <Legend c={C.rose} t="0, gap" />
+            <Legend c={C.amber} t="1, thin" />
+            <Legend c={C.emerald} t="2+, covered" />
           </div>
         </div>
 
@@ -257,8 +257,7 @@ export default function StoryCoverageMatrix() {
             <div className="flex items-start gap-1.5 text-[10px] text-[var(--w-muted)] mt-3 leading-relaxed">
               <AlertTriangle size={12} className="shrink-0 mt-0.5" style={{ color: C.amber }} />
               <span>
-                Unfilled slots are the questions you'll improvise under pressure. Mine your last 5 years for each one —
-                the story exists; you haven't packaged it yet.
+                Unfilled slots are the questions you'll improvise under pressure. Mine your last 5 years for each one, the story exists; you haven't packaged it yet.
               </span>
             </div>
           )}
@@ -266,7 +265,7 @@ export default function StoryCoverageMatrix() {
 
         <p className="text-[11px] text-[var(--w-faint)] mt-4 leading-relaxed">
           The Director-altitude point: interviewers sample <span className="text-[var(--w-text)]">columns</span>, not stories.
-          A portfolio of 8–12 stories that each cover 2–3 categories beats 20 single-purpose anecdotes — fewer to rehearse,
+          A portfolio of 8-12 stories that each cover 2-3 categories beats 20 single-purpose anecdotes, fewer to rehearse,
           and every follow-up lands on prepared ground.
         </p>
       </div>

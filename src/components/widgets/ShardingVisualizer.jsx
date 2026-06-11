@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Database, Hash, Ruler, BookOpen, Flame, Scale } from "lucide-react";
 
-// --- deterministic 32-bit hash (FNV-1a) — no crypto, no Math.random ----------
+// --- deterministic 32-bit hash (FNV-1a), no crypto, no Math.random ----------
 // Render-path must be deterministic: the widget SSRs then hydrates via
 // client:load, so any randomness would cause a hydration mismatch.
 function fnv1a(str) {
@@ -23,7 +23,7 @@ const KEYS = Array.from({ length: KEY_COUNT }, (_, i) => ({
 }));
 
 // The "celebrity"/hot band: a CONTIGUOUS run of keys near the top of the
-// key-space. This is the honest model — range only hot-spots when the heavy
+// key-space. This is the honest model, range only hot-spots when the heavy
 // keys are adjacent in key order (e.g. monotonic recent IDs, or one viral
 // region). Sprinkling skew over random keys would NOT overload a range shard.
 const HOT_BAND_START = 18; // ids 18..23 are the hot band
@@ -41,19 +41,19 @@ const STRATEGIES = {
     label: "Range",
     icon: Ruler,
     rule: "shard = bucket(key.id) by contiguous id boundaries",
-    blurb: "Keys sorted by id, cut into N adjacent ranges. Great for range scans — terrible when the hot keys are adjacent.",
+    blurb: "Keys sorted by id, cut into N adjacent ranges. Great for range scans, terrible when the hot keys are adjacent.",
   },
   hash: {
     label: "Hash",
     icon: Hash,
     rule: "shard = hash(key) mod N",
-    blurb: "A good hash scatters adjacent keys everywhere. Spreads a distributed hot band evenly — but kills range scans.",
+    blurb: "A good hash scatters adjacent keys everywhere. Spreads a distributed hot band evenly, but kills range scans.",
   },
   directory: {
     label: "Directory",
     icon: BookOpen,
     rule: "shard = lookup_table[key]  (explicit, rebalanceable)",
-    blurb: "An indirection layer assigns each key to the least-loaded shard. Most flexible — but adds a hop and a SPOF.",
+    blurb: "An indirection layer assigns each key to the least-loaded shard. Most flexible, but adds a hop and a SPOF.",
   },
 };
 
@@ -296,7 +296,7 @@ export default function ShardingVisualizer() {
           <div className="flex items-center gap-1.5 mb-1.5" style={{ color: SHARD_COLORS[0] }}>
             <Strat.icon size={14} />
             <span className="text-[11px] uppercase tracking-wide" style={{ color: "var(--w-muted)" }}>
-              {Strat.label} partitioning — mapping rule
+              {Strat.label} partitioning, mapping rule
             </span>
           </div>
           <code className="block text-sm font-bold mb-2" style={{ color: "var(--w-heading)" }}>{Strat.rule}</code>
@@ -310,7 +310,7 @@ export default function ShardingVisualizer() {
                   <div key={i} className="h-full rounded border p-2" style={{ background: "var(--w-panel)", borderColor: "var(--w-border-soft)" }}>
                     <div className="text-[10px]" style={{ color: "var(--w-faint)" }}>shard {i}</div>
                     <div className="text-xs font-semibold" style={{ color: SHARD_COLORS[i % SHARD_COLORS.length] }}>
-                      id [{b.lo}–{b.hi}]
+                      id [{b.lo}-{b.hi}]
                     </div>
                   </div>
                 ) : (
@@ -377,7 +377,7 @@ export default function ShardingVisualizer() {
             c="#2dd4a7"
             t="Hash"
             on={strategy === "hash"}
-            s="Flattens a distributed hot band. Cost: no range scans — and a SINGLE celebrity key still pins to one shard (fix: key-splitting / suffix sharding)."
+            s="Flattens a distributed hot band. Cost: no range scans, and a SINGLE celebrity key still pins to one shard (fix: key-splitting / suffix sharding)."
           />
           <Cost
             c="#e8a13a"
@@ -387,14 +387,14 @@ export default function ShardingVisualizer() {
           />
         </div>
 
-        {/* closing interpretation — ties to the skew toggle */}
+        {/* closing interpretation, ties to the skew toggle */}
         <p className="text-[11px] leading-relaxed" style={{ color: "var(--w-faint)" }}>
           Flip to <span className="text-amber-300">Skewed</span>: under <span className="text-sky-300">range</span> the
-          hot band stacks onto one shard — watch the <span className="text-rose-300">peak/avg</span> badge spike well past
+          hot band stacks onto one shard, watch the <span className="text-rose-300">peak/avg</span> badge spike well past
           balanced (a classic hot-spot). <span className="text-emerald-300">Hash</span> scatters those same keys far flatter,
-          and <span className="text-amber-300">directory</span> rebalances to near-flat — paying with the lookup hop.
+          and <span className="text-amber-300">directory</span> rebalances to near-flat, paying with the lookup hop.
           The Director-altitude point: pick the partition key for your <span style={{ color: "var(--w-text)" }}>access pattern</span>, then
-          name how it fails (hot-spot vs lost locality vs lookup SPOF) and the mitigation — don't just say "we'll shard it."
+          name how it fails (hot-spot vs lost locality vs lookup SPOF) and the mitigation, don't just say "we'll shard it."
         </p>
       </div>
     </div>

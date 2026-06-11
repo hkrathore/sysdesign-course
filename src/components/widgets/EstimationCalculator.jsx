@@ -3,14 +3,14 @@ import { Activity, Database, Server, Gauge, ArrowUpDown, HardDrive, Zap } from "
 
 // --- formatting helpers ---------------------------------------------------
 const fmtNum = (n) => {
-  if (!isFinite(n)) return "—";
+  if (!isFinite(n)) return ", ";
   if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + "B";
   if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "K";
   return n.toFixed(n < 10 ? 1 : 0);
 };
 const fmtBytes = (b) => {
-  if (!isFinite(b)) return "—";
+  if (!isFinite(b)) return ", ";
   const u = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
   let i = 0;
   while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; }
@@ -129,7 +129,7 @@ export default function EstimationCalculator() {
         </div>
 
         <p className="text-[11px] text-[var(--w-faint)] mt-5 leading-relaxed">
-          The interview point is the <span className="text-[var(--w-text)]">conclusion</span> the numbers justify — e.g. "reads dominate ~{s.rw}×, so the architecture lives on the cache/read path," or "media egress, not QPS, is the binding cost." Round aggressively; ≤3 minutes.
+          The interview point is the <span className="text-[var(--w-text)]">conclusion</span> the numbers justify, e.g. "reads dominate ~{s.rw}×, so the architecture lives on the cache/read path," or "media egress, not QPS, is the binding cost." Round aggressively; ≤3 minutes.
         </p>
       </div>
     </div>

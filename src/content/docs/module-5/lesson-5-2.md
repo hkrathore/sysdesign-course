@@ -152,7 +152,7 @@ DELETE /rules/{rule_id}
 - *Rejected - sliding-window log (a ZSET of every request timestamp):* exact, but O(limit) entries per key → multi-GB at 10M keys for accuracy the tiers don't need. Keep it only for low-volume high-value limits ("3 password resets/hour"). Reject as the default on memory.
 
 <details>
-<summary>Go deeper — the atomic token-bucket update in Redis (IC depth, optional)</summary>
+<summary>Go deeper, the atomic token-bucket update in Redis (IC depth, optional)</summary>
 
 The Lua script does refill-check-decrement in one critical section: read `{tokens, ts}`, add `(now − ts) × rate` tokens capped at `burst`, check `tokens ≥ cost`, decrement if so, write back, and set the TTL **in the same call**. Single-threaded Redis makes the script a natural critical section, eliminating both 3.10 races: the read-modify-write over-admission race (Race B - two concurrent checks both see one remaining token) and the orphaned-key race from a separate `EXPIRE` (Race A). Fractional tokens from lazy refill are kept so low rates accrue correctly. Never implement this as GET → compute → SET from the client: the gap between read and write is exactly where concurrent over-admission lives.
 

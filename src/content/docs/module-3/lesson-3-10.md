@@ -30,7 +30,7 @@ Now put a thousand of these doors around the world that must enforce **one share
 **The algorithm progression - three sentences, not twenty minutes.** A **fixed window** (one counter per key, reset each interval) is the cheapest option - a single atomic `INCR` - but allows up to **~2× the limit** in a burst straddling the window boundary, and the exact fix (a **sliding-window log** of every request timestamp) costs O(limit) memory per key. The **sliding-window counter** - keep this window's count and last window's, weight the previous by how much of it still overlaps the trailing window - kills the boundary cliff at **O(1) memory** and is the **production default** for high-volume trailing-window limits (it's what Cloudflare runs at edge scale). The **token bucket** models the two-number limit directly - a bucket of **B** tokens (the burst) refilling at **R**/second (the sustained rate), two numbers of state per key - and is the default gateway choice: it's what **Stripe** uses and what **AWS API Gateway** exposes as `rateLimit` + `burstLimit`. Its dual, the **leaky bucket**, drains a queue at a constant R so the downstream never sees a spike - choose it only when the thing you're protecting cannot tolerate bursts at all, and accept that it removes burst tolerance and adds queueing latency where the token bucket admits instantly while tokens last.
 
 <details>
-<summary>Go deeper — the five algorithms compared (IC depth, optional)</summary>
+<summary>Go deeper, the five algorithms compared (IC depth, optional)</summary>
 
 | Algorithm | Burst handling | Accuracy | Memory / key | Cost per request | Use when… |
 |---|---|---|---|---|---|
@@ -49,7 +49,7 @@ The sliding-window counter's estimate: `current_count + previous_count × (1 −
 **Atomicity in one sentence.** The token-bucket check is a read-modify-write (read tokens, compute refill, check, decrement, write back), and run as separate Redis commands two concurrent requests can both see "1 token left" and both get in - so the **entire check runs as one Lua script**, which Redis's single thread executes as an indivisible critical section. "Token bucket in Redis" always means "token bucket in a Lua script."
 
 <details>
-<summary>Go deeper — the two distinct Redis races (IC depth, optional)</summary>
+<summary>Go deeper, the two distinct Redis races (IC depth, optional)</summary>
 
 *Race A - `INCR` then `EXPIRE` (the orphaned-key race).* Fixed-window in Redis is `INCR key` then, on first creation, `EXPIRE key 60`. `INCR` itself is atomic - the count is always correct under any concurrency. The race is that `INCR` and `EXPIRE` are two separate commands: if the client crashes between them, the key has the right count but **no TTL** - it never resets, and that user is throttled forever once they hit the limit. Fix: a Lua script, or `SET key 0 EX 60 NX` to seed the TTL atomically. Note: the bug is the lost expiry, not an over-count.
 

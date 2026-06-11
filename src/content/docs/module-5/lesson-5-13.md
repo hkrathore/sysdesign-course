@@ -189,7 +189,7 @@ DELETE /v1/holds/{holdId}                        -> 204
 **`orders`** - primary key `order_id`, sharded by **`event_id`** (colocated with the seats it bought); carries buyer, seat list, `payment_status`, and a **unique `idempotency_key`** - the index that makes purchase exactly-once.
 
 <details>
-<summary>Go deeper — full column schemas (IC depth, optional)</summary>
+<summary>Go deeper, full column schemas (IC depth, optional)</summary>
 
 **`seats`:**
 
@@ -236,10 +236,10 @@ DELETE /v1/holds/{holdId}                        -> 204
 
 **Bottleneck 1 - oversell / double-booking (the cardinal correctness risk).**
 Two fans claim seat 14F in the same millisecond.
-*Fix:* an **atomic conditional write (CAS)** - a single statement that tests and sets: `UPDATE seats SET status='HELD', hold_id=?, expires_at=? WHERE ... AND status='AVAILABLE'`. **One winner per seat; losers affect 0 rows and fail fast with a 409**, no lock held; multi-seat is the same predicate in one all-or-nothing transaction. *Rejected:* pessimistic `SELECT FOR UPDATE` - **pessimistic locks form convoys under contention**, serializing losers who should be bouncing to other seats. (On a quorum store the same invariant is a conditional put with W+R>N — Lessons 2.7-2.8.)
+*Fix:* an **atomic conditional write (CAS)** - a single statement that tests and sets: `UPDATE seats SET status='HELD', hold_id=?, expires_at=? WHERE ... AND status='AVAILABLE'`. **One winner per seat; losers affect 0 rows and fail fast with a 409**, no lock held; multi-seat is the same predicate in one all-or-nothing transaction. *Rejected:* pessimistic `SELECT FOR UPDATE` - **pessimistic locks form convoys under contention**, serializing losers who should be bouncing to other seats. (On a quorum store the same invariant is a conditional put with W+R>N, Lessons 2.7-2.8.)
 
 <details>
-<summary>Go deeper — CAS vs SELECT FOR UPDATE under 33:1 contention (IC depth, optional)</summary>
+<summary>Go deeper, CAS vs SELECT FOR UPDATE under 33:1 contention (IC depth, optional)</summary>
 
 With `SELECT ... FOR UPDATE`, every contender for seat 14F acquires (or queues on) a row lock, holds it across its read-decide-write window, and blocks the rest - a **lock convoy**: hundreds of transactions serialized behind one row, inflating p99 dramatically and holding DB connections hostage. The optimistic CAS inverts the failure cost: the database still serializes writes to the row internally, but losers learn "0 rows updated" immediately and retry on a *different* seat - no held lock, no queueing, no connection pinned.
 

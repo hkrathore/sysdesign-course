@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
-// Caching write strategies — a single-writer simulator.
+// Caching write strategies, a single-writer simulator.
 //   READ path is identical for all three strategies.
 //   WRITE path is where they diverge (consistency / durability trade).
 // Each key holds a monotonically increasing *version*, so cache/DB skew is a
@@ -32,7 +32,7 @@ const STRATS = {
     read: "App checks cache. Hit → return. Miss → read DB, populate cache, return.",
     write: "App writes DB, then INVALIDATES (deletes) the cache key. Next read re-loads it.",
     consistency: "DB is source of truth. Cache can only be stale via a race, not by design.",
-    durability: "Safe — every write hits the DB synchronously before ack.",
+    durability: "Safe, every write hits the DB synchronously before ack.",
     verdict:
       "Most common default. Cost is an extra miss + lazy-load after every write to a key. No data-loss risk; cache and DB never drift in a single-writer flow.",
   },
@@ -43,8 +43,8 @@ const STRATS = {
     writeMs: 11,
     read: "App checks cache. Hit → return. Miss → read DB, populate cache, return.",
     write: "App writes cache AND DB on the critical path, both before ack.",
-    consistency: "Cache always matches DB — reads-after-writes always HIT and are fresh.",
-    durability: "Safe — DB written synchronously on every write.",
+    consistency: "Cache always matches DB, reads-after-writes always HIT and are fresh.",
+    durability: "Safe, DB written synchronously on every write.",
     verdict:
       "Best read freshness: a written key stays warm and correct, so cache-aside's post-write miss disappears. Cost is the highest write latency (cache + DB on the hot path) and cache churn for write-heavy, rarely-read keys.",
   },
@@ -55,8 +55,8 @@ const STRATS = {
     writeMs: 1,
     read: "App checks cache. Hit → return. Miss → read DB, populate cache, return.",
     write: "App writes cache only, marks key DIRTY, acks. DB flushed later (async).",
-    consistency: "Cache is ahead of DB until flush — DB serves stale versions to anyone reading it directly.",
-    durability: "AT RISK — a crash before flush loses every dirty version.",
+    consistency: "Cache is ahead of DB until flush, DB serves stale versions to anyone reading it directly.",
+    durability: "AT RISK, a crash before flush loses every dirty version.",
     verdict:
       "Best write latency (cache-speed acks) and absorbs write bursts. The trade is brutal: until the async flush, the DB is stale, and a crash loses all un-flushed writes. Only acceptable where the data is reconstructable or some loss is tolerable.",
   },
@@ -75,13 +75,13 @@ function buildStream(kind, n = 28) {
   const key = () => KEYS[Math.floor(rnd() * KEYS.length)];
   for (let i = 0; i < n; i++) {
     if (kind === "readHeavy") {
-      // ~90% reads — all three strategies converge here
+      // ~90% reads, all three strategies converge here
       out.push({ t: rnd() < 0.1 ? "w" : "r", k: key() });
     } else if (kind === "writeHeavy") {
-      // ~55% writes on a hot key — cache-aside pays a miss after each write
+      // ~55% writes on a hot key, cache-aside pays a miss after each write
       out.push({ t: rnd() < 0.55 ? "w" : "r", k: key() });
     } else {
-      // readAfterWrite: deliberate w,r,r cycles on one key at a time — the discriminator.
+      // readAfterWrite: deliberate w,r,r cycles on one key at a time, the discriminator.
       // cache-aside invalidates on the write, so its first read MISSES then recovers;
       // write-through / write-back keep the key warm and stay at 100%.
       const cycle = Math.floor(i / 3);
@@ -145,7 +145,7 @@ function advance(s) {
       result = `MISS ${k} → v${n.db[k]} (db→cache)`;
     }
   } else {
-    // write — bump the app's intended version for this key
+    // write, bump the app's intended version for this key
     const v = n.db[k] !== undefined ? Math.max(n.db[k], n.cache[k] ?? 0) + 1 : 1;
     if (s.strat === "aside") {
       n.db[k] = v;
@@ -207,8 +207,8 @@ function crash(s) {
       k: "*",
       result:
         lostNow > 0
-          ? `CRASH — cache lost, ${lostNow} dirty version(s) GONE`
-          : "CRASH — cache lost, 0 un-flushed writes (no loss)",
+          ? `CRASH, cache lost, ${lostNow} dirty version(s) GONE`
+          : "CRASH, cache lost, 0 un-flushed writes (no loss)",
     },
   };
 }
@@ -225,7 +225,7 @@ export default function CachingStrategiesSimulator() {
   const strat = STRATS[stratKey];
   const done = state.cursor >= state.stream.length;
 
-  // Auto-run loop — functional setState dodges the stale-closure bug.
+  // Auto-run loop, functional setState dodges the stale-closure bug.
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => {
@@ -273,7 +273,7 @@ export default function CachingStrategiesSimulator() {
   );
 
   const accent = strat.color;
-  const maxLat = CACHE_MS + DB_MS; // 11ms — bar scale ceiling
+  const maxLat = CACHE_MS + DB_MS; // 11ms, bar scale ceiling
 
   return (
     <div
@@ -292,7 +292,7 @@ export default function CachingStrategiesSimulator() {
           </h2>
         </div>
         <p className="text-xs mb-4" style={{ color: "var(--w-muted)" }}>
-          Single writer. Reads are identical across strategies — the{" "}
+          Single writer. Reads are identical across strategies, the{" "}
           <span style={{ color: "var(--w-text)" }}>write path</span> is the trade. Each key holds a{" "}
           <span style={{ color: "var(--w-text)" }}>version</span>; cache/DB skew is the staleness.
         </p>
@@ -480,7 +480,7 @@ export default function CachingStrategiesSimulator() {
           )}
         </div>
 
-        {/* key state table — versions in cache vs db, dirtiness */}
+        {/* key state table, versions in cache vs db, dirtiness */}
         <div className="grid grid-cols-3 items-stretch gap-2 mb-5">
           {KEYS.map((k) => {
             const c = state.cache[k];
@@ -506,7 +506,7 @@ export default function CachingStrategiesSimulator() {
                   <span title="cache" className="flex items-center gap-1">
                     <Layers size={12} style={{ color: accent }} />
                     <span style={{ color: c === undefined ? "var(--w-faint)" : accent }}>
-                      {c === undefined ? "—" : `v${c}`}
+                      {c === undefined ? ", " : `v${c}`}
                     </span>
                   </span>
                   <span style={{ color: "var(--w-faint)" }}>/</span>
@@ -627,7 +627,7 @@ export default function CachingStrategiesSimulator() {
           <div className="flex items-center gap-1.5 mb-1">
             <ArrowRight size={14} style={{ color: accent }} />
             <span className="text-[11px] uppercase tracking-wide" style={{ color: accent }}>
-              Verdict — {strat.name}
+              Verdict, {strat.name}
             </span>
           </div>
           <p className="text-[12px] leading-relaxed" style={{ color: "var(--w-text)" }}>{strat.verdict}</p>

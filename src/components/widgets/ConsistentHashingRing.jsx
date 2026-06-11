@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Plus, Minus, RotateCcw, Hash, Scale, Move } from "lucide-react";
 
-// --- deterministic 32-bit hash — no crypto, fully self-contained -------------
+// --- deterministic 32-bit hash, no crypto, fully self-contained -------------
 // FNV-1a accumulate + a MurmurHash3 finalizer. The finalizer's avalanche is what
 // makes near-identical inputs ("A#0","A#1", "key:0","key:1") scatter across the
 // ring; plain FNV-1a clusters them and produces dead arcs / zero-load nodes.
@@ -220,7 +220,7 @@ export default function ConsistentHashingRing() {
                 );
               })}
 
-              {/* node labels — only for the primary token of each physical node (vnodes==low) */}
+              {/* node labels, only for the primary token of each physical node (vnodes==low) */}
               {vnodes <= 8 && nodes.map((n) => {
                 const pos = hash32(`${n}#0`);
                 const a = posToAngle(pos);
@@ -295,7 +295,7 @@ export default function ConsistentHashingRing() {
                 className="w-full accent-sky-400 cursor-pointer"
               />
               <div className="text-[10px] text-[var(--w-faint)] mt-1">
-                More tokens per node ⇒ each node owns many small arcs ⇒ smoother load. Production rings use 100–256.
+                More tokens per node ⇒ each node owns many small arcs ⇒ smoother load. Production rings use 100-256.
               </div>
             </div>
 
@@ -362,7 +362,7 @@ export default function ConsistentHashingRing() {
         </div>
 
         <p className="text-[11px] text-[var(--w-faint)] mt-4 leading-relaxed">
-          Interview point: the win isn't the ring, it's <span className="text-[var(--w-text)]">bounded disruption</span> — adding capacity
+          Interview point: the win isn't the ring, it's <span className="text-[var(--w-text)]">bounded disruption</span>, adding capacity
           remaps only its fair share, so cache hit-rate and rebalancing I/O stay survivable at scale (DynamoDB, Cassandra, and
           memcached clients all ride this). The cost is harder range scans and the need for vnodes to fix skew.
         </p>
