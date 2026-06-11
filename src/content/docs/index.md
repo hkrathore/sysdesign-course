@@ -25,14 +25,14 @@ Run this exact 8-step roadmap on *every* problem. You'll see it named in every M
 
 | Step | Letter | What you do | The interview signal |
 |---|---|---|---|
-| 1 | **R**, Requirements | Functional vs. non-functional; scope; read:write ratio; scale | You scope before you build |
-| 2 | **E**, Estimation | QPS, storage, bandwidth, memory, server count (back-of-envelope) | You reason in numbers |
-| 3 | **S**, Storage | What must persist; store-type selection | You match data to store |
-| 4 | **H**, High-level design | Component/box diagram; happy path first | You think in components |
-| 5 | **A**, API design | The contract: endpoints / signatures | You define interfaces |
-| 6 | **D**, Data model | Schema, relationships, partition/shard keys, indexes | You know where data lives |
-| 7 | **E**, Evaluation | Re-check vs. non-functional reqs; find bottlenecks; fix them | You stress your own design |
-| 8 | **D**, Design evolution | Justify trade-offs; how it scales/changes under new constraints | You think past v1 |
+| 1 | **R**: Requirements | Functional vs. non-functional; scope; read:write ratio; scale | You scope before you build |
+| 2 | **E**: Estimation | QPS, storage, bandwidth, memory, server count (back-of-envelope) | You reason in numbers |
+| 3 | **S**: Storage | What must persist; store-type selection | You match data to store |
+| 4 | **H**: High-level design | Component/box diagram; happy path first | You think in components |
+| 5 | **A**: API design | The contract: endpoints / signatures | You define interfaces |
+| 6 | **D**: Data model | Schema, relationships, partition/shard keys, indexes | You know where data lives |
+| 7 | **E**: Evaluation | Re-check vs. non-functional reqs; find bottlenecks; fix them | You stress your own design |
+| 8 | **D**: Design evolution | Justify trade-offs; how it scales/changes under new constraints | You think past v1 |
 
 ---
 

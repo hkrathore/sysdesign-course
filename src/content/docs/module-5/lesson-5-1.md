@@ -211,7 +211,7 @@ Stress the design against the NFRs; each fix names its trade-off.
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
 | **Where the bytes live** | **Split: metadata in KV + body in blob store** *(chosen)* | Everything in one SQL DB (`TEXT`/`BLOB` column) | Everything in one KV/document store | **Split** for any paste that can exceed a few KB and any real scale. One-DB only for a toy/internal tool. |
-| **Metadata store type** | **KV, DynamoDB/Cassandra** *(chosen for public scale)* | Sharded relational, Postgres/MySQL | Document store | **KV** for pure point-lookup, native TTL, effortless horizontal scale. **Relational** when the team runs it well and accepts a harder shard story. |
+| **Metadata store type** | **KV: DynamoDB/Cassandra** *(chosen for public scale)* | Sharded relational, Postgres/MySQL | Document store | **KV** for pure point-lookup, native TTL, effortless horizontal scale. **Relational** when the team runs it well and accepts a harder shard story. |
 | **Short-key scheme** | **Random base62 + collision check** *(chosen, public)* | Counter/Snowflake → base62 | Hash of content (dedup-friendly) | **Random** when keys must be unguessable. **Counter** for internal tools where enumeration is fine. **Content-hash** for automatic dedup. |
 
 ---

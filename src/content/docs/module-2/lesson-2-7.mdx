@@ -25,9 +25,9 @@ That is the whole of CAP: *when the line is cut, you pick correctness or uptime,
 ### Deep explanation
 
 **CAP, stated precisely.** Brewer's theorem concerns three properties of a distributed system:
-- **C, Consistency** (specifically *linearizability*): every read sees the most recent acknowledged write, as if there were a single copy. Note this is a **stronger** C than the "C" in ACID (which is about integrity constraints), a frequent point of confusion.
-- **A, Availability**: every request to a non-failing node gets a non-error response (not necessarily the latest data).
-- **P, Partition tolerance**: the system keeps operating despite the network dropping or delaying messages between nodes.
+- **C: Consistency** (specifically *linearizability*): every read sees the most recent acknowledged write, as if there were a single copy. Note this is a **stronger** C than the "C" in ACID (which is about integrity constraints), a frequent point of confusion.
+- **A: Availability**: every request to a non-failing node gets a non-error response (not necessarily the latest data).
+- **P: Partition tolerance**: the system keeps operating despite the network dropping or delaying messages between nodes.
 
 The precise statement is **not** "pick any two of three." It is: **when a partition occurs, you must forfeit either C or A.** The reason is mechanical, if node A and node B cannot communicate and both keep accepting writes, their states diverge (C lost); the only way to preserve C is for at least one side to stop answering (A lost). There is no algorithm that escapes this; it is a proven impossibility, not an engineering gap.
 

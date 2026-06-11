@@ -61,9 +61,9 @@ A Director loop is 5-6 interviewers, each a different competency, drilling to L3
 
 A framework gets you through the first 90 seconds. **The probe is the round.** Senior interviewers (Amazon bar-raiser is the archetype) drill 3-4 levels below the headline to find where your story dissolves into generalities, because that layer is where the rehearsed story began.
 
-- **L1, Specifics:** exact dates, numbers, names. "March 4," not "early that quarter." "12% of 90 people," not "a chunk of the org."
-- **L2, Mechanism:** *how* you measured or decided. "The week-3 checkpoint measured whether he'd shipped the reconciliation module, he hadn't," not "he wasn't improving."
-- **L3, The cost:** the counterfactual, what it actually cost *you*. "An engineer told me in a skip-level it was overdue, the team carried my extra quarter of hope," not "it worked out."
+- **L1: Specifics:** exact dates, numbers, names. "March 4," not "early that quarter." "12% of 90 people," not "a chunk of the org."
+- **L2: Mechanism:** *how* you measured or decided. "The week-3 checkpoint measured whether he'd shipped the reconciliation module, he hadn't," not "he wasn't improving."
+- **L3: The cost:** the counterfactual, what it actually cost *you*. "An engineer told me in a skip-level it was overdue, the team carried my extra quarter of hope," not "it worked out."
 
 Two delivery rules: **never announce the framework aloud** ("let me use STAR here" breaks the spell, the structure is felt, not named), and **only claim depth you actually have**, getting caught inventing at L3 contaminates every other answer in the loop.
 

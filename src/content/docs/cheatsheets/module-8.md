@@ -35,14 +35,14 @@ sidebar:
 
 | Step | In a product design (Mod 5) | In a strategy problem (Mod 8) |
 |---|---|---|
-| **R, Requirements** | features, scope | the **pain inventory, quantified**, "it's slow" is not a requirement |
-| **E, Estimation** | QPS, storage | **velocity / cost / TCO / attrition math**, the call falls out of the numbers |
-| **S, Storage** | pick the DB | **data ownership**, the breakup, the fracture plane (the hardest, most-skipped step) |
-| **H, High-level** | box diagram | the **migration phase machine** / the **org-and-services-as-one-drawing** |
-| **A, API** | endpoints | **seam contracts / team APIs**, versioned, owned, the anti-recoupling rule |
-| **D, Data model** | schema | the **ownership map**, who owns which service, table, and pager |
-| **E, Evaluation** | re-check vs NFRs | stress the **migration/org against its failure modes**, predict where it leaks |
-| **D, Design evolution** | 10× traffic | the **sequence, the stopping condition, the kill criteria**, *this carries the lesson* |
+| **R: Requirements** | features, scope | the **pain inventory, quantified**, "it's slow" is not a requirement |
+| **E: Estimation** | QPS, storage | **velocity / cost / TCO / attrition math**, the call falls out of the numbers |
+| **S: Storage** | pick the DB | **data ownership**, the breakup, the fracture plane (the hardest, most-skipped step) |
+| **H: High-level** | box diagram | the **migration phase machine** / the **org-and-services-as-one-drawing** |
+| **A: API** | endpoints | **seam contracts / team APIs**, versioned, owned, the anti-recoupling rule |
+| **D: Data model** | schema | the **ownership map**, who owns which service, table, and pager |
+| **E: Evaluation** | re-check vs NFRs | stress the **migration/org against its failure modes**, predict where it leaks |
+| **D: Design evolution** | 10× traffic | the **sequence, the stopping condition, the kill criteria**, *this carries the lesson* |
 
 > In Module 5, H (the diagram) is the deliverable. In Module 8, **the last two D-steps are**, a strategy answer with a static end-state and no path to it has said nothing.
 
