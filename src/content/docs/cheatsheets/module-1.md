@@ -1,5 +1,5 @@
 ---
-title: "Module 1 — Cheat Sheet"
+title: "Module 1 — Interview Mechanics Cheat Sheet"
 description: "Interview-mechanics cheat sheet."
 sidebar:
   order: 1

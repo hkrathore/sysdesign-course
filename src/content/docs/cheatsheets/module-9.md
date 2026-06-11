@@ -1,8 +1,8 @@
 ---
-title: "Cheat Sheet — Module 9 (Business-Domain Problems)"
+title: "Module 9 — Business-Domain Problems Cheat Sheet"
 description: "The load-bearing decision and canonical one-line answer for all 14 business-domain problems — money, marketplaces, streaming, and the single-component deep dive — on one page."
 sidebar:
-  order: 10
+  order: 9
 ---
 
 ### Every business-domain problem turns on ONE decision. Name it, defend it, price it.

@@ -1,8 +1,8 @@
 ---
-title: "Cheat Sheet — Module 10 (Leadership Track)"
+title: "Module 10 — Leadership Track Cheat Sheet"
 description: "The four answer shapes, one crux per behavioral category, the mandatory story slots, the probe-resistance rule, and 2015→2026 phrase swaps — one page."
 sidebar:
-  order: 11
+  order: 10
 ---
 
 ### The behavioral loop is a graded technical assessment of judgment. Read the question shape, reach for the matching instrument, and survive a four-level probe.

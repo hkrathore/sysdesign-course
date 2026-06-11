@@ -1,8 +1,8 @@
 ---
-title: "Cheat Sheet — Module 8 (Architecture & Org Strategy)"
+title: "Module 8 — Architecture & Org Strategy Cheat Sheet"
 description: "The load-bearing decision and canonical Director answer for all 11 architecture-strategy problems — one page."
 sidebar:
-  order: 9
+  order: 8
 ---
 
 ### These are not design problems — they're judgment problems. Resist by default, quantify the tax, sequence reversibly, name the stopping condition.

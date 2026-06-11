@@ -1,8 +1,8 @@
 ---
-title: "Cheat Sheet — Module 7 (LLD & OOD Curveballs)"
+title: "Module 7 — LLD & OOD Curveballs Cheat Sheet"
 description: "The load-bearing decision and canonical Director answer for all 10 LLD/OOD curveballs — restraint, invariants, and the one race, on one page."
 sidebar:
-  order: 8
+  order: 7
 ---
 
 ### Every LLD problem is undersized on purpose. The empty space is the test.
