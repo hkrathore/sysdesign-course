@@ -1,6 +1,6 @@
 ---
 title: "Modern System Design Interview"
-description: "Course syllabus, Director-altitude system-design interview prep."
+description: "Course syllabus, Director-altitude system-design and engineering-leadership interview prep."
 ---
 
 ### Modern System Design Interview, taught the RESHADED way
@@ -11,7 +11,7 @@ description: "Course syllabus, Director-altitude system-design interview prep."
 
 ## 1. What this course is
 
-A self-paced, module-by-module course that drills one repeatable method, **RESHADED**, onto a library of reusable **building blocks**, then runs that method end-to-end on 16 real design problems. The goal is not to memorize architectures. It's to make RESHADED *muscle memory* so that under interview pressure you produce a defensible design, quantify every claim, and name the trade-off you rejected.
+A self-paced course that drills one repeatable method, **RESHADED**, onto a library of reusable **building blocks**, then runs it end-to-end across **~50 design problems**: the canonical set (URL shortener, Instagram, Uber, …), the non-canonical questions real Director loops actually ask (LLD curveballs, architecture-and-org strategy, business-domain systems), and a dedicated **leadership track** for the behavioral half of the loop. The goal is not to memorize architectures or rehearse answers. It's to make the method *muscle memory* so that in **both halves of the loop**, the design round and the leadership round, you produce a defensible, quantified, trade-off-aware answer under pressure.
 
 **Two rules govern every lesson:**
 1. **Always quantify.** "It scales" is banned. We show the math.
@@ -21,7 +21,7 @@ A self-paced, module-by-module course that drills one repeatable method, **RESHA
 
 ## 2. The spine: RESHADED
 
-Run this exact 8-step roadmap on *every* problem. You'll see it named in every Module 5 walkthrough until it's automatic.
+Run this exact 8-step roadmap on *every* problem. You'll see it named in every walkthrough (Modules 4–9, adapted per problem) until it's automatic.
 
 | Step | Letter | What you do | The interview signal |
 |---|---|---|---|
@@ -73,6 +73,8 @@ Every lesson delivers all of these, in this order:
 10. 3-5 practice questions with model answers
 11. Key takeaways (5) + a 2-3 line spaced-repetition recap
 
+Modules 7-10 adapt this to their format, the LLD lessons add interface sketches, the strategy lessons lead with sequencing and risk, the leadership lessons add a *2015-vs-2026 calibration* and annotated model answers, but the constants hold throughout: intuition first, every decision quantified with its rejected alternative, a trade-offs view, "what interviewers probe," and a spaced-repetition recap.
+
 ---
 
 ## 4. The interactive widgets you'll get
@@ -87,12 +89,14 @@ Built as self-contained React artifacts, no network calls, at the module where e
 - **Load-balancing comparison** (round-robin / least-conn / hashing; animated distribution), *Module 3*
 - **Sharding/partitioning visualizer** (range / hash / directory; hot-spotting), *Module 2 & 3*
 - **Quorum calculator** (N/W/R sliders → strong-consistency check + availability impact), *Module 2*
+- **Probe simulator** (three-levels-deep follow-up drill per behavioral question), *Module 10*
+- **Story-coverage matrix** (leadership stories × categories; gap highlighting + the mandatory story slots), *Module 10*
 
 ---
 
 ## Director's Fast Path
 
-An honest accounting: the full course is ~250k words, 100+ hours of reading. On a 2-week runway you must **not** read it all; trying to is itself a triage failure. Here is the triage.
+An honest accounting: the full course is now **~430k words across 10 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
 
 **Must do (full reads):**
 - **Module 1**, interview mechanics and estimation reps.
