@@ -1,6 +1,6 @@
 ---
 title: "Modern System Design Interview"
-description: "Course syllabus and progress tracker, Director-altitude system-design interview prep."
+description: "Course syllabus, Director-altitude system-design interview prep."
 ---
 
 ### Modern System Design Interview, taught the RESHADED way
@@ -93,99 +93,14 @@ Built as self-contained React artifacts, no network calls, at the module where e
 ## 5. Delivery protocol
 
 - **One module per turn.** Never the whole course at once.
-- Each module ends with (a) an updated progress tracker and (b) a prompt to say **"continue"** or to go deeper.
+- Each module ends with a prompt to say **"continue"** or to go deeper.
 - Oversized modules get split lesson-by-lesson, and I'll always tell you where we are.
 
 ---
 
-## 6. Progress tracker
+## 6. A realistic 2-week study plan
 
-> Tick boxes as you finish. `[x]` = done, `[ ]` = pending.
-
-### ☑ Module 0: Syllabus & how to use this course
-- [x] **0**, Syllabus, RESHADED spine, study plan *(this document)*
-
-### ☐ Module 1: Interview mechanics
-- [ ] **1.1**, What interviewers actually score (the 5 axes)
-- [ ] **1.2**, Functional vs. non-functional requirements
-- [ ] **1.3**, Back-of-the-envelope estimation *(+ Estimation Calculator)*
-- [ ] **1.4**, Latency numbers every engineer should know *(+ Latency visualizer)*
-- [ ] **1.5**, Common failure modes & how to recover live
-
-### ☐ Module 2: Distributed systems fundamentals & trade-offs
-- [ ] **2.1**, Networking, DNS, proxies (forward vs. reverse)
-- [ ] **2.2**, SQL vs. NoSQL; when each wins
-- [ ] **2.3**, Indexing (B-tree vs. LSM-tree, the write/read trade)
-- [ ] **2.4**, Replication (leader-follower, multi-leader, leaderless)
-- [ ] **2.5**, Partitioning / sharding (range / hash / directory) *(+ Sharding visualizer)*
-- [ ] **2.6**, Consistent hashing *(+ Consistent Hashing ring)*
-- [ ] **2.7**, CAP & PACELC *(+ CAP/PACELC explorer)*
-- [ ] **2.8**, Consistency models (strong / eventual / causal) + quorum W+R>N *(+ Quorum calculator)*
-- [ ] **2.9**, Bloom filters; latency vs. throughput; batch vs. stream
-- [ ] **2.10**, REST vs. RPC vs. GraphQL; stateful vs. stateless *(+ Caching simulator)*
-
-### ☐ Module 3: Building blocks (one lesson each)
-- [ ] **3.1**, DNS
-- [ ] **3.2**, Load Balancers *(+ Load-balancing comparison)*
-- [ ] **3.3**, Databases
-- [ ] **3.4**, Key-Value Store
-- [ ] **3.5**, CDN
-- [ ] **3.6**, Sequencer (unique-ID / causality)
-- [ ] **3.7**, Distributed Caching
-- [ ] **3.8**, Distributed Messaging Queue
-- [ ] **3.9**, Publish-Subscribe
-- [ ] **3.10**, Rate Limiter
-- [ ] **3.11**, Blob Store
-- [ ] **3.12**, Distributed Search
-- [ ] **3.13**, Distributed Logging
-- [ ] **3.14**, Distributed Monitoring
-- [ ] **3.15**, Distributed Task Scheduler
-- [ ] **3.16**, Sharded Counters
-
-### ☐ Module 4: RESHADED end-to-end
-- [ ] **4**, Full RESHADED walkthrough on one warm-up problem
-
-### ☐ Module 5: Design problems (full RESHADED each)
-- [ ] **5.1**, TinyURL / URL shortener
-- [ ] **5.2**, Pastebin
-- [ ] **5.3**, Rate limiter
-- [ ] **5.4**, Instagram
-- [ ] **5.5**, Twitter + news feed
-- [ ] **5.6**, WhatsApp / chat
-- [ ] **5.7**, Typeahead / search autocomplete
-- [ ] **5.8**, Uber / proximity service
-- [ ] **5.9**, Dropbox / Google Drive
-- [ ] **5.10**, YouTube / Netflix
-- [ ] **5.11**, Google Maps
-- [ ] **5.12**, Web crawler
-- [ ] **5.13**, Notification system
-- [ ] **5.14**, Ticketmaster
-- [ ] **5.15**, Distributed job scheduler
-- [ ] **5.16**, ChatGPT / LLM serving infrastructure
-
-### ☐ Module 6: Capstone
-- [ ] **6**, Fresh problem, you drive / I critique like an interviewer + red-flags & strong-signals rubric
-
-### ☐ Module 7: LLD & OOD curveballs (the *unmemorizable* design questions)
-- [ ] **7.1** Parking lot · **7.2** Elevator · **7.3** Vending machine · **7.4** LRU cache · **7.5** Rate limiter (LLD) · **7.6** Meeting scheduler · **7.7** Splitwise · **7.8** Movie-ticket seat-locking · **7.9** Chess · **7.10** Amazon Locker (cold-open drill)
-
-### ☐ Module 8: Architecture & org strategy (the Director-distinctive round)
-- [ ] **8.1** Monolith → microservices · **8.2** Inherited legacy · **8.3** Zero-downtime migration · **8.4** Multi-region DR · **8.5** Cut cost 30-50% · **8.6** Build vs buy · **8.7** Internal developer platform · **8.8** Org + architecture (Conway) · **8.9** Competing proposals · **8.10** Defend your own design · **8.11** Fleet upgrade on the moon
-
-### ☐ Module 9: Business-domain problems (the non-canonical HLD set)
-- [ ] **9.1** Payments · **9.2** Digital wallet · **9.3** Hotel booking · **9.4** Online auction · **9.5** Food delivery · **9.6** Stock exchange · **9.7** Ad-click aggregator · **9.8** Top-K / leaderboard · **9.9** Live comments · **9.10** Google Docs · **9.11** Online judge · **9.12** Metrics platform · **9.13** Design Kafka · **9.14** Distributed cache deep-dive
-
-### ☐ Module 10: Leadership track (~40% of the Director loop)
-- [ ] **10.1** Recalibrated for 2026 · **10.2** The four answer frameworks · **10.3** Story portfolio · **10.4** Philosophy & style · **10.5** Hiring · **10.6** Hard people calls · **10.7** Managing managers · **10.8** Operating system & metrics · **10.9** Execution under pressure · **10.10** Influence & exec comms · **10.11** Efficiency-era (layoffs/cuts) · **10.12** AI-era leadership · **10.13** Company calibration · **10.14** Demonstrate-don't-describe capstone
-
-### Cheat sheets (delivered alongside modules)
-- [ ] One Markdown cheat-sheet per module (Modules 1-10) + **Master RESHADED cheat-sheet**
-
----
-
-## 7. A realistic 2-week study plan
-
-Two weeks from beginner-stated to Director-ready is tight. The plan below prioritizes ruthlessly, and reserves time for the thing that usually decides Director loops (see §8).
+Two weeks from beginner-stated to Director-ready is tight. The plan below prioritizes ruthlessly, and reserves time for the thing that usually decides Director loops (see §7).
 
 | Day | Focus | Modules |
 |---|---|---|
@@ -226,7 +141,7 @@ An honest accounting: the full course is ~250k words, 100+ hours of reading. On 
 
 ---
 
-## 8. The other half of the loop: leadership (now Module 10)
+## 7. The other half of the loop: leadership (now Module 10)
 
 At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority**, far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is now a full track: **Module 10, Leadership**, fourteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 10.2 generalizes it into the **four answer shapes**, STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
 
