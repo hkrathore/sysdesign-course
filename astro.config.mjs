@@ -42,8 +42,8 @@ export default defineConfig({
 				{ tag: 'script', attrs: { src: `${base}/mermaid-zoom.js`, defer: true } },
 			],
 			customCss: ['./src/styles/global.css'],
-			// Sidebar = Modules 0–9. Module 0 is the syllabus home (index.mdx);
-			// Modules 1–9 autogenerate from their directories by frontmatter sidebar.order.
+			// Sidebar = Modules 0–12. Module 0 is the syllabus home (index.mdx);
+			// Modules 1–12 autogenerate from their directories by frontmatter sidebar.order.
 			sidebar: [
 				{ label: 'Module 0 · Course Overview', link: '/' },
 				{ label: 'Module 1 · Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-1' } }] },
@@ -56,6 +56,8 @@ export default defineConfig({
 				{ label: 'Module 8 · Architecture & Org Strategy', collapsed: true, items: [{ autogenerate: { directory: 'module-8' } }] },
 				{ label: 'Module 9 · Business-Domain Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-9' } }] },
 				{ label: 'Module 10 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-10' } }] },
+				{ label: 'Module 11 · Gen AI & Agentic Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-11' } }] },
+				{ label: 'Module 12 · Gen AI & Agentic Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-12' } }] },
 				{ label: 'Cheat Sheets', collapsed: true, items: [{ autogenerate: { directory: 'cheatsheets' } }] },
 			],
 		}),
