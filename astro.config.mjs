@@ -24,7 +24,13 @@ export default defineConfig({
 	// text unless remark-gfm is added explicitly to remarkPlugins (which IS
 	// inherited by MDX). This is the single fix for all 12 widget (.mdx) lessons.
 	markdown: {
-		remarkPlugins: [remarkGfm],
+		// singleTilde:false so a bare `~` (used throughout as "approximately", e.g.
+		// `~10-30%`) renders literally instead of being parsed as GFM strikethrough.
+		// With singleTilde on (the default), two `~` pair up and strike through the
+		// span between them (phantom strike-out, most visible in the dense cheat
+		// sheets). We use no intentional `~~` strikethrough anywhere, so only `~~`
+		// staying as strikethrough costs us nothing.
+		remarkPlugins: [[remarkGfm, { singleTilde: false }]],
 	},
 	integrations: [
 		// astro-mermaid MUST be registered BEFORE starlight so its rehype step
