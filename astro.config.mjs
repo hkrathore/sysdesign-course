@@ -37,6 +37,10 @@ export default defineConfig({
 			title: 'Modern System Design Interview',
 			description:
 				'Director-altitude system-design interview prep, built on the RESHADED framework.',
+			// "On this page" right-hand table-of-contents disabled site-wide; reclaims reading
+			// width (paired with a wider --sl-content-width in global.css so wide trade-off
+			// tables fit the reading column instead of overflowing it).
+			tableOfContents: false,
 			head: [
 				// Click-to-zoom for Mermaid diagrams (readability for dense diagrams).
 				{ tag: 'script', attrs: { src: `${base}/mermaid-zoom.js`, defer: true } },

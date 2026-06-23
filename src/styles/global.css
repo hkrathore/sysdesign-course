@@ -22,6 +22,11 @@
  * ================================================================== */
 :root {
 	--sl-font: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+	/* Wider reading column. With the "On this page" TOC disabled (astro.config.mjs),
+	   the main pane has the room; 54rem (vs Starlight's 45rem default) lets the
+	   5-column RESHADED trade-off tables breathe instead of wrapping into cramped
+	   stacks, while staying readable for prose. */
+	--sl-content-width: 54rem;
 	/* dark theme accent (Starlight default) */
 	--sl-color-accent-low: #103d2e;
 	--sl-color-accent: #2dd4a7;
