@@ -58,6 +58,8 @@ export default defineConfig({
 				{ label: 'Module 10 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-10' } }] },
 				{ label: 'Module 11 · Gen AI & Agentic Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-11' } }] },
 				{ label: 'Module 12 · Gen AI & Agentic Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-12' } }] },
+				{ label: 'Module 13 · Data Platform Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-13' } }] },
+				{ label: 'Module 14 · Data Platform Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-14' } }] },
 				{ label: 'Cheat Sheets', collapsed: true, items: [{ autogenerate: { directory: 'cheatsheets' } }] },
 			],
 		}),

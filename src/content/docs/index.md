@@ -11,7 +11,7 @@ description: "Course syllabus, Director-altitude system-design and engineering-l
 
 ## 1. What this course is
 
-A self-paced course that drills one repeatable method, **RESHADED**, onto a library of reusable **building blocks**, then runs it end-to-end across **~60 design problems**: the canonical set (URL shortener, Instagram, Uber, …), the non-canonical questions real Director loops actually ask (LLD curveballs, architecture-and-org strategy, business-domain systems), a **Gen AI & Agentic AI track** (the LLM, RAG, and agent systems every company now expects its leaders to design and govern), and a dedicated **leadership track** for the behavioral half of the loop. The goal is not to memorize architectures or rehearse answers. It's to make the method *muscle memory* so that in **both halves of the loop**, the design round and the leadership round, you produce a defensible, quantified, trade-off-aware answer under pressure.
+A self-paced course that drills one repeatable method, **RESHADED**, onto a library of reusable **building blocks**, then runs it end-to-end across **~60 design problems**: the canonical set (URL shortener, Instagram, Uber, …), the non-canonical questions real Director loops actually ask (LLD curveballs, architecture-and-org strategy, business-domain systems), a **Gen AI & Agentic AI track** (the LLM, RAG, and agent systems every company now expects its leaders to design and govern), a **data-platform track** (the analytical/OLAP systems, lakehouses, and data pipelines an engineering-and-data leader is expected to design and run), and a dedicated **leadership track** for the behavioral half of the loop. The goal is not to memorize architectures or rehearse answers. It's to make the method *muscle memory* so that in **both halves of the loop**, the design round and the leadership round, you produce a defensible, quantified, trade-off-aware answer under pressure.
 
 **Two rules govern every lesson:**
 1. **Always quantify.** "It scales" is banned. We show the math.
@@ -21,7 +21,7 @@ A self-paced course that drills one repeatable method, **RESHADED**, onto a libr
 
 ## 2. The spine: RESHADED
 
-Run this exact 8-step roadmap on *every* problem. You'll see it named in every walkthrough (Modules 4–9 and 12, adapted per problem) until it's automatic.
+Run this exact 8-step roadmap on *every* problem. You'll see it named in every walkthrough (Modules 4–9, 12, and 14, adapted per problem) until it's automatic.
 
 | Step | Letter | What you do | The interview signal |
 |---|---|---|---|
@@ -73,7 +73,7 @@ Every lesson delivers all of these, in this order:
 10. 3-5 practice questions with model answers
 11. Key takeaways (5) + a 2-3 line spaced-repetition recap
 
-Modules 7-12 adapt this to their format, the LLD lessons add interface sketches, the strategy lessons lead with sequencing and risk, the Gen AI lessons keep the contract while leaning on the model/agent building blocks the problems rest on, the leadership lessons add a *2015-vs-2026 calibration* and annotated model answers, but the constants hold throughout: intuition first, every decision quantified with its rejected alternative, a trade-offs view, "what interviewers probe," and a spaced-repetition recap.
+Modules 7-14 adapt this to their format, the LLD lessons add interface sketches, the strategy lessons lead with sequencing and risk, the Gen AI and data-platform lessons keep the contract while leaning on the building blocks their problems rest on, the leadership lessons add a *2015-vs-2026 calibration* and annotated model answers, but the constants hold throughout: intuition first, every decision quantified with its rejected alternative, a trade-offs view, "what interviewers probe," and a spaced-repetition recap.
 
 ---
 
@@ -96,7 +96,7 @@ Built as self-contained React artifacts, no network calls, at the module where e
 
 ## Director's Fast Path
 
-An honest accounting: the full course is now **~530k words across 12 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
+An honest accounting: the full course is now **~655k words across 14 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
 
 **Must do (full reads):**
 - **Module 1**, interview mechanics and estimation reps.
@@ -114,6 +114,8 @@ An honest accounting: the full course is now **~530k words across 12 modules**, 
 **Module 10, the leadership track is not optional.** ~40% of a Director loop is leadership, and it's where most strong system designers lose the offer. Read **10.1-10.3** (the calibration, the four answer frameworks, the story portfolio) first, they're the spine, then the category lessons that match your gaps. Use the **probe simulator** (10.2) and **story-coverage matrix** (10.3) as drill tools, and build your real story bank early; a quantified, probe-resistant portfolio is the single highest-ROI prep on this whole site.
 
 **The Gen AI & Agentic track (Modules 11–12) is now table stakes.** Every company is building on LLMs, and Director loops increasingly add an AI-systems design round and AI-strategy questions on top of the classic ones. **Module 11** is the building blocks: the LLM mental model and its token/cost/latency math, embeddings and vector search, RAG, inference and serving, the prompt-vs-RAG-vs-fine-tune decision, guardrails and safety, evaluation/LLMOps, and cost control, then the agentic half (the agent loop, tools and MCP, memory, multi-agent orchestration, durable runtimes, agent safety), capped by two leadership lessons (AI strategy and build-vs-buy; governance, risk, and cost). **Module 12** runs RESHADED across the eight problems these loops actually ask: enterprise RAG, a ChatGPT-style assistant, an LLM gateway/router, content moderation at scale, a tool-using support agent, an autonomous multi-agent coder, image generation, and a real-time meeting assistant. Read **11.1, 11.3, and 11.9** as the spine, then the problems closest to your target. The two non-negotiables hold here too: quantify (in tokens and dollars), and name the trade-off and the rejected alternative. The raw-serving deep dive lives in **5.15**, which Module 11.4 and Module 12 build on.
+
+**The Data Platforms track (Modules 13–14) is the analytics-and-data half of the modern leadership remit.** If your scope sits at the intersection of engineering and data, Director loops now probe whether you can design and *govern* the analytical plane, not just the operational one. **Module 13** is the building blocks: the OLTP-vs-OLAP mental model and the freshness/scan-cost/volume/trust lens, columnar storage, the warehouse/lake/lakehouse and open table formats (Iceberg/Delta), the Spark and Flink engines, real-time OLAP, ingestion and CDC, orchestration and dbt, dimensional and medallion modeling, data quality and contracts, governance/catalog/lineage/mesh, and platform FinOps, capped by two leadership lessons (data strategy and build-vs-buy; leading a data-platform org) carrying the 2015-vs-2026 calibration. **Module 14** runs RESHADED across the six problems these loops ask: the warehouse/lakehouse, a real-time OLAP serving store, a CDC/streaming-ETL pipeline, a product-analytics platform, a data-lake-governance/mesh, and a data-observability platform. Read **13.1, 13.3, and 13.4** as the spine, then the problems closest to your target. The two non-negotiables hold here too: quantify (in bytes scanned, freshness, and dollars), and name the trade-off and the rejected alternative. **Lesson 2.9** (batch vs stream, Lambda/Kappa) is the prerequisite the whole track builds on.
 
 **One convention to know:** lessons park optional IC-level detail in collapsible **"Go deeper"** blocks. Skip them by default; open one only when a decision you're defending turns on that detail. They exist for depth-on-demand, not for the first pass.
 
