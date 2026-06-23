@@ -27,6 +27,9 @@
 	   5-column RESHADED trade-off tables breathe instead of wrapping into cramped
 	   stacks, while staying readable for prose. */
 	--sl-content-width: 54rem;
+	/* Left nav sidebar widened (Starlight default 18.75rem -> 25rem) so the
+	   long module/lesson titles in the tree wrap less. */
+	--sl-sidebar-width: 25rem;
 	/* dark theme accent (Starlight default) */
 	--sl-color-accent-low: #103d2e;
 	--sl-color-accent: #2dd4a7;
