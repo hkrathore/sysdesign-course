@@ -220,7 +220,7 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 
 ---
 
-## Trade-offs table: algorithm selection as class design
+### Trade-offs table: algorithm selection as class design
 
 | Dimension | A, Token bucket | B, Sliding-window log | C, Fixed window | Use when… |
 |---|---|---|---|---|
@@ -233,7 +233,7 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Why three algorithms behind an interface?"**, *Strong:* maps each to a requirement (burst tolerance, memory, false-reject cost); the seam is forced by per-endpoint differences. *Red flag:* "Strategy pattern is best practice", pattern as incantation.
 - **"Two threads, one token left."**, *Strong:* the read-modify-write race, check-and-consume atomic *in the contract*, per-client locks, the convoy quantified. *Red flag:* `synchronized` everywhere, no cost stated.
@@ -243,7 +243,7 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Leading with an algorithm instead of the interface.** Refill math before any contract exists reads as IC reflex. Interface, seam, state, the algorithm is a plug-in.
 - **`check()` and `consume()` as separate methods.** The gap is a TOCTOU race the interface invites. One atomic call, make the race inexpressible.
@@ -253,7 +253,7 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Sketch your core interface and defend its shape.**
 > *Model:* `Decision allow(clientId, resource)` on the facade; `Decision tryAcquire(state, rule, now)` on the Strategy. Three choices: **`Decision`, not boolean**, the caller needs `retryAfter` and remaining quota for 429 headers; **check-and-consume in one call**, separate check/consume is a TOCTOU gap the contract must make impossible; **time injected, monotonic**, wall clock steps backward under NTP and mints free tokens. Strategies stateless and shared; per-client state in a locked map entry, the factoring that later lets state move to Redis.

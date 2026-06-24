@@ -229,7 +229,7 @@ WS   /v1/docs/{docId}/connect
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -239,7 +239,7 @@ WS   /v1/docs/{docId}/connect
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"OT or CRDT - and why?"** - *Strong:* names **all three** (incl. why locking kills the product), picks one **against a requirement** (CRDT *because* offline merge is required), states the trade (metadata overhead), and **delegates the proof with a stated prior** (Yjs). *Red flag:* "we use CRDTs" with no idea why - or fifteen minutes deriving transforms.
 - **"How do two people editing the same word converge?"** - *Strong:* by construction - CRDT ops are commutative with stable per-element IDs and a deterministic tie-break, so every replica orders them identically with no lost keystroke. *Red flag:* "last write wins" (loses keystrokes) or "lock the paragraph" (kills co-editing).
@@ -249,7 +249,7 @@ WS   /v1/docs/{docId}/connect
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Hand-waving "we'll use CRDTs"** with no reason and no trade-off - or rat-holing on transform-function derivation. Both miss the altitude: **name three, decide one against a requirement, delegate the proof.**
 - **Treating convergence as a staleness problem.** A stale read here means **two people see two different documents** - a correctness invariant, not a latency knob.
@@ -259,7 +259,7 @@ WS   /v1/docs/{docId}/connect
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. OT or CRDT for this, and defend it.**
 > *Model:* Three strategies: locking (rejected - it serializes co-editing and kills the product), OT, CRDT. I choose a **sequence CRDT**, and the deciding requirement is **offline editing** - under a CRDT, reconnect-and-merge is the *same code path* as online editing (commutative merge, no central ordering authority), whereas OT must transform an offline client's stale-baseline ops against all intervening history on reconnect. The trade I accept is CRDT metadata/memory overhead, mitigated by snapshotting and a mature library; if offline were cut I'd reconsider OT for smaller payloads. The convergence *proof* I delegate to the collaboration team with property tests and a fuzzer; my prior is **Yjs**. Owning the decision, delegating the internals, is the point.

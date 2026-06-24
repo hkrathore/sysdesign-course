@@ -267,7 +267,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -277,7 +277,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What's the read:write skew, and why is a single ratio the wrong answer?"** - *Strong signal:* names **two planes** - write-once/dedup'd blocks vs a metadata plane **read-amplified by device + member fan-out** - and designs the cheap-connection / expensive-commit split. *Red flag:* "read-heavy like every app" and a byte read-cache the immutable block store already obviates.
 - **"How does a device know what changed without re-downloading everything?"** - *Strong:* the **per-namespace cursor + journal**, contrasted with full-tree-diff death. *Red flag:* periodic tree fetch-and-compare, or no notion of *order*.
@@ -287,7 +287,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Re-treading the metadata/blob split as the headline.** It's table stakes (Pastebin). The new crux is **sync** - cursor/journal, dedup, conflict.
 - **Full-tree-diff sync.** O(tree) per poll across 200M devices. The per-namespace cursor + journal makes it O(changes).
@@ -297,7 +297,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate storage and the commit rate, and defend your per-user basis.**
 > *Model:* Basis stated first: **blended across all 500M registered at ~10GB/user** - free tier dominates, so a blended 50GB would be indefensible. Raw `= 5 EB`; dedup+compression ~35% → **~3 EB effective**. At ~1MB/file that's **~5T files ≈ ~5T blocks** (most files are one sub-4MB block), and the chain ties out (`10GB/1MB = 10K files/user`). Writes: ~100 changes/user/day × 100M DAU → **~120K commits/s avg, ~300-500K peak**. The headline is the pairing: **~120K durable ordered commits/s fanned out over ~200M idle connections.** The soft knob is changes/user/day - I'd anchor it and let the interviewer dial it.

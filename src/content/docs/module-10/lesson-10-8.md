@@ -269,7 +269,7 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -280,7 +280,7 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"How do you summarize a 2-hour meeting whose transcript exceeds the model's context window?"** — *Strong signal:* names the context-window limit explicitly, reaches for **map-reduce / hierarchical reduction** (chunk → summarize → reduce), and notes lost-in-the-middle as the reason one-shot stuffing degrades even when it *fits*. Mentions citation-grounding to keep the reduce faithful. *Red flag:* "send the whole transcript to the LLM" with no awareness of context limits, cost, or middle-degradation.
 
@@ -294,7 +294,7 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **One "AI pipeline" box.** Treating live captions and post-meeting notes as one system. They have opposite binding constraints (latency vs context/cost) and must be split, joined only by the transcript.
 - **Naive long-transcript summarization.** Stuffing a whole long transcript into one prompt — expensive on every call and degraded by lost-in-the-middle. Map-reduce or refine, by transcript length.
@@ -304,7 +304,7 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. A user complains live captions lag the speaker by several seconds. What's wrong and how do you fix it?**
 

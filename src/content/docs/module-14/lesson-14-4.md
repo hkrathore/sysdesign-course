@@ -224,7 +224,7 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -234,7 +234,7 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"A region just died at peak, go."** *Strong:* runs the script, declare on a pre-written rule, drain, promote, shed in pre-agreed order, communicate with a revenue number. *Red flag:* starts debugging the region, or describes a failover never drilled.
 - **"Why not active-active everywhere, one posture, simpler?"** *Strong:* two costs, quantified, ~+$18M/yr over tiered, *and* a write-conflict problem imported into 80 services that mostly don't need it. *Red flag:* agrees, or rejects it on vibes without the dollar delta.
@@ -244,7 +244,7 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **"Everything active-active."** The genre's signature failure: ~2× spend defended with "resilience," plus a conflict-resolution problem in every service. Tiering by revenue-at-risk *is* the answer; uniformity is the absence of one.
 - **Replication confused with backup.** Replication copies your bad deploy and your `DELETE` to every region in milliseconds. Point-in-time backups survive in every tier, including Tier 0.
@@ -254,7 +254,7 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. It's Black Friday peak and us-east just went dark. First 15 minutes?**
 > *Model:* T+0-3: external probes confirm from three vantage points; the pre-written rule says declare at 3 minutes unreachable, the incident commander declares via the out-of-region control plane; nobody debugs first. T+3-6: drain East; Tier 0 in West is already serving production, so checkout recovers inside ~6 minutes; carts homed East lose seconds of writes, the RPO we signed. T+5-15: promote the Tier 1 replica, scale the warm fleet against pre-reserved quota, activate the shedding order, analytics first, checkout last, by written policy. T+10-15: synthetic checkout transactions verify the revenue path; status page and exec comms go out with a dollar estimate. The only live decision was *declare*, everything else was rehearsed in quarterly evacuations, which is why I can give minute marks instead of adjectives.

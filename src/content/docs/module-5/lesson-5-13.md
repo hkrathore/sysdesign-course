@@ -266,7 +266,7 @@ A skewed key concentrates load on one partition's leader.
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -276,7 +276,7 @@ A skewed key concentrates load on one partition's leader.
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Does Kafka guarantee ordering?"**, *Strong:* "**Per-partition only.** Same key → same partition → strict order; across partitions, none. Global ordering forces a single partition and caps throughput at one consumer, you buy ordering with the key and pay in parallelism." *Red flag:* "Yes, Kafka is ordered," no qualifier. The single most diagnostic answer.
 - **"What exactly does `acks=all` promise, and when does it fail?"**, *Strong:* waits for all *in-sync* replicas (not all RF copies) bounded by `min.insync.replicas`; if the ISR shrinks below the floor, the topic goes **write-unavailable rather than lose data**, a deliberate CP-leaning choice, tunable per topic. *Red flag:* "acks=all never loses data," no mention of the ISR floor.
@@ -286,7 +286,7 @@ A skewed key concentrates load on one partition's leader.
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Claiming global ordering.** Ordering is **per-partition only.** Forgetting the qualifier is the classic tell that the mental model is borrowed, not built.
 - **Misreading `acks=all`.** It waits for the *in-sync* set, not all RF copies, and goes **write-unavailable below `min.insync.replicas`** rather than lose data. RF=3 with `min.insync.replicas=1` makes `acks=all` a lie.
@@ -296,7 +296,7 @@ A skewed key concentrates load on one partition's leader.
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Two messages for the same user must be processed in order. How do you guarantee it?**
 > *Model:* Set the **partition key to `user_id`.** That user's messages all hash to one partition, strictly ordered by offset, and a partition is consumed by exactly one member of a group, so a single consumer sees them in order. The cost: ordering holds *only* within that key; different users have no relative order, fine since I only need per-user sequence. A hot whale I'd salt to spread load, accepting weaker ordering for that key. The thing I'd never claim is global ordering, it needs one partition and caps the topic at one consumer.

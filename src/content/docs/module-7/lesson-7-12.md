@@ -108,7 +108,7 @@ This is the category where a dated answer is most expensive, because the dated a
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"When, specifically, would you self-host an open lakehouse?"**, *Strong:* concrete triggers, genuine PB-scale, *steady* volume where the managed bill is high six/seven figures and self-managed compute would stay busy, *plus* a data-platform team that can actually operate it, *or* a hard residency constraint, and names the fixed team cost it adds. *Red flag:* "to save money" or "to avoid lock-in" with no volume math and no mention of the team, ideology, not a decision.
 - **"The CEO wants us to build a real-time lakehouse. How do you respond?"**, *Strong:* channels the ambition without capitulating, "the goal is fast, trustworthy data, and the cheapest path is a managed platform on open formats plus a streaming path only for the workloads that need seconds; here's the spend and team comparison and what each buys." Redirects to value, offers a proof gate. *Red flag:* either caves to the buzzword or dismisses the CEO; both lose the room.
@@ -119,7 +119,7 @@ This is the category where a dated answer is most expensive, because the dated a
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Building when you should buy.** The engineer's instinct to stand up the lakehouse because operating infrastructure feels like the serious work. The default is buy-to-move-fast; self-hosting is what you *earn* with PB-scale steady volume and a team to run it, not a starting posture.
 - **Comparing the invoice, ignoring TCO and the crossover.** Putting the warehouse bill next to "Spark on EC2 is cheaper per query" without counting the data-platform team (the dominant fixed cost), the slower delivery, the on-call, and where the volume crossover actually sits. Self-host economics live or die on whether the savings clear the headcount.
@@ -129,7 +129,7 @@ This is the category where a dated answer is most expensive, because the dated a
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Make the build-vs-buy call for a Series-B startup in 90 seconds.** A fast-growing SaaS has tens of TB and two analysts, no platform engineers. *(Sketch: clarify volume + team + workload; options spectrum; sequence = managed warehouse + dbt + a managed connector now to move fast, standardize on Iceberg for portability, revisit self-host only if volume reaches PB-scale and you've hired a platform team; name the open-format-reversible vs team-one-way-door trade, self-hosting now would be a stranded generator.)*
 2. **Defend the warehouse spend to a cost-cutting CFO.** "We're paying $2M/year for BigQuery, own it." *(Sketch: TCO comparison, the $2M opex vs cheaper compute + object storage *plus* a $1–2M/year platform team + slower delivery + on-call; roughly a wash at $2M, self-host clearly wins only at much higher steady volume; offer the measured path, FinOps hygiene first for a quantified 20–40%, then route only the high-volume steady workloads to self-managed compute over the same Iceberg tables, the platform-FinOps lesson.)*

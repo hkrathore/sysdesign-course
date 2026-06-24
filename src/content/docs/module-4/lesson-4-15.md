@@ -262,7 +262,7 @@ Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -272,7 +272,7 @@ Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What actually drives the load?"**, *Strong:* names the **control-plane** reframe, the due-poll scan + execution fan-out, a ~1.2K/s average hiding a ~30M-fire midnight herd, a ~7 TB/yr history firehose, and sizes those. *Red flag:* sizes it like a web app with a giant read tier.
 - **"How do you guarantee a job runs exactly once?"**, *Strong:* "Exactly-once firing across a leader death doesn't exist, gaps miss, zombies double. Both firing and execution are at-least-once; idempotency on **`(job_id, fire_time)`** gives exactly-once-*effect*; the fire-time is *in* the key so retries dedupe but recurrences don't." *Red flag:* "I elect a leader, so it fires once."
@@ -283,7 +283,7 @@ Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Sizing it like a read-heavy web service.** The load is the due-poll + fan-out; the costs are the midnight herd and the history firehose.
 - **"Leader election gives exactly-once firing."** It only prevents *concurrent* double-fire. Gaps miss; zombies double without fencing. Correctness needs idempotency on `(job_id, fire_time)`.
@@ -293,7 +293,7 @@ Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate fires/sec and due-poll load for 100M live timers, why is the average misleading?**
 > *Model:* Uniform: `100M ÷ 86,400 ≈ 1.2K fires/s`, small. But fires clump at round cron times: 30% pinned to midnight is **30M fires in one second**, ~4 orders of magnitude above average; against a 50K/s drain that's a 600 s daily cliff. So I size for the herd and smear it with a jitter window. The due-poll is cheap in count (~8 scans/s across 16 shards) but each is a `SKIP LOCKED` claim over the time index, the cost is lock + scan pressure, which is why I shard by `hash(job_id)` and keep history out of the table. The storage that matters isn't the 10 GB live set; it's the ~7 TB/yr history firehose, which must be tiered.

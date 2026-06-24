@@ -104,7 +104,7 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"How did you detect the slip, and who did you tell, when?"**, *Strong:* a specific early instrument (a widening forecast range, a skip-level signal) and a same-day headline-first heads-up *before* stakeholders heard it elsewhere. *Red flag:* the story starts at the crisis with no early-warning mechanism, or stakeholders found out late.
 - **"Did you consider killing it?"**, *Strong:* the kill was a live option, costed against the rescue, with the redeploy named; sunk cost explicitly rejected. *Red flag:* never considered the kill, or killed reflexively with no analysis.
@@ -114,7 +114,7 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **The story starts at the crisis.** No detection beat means no system, and the cluster is scored on the system. *Missing the deadline isn't the failure; the surprise is.* Open with the instrument that flagged it, not the fire.
 - **Heroics as strategy.** Proud crunch, the weekend war room, "we just pushed through." It reads as the absence of a decision tree, and in 2026 as the absence of cost discipline. The options-costed beat is scored, not the stamina.
@@ -124,7 +124,7 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Run the incident on the IC command spine, with the dollar figure.** "Walk me through a Sev-1 you led." *(Sketch: declare severity in minutes, separate into named workstreams while you coordinate and don't type, a comms cadence you wrote, a hard call under two hypotheses with bounded-vs-unbounded risk reasoning and the cost-per-hour, then a blameless postmortem where you own your contribution first, action items verified at 30 days, MTTR before/after. Hold every figure for the probe.)*
 2. **Defend a kill as the turnaround.** "Tell me about a failing project you turned around." *(Sketch: lead with detection, then make the kill a live, costed option against the rescue; if you killed it, name the redeploy and reject sunk cost out loud; if you rescued it, say why the kill *lost* on the numbers. End with the program-health mechanism that would have flagged it sooner.)*

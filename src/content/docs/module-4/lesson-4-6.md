@@ -235,7 +235,7 @@ Pairwise Signal sessions would force the sender to encrypt each group message on
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -246,7 +246,7 @@ Pairwise Signal sessions would force the sender to encrypt each group message on
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"How does the server route a message when the recipient could be on any of 250 gateways?"**, *Strong:* a **session registry (Redis) mapping device→gateway**, heartbeat-TTL'd, looked up by the router; notes it's the hottest dependency and shards it. *Red flag:* "the load balancer figures it out," or broadcasting to all gateways.
 - **"Walk me through delivery to an offline user."**, *Strong:* ack-then-route (always-writable), registry miss → durable per-recipient inbox, drain-and-delete on reconnect, exactly-once display via `client_msg_id` dedupe. *Red flag:* losing messages when the recipient is down.
@@ -256,7 +256,7 @@ Pairwise Signal sessions would force the sender to encrypt each group message on
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Sizing for "messages/sec" and forgetting fan-out + receipts.** The real load is **~6M deliveries/s and ~12M receipts/s**, 4-10× the headline; quoting only the send rate undersizes everything.
 - **Synchronous delivery (sender waits for recipient).** Breaks always-writable; ack-then-route via the durable queue is the fix.
@@ -266,7 +266,7 @@ Pairwise Signal sessions would force the sender to encrypt each group message on
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. WhatsApp is E2E-encrypted. How do you do *group* fan-out if the server can't read the message?**
 > *Model:* Encryption is the client's job, the server can't make one plaintext copy and broadcast. Naive pairwise encryption is O(N) crypto per message; **Sender Keys** makes it **O(1) per message with an O(N) re-key only when membership changes** (rotate on leave so the departed member can't read on). The server's role is pure routing: a fan-out worker expands the group into per-recipient delivery jobs on Kafka, each delivered like a 1:1 message. The protocol internals belong to the security team; the architecture guarantees it only ever routes sealed envelopes.
@@ -282,7 +282,7 @@ Pairwise Signal sessions would force the sender to encrypt each group message on
 
 ---
 
-## Key takeaways
+### Key takeaways
 - **Messaging is a switchboard, not a database:** the two hard sub-problems are the **session registry** (device→gateway, Redis, the hottest lookup) and the **durable per-recipient inbox** (Cassandra/RAM), sized for **200M sockets** and **~6M deliveries + ~12M receipts/s**, not the 1.2M-send/s headline.
 - **Fan out on *write*, delete on delivery**, the inverse of a feed. Bounded fan-out (≤1,024), read once, then gone: **~5 TB/day transient vs ~7 PB/yr persisted**.
 - **Ack-then-route through a durable queue (Kafka)** buys always-writable + durability + offline buffering in one move; a `client_msg_id` idempotency key turns at-least-once transport into **exactly-once display**.

@@ -114,7 +114,7 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Give me a meeting you killed, and how you knew it was safe to."**, *Strong:* a specific forum removed because an artifact made it redundant (the async review replacing the status all-hands), "nobody noticed" as the evidence. *Red flag:* no killed meeting, a system that only adds is process maximalism, and you'll bloat the calendar here too.
 - **"How would you use DORA to find your weakest engineers?"**, *Strong:* you wouldn't, that's the stack-rank trap; DORA diagnoses where the *system* is slow, individual performance runs through 1:1s and calibration, not a flow dashboard. *Red flag:* taking the bait and ranking people by a team-level metric (or naming LOC, commits, or velocity as a productivity measure, an instant fail, harder post-AI).
@@ -123,7 +123,7 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **A list of meetings with no decisions attached.** A cadence is not an operating system. Every recurring forum needs an owner, an artifact, and a decision right, a meeting that only shares status should be a written doc.
 - **"I hire great people and get out of the way" with no verification layer.** The abdication ditch, delegation without a visibility system is flying by feel. The fix is the three channels and the exception protocol that let you trust *and* verify.
@@ -132,7 +132,7 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Describe your operating system, then prove it.** "What's your management operating cadence?" *(Sketch: the layered stack, staff for decisions, monthly metrics review with a cost line, quarterly planning, 1:1s/skip-levels/incident loop, each with owner, artifact, decision right; then the visibility three channels + exception protocol; close with the killed meeting and the metric-changed-a-decision proof. Say the "owner, artifact, decision right" sentence aloud.)*
 2. **Walk a red metric to a systemic fix.** "Your change-failure rate doubled, go." *(Sketch: diagnose-systems-not-individuals, 'where did the safety net thin,' not 'who broke it'; a real cause, a systemic fix (a review gate, not a person), the recovery number with lead time held. State the meta-position explicitly.)*

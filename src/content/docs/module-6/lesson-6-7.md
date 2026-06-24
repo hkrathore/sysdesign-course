@@ -259,7 +259,7 @@ Production wrinkle: simplification suggestions go stale the moment a new expense
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -269,7 +269,7 @@ Production wrinkle: simplification suggestions go stale the moment a new expense
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What stops balances from drifting?"** - *Strong:* nothing *needs* to - balances derive from entries that sum to zero by construction; reconciliation is cheap insurance, not the mechanism. *Red flag:* "we carefully update both balances in a transaction" - discipline where structure should be.
 - **"Split ₹100 three ways."** - *Strong:* `10000 → [3334, 3333, 3333]` cents, extra cent by a stated deterministic rule, largest-remainder for percents, floats banned with the one-line reason. *Red flag:* "₹33.33 each" with the lost cent unaccounted.
@@ -279,7 +279,7 @@ Production wrinkle: simplification suggestions go stale the moment a new expense
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Floats for money.** `0.1 + 0.2 ≠ 0.3`; three thirds of ₹20 don't make ₹20. Integer minor units, full stop.
 - **Mutable pairwise balances as truth.** The drift is silent, the race is real, there's no audit trail. Balances are views.
@@ -289,7 +289,7 @@ Production wrinkle: simplification suggestions go stale the moment a new expense
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. ₹2,000 dinner, split equally among 3, payer included. Show the exact ledger rows.**
 > *Model:* Total `200000` cents; equal-split shares `[66667, 66667, 66666]` (sorted by user id, first two take the remainder cents). Payer (user 1, share 66667) fronted 200000 and consumed 66667 → entry **+133333**; users 2 and 3 get **−66667** and **−66666**. Sum: `133333 − 66667 − 66666 = 0`. Deterministic, so a retry with the same idempotency key reproduces - and dedups to - the identical posting.

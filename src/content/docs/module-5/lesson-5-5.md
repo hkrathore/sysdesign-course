@@ -349,7 +349,7 @@ Order-state sharding scales linearly, `order_id` key distributes cleanly, add sh
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when |
 |---|---|---|---|---|
@@ -361,7 +361,7 @@ Order-state sharding scales linearly, `order_id` key distributes cleanly, add sh
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What prevents dispatching a courier to a cancelled order?"**, Strong: conditional CAS, `COURIER_ASSIGNED` is only valid from `READY_FOR_PICKUP`; a concurrent cancellation wins the row first; dispatch sees 0 rows updated and re-queries. Red flag: "we check before dispatching", a read-then-write race condition.
 
@@ -375,7 +375,7 @@ Order-state sharding scales linearly, `order_id` key distributes cleanly, add sh
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Dispatching at order-placed instead of at ready-minus-travel.** This is the single most common design gap. The restaurant-prep wait makes naive dispatch expensive and operationally wrong; always quantify the idle-cost consequence.
 - **Making menus strongly consistent.** A 120-s stale menu that re-prices at checkout is acceptable UX. Serving menus from the order-state store couples a 2M-reads/s browse firehose to a CP transactional database and is a scaling catastrophe.
@@ -385,7 +385,7 @@ Order-state sharding scales linearly, `order_id` key distributes cleanly, add sh
 
 ---
 
-## Practice questions (with model answers)
+### Practice questions (with model answers)
 
 **Q1. A restaurant marks an order `READY_FOR_PICKUP`, but the courier assigned to it just cancelled. What happens?**
 

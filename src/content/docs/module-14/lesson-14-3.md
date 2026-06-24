@@ -201,7 +201,7 @@ Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliati
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -211,7 +211,7 @@ Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliati
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"How do you know the two systems match?"**, *Strong:* layered proof, checksums for all data, dark reads for live truth, a numeric budget with a sustained-clean window; unexplained mismatches block. *Red flag:* "compare row counts," "run both and watch for errors."
 - **"Dual-write or CDC? Defend it."**, *Strong:* CDC, dual-write is non-atomic (partial failure = silent divergence, no record), unordered, and needs backfill + reconciliation anyway; names the vendor-exit exception. *Red flag:* dual-write "for simplicity" without naming divergence.
@@ -221,7 +221,7 @@ Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliati
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Big-bang cutover**, converting a reversible program into one bet. The ladder exists so no single moment carries the whole risk.
 - **Dual-write as the primary sync**, non-atomic, unordered, silently divergent; you build CDC's hard parts anyway, after the divergence is in production.
@@ -231,7 +231,7 @@ Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliati
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Your TinyURL Postgres is at 80% capacity, 5K writes/s. Sketch the live migration to a sharded store.**
 > *Model:* Six phases. **Assess:** backfill ≈ a day at a throttled 200 MB/s; the 5 MB/s change rate is trivial for CDC, the calendar is verification, not copying. **Stabilize:** freeze schema; funnel all access through one seam with runtime flags. **Parallel-run:** Debezium off the WAL into Kafka keyed by short code; mark the log position, snapshot, replay to convergence; verify with partition checksums plus 1% dark reads against a < 0.01% budget sustained a week. **Shift:** reads ramp 1→10→50→100% behind flags; writes flip last via a 2-5 s drain with reverse CDC started at the flip. **Verify:** 2+ weeks of burn-in, old store as warm replica, flip-back rehearsed. **Decommission:** archive to S3, kill reverse sync, delete scaffolding. Dual-run ≈ $13K/week, why the exit criteria are written before phase one and I own go/no-go.

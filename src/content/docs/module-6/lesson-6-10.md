@@ -202,7 +202,7 @@ The promise ledger can deliberately overbook, airline-style: some reservations n
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -212,7 +212,7 @@ The promise ledger can deliberately overbook, airline-style: some reservations n
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Walk me through checkout to pickup."**, *Strong:* narrates two-phase allocation unprompted, promise at checkout, slot bound at courier scan, and quantifies why (the 60% dwell tax). *Red flag:* binds a slot at checkout without noticing transit time, or never asks when the locker is chosen.
 - **"A code expires. Is the slot free?"**, *Strong:* "No, the package is still in it. Expiry is a package transition; the slot waits in `AWAITING_RETURN` for the carrier sweep, and the ledger counts it unavailable." *Red flag:* the lazy-expiry reflex copied from seat-booking problems, memorized patterns misapplied.
@@ -222,7 +222,7 @@ The promise ledger can deliberately overbook, airline-style: some reservations n
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Modeling the hardware.** `Cabinet`, `Door`, `Screen` entities burn the timer on scenery; the system is three lifecycles and a counter.
 - **Conflating package expiry with slot availability**, the signature trap; reclaim has a truck in it.
@@ -232,7 +232,7 @@ The promise ledger can deliberately overbook, airline-style: some reservations n
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. The courier scans in; no free slot of the right size. Now what?**
 > *Model:* Bind-time fallback chain: next size up (an M in an L, wastes capacity, saves the delivery), then the nearest location in a small radius, then courier redirect, each step logged against the <2% SLO. But the real answer is upstream: this mostly happens when `AWAITING_RETURN` slots were counted as promisable, so the fix is the ledger, expired-but-uncollected packages subtract from `available_count`, and the carrier return sweep becomes a capacity-critical operation with its own SLA, not housekeeping.

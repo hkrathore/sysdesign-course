@@ -161,7 +161,7 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 ---
 
-## Trade-offs: defense posture options
+### Trade-offs: defense posture options
 
 | Posture | When to use | Risk |
 |---------|-------------|------|
@@ -172,7 +172,7 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 **"Walk me through the hardest trade-off."**
 *Strong:* Names a specific decision, 2-3 alternatives considered with rejection reasons, cost of the chosen path in numbers (engineering time, latency budget, availability impact). "The hardest part was alignment" is process, not architecture.
@@ -196,7 +196,7 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Submitting the intended design, not the actual design.** Every delta between your diagram and the running system is a credibility risk if you haven't pre-acknowledged it.
 - **Over-defending mistakes as inevitable.** The probe isn't "did you make mistakes?", it's "do you have the self-awareness to identify them and the judgment to know which ones you'd have avoided with the information available at the time?"
@@ -206,7 +206,7 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. "Your doc says you chose a monolithic deploy. Six months later you decomposed it. Was the original decision wrong?"**
 

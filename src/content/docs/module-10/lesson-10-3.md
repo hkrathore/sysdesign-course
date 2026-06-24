@@ -262,7 +262,7 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -273,7 +273,7 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"This box is now in front of every AI feature — how is it not the thing that takes them all down?"** — *Strong:* stateless multi-AZ fleet behind a health-checked LB, replicated Redis, no clever per-request dependency, load-shedding over collapse, and an explicit **fail-open vs fail-closed** decision *per dependency* tied to the requirement. *Red flag:* "we make it highly available" with no mechanism, or no awareness that the gateway is itself a SPOF.
 
@@ -287,7 +287,7 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating it as an ML problem.** There is no model to train; it's the **API-gateway + rate-limiter + circuit-breaker** pattern re-pointed at providers. Reaching for cleverness adds latency, cost, and failure modes.
 - **Forgetting the gateway is itself a SPOF.** It protects everything, so it's the most concentrated single point of failure you have — it needs its own HA story (stateless, multi-AZ, replicated shared state) before anything else.
@@ -297,7 +297,7 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. A team's AI feature suddenly 10×'d its traffic from a buggy retry loop and the whole org's chat features started getting rate-limited by the provider. How does your design prevent this?**
 

@@ -223,7 +223,7 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -233,7 +233,7 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Walk me through your classes."**, *Strong:* three entities + one value object, each justified by a requirement; cuts stated out loud. *Red flag:* ten classes in five minutes, `AbstractSpotFactory` before any clarifying question.
 - **"Two cars, one spot left, two gates, what happens?"**, *Strong:* already covered it unprompted; names the atomic claim, the `Held` window, timeout reclaim, the DB partial index backstop. *Red flag:* "I'd add synchronized everywhere," or surprise that concurrency exists in an OOD question.
@@ -243,7 +243,7 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Class explosion before scope lock**, modeling valet, EV charging, and reservations nobody asked for. Scope-cutting is the first scored behavior; skipping it loses the interview in minute two.
 - **Pattern-first design**, Singleton/Factory/Observer named before requirements are. Every abstraction must point at the requirement that bought it; pricing earns Strategy here, nothing else does.
@@ -253,7 +253,7 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Two cars hit two entry gates simultaneously; one compatible spot remains. Walk me through exactly why only one gets it.**
 > *Model:* Spot assignment is an atomic dequeue from a lock-free free-list per spot type, both gate threads call `poll()`; the queue's internal CAS guarantees one gets the spot and the other gets `null`, falling through to the next compatible size, then "lot full." There is no check-then-act window because the claim *is* the removal. The claimed spot sits `Held` until the ticket persists, with timeout reclaim if the gate crashes mid-assignment, the `AVAILABLE → HELD → OCCUPIED` shape of a Ticketmaster seat, shrunk to one process. Defense in depth: a partial unique index on open tickets per spot makes the database reject a double-issue even if the in-memory layer ever regressed.

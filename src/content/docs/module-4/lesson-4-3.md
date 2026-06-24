@@ -190,7 +190,7 @@ Re-check against the NFRs and hunt bottlenecks. Each fix names its trade-off.
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -200,7 +200,7 @@ Re-check against the NFRs and hunt bottlenecks. Each fix names its trade-off.
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Read-heavy or write-heavy, and why does it matter?"** - *Strong:* **write-heavy - ~100% writes** on the counter path, so you scale by sharding the keyspace, replicas buy HA not throughput, and the bottleneck is write-concentration (the hot key). *Red flag:* "cache the answers / add read replicas" - a stale counter is a wrong limit; this misframes the entire design.
 - **"How do you keep added latency under a millisecond?"** - *Strong:* embed the check (no extra service hop), one same-AZ Redis op, lease budget locally so most decisions never touch Redis - naming the fairness/accuracy you trade. *Red flag:* a central limiter service adding a second hop.
@@ -209,7 +209,7 @@ Re-check against the NFRs and hunt bottlenecks. Each fix names its trade-off.
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Designing it as a read-heavy store** - read replicas or response caching. The counter path is all writes; a stale count is a wrong decision.
 - **One store for everything** - cramming rules into Redis couples cold config to the hot counter store and risks eviction. Two planes, two technologies.
@@ -219,7 +219,7 @@ Re-check against the NFRs and hunt bottlenecks. Each fix names its trade-off.
 
 ---
 
-## Interviewer follow-ups (with model answers)
+### Interviewer follow-ups (with model answers)
 
 **Q1. You said the counter path is ~100% writes. Defend that, and say what it rules out.**
 > Every decision is "consume a token and tell me the result" - a read-modify-write. There is no separable read: reading a counter without decrementing tells you nothing actionable, and reading from a replica gives a stale value that produces a wrong limit. So it rules out both read-heavy reflexes: replicas add zero throughput (HA only) and caching the decision is impossible (it changes every request). The only reads are rule lookups - tiny and staleness-tolerant, cached in-process. You scale by **sharding the write keyspace**, and the bottleneck is write-concentration, not read fan-out.

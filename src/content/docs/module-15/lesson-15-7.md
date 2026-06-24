@@ -114,7 +114,7 @@ This category was re-scored hard: the efficiency era inverted the default (growt
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Span math, and when do you split a team?"**, *Strong:* managers at 6-8, M-of-Ms at 4-6, teams bud at 8-10 along *ownership* lines; names the scaffolding that breaks at ~30. *Red flag:* an org chart with no numbers, or splitting around personalities.
 - **"Can you hit the goal *without* the headcount?"**, *Strong:* treats headcount as the expensive option, reaches first for platform/AI leverage and fewer-larger teams, justifies each manager role. *Red flag:* "growth means more managers", the reflex that codes as ZIRP empire-building.
@@ -124,7 +124,7 @@ This category was re-scored hard: the efficiency era inverted the default (growt
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Promoting the best engineer by default.** The most common org-design error, and the most tempting. Management is a different job; a candidate should run a real slice of it first (lead a project, mentor, run a loop) and decide from evidence. No failed-transition story reads as someone who hasn't managed managers long enough to have made the mistake.
 - **Treating the inherited team as a blob.** "Low morale, so I ran an offsite" is an EM answer. The Director assesses person by person and team by team, most are fine, one structure is broken, one person is the issue, and acts differently on each. No before/after metric means it didn't happen.
@@ -134,7 +134,7 @@ This category was re-scored hard: the efficiency era inverted the default (growt
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Scale 15→50 in 18 months, answer the inverted version first.** *(Sketch: clarify headcount-vs-output and surface the leverage path before committing to bodies; span constants (6-8, 4-6, bud at 8-10 on ownership); ~6-8 teams + 2-3 senior-manager slots; scaffolding before headcount; ~60/40 with the why; tripwires at 8% attrition or spans past 8.)*
 2. **Inherited low-delivery, low-morale team, first 90 days.** *(Sketch: classify turnaround vs realignment, ask about a layoff; days 1-30 diagnose system-vs-person from delivery data, per-person read; 30-60 the structural fix + one visible win; 60-90 per-person honesty + reset the roadmap upward; before/after number + an honest "I acted three weeks too late.")*

@@ -252,7 +252,7 @@ The frontier *is* the crawl's progress; losing it means re-crawling petabytes. A
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -263,7 +263,7 @@ The frontier *is* the crawl's progress; losing it means re-crawling petabytes. A
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 At Director altitude the probes are about trade-off articulation, cost ownership, and delegation, not whether you can recite an HTTP GET.
 
@@ -275,7 +275,7 @@ At Director altitude the probes are about trade-off articulation, cost ownership
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating it as a download loop.** The hard part is the **frontier** (priority + politeness + dedup), not the HTTP GET.
 - **Partitioning the frontier by URL-hash.** It scatters each host across nodes, forcing a global rate-limiter on the hot path. Partition by **host** so politeness is local.
@@ -285,7 +285,7 @@ At Director altitude the probes are about trade-off articulation, cost ownership
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. How does the frontier enforce "≤1 req/s per host" while hitting 12k pages/sec, and why does partitioning matter?**
 > *Model:* Two ideas. The **two-tier frontier**: front queues encode priority, back queues encode politeness, each back-queue serves exactly one host, drained no faster than its `crawl_delay`, scheduled by a min-heap of next-eligible times. A host *physically can't* be fetched faster than its delay. And **partition by host**: all of `example.com` lives on one node, which enforces its limit locally, no global coordinator. Throughput comes from breadth: 12k/s ÷ 1 req/s/host = ~12k hosts drained concurrently. Sharding by URL-hash instead would scatter each host across nodes and demand a distributed rate-limiter at 12k/s; I traded perfect balance for coordination-free politeness, handling mega-host hot-spots with budgets.
@@ -304,7 +304,7 @@ At Director altitude the probes are about trade-off articulation, cost ownership
 
 ---
 
-## Key takeaways
+### Key takeaways
 - **A crawler is a politeness-constrained BFS, not a downloader.** ≤1 req/s/host + 12k pages/s ⇒ **≥12k concurrent hosts**, throughput is bought with host-breadth, not depth.
 - **Partition the frontier by host** so politeness is a local invariant with zero coordination, the pivotal decision; rejected URL-hash partitioning forces a global rate-limiter on the hot path.
 - **The seen-set is a RAM Bloom filter (~120 GB), not a database**, 720k checks/s vs 12k enqueues/s; a false positive drops a new page (coverage loss), never double-crawls; the filter is an 8× RAM saving over an exact set.

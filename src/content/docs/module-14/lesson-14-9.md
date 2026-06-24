@@ -246,7 +246,7 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -256,7 +256,7 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Two senior engineers are deadlocked. Walk me through what you do."**, *Strong:* a process, in order, steelman, shared requirement sheet with numbers, door classification, criteria-before-scoring, timebox, ADR with recorded dissent and tripwires; names who the decider is (usually not themselves). *Red flag:* jumps straight to which architecture they personally prefer, or "I'd get them in a room to hash it out" with no mechanism.
 - **"Which proposal wins, and why?"**, *Strong:* adjudicates on the requirement sheet, 140/s, p99 2s, a team with zero Kafka ops, not on architectural fashion; quantifies the gap (5× build cost, $200-300K/yr run delta, first-year risk premium); then looks for the hybrid that buys the loser's one winning row cheaply. *Red flag:* "event-driven is the modern approach" (taste), or a matrix recited with no interrogation of what it revealed.
@@ -266,7 +266,7 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Adjudicating on taste, then building a matrix to justify it.** The tell is scoring before criteria are agreed. Criteria and weights get signed while nobody knows which design wins, that sequencing *is* the integrity of the process.
 - **Treating team capability as a soft factor.** A design the team can't operate at 3 a.m. fails an NFR. "Zero production Kafka experience" belongs on the requirement sheet next to the latency budget, with the year-one incident cost priced in.
@@ -276,7 +276,7 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Both engineers refuse to budge after your two-week process. The timebox expires today. What happens?**
 > *Model:* The decider decides today, that's what the timebox is for. Consensus was never the exit criterion; an auditable decision was. The decider is the tech lead who'll operate the result; I'm the approver and I override only on budget, risk posture, or strategic conflict, none of which apply here. Both dissents (if both remain) go into the ADR by name with tripwires. The cost math is the justification: the blocked workstream burns ~$40K/week, and nothing new will be learned in week three that wasn't known in week two, past the timebox we're paying for comfort, not information. If the deadlock pattern *recurs* across decisions, that's a different problem, a missing technical strategy that should be pre-deciding these at the principle level, and that one lands on my desk, not the decider's.

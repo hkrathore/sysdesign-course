@@ -303,7 +303,7 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 ---
 
-## Trade-offs: the pivotal decisions
+### Trade-offs: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when |
 |---|---|---|---|---|
@@ -314,7 +314,7 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Why can't you shard the order book horizontally?"**, *Strong signal:* "Price-time priority requires a total order per symbol. Two engines processing the same symbol assign sequence numbers independently; fills diverge, both incorrect and a regulatory violation. You scale by partitioning symbols across engines, never by distributing one book." *Red flag:* horizontal distribution without addressing total-order violation.
 - **"How do you recover if the engine crashes?"**, *Strong signal:* "The engine is derived state, a projection of the journal. Restart, replay from the last snapshot to the journal tail (seconds per symbol at memory speed), resume. The hot standby makes failover instantaneous by pre-applying the journal in parallel." *Red flag:* "restore from a database backup", implies the book is stored separately from the journal.
@@ -324,7 +324,7 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Proposing horizontal distribution of a single order book.** Splitting a symbol's book across nodes requires cross-shard coordination on every match (nearly every event), reintroduces race conditions under concurrent inserts at the same price level, and breaks deterministic replay. This is the most common and most fatal mistake.
 - **Using floating-point for prices.** IEEE 754 doubles are non-deterministic across platform configurations; replaying the journal on a different machine can produce different fill prices. Prices are integer ticks, always.
@@ -334,7 +334,7 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 ---
 
-## Practice questions (with model answers)
+### Practice questions (with model answers)
 
 **Q1. Two orders arrive at the same price level. How does the engine decide which fills first?**
 

@@ -210,7 +210,7 @@ Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cr
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -220,7 +220,7 @@ Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cr
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"You have 72 hours, what do you do?"**, *Strong:* visibility first (billing export, top-20 items), delete only the provably orphaned, freeze commitments, and stand up the guardrail dashboard *before* any risky cut. *Red flag:* cutting on day one with no decomposition, or spending the 72 hours forming a committee.
 - **"Why commitments after rightsizing?"**, *Strong:* a commitment is a contract on the baseline; commit first and you pay for the waste for 1-3 years, the ordering is a correctness property. *Red flag:* "buy reserved instances" as the opening move.
@@ -230,7 +230,7 @@ Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cr
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Cutting before decomposing.** Peanut-butter cuts ("everyone trims 20%") starve efficient teams, miss the concentrated waste, and break guardrails, designing before requirements, in dollars.
 - **Committing before rightsizing.** Locks the waste into a 1-3 year contract; the most expensive ordering mistake and the easiest probe to fail.
@@ -240,7 +240,7 @@ Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cr
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. The CFO wants 40% in two quarters. Walk me through the first 30 days.**
 > *Model:* First 72 hours: visibility and freeze, billing export on, top-20 line items (~80% of a $10M bill), delete the provably orphaned (~$0.5-0.8M run-rate), freeze new commitments, stand up the guardrail dashboard before anything that could bite. Days 3-30, the ladder in order: rightsize compute, k8s requests, and storage off p95 utilization (~12%), shipped like deploys, canary, watch 48h, proceed or revert, *then* 1-year Savings Plans at ~75% coverage of the new baseline (~12%). That's ~32% at near-zero risk, the mandate's floor, and it funds the 6-month re-architecture that closes to ~40-45%. The ordering is the design: visibility before cuts, rightsize before commit, quick wins before structural work.

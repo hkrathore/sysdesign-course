@@ -173,7 +173,7 @@ Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, co
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -183,7 +183,7 @@ Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, co
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Why not just rewrite it?"**, *Strong:* the asymmetry, rewrite value is all-or-nothing after 2 years and >$15M with failure odds north of 50%; strangle value is cumulative, survivable at any cancellation point, and names the rare case where rewrite *is* right (small, unsalvageable, freeze tolerable). *Red flag:* either instinct as dogma.
 - **"What do you do in your first 90 days?"**, *Strong:* measure before touching, revenue map, churn-×-incident hotspots, bus factor, KTLO %, tested restores, while shipping stabilization quick wins; ends the quarter with a disposition map priced in dollars. *Red flag:* drawing the target microservice architecture in week 1.
@@ -193,7 +193,7 @@ Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, co
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Architecting before auditing.** The week-1 target diagram is always wrong, hotspots, dead features, and bus factors aren't where intuition says.
 - **Treating "leave it alone" as failure.** Migrating a stable, cold module is pure risk with no return. The data-backed, formally accepted leave-alone list is a deliverable.
@@ -203,7 +203,7 @@ Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, co
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Six months in, your sponsor (the CTO) leaves. The new CTO asks why the company is paying a 20% tax. Your answer?**
 > *Model:* I show the scorecard, not the architecture: deploys quarterly → weekly, change-failure 25% → 12%, two completed slices live with their legacy code deleted, first Oracle tables gone, KTLO trending toward ~11 recovered engineers by Q8. Then the asymmetry: cancel today and we keep everything shipped, stable intermediate states are why I chose strangle over rewrite. If it's still cut, I descope to finishing the in-flight slice, never abandon one mid-cutover. Surviving sponsor loss is why value lands quarterly instead of at the end.

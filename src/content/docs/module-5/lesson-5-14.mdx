@@ -217,7 +217,7 @@ Drag N, W, R: when `W + R ≤ N` the read and write sets can miss each other →
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -227,7 +227,7 @@ Drag N, W, R: when `W + R ≤ N` the read and write sets can miss each other →
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Eventual or strong consistency, and defend it."**, *Strong:* "Depends on the use case, and I'd make it per-request. Look-aside cache → eventual + read-repair, because a stale cache entry is just an old copy the DB still holds, and I'm buying sub-ms reads and partition survival. Session/KV → strong quorum W+R>N for read-your-writes. Forcing one posture on the whole cluster either slows the cache or risks the session." Names the cost of each. *Red flag:* "strong everywhere" (melts latency and availability) or "eventual, caches are always eventual" (loses the session).
 - **"One key gets 30% of your traffic. What happens?"**, *Strong:* names it a **hot key**, says consistent hashing *doesn't* help, then layers near-cache → key replication/splitting → detection. *Red flag:* "add more nodes" (does nothing for a singular key) or doesn't recognize the failure mode.
@@ -237,7 +237,7 @@ Drag N, W, R: when `W + R ≤ N` the read and write sets can miss each other →
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **One fixed consistency for the whole cluster.** The Dynamo insight, and the Director answer, is **tunable per request**: eventual for cache reads, quorum for the keys that are a source of truth. Conflating the two is the central error.
 - **Using `hash(key) % N`.** It remaps almost every key when N changes, cold-starting the entire cache and slamming the backing DB. Consistent hashing with vnodes is the only acceptable answer at scale.
@@ -247,7 +247,7 @@ Drag N, W, R: when `W + R ≤ N` the read and write sets can miss each other →
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Eventual or strong consistency for this cache, defend your choice.**
 > *Model:* I make it **per-request**, defaulting by use case. For a **look-aside cache** fronting a database, eventual + read-repair: I write to the owner, replicate async, read the fastest replica, and repair stragglers. A stale read here is just a slightly-old copy of data the DB still authoritatively holds, invisible to correctness, and I'm buying sub-millisecond p99 and survival when replicas diverge under partition. For a **session store or rate-limit counter that is itself the source of truth**, I switch to strong quorum with W+R>N (N=3, W=2, R=2) for read-your-writes, a stale read there is a logged-out user or a breached limit. The cost of quorum is real: higher tail latency (wait for the 2nd-fastest replica) and lower availability under partition (fail if you can't reach W). So I keep the strong surface as small as the use case demands. The wrong answer is one fixed posture, it either slows the cache or breaks the session.

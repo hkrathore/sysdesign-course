@@ -323,7 +323,7 @@ The function is pure and deterministic given policy + timestamps, safe to run in
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -334,7 +334,7 @@ The function is pure and deterministic given policy + timestamps, safe to run in
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What prevents two guests from booking the last room simultaneously?"** *Strong:* the conditional atomic decrement in Postgres, `UPDATE inventory SET confirmed_count = confirmed_count + 1 WHERE ... AND confirmed_count + held_count + 1 <= physical_count + overbook_buffer`, one winner; loser sees 0 rows updated and returns 409. This is a deliberate CP choice on the booking path. *Red flag:* "the cache prevents it" or an eventually-consistent store as the booking truth.
 
@@ -348,7 +348,7 @@ The function is pure and deterministic given policy + timestamps, safe to run in
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Serving availability from the booking store.** The 1,000:1 search-to-book ratio makes this fatal at scale. The search tier must be an independent, eventually-consistent layer.
 - **Treating overbooking as a correctness bug.** It is a revenue policy. The system enforces *whatever invariant the business sets* via the buffer column, the architecture should not presuppose that buffer = 0.
@@ -358,7 +358,7 @@ The function is pure and deterministic given policy + timestamps, safe to run in
 
 ---
 
-## Practice questions (with model answers)
+### Practice questions (with model answers)
 
 **Q1. A property has 5 king rooms. Two guests simultaneously try to book the last available room for June 14. How does the system handle it?**
 

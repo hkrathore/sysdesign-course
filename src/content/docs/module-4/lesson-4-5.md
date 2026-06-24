@@ -250,7 +250,7 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | A | B | C | Use when… |
 |---|---|---|---|---|
@@ -261,7 +261,7 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Push, pull, or hybrid, and defend it with numbers."** *Strong:* push is default because the workload is **5:1 read-heavy**, so pay fan-out on the rarer write (~925K inserts/s) not the read (~4.6M fetches/s); **but** push makes a celebrity tweet a 100M-write bomb, so **pull celebrities and merge**, hybrid. *Red flag:* "use push, it's faster" with no celebrity case, or "pull, simpler" ignoring the read-amplification cost.
 - **"Walk me through the read-time merge."** *Strong:* fetch precomputed IDs + pull a session-cached set of celebrity tweets, **k-way merge by time-sortable `tweet_id`**, batch-hydrate, paginate by `tweet_id` cursor so the boundary stays coherent. *Red flag:* re-pulling every celebrity on every page, or no answer for ordering across the push/pull seam.
@@ -271,7 +271,7 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 
 ---
 
-## Common mistakes / misconceptions
+### Common mistakes / misconceptions
 
 - **Designing only push, or only pull.** Either pure approach is correct only at toy scale; the celebrity tail forces **hybrid**, and saying so early is the signal.
 - **Missing the read-heavy → write-heavy inversion.** Stating "it's read-heavy 5:1" and then picking push *without noting push inverts it to ~37:1 writes on the backend* misses the central tension.
@@ -283,7 +283,7 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 
 ---
 
-## Practice questions
+### Practice questions
 
 **Q1.** A user with 50M followers tweets. Trace what happens in your design and justify it with numbers.
 > *Model:* They're above the **celebrity threshold**, so the tweet is **not pushed**, it's written durably to the Tweet store and that's it on the write path. If we *had* pushed, that's **50M timeline inserts for one tweet**, dwarfing the 925K/s baseline and spiking the fan-out fleet. Instead, their followers **pull** this tweet at read time: each follower's Timeline Read service merges the celebrity's recent tweets (session-cached) with their precomputed push timeline, ordered by `tweet_id`. We trade a little read-time merge work for avoiding a 50M-write spike, the right trade because reads of any one celebrity tweet are amortized across a session cache, while the push would be 50M writes *now*.

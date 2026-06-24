@@ -85,7 +85,7 @@ The meta-point: calibration is a moving target because the companies move. Re-re
 
 ---
 
-## Worked example: one termination story, three companies
+### Worked example: one termination story, three companies
 
 Take the firing story, senior engineer, eight years tenured, missed three committed milestones on a revenue-blocking payments integration, diagnosed system-then-skill-vs-will, dated feedback March 4th, a 60-day plan, hit one of four criteria, exited personally in eight minutes with severance above policy, velocity recovered in a sprint, learning "act a quarter earlier" plus a two-week-trigger mechanism. **Every fact below is identical.** Watch only the open, vocabulary, and close move.
 
@@ -120,7 +120,7 @@ Meta and Google follow the same dials: at Meta, lead with how you pulled the tea
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Why do you want to work *here* specifically?"**, *Strong:* a calibrated read of the company's actual operating model (Amazon's ownership culture, Netflix's talent density, the startup's stage) tied to how you work, with a current reference. *Red flag:* generic "great mission, smart people," or praising a value the company has publicly moved off (the 2009 Netflix deck, "we're a family").
 - **"Map that story to one of our principles."** (Amazon, explicitly), *Strong:* a precise LP, including the one you scored *yourself* low on. *Red flag:* fumbling the LP names, or mapping a self-congratulatory story to a principle that demands self-criticism.
@@ -130,7 +130,7 @@ Meta and Google follow the same dials: at Meta, lead with how you pulled the tea
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Re-aiming until it's a lie.** Calibration tunes emphasis and vocabulary, never facts. Inventing a beat to fit a rubric is the one fail worse than mis-calibration, the probe lands exactly on the invented part.
 - **Quoting stale canon.** The Netflix 2009 deck, "we're a family," 2021 LP phrasings, using last-cycle's artifact is the loudest tell of stale prep. Re-read the *current* source the week of the loop.
@@ -140,7 +140,7 @@ Meta and Google follow the same dials: at Meta, lead with how you pulled the tea
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Re-aim your firing story for Amazon and Netflix back-to-back.** *(Sketch: same facts. Amazon, open on the volunteered self-criticism, map to Hire & Develop + Disagree-and-Commit, "I" throughout, close on the two-week mechanism. Netflix, re-frame through the keeper test, current-memo vocabulary, own that the long plan is off-culture and you'd compress it, close on the clean fat-severance exit. Change only the open, vocabulary, and close.)*
 2. **Turn one disagree-and-commit story into a Google hypothetical.** *(Sketch: anticipate "how would you handle a VP overruling your architecture call?", answer Clarify → Principles → Options → Decide → Tripwires, commit to a specific path, make it transcribable. Don't tell the past-event STAR version; that's the wrong instrument for a committee packet.)*

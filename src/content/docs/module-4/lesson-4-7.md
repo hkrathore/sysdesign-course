@@ -246,7 +246,7 @@ That division, own the SLOs, the trade-offs, and the cost envelope; delegate the
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -256,7 +256,7 @@ That division, own the SLOs, the trade-offs, and the cost envelope; delegate the
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 At Director altitude the probes are about **judgment, cost, and delegation**, not whether you can code a trie.
 
@@ -272,7 +272,7 @@ At Director altitude the probes are about **judgment, cost, and delegation**, no
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Ranking on the request path.** The whole game is to *precompute*; computing relevance per keystroke blows the budget. If you find yourself sorting at request time, you've lost the plot.
 - **Sharding the trie by first letter / prefix range** and not seeing the hot-partition skew it creates.
@@ -283,7 +283,7 @@ At Director altitude the probes are about **judgment, cost, and delegation**, no
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through why a trie beats just storing every prefix → top-k in a hash map.**
 > *Model:* The flat hash map is O(1) and dead simple, and I *do* use it, at the edge and in Redis for the ~1M hottest prefixes. But as the **primary** store it materializes a row for every prefix of every phrase with **no structural sharing**: "dell laptop" forces separate entries for `d`, `de`, `del`, … each carrying the string, which multiplies storage well past the trie's ~100 GB. The trie shares stems (the string lives once in a phrase table, referenced by id) and answers "all completions under prefix p" in one walk if requirements ever grow. So: trie at origin for compactness and prefix-nativeness, flat KV at the edge for O(1) on the bounded hot set. Right tool per tier.

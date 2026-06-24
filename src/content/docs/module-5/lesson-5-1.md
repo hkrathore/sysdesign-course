@@ -296,7 +296,7 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -307,7 +307,7 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"How do you prevent a double charge when the client retries?"**, *Strong signal:* names idempotency keys as the mechanism, explains the exact ordering (write idempotency record to Postgres *before* calling PSP; derive a PSP-level key from ours), and identifies the crash-between-PSP-and-commit as the hardest case. *Red flag:* "we deduplicate by checking if a transaction exists" (a check-then-act race), or "the client should not retry" (clients always retry).
 
@@ -321,7 +321,7 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating money movement like data movement.** Storing a transaction and calling a PSP are both writes, but they are not the same write. The ordering (idempotency record → PSP call → DB commit) is load-bearing. Reversing it or parallelizing it creates a silent double-charge window.
 - **Making idempotency keys optional.** "The client should generate them" without enforcing at the gateway means the first client who forgets generates a duplicate charge in production. Require and enforce.
@@ -331,7 +331,7 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. Charge request times out at the client. How many times is the card charged?**
 

@@ -300,7 +300,7 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 ---
 
-## Trade-offs table: the three atomicity mechanisms
+### Trade-offs table: the three atomicity mechanisms
 
 | Mechanism | Availability under partition | Latency on fast path | Recovery complexity | Audit clarity | Use when |
 |---|---|---|---|---|---|
@@ -312,7 +312,7 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"How do you ensure the sender is debited and the receiver is credited atomically across two shards?"**, *Strong signal:* names all three mechanisms, immediately scopes to TPS to eliminate non-starters, picks one with a stated reason. Calls out that saga has an in-flight window and describes the sweeper recovery. *Red flag:* "use a single database" (doesn't engage the shard question) or "use Kafka" with no explanation of how the balance update becomes atomic.
 
@@ -326,7 +326,7 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Floating-point balances.** Storing balances as `DECIMAL` or `FLOAT` instead of integer cents causes rounding drift that violates balance conservation at millions of transfers. Always integers in the smallest currency unit.
 - **Idempotency only at the API layer.** Redis TTL expires; a unique constraint on `idempotency_key` in the transfers table is the durable backstop. Both layers are required.
@@ -336,7 +336,7 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 ---
 
-## Practice questions (with model answers)
+### Practice questions (with model answers)
 
 **Q1. Sender has $100. Two concurrent transfers of $80 each are submitted simultaneously. Walk through exactly what happens.**
 

@@ -207,7 +207,7 @@ Convoying fix without a full cost function: stagger idle-parking floors so cars 
 
 ---
 
-## Trade-offs table: the dispatch strategies
+### Trade-offs table: the dispatch strategies
 
 | Dimension | FIFO | Nearest-first (SSTF) | SCAN / LOOK |
 |---|---|---|---|
@@ -220,7 +220,7 @@ Convoying fix without a full cost function: stagger idle-parking floors so cars 
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Before you draw, any questions?"**, *Strong:* asks **simulation vs real hardware**, scopes safety to firmware, designs the dispatch brain. *Red flag:* starts writing an `Elevator` class into an unscoped problem.
 - **"Why not always serve the nearest call?"**, *Strong:* produces the starvation trace unprompted; names SCAN's ~4 min bound as the requirement-matching property. *Red flag:* "nearest is most efficient" with no worst-case analysis.
@@ -230,7 +230,7 @@ Convoying fix without a full cost function: stagger idle-parking floors so cars 
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Designing dispatch without asking simulation-vs-hardware.** The question is on the rubric; skipping it means ten minutes "designing" door safety that elevator code assigns to certified firmware.
 - **Proposing nearest-first without naming starvation.** The unbounded-wait trace is the problem's central trap; falling into it silently is the clearest junior tell.
@@ -240,7 +240,7 @@ Convoying fix without a full cost function: stagger idle-parking floors so cars 
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Riders on floor 28 complain of five-minute waits at lunch while the lobby gets instant service. Diagnose and fix.**
 > *Model:* The signature of nearest-first dispatch (or an over-greedy cost function): lunch traffic concentrates calls on floors 1-5, and a closest-call policy always finds a nearer call than 28, its wait is unbounded by construction. Car-level fix: SCAN/LOOK, which reaches 28 within one sweep (~4 min worst case). Bank-level fix: an aging term so a waiting call outbids closer fresh calls. Verify with telemetry, p95 wait *by floor*, before and after; if floor-28 p95 doesn't collapse, the bug is in assignment, not car policy.

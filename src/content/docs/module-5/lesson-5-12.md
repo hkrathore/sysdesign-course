@@ -254,7 +254,7 @@ What I keep, the cardinality-as-cost-function framing, the retention budget, the
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -265,7 +265,7 @@ What I keep, the cardinality-as-cost-function framing, the retention budget, the
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What actually drives the cost of this system?"**, *Strong:* **cardinality, the active-series count** (hosts × series/host), not the request rate; it sizes the index memory *and* the per-series SaaS bill; an unbounded label (`user_id`, raw URL) is an extinction event; governed at the collector. *Red flag:* "it's a write-heavy system, so we scale writes", designs for samples/sec and misses that two fleets at the same write rate cost 100× differently on cardinality.
 - **"How do you store 13 months without going broke?"**, *Strong:* **downsampling tiers**, raw 10 s for ~2 weeks, roll to 1 m then 1 h, expire raw, cold tiers to object storage; a 30-360× reduction; you lose only sub-minute detail on old data nobody queries at that resolution. *Red flag:* "keep it all in the TSDB", pays 360× for unused resolution.
@@ -275,7 +275,7 @@ What I keep, the cardinality-as-cost-function framing, the retention budget, the
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Designing for write rate instead of cardinality.** Samples/sec sizes the write path; **active-series count** sizes the cost and the memory. Two fleets at the same ingest rate cost 100× differently, cardinality is the cost function.
 - **Letting an unbounded label in.** `user_id`, `request_id`, raw URL paths, `email` as metric labels multiply series into the billions, OOMing the index *and* detonating per-series SaaS bills. Per-event IDs go in logs/traces; enforce the drop at the collector.
@@ -285,7 +285,7 @@ What I keep, the cardinality-as-cost-function framing, the retention budget, the
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. What's the single number that drives this system's cost, and why?**
 > *Model:* **Cardinality, the count of distinct active series**, which is `hosts × series-per-host`, here 10K × 1K = **10M series**. It's the cost driver because each active series carries an in-memory index entry (low-KB of RAM), so 10M series sizes the TSDB memory, and on a SaaS billed per unique series it sizes the invoice too. Crucially it's *not* the same as the write rate: two fleets emitting the same 1M samples/sec cost 100× differently if one smuggled a `user_id` label in. That's why I govern cardinality at the collector with a hard per-tenant cap, the cheapest series is the one I never admit.

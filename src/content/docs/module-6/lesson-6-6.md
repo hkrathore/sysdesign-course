@@ -212,7 +212,7 @@ If you ever migrate to a store without exclusion constraints (MySQL), the lock r
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -222,7 +222,7 @@ If you ever migrate to a store without exclusion constraints (MySQL), the lock r
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Two requests book the same room for the same slot."** - *Strong:* names TOCTOU unprompted; the serialization point (room-row lock), the check inside it, the constraint as independent tripwire; contrasts 5.13 - same race, 1,000× less contention, so pessimistic wins. *Red flag:* check-then-insert with no atomicity, or a distributed lock service at 6 writes/s.
 - **"The CEO books a daily standup with no end date. What do you store?"** - *Strong:* ~100 bytes - the rule and a zone-anchored start; occurrences generated through query windows; edits as exceptions or series splits; names RRULE's depth and delegates it. *Red flag:* inserting N rows, or a cron pre-writing occurrences forever.
@@ -232,7 +232,7 @@ If you ever migrate to a store without exclusion constraints (MySQL), the lock r
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Closed intervals.** `start <= other.end` makes every back-to-back meeting a conflict. Half-open `[start, end)`, predicate defined once in a value object.
 - **Materializing recurrences.** Pre-writing occurrence rows explodes storage, can't represent infinite rules, and turns one edit into hundreds of row mutations. Store the rule; generate.
@@ -242,7 +242,7 @@ If you ever migrate to a store without exclusion constraints (MySQL), the lock r
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Concretely, what stops two assistants double-booking the boardroom for Friday 3pm?**
 > *Model:* The booking transaction locks the boardroom's row before checking - check and insert are atomic per room; the second assistant's transaction waits ~5 ms, re-checks, sees the conflict, gets a 409 with alternative slots. Inside the lock I check concrete bookings *and* expand any recurring series intersecting the window, so rule-only occurrences are protected too. Independently, an exclusion constraint on `(room_id, overlapping range)` rejects overlaps at the storage layer - a tripwire for any path that bypasses the lock. Pessimistic was deliberate: at ~25 bookings/room/day there's no convoy to fear - the opposite of Ticketmaster, where 33K req/s made optimistic CAS mandatory. Same race; the contention shape picks the tool.

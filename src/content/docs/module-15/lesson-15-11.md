@@ -115,7 +115,7 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Who made the call, you or finance?"**, *Strong:* you owned it; you fought the number down with a model or accepted it honestly, and never distanced from it to your team. *Red flag:* "they gave me a list," "finance decided", the signature fail, because it predicts you'll abandon your org whenever it's uncomfortable.
 - **"How did people find out?"**, *Strong:* affected people individually, by a human, *before* any broadcast; survivor all-hands same day with the honest why. *Red flag:* mass email, a deactivated badge, a calendar invite with no person on it, the deliberate trap, an instant fail.
@@ -125,7 +125,7 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Distancing language.** "Finance gave me a list," "leadership decided, I just executed." The whole cluster exists to catch this. Own the number, fight it down or accept it honestly, never hand the blame upward to your own team.
 - **Stopping at selection.** A story about *who* with nothing about the survivors is half an answer. The rebuild, re-scoping work, re-recruiting keepers, a recovery metric, is where most of the score lives, and where weak candidates go silent.
@@ -135,7 +135,7 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Walk the full layoff on the spine.** "You had to cut 15%, take me through it." *(Sketch: own-it-end-to-end STAR-L, own the number first (fought down or accepted, never 'they gave me a list'); criteria-before-names selection with an adverse-impact check; individual-and-before-broadcast communication plus the same-day survivor all-hands; rebuild by cutting projects not just people, re-recruiting keepers in 48 hours, a named recovery metric. Hold every number for the probe.)*
 2. **Defend the absorption model.** "How did you *know* the org could deliver after losing those people?" *(Sketch: a reasoned model, not a vibe, what work stopped, what tooling closed the gap, the recovery metric you tracked. If AI is part of the story, instrument it, don't hand-wave it, bridges to AI-era leadership.)*

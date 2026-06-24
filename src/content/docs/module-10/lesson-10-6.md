@@ -289,7 +289,7 @@ Someone fans out a tightly-coupled task (refactor one file, debug one stack trac
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -301,7 +301,7 @@ Someone fans out a tightly-coupled task (refactor one file, debug one stack trac
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"It works perfectly in demos but fails on long real tasks. Why?"** — *Strong signal:* names **compounding error** (success ≈ pᴺ), does the arithmetic (0.95⁴⁰ ≈ 13%), and prescribes **decompose + verify-and-retry + checkpoint** to shorten chains and raise effective per-step reliability — *not* "use a better model." *Red flag:* "tune the planner prompt" with no grasp that the failure is multiplicative and structural.
 
@@ -315,7 +315,7 @@ Someone fans out a tightly-coupled task (refactor one file, debug one stack trac
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating autonomy as the feature instead of the risk.** The longer it runs unsupervised, the worse the odds and the higher the bill. The engineering is *bounding* the loop — verify, checkpoint, budget, gate — not unleashing it.
 - **No external verifier.** Letting the agent decide it's finished ships confidently-wrong work. "Done" must be an objective signal (tests, cross-checked sources) supplied as input.
@@ -325,7 +325,7 @@ Someone fans out a tightly-coupled task (refactor one file, debug one stack trac
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. Your coding agent resolves 70% of issues in eval but only 35% in production. What's going on and what do you change?**
 

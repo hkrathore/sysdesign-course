@@ -202,7 +202,7 @@ Two columns are this track's house rules: **quantification** is "always quantify
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Now write me a better OKR, live."**, *Strong:* a quantified, outcome-shaped KR with a guardrail metric on the spot. *Red flag:* can only diagnose; the rewrite is vague or another output metric.
 - **"Of your three survey actions, which is first and why?"**, *Strong:* names the load-bearing one (decision rights/focus), why the others are downstream, what it would *not* chase. *Red flag:* treats all three as equal, or leads with the morale symptom.
@@ -212,7 +212,7 @@ Two columns are this track's house rules: **quantification** is "always quantify
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Critiquing without producing.** Listing what's wrong and never building the better version. The premise is *demonstrate*, the rewrite, the three moves, the said sentence *is* the answer; the teardown alone fails.
 - **Reciting the framework instead of running it.** "I'd use SBI here," or "first a listening tour" as a label. The interviewer wants the maneuver performed, not named, announcing it breaks the moment, exactly as in a STAR answer.
@@ -222,7 +222,7 @@ Two columns are this track's house rules: **quantification** is "always quantify
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Rewrite a real OKR set live.** Take your team's actual OKRs, 5-minute timer: name the category error, then rewrite objective and KRs into outcomes with one guardrail metric. *(Sketch: "ship X, migrate Y, hit Z% coverage" are outputs, re-anchor to incidents/lead time/a business metric, and demote the originals to initiatives that must earn their place.)*
 2. **Read a survey cold.** Use Exercise 2's data; give three *prioritized* actions in 3 minutes, naming the first and the one you'd refuse. *(Sketch: connect metrics and free-text into one diagnosis before acting; use a good number diagnostically; close with a re-pulse date.)*

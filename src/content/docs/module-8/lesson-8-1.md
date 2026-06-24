@@ -271,7 +271,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -282,7 +282,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Warehouse or lakehouse, and why?"**, *Strong:* separates storage from compute first, then chooses on scale/workload/lock-in, lakehouse for PB + ML + openness, warehouse for BI-first/ops-light, and knows they're converging (managed engines over Iceberg). *Red flag:* names a vendor with no trade-off, or thinks "lakehouse" is just a buzzword for "data lake."
 - **"What makes a data *lake* safe to query like a warehouse?"**, *Strong:* the **open table format** (Iceberg/Delta), ACID commits, snapshot isolation, schema/partition evolution, time travel, over open Parquet; raw directories can't do this. *Red flag:* "it's just Parquet on S3", missing the table-format layer entirely.
@@ -292,7 +292,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating it as database selection.** "Use Snowflake/Databricks" is a product, not a design. The design is storage/compute decoupling, format choices, the medallion model, and cost control; the vendor is a delegated bake-off.
 - **Raw Parquet directories as "tables."** No ACID, no schema evolution, no concurrent-writer safety, a metadata mess. The open *table format* is the non-negotiable layer that makes a lake a lakehouse.
@@ -302,7 +302,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through how data gets from a production Postgres table to a finance dashboard.**
 > *Model:* CDC streams Postgres row changes into **bronze** as raw, append-only, retained, idempotent on a load id. A scheduled transform (Spark/dbt) applies those changes with an atomic `MERGE` into a **silver** `customers`/`orders` table, snapshot-isolated so analysts never see half-applied state, cleaning types, timezones, and dedup along the way. Business logic rolls silver into a **gold** `finance.revenue` dimensional mart, partitioned by day, clustered by region. The BI tool queries gold over a right-sized compute pool, pruning to the requested days so it scans MBs. Everything is Iceberg/Delta on Parquet in object storage, one copy; the catalog governs access and records lineage so finance can trace the number to its source. If a transform bug is found, I re-run from retained bronze, no data loss.

@@ -320,7 +320,7 @@ The cascade structure holds; the per-tier mechanics change:
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -332,7 +332,7 @@ The cascade structure holds; the per-tier mechanics change:
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Can't you just run an LLM on every item, it's the best classifier?"**, *Strong signal:* does the cost math out loud (~$10–390M/**day** at firehose scale, off by 100–1000×), notes the inline latency blowout, and concludes tiering is *mandatory*, not an optimization, then explains the cheap-tier early-exit that clears ~99%. *Red flag:* "LLMs are the most accurate so we use them everywhere" with no cost number, or "we'd negotiate a cheaper rate" (you cannot negotiate away three orders of magnitude).
 
@@ -348,7 +348,7 @@ The cascade structure holds; the per-tier mechanics change:
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **LLM-on-everything.** The single most common and most fatal answer. It is off by 100–1000× on cost and too slow inline. Tiering is mandatory; lead with the cost math.
 - **One global precision/recall threshold.** Collapses the per-policy asymmetry, either CSAM leaks or legitimate content is mass-blocked. Thresholds are per-policy, per-surface, and owned by policy/legal + finance, not the data scientist.
@@ -358,7 +358,7 @@ The cascade structure holds; the per-tier mechanics change:
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. Your firehose is 5M items/s. An exec proposes classifying every item with a frontier LLM "for maximum accuracy." Evaluate.**
 

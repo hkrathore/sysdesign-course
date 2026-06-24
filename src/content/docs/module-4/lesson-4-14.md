@@ -289,7 +289,7 @@ If the queue dies, the gate fails open (stampede) or closed (no sales).
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -299,7 +299,7 @@ If the queue dies, the gate fails open (stampede) or closed (no sales).
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What actually prevents two people buying the same seat?"** - *Strong:* the atomic conditional write - the DB serializes the row, exactly one update hits 1 row, the rest fail fast; multi-seat is one transaction; names the CP choice and that **the queue does not prevent oversell** - admission ≠ a seat. *Red flag:* "the queue handles it," or an eventually-consistent store.
 - **"What's the real job of the waiting room?"** - *Strong:* it **bounds the per-event write rate** (~2K/s) so the `event_id`-sharded inventory - otherwise a hot partition under 33K/s - survives; it's the device that makes event-sharding viable, not fairness UX. *Red flag:* treats the queue as cosmetic.
@@ -309,7 +309,7 @@ If the queue dies, the gate fails open (stampede) or closed (no sales).
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Thinking the queue prevents oversell.** Admission grants *permission to try*, not a seat. Only the atomic seat-state transition prevents oversell - conflating the two is the most common error.
 - **Caching your way out of a contention problem.** The crux is correctness under write contention; the cache serves browse and must never be the seat's source of truth.
@@ -319,7 +319,7 @@ If the queue dies, the gate fails open (stampede) or closed (no sales).
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Two fans click the same seat in the same instant. What stops a double-sell?**
 > *Model:* The claim is a single atomic conditional update, not a read-then-write: `UPDATE seats SET status='HELD', ... WHERE event_id=? AND seat_id=? AND (status='AVAILABLE' OR (status='HELD' AND expires_at<now()))`. The store serializes writes to the row: exactly one statement affects 1 row; the loser sees 0 rows and instantly returns **409 - pick another seat**, holding no lock. Multi-seat is the same predicate inside one transaction, all-or-nothing. This is a deliberate CP posture - I chose a strongly-consistent store precisely so this single-statement CAS is the entire oversell defense. The queue is *not* part of it; it only controls how many attempts arrive per second.

@@ -301,7 +301,7 @@ Ticketmaster uses a seat-hold TTL, a temporary claim that expires, with `AVAILAB
 
 ---
 
-## Trade-offs table: pivotal decisions
+### Trade-offs table: pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when |
 |---|---|---|---|---|
@@ -312,7 +312,7 @@ Ticketmaster uses a seat-hold TTL, a temporary claim that expires, with `AVAILAB
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 **"What prevents two people winning the same auction?"**
 Strong signal: the CAS on `current_price`, DB serializes writes to the row; exactly one UPDATE affects 1 row; the loser sees 0 rows and gets a 409 with the fresh price; both wins are not possible. Name the CP choice and the rejected AP alternative.
@@ -336,7 +336,7 @@ Red flag: sizing a giant database.
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Proposing a distributed lock before checking per-auction write rate.** The math shows < 1 bid/s per auction on average. DB row-level CAS is already atomic; Redis SETNX adds a network hop and a failure domain for an invariant you get for free.
 - **Conflating auction CAS with Ticketmaster seat holds.** Seat holds use TTL-based exclusive claims (`AVAILABLE → HELD → SOLD`); bids use a monotonically advancing maximum with no exclusive claim. The DB primitive is identical; the semantics and design differ. Name the pair.
@@ -346,7 +346,7 @@ Red flag: sizing a giant database.
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. A bidder places $200 at the exact moment another bidder places $205. Both bids arrive at the same millisecond. What happens?**
 

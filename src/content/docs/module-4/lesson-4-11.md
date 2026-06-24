@@ -281,7 +281,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -291,7 +291,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What's the read:write ratio, and how is it different from Uber?"** - *Strong signal:* **read-dominated and cacheable** (near-static data, batch-written, read billions of times, ~99% CDN-served) - the inverse of the firehose - with traffic as the lone fast overlay. *Red flag:* reusing the ingest-firehose framing, or missing that the same tile/route serves millions.
 - **"Why not just run Dijkstra, and what breaks contraction hierarchies?"** - *Strong:* Dijkstra is seconds on a continental graph; CH precomputes shortcuts for sub-ms queries; **but CH assumes static weights, and live traffic is dynamic** - so split topology preprocessing (rare) from metric customization (every ~1-2 min). *Red flag:* "use contraction hierarchies" and stopping - missing that CH alone can't do live traffic.
@@ -301,7 +301,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating it as write-heavy / reusing the Uber framing.** Maps is read-dominated and cacheable; the heavy artifacts are batch-written and precomputed.
 - **"Use contraction hierarchies" and stopping.** Plain CH bakes static weights; **live traffic breaks it.** Naming the customization split is the IC-vs-Director line on this problem.
@@ -311,7 +311,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate the tile-fetch QPS and explain why the CDN, not the origin, defines the cost.**
 > *Model:* ~2B sessions/day × ~20 tiles → **~40B requests/day ≈ 0.5M/s avg, ~1.5M/s peak.** Tiles are immutable and identical for everyone at a given `(z,x,y,style,version)`, and a small popular set covers most fetches → **~95-99% edge hit rate**. At 99% the origin sees **~5K tiles/s - a ~100x reduction.** The serving tier is a CDN + object store; the cost is egress + edge storage, not origin compute. That subtraction *is* the serving design, and it's only possible because tiles are versioned-immutable and cache-forever.

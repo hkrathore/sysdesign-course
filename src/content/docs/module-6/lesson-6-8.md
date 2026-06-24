@@ -212,7 +212,7 @@ That table is the interview move: **the atomic claim and the TTL hold are the in
 
 ---
 
-## Trade-offs table: the pivotal decision
+### Trade-offs table: the pivotal decision
 
 | Decision | A, Pessimistic `SELECT FOR UPDATE` | B, Optimistic conditional update (CAS) | C, Hold table, unique-constraint insert | Use when... |
 |---|---|---|---|---|
@@ -222,7 +222,7 @@ That table is the interview move: **the atomic claim and the TTL hold are the in
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Two requests for F14 arrive in the same millisecond, what exactly happens?"** *Strong:* the atomic conditional write, the DB serializes the row, exactly one statement updates 1 row, the loser gets 0 rows and an instant conflict; multi-seat is one all-or-nothing transaction. *Red flag:* "I'd synchronize the method" or any answer where truth lives in process memory.
 - **"Where is the lock while the user types their card number?"** *Strong:* nowhere, the hold is **data with a TTL**; the claim transaction is milliseconds, the hold is minutes. *Red flag:* row locks or leases held across the payment call.
@@ -232,7 +232,7 @@ That table is the interview move: **the atomic claim and the TTL hold are the in
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Status on the physical `Seat` instead of `ShowSeat`.** The same seat sells independently per show; this bug is usually fatal in the first ten minutes.
 - **In-memory locks as the arbiter.** Dies at the second app instance or first restart. Truth lives in the database.
@@ -242,7 +242,7 @@ That table is the interview move: **the atomic claim and the TTL hold are the in
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through the exact moment two users win and lose seat F14.**
 > *Model:* Both requests hit the claim as a conditional update: `UPDATE show_seats SET status='HELD', hold_id=?, expires_at=? WHERE show_id=? AND seat_id='F14' AND (status='AVAILABLE' OR (status='HELD' AND expires_at < now()))`. The DB serializes writes to the row: the first statement reports 1 row; the second matches nothing and reports 0. Zero rows = lost race, roll back the multi-seat transaction, return the conflicting seats, the UI re-offers. No lock outlives the transaction, no read-then-write window exists, and the invariant holds on any number of app instances because the row is the single arbiter.

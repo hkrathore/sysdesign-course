@@ -274,7 +274,7 @@ Federation's risk: 40 domains produce 40 different levels of quality, naming, an
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -285,7 +285,7 @@ Federation's risk: 40 domains produce 40 different levels of quality, naming, an
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Centralized data team or data mesh, and why?"**, *Strong:* names the **crossover** first, centralized below ~10 domains / few-hundred datasets, mesh once the central team is a multi-week bottleneck, and quantifies it (the ~3.6× central-throughput shortfall); frames it as a **Conway's-law operating-model decision**, not a tooling one; refuses to cargo-cult mesh. *Red flag:* "we'll do data mesh" as a destination with no scale trigger, or "we'll add a catalog" while ignoring the org bottleneck entirely.
 - **"How does governance scale to thousands of datasets without becoming the new bottleneck?"**, *Strong:* **policy-as-code over tags** (ABAC), enforced *computationally* by the self-serve platform so non-compliant products can't publish and access is rule-based not ticket-based, scaling with rule-count, not dataset-count. *Red flag:* a governance committee or per-object grants, i.e., manual review, the human queue reborn.
@@ -295,7 +295,7 @@ Federation's risk: 40 domains produce 40 different levels of quality, naming, an
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Cargo-culting data mesh.** Adopting mesh because it's fashionable, below the crossover, where a centralized platform team is simpler and *correct*. Mesh trades a central bottleneck for distributed inconsistency; that trade only pays once the bottleneck is real and quantified.
 - **Solving discovery, ignoring the org.** Standing up a catalog while the central team stays the serialization point for every dataset. A catalog over a central bottleneck is a nicer-looking swamp; the architecture mirrors the org (Conway), and the org is the bottleneck.
@@ -305,7 +305,7 @@ Federation's risk: 40 domains produce 40 different levels of quality, naming, an
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. We have 2,000 datasets across 40 teams and nobody can find or trust anything. Where do you start, centralized cleanup or mesh?**
 > *Model:* First I'd confirm the **bottleneck**: are domains waiting weeks on a central team to publish or get access? At 40 domains the central-team math doesn't close, roughly 12,000 engineer-days of change-work a year against a ~15-person team's ~3,300, a ~3.6× shortfall, so the queue grows without bound; that *is* the bottleneck, and it's why a bigger central team can't fix it (you can't hire past a serialization point). So the direction is **federation**, but I would *not* big-bang reorg or lead with "data mesh." I'd build the **governance plane and self-serve platform first**, catalog with rich business metadata so people can *find and judge* data, policy-as-code so access stops queuing, auto-captured column-level lineage so people can *trust* it, then **peel off the highest-pain, highest-maturity domains into ownership one at a time**, leaving the rest centrally managed until ready. The two models coexist for years; the platform helps either way. The crossover I'd name aloud: below ~10 domains I'd stay centralized.

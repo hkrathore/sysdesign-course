@@ -289,7 +289,7 @@ An ML model says "anomaly" with no *why*; on-call can't tell a real break from d
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -300,7 +300,7 @@ An ML model says "anomaly" with no *why*; on-call can't tell a real break from d
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Tests or ML anomaly detection, and why?"**, *Strong:* **both, scoped by blast radius**, ML broad over all 5,000 tables (coverage of the unknown, no human maintains 5,000 tests), declarative tests on the ~100–200 tier-1 tables (deterministic, explainable, where a false negative is a board-level event); names ML's false-positive/opacity cost and tests' maintenance/blind-spot cost. *Red flag:* "write tests on every table" (unmaintainable, misses unknowns) or "ML detects everything" (false positives and opacity on the tables that matter most).
 - **"How do you monitor thousands of tables without the monitoring costing more than the platform?"**, *Strong:* **metadata-first** (freshness/volume/schema free from `information_schema`, zero scan), **sampled aggregates** for distribution (~MBs, not full tables), and a **hard scan budget**, a ~500× cut vs naive full profiling; quantifies it (naive ~\$900k/mo → governed low thousands). *Red flag:* "profile every table each run" without realizing it scans petabytes and self-defeats.
@@ -310,7 +310,7 @@ An ML model says "anomaly" with no *why*; on-call can't tell a real break from d
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Full-scanning tables to check them.** Profiling thousands of tables fully each interval scans petabytes and makes monitoring cost more than the platform it watches. Three pillars are free (metadata), distribution is sampled, full scans are rare, that ordering *is* the design.
 - **Tests-only or ML-only.** Tests-only is unmaintainable at thousands of tables and misses the unknowns; ML-only is too opaque and false-positive-prone for the revenue tables that matter most. The answer is ML broad + tests on the critical few, scoped by blast radius.
@@ -320,7 +320,7 @@ An ML model says "anomaly" with no *why*; on-call can't tell a real break from d
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. How do you detect a problem across thousands of tables without the monitoring bill exceeding the warehouse bill?**
 > *Model:* By never scanning what I can read for free. Three of the five pillars, **freshness** (last-modified time), **volume** (row count), and **schema** (column list) come straight from the warehouse's `information_schema`/system tables, **zero scan**, for all 5,000 tables. The **distribution** pillar (null rates, ranges, cardinality) runs as **sampled aggregate queries** over `TABLESAMPLE` or column statistics, scanning ~MBs, not the whole table, and I put a **hard per-warehouse scan budget** in front of it that 429s overflow. Naive full profiling would scan ~250 TB/interval, ~\$900k/month, more than the platform itself; metadata-first + sampling lands it in the low thousands, a ~500× cut. Full scans are reserved for the rare tier-1 exact assertion. The principle is the same as the metrics platform: the cost is bytes scanned, and the lever is scanning less, not buying more compute.

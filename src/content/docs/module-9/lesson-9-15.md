@@ -108,7 +108,7 @@ This is the category where a dated answer is most expensive, because the dated a
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"When, specifically, would you self-host?"** — *Strong:* concrete triggers — a hard data-residency/contractual constraint, or sustained high-and-steady volume past the utilization crossover where a near-saturated fleet beats per-token pricing, or a latency/control requirement an API can't meet — and names the fixed cost (a platform team) it adds. *Red flag:* "for control" or "to avoid lock-in" with no volume math or residency trigger — ideology, not a decision.
 - **"The CEO insists on a proprietary model. How do you respond?"** — *Strong:* channels the ambition without capitulating — "the goal is a defensible AI advantage, and the cheapest path to it is owning our data and evals, not training weights the next release will leapfrog; here's the spend comparison and what each buys." Redirects to the moat, offers a small proof gate. *Red flag:* either caves to the hype or dismisses the CEO; both lose the room.
@@ -119,7 +119,7 @@ This is the category where a dated answer is most expensive, because the dated a
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Building when you should buy.** The instinct to train or self-host because it sounds more serious. The default is buy; self-host/fine-tune is what you *earn* with volume, residency, or a proven control need — not a starting posture.
 - **Chasing the latest model as the strategy.** Treating "we're on the newest, best model" as a plan. Models leapfrog each other monthly; a strategy that is just model-picking has no durable shape. The strategy is the sequence and the moat, with a gateway that lets the model underneath change freely.
@@ -129,7 +129,7 @@ This is the category where a dated answer is most expensive, because the dated a
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Make the build-vs-buy call in 90 seconds.** A B2B SaaS wants an AI assistant over customer data. *(Sketch: clarify data-residency + volume + time-to-market; options spectrum; sequence = API-behind-a-gateway now to learn, invest in proprietary data + eval, revisit self-host only if a customer demands on-prem/residency or volume saturates a fleet; name the reversible-vs-one-way-door trade.)*
 2. **Defend paying a vendor to a cost-cutting CFO.** "We're spending $2M/year on API calls — why don't we own this?" *(Sketch: TCO comparison — the $2M opex vs a reserved GPU fleet + a standing platform team + capability gap + slower shipping; self-host only beats it past the utilization crossover; offer to model the crossover and route the high-volume, steady workloads to open-weights behind the gateway as the *measured* middle path.)*

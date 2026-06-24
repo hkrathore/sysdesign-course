@@ -240,7 +240,7 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -251,7 +251,7 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"You have 40 engineers and this architecture, draw the org."**, *Strong:* draws services and team boundaries as **one diagram**; ~6 teams of 5-8; mostly stream-aligned on business seams + one platform team; states the one-owner rule and the cognitive-load budget; carves a specialism out only with a named reason. *Red flag:* maps teams to layers or to the existing managers, or produces an org chart with no services on it.
 - **"Why not just tell the teams what architecture to build?"**, *Strong:* explains Conway as an optimization pressure, thousands of "who do I ask" decisions, so the durable lever is the communication structure itself; mandates decay, boundaries persist. *Red flag:* treats Conway as a slogan, or believes architecture review boards outrun it.
@@ -261,7 +261,7 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Drawing the org around current people instead of target seams**, "Priya's team keeps payments because Priya knows payments." Inputs, yes; the design driver, no. Inverse Conway dies here.
 - **Boundaries with 2-3 standing owners** ("checkout and fulfilment co-own orders"). Co-ownership without an end date is no ownership; the seam never forms and the pager game begins.
@@ -271,7 +271,7 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Your CEO wants the reorg announced Monday, company-wide, done in one shot. Talk them out of it, or don't.**
 > *Model:* I'd show the cost asymmetry. Sequenced: ~$0.5M of managed productivity dip over three quarters with checkpoints. Big-bang: roughly double the dip, *plus* the attrition tail, every team changes at once, nobody's new domain exists yet as a service (so every boundary starts as a two-owner boundary), and each regrettable senior exit is $300-500K plus unwritten system knowledge; three exits and the big bang costs 2-3× the sequenced plan while delivering a worse org. The exception I'd grant: if the current structure is actively hemorrhaging people *now*, speed can beat sequencing, then I'd announce the **target and the wave plan** Monday (clarity is cheap and calming) but move ownership in waves regardless. Announce big-bang, *execute* in waves.

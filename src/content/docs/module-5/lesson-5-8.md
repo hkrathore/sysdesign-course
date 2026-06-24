@@ -227,7 +227,7 @@ Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/wid
 
 ---
 
-## Trade-offs: the pivotal decisions
+### Trade-offs: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -237,7 +237,7 @@ Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/wid
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Is exact rank actually a requirement?"**, *Strong:* asks it in the first two minutes, splits into **exact top-K + bucketed tail**, notes "rank #4,000,001" is never asked, frames precision/cost/freshness as the three knobs set in R. *Red flag:* assumes "rank everyone exactly" and heroically scales to fit it.
 - **"Trending and a leaderboard, same or different?"**, *Strong:* "Same problem, ranked heavy hitters over a window, differing only on cardinality and tail precision; the engine (sorted set vs sketch+heap) falls out of those two numbers." *Red flag:* two unrelated systems, or a sketch on a 10M-player board that fits exactly in ~1 GB.
@@ -247,7 +247,7 @@ Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/wid
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Assuming exact rank for the whole population is the requirement.** It rarely is, exact top-K + percentile buckets for the tail collapse the cost. Interrogate precision in R; it's the whole problem.
 - **Treating trending and leaderboard as different problems.** Same ranked-heavy-hitters query; only cardinality and tail precision differ. Pick the engine from those two numbers.
@@ -257,7 +257,7 @@ Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/wid
 
 ---
 
-## Practice questions (with model answers)
+### Practice questions (with model answers)
 
 **Q1. Top-10 trending hashtags over the last hour, out of a billion distinct tags. Walk the design.**
 

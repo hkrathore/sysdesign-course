@@ -209,7 +209,7 @@ What I keep: the metrics, the voluntary-adoption posture, the hatch contract, th
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -220,7 +220,7 @@ What I keep: the metrics, the voluntary-adoption posture, the hatch contract, th
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Why would teams adopt this at all?"**, *Strong:* it wins on their metrics, TTFD days → < 1 hour, flake rate down, observability free, proven by pilots whose tech leads evangelize peer-to-peer. *Red flag:* "leadership will mandate it" as the opening move.
 - **"A team refuses. What do you do?"**, *Strong:* segment the refusal, genuinely different workload → `tier: hatch`, sanctioned and counted as success; merely busy → wait, keep shipping value, bring the deadline only after ~70% adoption with the $600K/yr carrying cost documented. *Red flag:* escalate to their VP in week one, or let them run an invisible stack.
@@ -230,7 +230,7 @@ What I keep: the metrics, the voluntary-adoption posture, the hatch contract, th
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating it as a pure infrastructure problem.** The prompt is change management in a technical costume; a beautiful Kubernetes abstraction with no adoption strategy answers the wrong question.
 - **Mandate-first migration.** A decreed date before demonstrated value produces compliance theater, side-door deploys, and a corrupted adoption metric, the only number that justifies the spend.
@@ -240,7 +240,7 @@ What I keep: the metrics, the voluntary-adoption posture, the hatch contract, th
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Your CEO says "just mandate it, we're not a democracy." Respond.**
 > *Model:* Agree on the goal, push back on the mechanism with the metric: the business case is **linear in real adoption**, $5M/yr returned at full adoption, underwater below ~40%, and mandates produce *fake* adoption: services flagged golden that still deploy through side doors. I'd offer the two cheap, legitimate mandates, **all new services on the platform** (touches no existing workflow) and the **security baseline on every tier**, and commit to a decommission date *once pilots prove the path and adoption passes ~70%*. Same destination, with the teams' trust and an honest number. An acute forcing function (an active Jenkins CVE, an audit) compresses the sequence; absent that, the decree costs more than it buys.

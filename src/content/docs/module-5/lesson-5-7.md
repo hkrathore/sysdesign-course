@@ -256,7 +256,7 @@ Bots and duplicate-intent clicks must not be billed.
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -267,7 +267,7 @@ Bots and duplicate-intent clicks must not be billed.
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Is this for billing or analytics?"**, *Strong:* asks it *first*, then designs two paths, fast approximate stream for dashboards, exact batch for the bill, and states that the answer flips the architecture. *Red flag:* builds one pipeline and never distinguishes the two contracts.
 - **"How do you count each click exactly once for billing?"**, *Strong:* dedup by explicit `eventId`; the **batch recompute over complete deduped raw is the real guarantee** (exactly-once over *all* events, not just a window); never bill from the stream. *Red flag:* "exactly-once on the stream" with no batch, ignoring late events outside the window.
@@ -277,7 +277,7 @@ Bots and duplicate-intent clicks must not be billed.
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Billing from the stream.** The OLAP/stream number is at-least-once and lossy on very-late events. Bill from the **batch** over complete deduped raw, full stop. This is the single most important rule on the problem.
 - **One pipeline for both jobs.** Speed (dashboard) and truth (billing) are different correctness contracts; forcing one path makes you either accept approximate bills or build impractical unbounded-window exactly-once.
@@ -287,7 +287,7 @@ Bots and duplicate-intent clicks must not be billed.
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through counting a single click exactly once for the invoice.**
 > *Model:* The click arrives with an assigned `eventId` and durably lands on the Kafka log, partitioned by `campaign_id`, and is tee'd to S3 as retained raw. The **stream** dedups by `eventId` in keyed state and produces a fast approximate count for the dashboard, but that's not the bill. The **bill** comes from a **batch job that recomputes over the complete retained raw**: it dedups across *all* events (not just a window), folds in late arrivals, applies the fraud filter, and writes an exact count to the billable table. The invoice reads only that table. So exactly-once for billing is structural: idempotent recomputation over an immutable, deduped raw set yields the same exact number however many times it runs. The stream is fast; the batch is true.

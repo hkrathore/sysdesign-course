@@ -284,7 +284,7 @@ Image/audio inputs change tokenization and context accounting (an image is worth
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -294,7 +294,7 @@ Image/audio inputs change tokenization and context accounting (an image is worth
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"The model is stateless — so how is this a coherent multi-turn chat?"** — *Strong signal:* the model remembers nothing; coherence is manufactured by **re-assembling context every turn** (system prompt + windowed history + summary + retrieved memory) and re-sending it; the system, not the model, holds the conversation. Names that the serving-tier KV-cache helps *within* a request but not *across* turns. *Red flag:* "the model keeps the conversation in memory" — it does not; this misunderstanding sinks the whole design.
 
@@ -308,7 +308,7 @@ Image/audio inputs change tokenization and context accounting (an image is worth
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Resending the full conversation history forever.** It's `O(N²)` cumulative cost and eventually exceeds the window. You *must* budget context — windowed history + summary + retrieval — to keep it `O(N)`.
 - **No explicit context budget / token accounting.** Without a per-turn token budget and a packing priority, you either overflow the window or silently truncate mid-reference. Precompute token counts; pack by priority; signal when you summarize.
@@ -318,7 +318,7 @@ Image/audio inputs change tokenization and context accounting (an image is worth
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. A user has a 100-turn conversation. Walk me through exactly what's in the prompt on turn 100, and why the system isn't paying for 100 turns of history.**
 

@@ -188,7 +188,7 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -199,7 +199,7 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Walk me through your design."** - *Strong:* contract and policy seam first; states the HashMap+DLL result in a sentence and offers depth. *Red flag:* opens with pointer surgery; eviction welded into the cache class.
 - **"How do you make it thread-safe?"** - *Strong:* "global mutex - the arithmetic shows 20× headroom; striping is a contained refactor if profiling disagrees," and names the compound map+policy invariant. *Red flag:* reflexive striping or lock-free talk with no number attached.
@@ -209,7 +209,7 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Playing it as algorithm recall.** Forty minutes of pointer surgery, zero interface decisions - the precise inversion of what an EM/Director round scores.
 - **The read-write-lock reflex.** Strict LRU mutates on every read; the rwlock buys overhead, not concurrency. Trace what `get` does before picking a lock.
@@ -219,7 +219,7 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Your teammate's design review proposes 16-way lock striping for v1. Respond.**
 > *Model:* I'd ask for the number. We run ~150K cache ops/s peak; a coarse-locked cache sustains ~2-5M ops/s - 15-30× headroom, so striping solves a problem we can't measure. And it isn't free: LRU goes per-segment approximate, stats turn racy, a global byte budget needs cross-segment coordination. Locking hides behind the facade, so striping later is a contained refactor, not an API change. Decision: coarse lock, lock-wait and hit-rate telemetry from day one - if the profile ever shows a convoy, the platform team benchmarks striped-16 against our replayed trace; my prior is we never need it.

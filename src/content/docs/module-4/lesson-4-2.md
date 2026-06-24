@@ -206,7 +206,7 @@ Stress the design against the NFRs; each fix names its trade-off.
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -216,7 +216,7 @@ Stress the design against the NFRs; each fix names its trade-off.
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 At Director altitude they're listening for **trade-off articulation, cost ownership, and credible delegation**.
 
@@ -228,7 +228,7 @@ At Director altitude they're listening for **trade-off articulation, cost owners
 
 ---
 
-## Common mistakes / misconceptions
+### Common mistakes / misconceptions
 
 - **Stuffing the body into the metadata DB**, the defining error: bulk write-once bytes at transactional $/GB.
 - **Racy burn-after-read**, check-then-decrement double-serves a one-time paste; it needs an atomic claim.
@@ -238,7 +238,7 @@ At Director altitude they're listening for **trade-off articulation, cost owners
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. A single paste goes viral and takes 80% of your read traffic. What saves you?**
 > *Model:* It's a **hot key**, but it's the **same URL for everyone**, so the CDN serves it at ~100% edge hit and the body reads never reach origin; Redis absorbs the metadata lookups that leak through, `origin = R×(1−h)` with `h≈0.99` means origin sees ~1% of the spike. This works because the paste is public and immutable (cacheable). A **burn** paste is self-limiting (one reader wins); an **unlisted** one stays non-cacheable and rides Redis + the sharded store. The lever is hit ratio, never "add origin capacity."
@@ -254,7 +254,7 @@ At Director altitude they're listening for **trade-off articulation, cost owners
 
 ---
 
-## Key takeaways
+### Key takeaways
 - **The one decision that matters: split metadata from blob.** Tiny strongly-consistent metadata in a **KV store**; immutable bodies in a **cheap object store**. Bytes in the DB is the defining mistake.
 - **Reason in numbers:** ~120 writes/s vs ~12K reads/s (100:1), ~100 GB/day blob vs ~5 GB/day metadata, ~2.4 Gbps peak egress → **CDN non-optional**; a ~10 GB cache fronts ~150 TB of storage.
 - **TTL is two layers:** native TTL for background deletion + a lazy read check for instant enforcement, never a table scan.

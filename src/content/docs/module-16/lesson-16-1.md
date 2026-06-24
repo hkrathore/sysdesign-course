@@ -167,7 +167,7 @@ Notice what the revision added: the **rejected alternative** (OT) with its reaso
 
 ---
 
-## Key takeaways
+### Key takeaways
 - **The capstone is the loop, not the answer.** Drive RESHADED end-to-end yourself, then turn the §C rubric on your own design, *"where would a Staff interviewer push, and would my answer survive it?"* That self-critique reflex is the most transferable thing here.
 - **This problem's crux is convergence**, and it's a harder *class* than anything in the canonical design problems: every prior problem tolerated staleness or a conflicted-copy; a collaborative editor must merge concurrent intention-carrying edits into **one state both screens show, zero lost keystrokes.** Name it as the defining requirement or you've already failed the R step.
 - **Let the numbers separate two systems**: presence/cursor traffic (high-volume, ~N² fan-out, loss-tolerant, *never persisted*) vs content edits (lower-volume, durable, acked, versioned), plus a huge **idle-connection** count that dwarfs the commit rate. Size them apart; route them apart.

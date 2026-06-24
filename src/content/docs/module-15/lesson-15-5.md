@@ -100,7 +100,7 @@ This category was re-scored harder than almost any other, because AI broke the a
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"How do you actually measure whether your loop works?"**, *Strong:* quality-of-hire at 6/12 months scored against the original packet, plus pass-through and offer-accept, with a story of a number drifting and a retro that fixed it. *Red flag:* funnel metrics only (time-to-fill) with no link to whether the hires succeeded, measures speed, not the instrument's predictive quality.
 - **"Bar-raiser, committee, or HM-owned, which, and why?"**, *Strong:* names the trade-off of each and picks *for this company's stage and talent density* (bar-raiser for consistency at scale; HM-owned for speed in a startup, with a calibration mechanism to stop drift). *Red flag:* importing one model as doctrine, or not knowing the trade-offs.
@@ -110,7 +110,7 @@ This category was re-scored harder than almost any other, because AI broke the a
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Gut-feel hiring.** "I can tell in ten minutes" / "I hire for fit" is the cardinal red flag, it's an unmeasured instrument with a bias vector built in. State structured signal, written rubrics, and competency-add against a bar.
 - **No funnel numbers and no quality-of-hire.** Describing how you interview without owning pass-through, offer-accept, and 12-month outcomes against the packet reads as someone who *participates* in hiring rather than *runs* it. The numbers are the instrument.
@@ -120,7 +120,7 @@ This category was re-scored harder than almost any other, because AI broke the a
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Deliver your hiring philosophy in 90 seconds, then stop.** Principles → Loop design → Metrics → AI redesign, story in reserve. *(Sketch: two principles each with a cost; one competency per round + written-debrief discipline; four owned numbers including quality-of-hire at 12 months; the direct-and-verify AI redesign, then tee up the junior-pipeline probe instead of answering it.)*
 2. **Design the loop for a 40-person startup, then for a 4,000-person org.** *(Sketch: startup → HM-owned for speed *plus* a calibration mechanism and a single cross-team bar-raiser to stop drift; FAANG-scale → hiring committee + bar-raiser for consistency and debiasing across thousands of loops; name the trade-off each accepts, speed vs consistency, and refuse to import one model into the other.)*

@@ -268,7 +268,7 @@ register_schema(table="users", schema=v2)   # additive: new nullable column 'cou
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -279,7 +279,7 @@ register_schema(table="users", schema=v2)   # additive: new nullable column 'cou
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"How do you get data from the source into the lake, and why not just poll?"**, *Strong:* **log-based CDC** (Debezium on the WAL), because polling **silently misses deletes** and **loads the source**; treats this as a correctness decision, not a connector choice. *Red flag:* a nightly `SELECT *` with no awareness that it loses deletes and corrupts downstream silently.
 - **"A change gets delivered twice. What lands in the lake?"**, *Strong:* **effectively-once via idempotent MERGE keyed on PK and guarded by `source_lsn`** + transactional checkpoint, replays are no-ops, older never overwrites newer; cites the machinery. Quantifies the ~10–30% overhead and says where it's worth paying. *Red flag:* "exactly-once, Kafka handles it" with no idempotency or version guard, the lost-update trap.
@@ -289,7 +289,7 @@ register_schema(table="users", schema=v2)   # additive: new nullable column 'cou
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Query-based polling for a table with deletes.** It structurally cannot see a deleted row, so the lake keeps data the source erased, corrupting every count and breaking GDPR erasure, silently. Log-based CDC is the only correct capture when deletes matter.
 - **At-least-once with no idempotency.** A re-delivered change applied twice, or an older change clobbering a newer one, is lost-update corruption. The apply must be an **idempotent PK upsert guarded by the source LSN**; "Kafka gives exactly-once" without a version guard is the trap.
@@ -299,7 +299,7 @@ register_schema(table="users", schema=v2)   # additive: new nullable column 'cou
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through how a single UPDATE on a production Postgres row ends up correctly reflected in the lakehouse.**
 > *Model:* The UPDATE commits to the **WAL**; **Debezium** tails it (the same log a replica reads) and emits a change event, `op=u` with before/after-images, source `lsn`, and primary key, to **Kafka**, **partitioned by primary key** so this row's changes stay strictly ordered. **Flink** applies an **atomic MERGE** into the **bronze** Iceberg table keyed on the primary key, guarded by `source_lsn` (apply only if newer), committing the offset transactionally with the write (effectively-once). The bronze row now mirrors the source; the silver/gold take it from there, and a re-delivery is a no-op by the `lsn` guard. Seconds end-to-end, correct under retries because the apply is idempotent.

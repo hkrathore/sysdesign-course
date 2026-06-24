@@ -261,7 +261,7 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -271,7 +271,7 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What actually stops a submission from taking over the host?"**, *Strong:* names the **boundary and its blast radius**, microVM (own kernel; escape must beat the hypervisor → radius one VM) or gVisor (userspace-filtered syscalls), plus per-run hygiene (no network, read-only FS, seccomp, fresh sandbox, hard CPU/mem/PID limits). *Red flag:* "run it in a Docker container," unaware a shared kernel means a CVE owns the host.
 - **"What's the real load, and how do you size for it?"**, *Strong:* steady is trivial (~12/s); the design exists for the **contest spike (~5,500 concurrent via Little's Law)**, sized with a **pre-warmed pool** because contests are scheduled and reactive scaling lags by host cold start. *Red flag:* sizes for the average, or reactive-autoscales a 3-minute spike.
@@ -281,7 +281,7 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating it as a CRUD app with a code field.** Durable data is ~80 GB/yr and trivial; the difficulty is the **untrusted execution plane** and the contest burst. Spending the interview on schema design misses the problem.
 - **"Just use a Docker container."** A bare container shares the host kernel, one CVE and the blast radius is the whole host. Adversarial code needs a *smaller* boundary (gVisor) or a *harder* one (microVM); name the radius.
@@ -291,7 +291,7 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. A submission is a deliberate exploit aimed at your kernel. How do you contain it, and what's the blast radius?**
 > *Model:* I pick the boundary by blast radius. A bare container shares the host kernel, radius is the whole host, unacceptable for adversarial code. My default is **Firecracker microVMs**: each run gets its own guest kernel behind a hardware boundary, so an escape must beat the hypervisor, not just the kernel, radius is one microVM, ~125 ms cold start, lower density. Where density/cost dominate and the threat is softer, **gVisor** filters syscalls in userspace to shrink the host kernel surface with container-like density. Either way: no network, read-only FS, seccomp, dropped capabilities, hard CPU/memory/PID/output limits, **fresh sandbox per run**. Internals delegated to platform-security behind `judge(submission, limits)`; prior is microVMs for the public threat model.

@@ -287,7 +287,7 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 
 ---
 
-## Trade-offs table: the pivotal decision (the core artifact)
+### Trade-offs table: the pivotal decision (the core artifact)
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -299,7 +299,7 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Why SSE over WebSocket, defend it with numbers."**, *Strong:* viewers are read-mostly (post via a cheap separate POST), so a one-way transport at ~half the per-connection memory **halves the fleet**, ~84 vs ~168 servers for a 5M stream; transport is a cost line, not a feature checkbox. *Red flag:* "WebSocket because it's real-time" with no per-connection cost reasoning.
 - **"How is this different from WhatsApp?"**, *Strong:* WhatsApp has a **durable per-recipient inbox** because a missed message matters and fan-out is to handfuls; Live comments fan out to **millions with no inbox** because a late comment is worthless, delete-by-default, route toward *streams* not *users*, recovery trivial. *Red flag:* a per-viewer queue / Kafka-per-viewer.
@@ -309,7 +309,7 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Building a durable inbox by reflex**, WhatsApp muscle memory on the wrong problem. A late comment is worthless; per-viewer queues for 5M viewers are huge cost for negative value. **No inbox is the central decision.**
 - **Reaching for WebSocket without costing it.** Viewers are read-mostly; WebSocket roughly doubles the per-connection footprint and the fleet, for duplex you don't use. SSE is cost-correct; defend it with the number.
@@ -319,7 +319,7 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Why no durable per-viewer inbox, when WhatsApp has one?**
 > *Model:* Because the value of a comment is *now*. In WhatsApp a missed message matters and fan-out is to ~2.5 recipients, so a durable per-recipient inbox is worth its cost. Here a comment seen 30 s late is noise and fan-out is to **millions**, durable per-viewer queues across 5M viewers would be enormous cost for *negative* value. So we delete-by-default, route toward *streams* not *users*, and a small `stream_id`-partitioned archive (Cassandra/Kafka) covers moderation and replay off the hot path. Side benefit: reconnect is trivial, no backlog to replay, just re-attach to "now."

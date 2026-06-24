@@ -214,7 +214,7 @@ Two riders must not be offered the same car, and a crashed matcher mid-dispatch 
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -224,7 +224,7 @@ Two riders must not be offered the same car, and a crashed matcher mid-dispatch 
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What's the read:write ratio, and why does it matter?"** - *Strong signal:* names it **write-dominated** (~0.5M pings/s vs ~20K reads/s, ~25:1) and designs the ingest+index path as the thing to scale. *Red flag:* assumes read-heavy "like every web app" and over-builds a read cache.
 - **"Why does a uniform grid fall over in a dense city?"** - *Strong:* equal-area cells, wildly unequal density → one bucket holds thousands, hot-spotting a shard; fix with **variable resolution** (quadtree/S2/H3), and knows a globally-tiny grid just swaps in a sparse-region scan. *Red flag:* "just add more cells."
@@ -234,7 +234,7 @@ Two riders must not be offered the same car, and a crashed matcher mid-dispatch 
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating it as read-heavy.** It's write-dominated; mis-sizing this mis-designs everything downstream.
 - **A uniform grid / fixed geohash precision.** Guarantees a dense-city hot spot. Use quadtree/S2/H3 for variable resolution.
@@ -244,7 +244,7 @@ Two riders must not be offered the same car, and a crashed matcher mid-dispatch 
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate the driver-location write QPS, and explain why that number drives the architecture.**
 > *Model:* ~5M registered drivers, ~20% online at peak ≈ **1M concurrent**, pinging every **4 s** → `1M ÷ 4s = 250K/s`, ~**0.5M writes/s** peaked. Nearby reads are only ~**20K/s**, so it's **~25:1 write:read - write-dominated**, the inverse of a feed. That inversion is the whole architecture: keep the ~100 MB index **in RAM**, shard **by region**, and make the write path cheap (202 fire-and-forget, eventually streamed ingest with dynamic ping rate). No giant read cache - there's barely any read load.

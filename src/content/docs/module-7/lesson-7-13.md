@@ -135,7 +135,7 @@ A leader who answers with the 2015 frame, central BI queue, no SLAs, one team, o
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Would you adopt data mesh?"**, *Strong:* sizes it to the org, "mesh earns its coordination cost only at a large, multi-domain scale where no central team can know every domain; at our size I'd run hub-and-spoke and *not* import mesh's overhead, adopting it now would be cargo-culting." Names federated governance as the hard part. *Red flag:* "yes, mesh is best practice" with no sizing, the fashion-following tell.
 - **"Who's on call for data, and what gets them paged?"**, *Strong:* a real rotation (5–8 engineers, humane frequency) paged by **freshness and quality SLO breaches** (stale data, null spikes, row-count anomalies) with a tight alert budget and a 'the number is wrong' runbook with a backfill path. *Red flag:* "the engineer who built it gets a Slack message when someone complains", reactive, no SLO, no rotation.
@@ -146,7 +146,7 @@ A leader who answers with the 2015 frame, central BI queue, no SLAs, one team, o
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Answering with the pipeline, not the operating model.** Describing ingestion and a warehouse when asked how you'd *run* the function. The interviewer wants the org shape, the contracts, and the access model, the DAG is the easy 20%.
 - **Cargo-culting data mesh (or any fashionable shape).** Proposing mesh for a 10-person data org imports all the coordination cost and none of the scale benefit; the skill is sizing the model to the company, and saying *no* to mesh when it doesn't fit is the senior signal.
@@ -156,7 +156,7 @@ A leader who answers with the 2015 frame, central BI queue, no SLAs, one team, o
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Structure a data org for a 500-person, multi-domain company in 90 seconds.** *(Sketch: clarify scale/maturity/existing team; reject pure-centralized (bottleneck) and pure-embedded (inconsistency); land on hub-and-spoke, central platform hub + embedded analytics engineers; operating model = data-as-a-product with owners/SLAs; access model = governed self-serve; reliability = freshness SLO + on-call; Limit = coordination cost, mitigate with a strong hub and the semantic layer as the contract.)*
 2. **Design data on-call from scratch.** *(Sketch: freshness + completeness/quality SLOs as the paging conditions; a 5–8-person rotation at humane frequency; a tight alert budget (handful/week, high-signal); a 'the number is wrong / pipeline fell behind' runbook with detection (quality tests), a backfill/replay path (idempotent recompute from retained raw), and proactive consumer communication; tier rigor to blast radius.)*

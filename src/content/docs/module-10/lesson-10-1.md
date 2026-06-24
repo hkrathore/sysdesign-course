@@ -270,7 +270,7 @@ Now the failure modes.
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -281,7 +281,7 @@ Now the failure modes.
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"The answer is wrong but confident — where's the bug?"** *Strong signal:* look at **retrieval first** — pull the retrieved chunks; if the relevant one isn't in the top-k, it's a recall problem (chunking/hybrid/rerank), not a model problem. Only if retrieval was good and the model still fabricated do you touch generation. *Red flag:* "swap to a bigger/better model" as the first move — that's treating the swappable part as the asset.
 
@@ -295,7 +295,7 @@ Now the failure modes.
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Drawing only the query path.** Ingestion is half the system and where freshness, ACL tagging, and tombstones live. Omitting it signals you think RAG is "call the vector DB," and misses where quality is actually built.
 - **Post-filtering ACLs instead of pre-filtering.** Retrieving then dropping forbidden chunks already pulled secret content into the candidate set and model context — one prompt-injection or logging slip and it leaks. Permissions belong *inside* retrieval.
@@ -305,7 +305,7 @@ Now the failure modes.
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. A user gets an answer quoting a salary figure from a doc they can't open. What broke and how do you prevent it structurally?**
 

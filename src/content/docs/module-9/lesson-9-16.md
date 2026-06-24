@@ -108,7 +108,7 @@ This is a freshly-scored category; the 2023 hype-era answers are now disqualifyi
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Give me a use case you'd refuse to ship AI for."** — *Strong:* a concrete one with the reason (e.g., "auto-deciding loan denials, high-risk under the AI Act, bias and explainability exposure, and a wrong call is unrecoverable, so at most AI-assisted with a human decision-maker"). *Red flag:* can't name one, "AI can help everywhere."
 - **"What does your AI feature cost per user, and what happens at 10× usage?"** — *Strong:* knows the per-request token cost, that cost scales with usage not capacity, the margin risk from power users, and the levers (caching, routing/cascade, output caps, quotas). *Red flag:* treats AI cost as a rounding error or "we'll optimize later."
@@ -119,7 +119,7 @@ This is a freshly-scored category; the 2023 hype-era answers are now disqualifyi
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Unbounded enthusiasm.** "AI everywhere, it's the future" is the 2026 equivalent of hand-waving "it scales." Lead with the portfolio and the gate, and be ready to say no.
 - **No unit economics.** Designing the feature but never modeling per-request token cost, then discovering negative gross margin in production. Cost is a launch gate.
@@ -130,7 +130,7 @@ This is a freshly-scored category; the 2023 hype-era answers are now disqualifyi
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Respond to "put AI in everything" in 90 seconds.** *(Sketch: reframe to "where it earns its place"; portfolio-score the candidates and name the *no*; route the winners through a lightweight gate, governance + data + cost model + eval; one quantified win; Limit = gate-as-bureaucracy and how you keep it days-not-weeks.)*
 2. **Defend a customer-data posture to a skeptical CISO.** *(Sketch: enterprise tier = no-training + short retention + DPA + indemnity, consumer banned; classify/redact data, PII out of prompts, in-region for residency; single audited gateway + DLP + sanctioned internal tool to kill shadow AI; trade-off = overhead vs audit-defensibility.)*

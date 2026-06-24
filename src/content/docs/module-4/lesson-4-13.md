@@ -277,7 +277,7 @@ That division, **own the SLOs, the reliability bar, the cost envelope, and the p
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -288,7 +288,7 @@ That division, **own the SLOs, the reliability bar, the cost envelope, and the p
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 At Director altitude the probes are about **judgment, cost, and delegation**, not whether you can integrate APNs.
 
@@ -304,7 +304,7 @@ At Director altitude the probes are about **judgment, cost, and delegation**, no
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Designing it as a read/database problem.** It's a **write/fan-out pipeline**; the hard parts are throughput, decoupling, and unreliable downstreams, not read latency. There is no high-QPS read path.
 - **No queue / synchronous delivery.** Couples ingestion to gateway uptime; one slow courier stalls the front door. The buffering queue *is* the design.
@@ -317,7 +317,7 @@ At Director altitude the probes are about **judgment, cost, and delegation**, no
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. How do you stop a duplicate notification when your pipeline is at-least-once and retries?**
 > *Model:* Two layers. At **ingest**, the caller supplies an `idempotency_key` and I `SETNX` it in Redis with a TTL equal to my dedup window, a replayed request is a no-op. At the **worker**, before re-sending after a crash/retry I check whether I already have a `gateway_msg_id` recorded for that `(notification_id, channel)` in the tracking store, so a "sent-but-didn't-commit-offset" case doesn't re-send. This **minimizes** dupes within a window; it is not a global exactly-once guarantee, because the gateways themselves are often at-least-once. For money-sensitive notifications ("you were charged"), I push idempotency up into the **producing** service's content so even a rare dupe is harmless. The honest framing is at-least-once + aggressive dedup.

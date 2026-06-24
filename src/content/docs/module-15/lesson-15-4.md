@@ -101,7 +101,7 @@ This is the category the modern world re-scored most violently. Five shifts sepa
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"What did you personally inspect at the work level last month?"**, *Strong:* a specific area, why it (risk concentration), and what he found, plus what he deliberately left alone. *Red flag:* nothing concrete, or a generic "I review dashboards", the abdication tell.
 - **"How would your team describe you when you're not in the room?"**, *Strong:* an honest, slightly unflattering read that matches the stated Limit ("decisive but sometimes moves before everyone's bought in"), with the mechanism he uses to compensate. *Red flag:* a flawless self-portrait, or a virtue dressed as a flaw ("too passionate").
@@ -111,7 +111,7 @@ This is the category the modern world re-scored most violently. Five shifts sepa
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **A one-word style label with no mechanism.** "I'm a servant leader" / "I'm hands-off" / "I empower people", a label with no standing practice and no number is a poster, not a philosophy. State a contextual Position, then a *named* mechanism.
 - **Falling into a founder-mode ditch.** Pure delegation ("get out of the way") reads as abdication; "I go deep on everything" reads as a micromanager who can't scale. The answer is selective depth plus mechanisms, and correct the *cliché* version of founder mode, don't recite it.
@@ -121,7 +121,7 @@ This is the category the modern world re-scored most violently. Five shifts sepa
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Deliver your style in 90 seconds, then shut up.** Write Position-Mechanism-Number-Limit for your own leadership and time it. *(Sketch: contextual Position; one named standing mechanism with a cadence; one number pairing quality + delivery; one dated, real Limit with "and here's when I change", then stop and let the probe come.)*
 2. **Answer the founder-mode question cold.** "Are you founder mode or manager mode?" *(Sketch: name the binary as false, correct the Chesky cliché, give selective-depth with a concrete "last month I inspected X and deliberately left Y alone," and add the CEO-skip-level channeling line.)*

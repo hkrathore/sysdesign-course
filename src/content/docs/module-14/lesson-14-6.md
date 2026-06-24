@@ -223,7 +223,7 @@ What I keep, the differentiation verdict, the crossover number, the exit trigger
 
 ---
 
-## Trade-offs table: the three verdicts
+### Trade-offs table: the three verdicts
 
 | Decision | A, Buy (SaaS vendor) | B, Adopt OSS, self-host | C, Build in-house | Use when... |
 |---|---|---|---|---|
@@ -235,7 +235,7 @@ What I keep, the differentiation verdict, the crossover number, the exit trigger
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Your platform lead says they can build it cheaper. How do you respond?"**, *Strong:* re-run their math with loaded cost, infra, the v1 year, the maintenance tail, and opportunity cost; show the crossover; offer the pipeline-tier middle path; commit to the build *if* the numbers clear it. *Red flag:* "no, we always buy" (dogma), or accepting the six-engineers-equals-the-bill framing.
 - **"What would make you reverse this decision?"**, *Strong:* written triggers with numbers, spend crossover, SLA breach count, roadmap block, acquisition, and the runbook that makes reversal a quarter, not a rewrite. *Red flag:* "we'd re-evaluate at renewal" (when leverage is lowest and no plan exists).
@@ -245,7 +245,7 @@ What I keep, the differentiation verdict, the crossover number, the exit trigger
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Comparing the vendor invoice to engineer salaries.** The build side is loaded cost + infra + v1 + a permanent maintenance tail; the buy side is a negotiated trajectory, not the sticker. Both numbers in the naive comparison are wrong.
 - **Pricing opportunity cost at zero.** Six engineers on commodity infrastructure are two product teams not shipping. The scarce resource is senior attention, not budget.
@@ -255,7 +255,7 @@ What I keep, the differentiation verdict, the crossover number, the exit trigger
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Your Datadog renewal comes in at $2.4M/yr, up 30%. Walk me through your decision.**
 > *Model:* Governance before strategy: do we control the volume? An OTel pipeline tier we own, with sampling and log filtering, typically cuts 30-50%, that alone may erase the increase. Then negotiate: a 3-year commit at this ACV gets 25-30% off, plus a renewal cap (~7%/yr) and egress rights in the paper. Then run the crossover: a replacement team is ~$2.1M/yr all-in, so build wins only when governed spend durably clears ~$4-5M/yr, we're at half that. Verdict: stay bought, govern the pipe, write the crossover into the memo as the trigger, and keep the exit runbook current so next renewal we negotiate with a credible alternative. What I won't do is commission a build to win one negotiation, that's a decade of ownership to dodge an invoice.

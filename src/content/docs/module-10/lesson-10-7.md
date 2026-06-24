@@ -253,7 +253,7 @@ GET  /v1/users/{user_id}/images?cursor=&limit=   -> 200 { images:[...], next_cur
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -265,7 +265,7 @@ GET  /v1/users/{user_id}/images?cursor=&limit=   -> 200 { images:[...], next_cur
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Why not stream it like ChatGPT?"** — *Strong signal:* diffusion is iterative denoising that yields nothing until the last of ~30 steps, so there are **no tokens to stream**; it's a multi-second batch job → async ticket model. Names the contrast with LLM serving explicitly. *Red flag:* proposes SSE token streaming — reveals they pattern-matched "GPU = LLM serving" without understanding the workload.
 - **"A 10× burst hits. What happens?"** — *Strong signal:* **pre-warmed pool + queue absorbs overflow + tiered shedding/backpressure + priority preemption**; explains that GPU cold start (weight load) makes reactive autoscaling too slow to catch a spike. *Red flag:* "autoscale the GPUs" with no awareness of cold-start lag or GPU availability, or "just provision for peak" with no cost awareness.
@@ -277,7 +277,7 @@ The through-line at Director altitude: **own the GPU economics and the safety/le
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Pattern-matching to LLM serving and streaming tokens.** The single biggest tell. Diffusion is a batch render; there is nothing to stream until it's done. Design a queue, not a serving loop.
 - **Holding a synchronous connection for the render.** Multi-second renders × hundreds/sec = a connection pileup and latency coupled to queue depth. Return a ticket.
@@ -288,7 +288,7 @@ The through-line at Director altitude: **own the GPU economics and the safety/le
 
 ---
 
-## Practice questions with model answers
+### Practice questions with model answers
 
 **Q1. Walk me through what happens, end to end, when a user submits a prompt — including where you spend a GPU-second and where you don't.**
 

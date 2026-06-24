@@ -106,7 +106,7 @@ This cluster got re-scored hard in both directions at once, more decisive *and* 
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"When did you first tell the person, exactly?"**, *Strong:* a specific early date, in writing, weeks before anything formal; the PIP or exit was never the first signal. *Red flag:* the feedback first appeared inside the PIP, a surprise termination dressed as process.
 - **"Did anyone ever pass your PIP? What's your real pass rate?"**, *Strong:* honest candor, some pass, most end in exit, and the PIP is *both* an improvement vehicle and documentation the employee reads as a notice; offers the negotiated-exit path candidly. *Red flag:* "PIPs usually work" (naive) or "I PIP to paper the file" (cynical), both fail.
@@ -116,7 +116,7 @@ This cluster got re-scored hard in both directions at once, more decisive *and* 
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **The PIP is the first the person hears of it.** A surprise termination is the cardinal sin of this cluster. Feedback is early, dated, and in writing; the formal plan formalizes a conversation already months old, it never starts it.
 - **Coaching with no deadline.** "I kept working with them" with no decision date reads as conflict-avoidance and as not operating at level. A plan has a clock; a decision has a deadline.
@@ -126,7 +126,7 @@ This cluster got re-scored hard in both directions at once, more decisive *and* 
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Run the firing story on the spine, with dates.** "Walk me through someone you let go." *(Sketch: STAR-L on the process spine, diagnose system-then-skill-vs-will, the dated first conversation in writing, a time-boxed plan with named support, the decision delivered personally with severance and references, the named team cost, and "one quarter earlier" plus the two-week-trigger upstream fix. Hold every date and number for the probe.)*
 2. **Defend your PIP philosophy to a skeptic.** "Aren't PIPs just legal cover?" *(Sketch: philosophy-shape, Position: a PIP formalizes a conversation already happening; Mechanism: passable criteria, weekly check-ins, the candid negotiated-exit path offered alongside; Number: your real pass rate, some pass most don't; Limit: the documentation function is real and pretending otherwise to the employee is the dishonest move. Land between naive and cynical.)*

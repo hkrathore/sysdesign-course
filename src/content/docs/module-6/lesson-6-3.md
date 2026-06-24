@@ -238,7 +238,7 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -249,7 +249,7 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Walk me through the jam-after-payment path."**, *Strong:* `Dispensing → Refunding` already on the diagram; journal `VEND_FAIL`; flag the slot; retry rejected (double-vend risk). *Red flag:* no failure transitions drawn; improvised under questioning.
 - **"Power dies mid-dispense. What does the customer see after reboot?"**, *Strong:* journal-before-motor, boot reconciliation, customer's favor, idempotent via `txn_id`; connects to the ATM variant unprompted. *Red flag:* "the transaction is atomic" with no notion of where durability lives.
@@ -259,7 +259,7 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **A state diagram with only the happy path.** No `Refunding`, no `OutOfService`. The failure transitions are the question; fleet-wide they fire thousands of times a day (per E).
 - **Checking change feasibility after dispensing.** You now owe money you may not be able to produce. Feasibility guards the irreversible action, ordering is the correctness.
@@ -269,7 +269,7 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. The motor jams after the customer paid $2.00 for a $1.50 item. Walk the exact sequence.**
 > *Model:* `Collecting` validated stock, credit, and `canMake(50¢)`, journaled `VEND_START`, fired the motor, returned `Dispensing(slot, 200¢)`. The jam sensor (or 5 s timeout) fires `onJamDetected`: journal `VEND_FAIL`, transition to `Refunding(200¢)`, **full** credit, no product moved, and flag the slot suspect. I reject retrying: a second pulse on a jammed helix can release two units. If the refund itself faults, `Refunding → OutOfService` with the owed amount journaled.

@@ -273,7 +273,7 @@ One client firing 100K-token prompts can monopolize KV and decode cycles - a hot
 
 ---
 
-## Trade-offs table - the pivotal decisions
+### Trade-offs table - the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -283,7 +283,7 @@ One client firing 100K-token prompts can monopolize KV and decode cycles - a hot
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What's the bottleneck resource, and what's the relevant 'skew'?"** - *Strong:* **GPU compute + HBM**, not disk/network; the skew is **prefill (cheap parallel burst) vs decode (slow sequential, ~30-50 ms/token)**, and **KV-cache memory caps the batch** → caps throughput. *Red flag:* reaching for a read:write ratio and a giant read cache, as if this were a CRUD app.
 - **"Walk me through continuous batching and why it matters."** - *Strong:* static batching waits on the longest generation while finished sequences hold KV slots; continuous batching admits/evicts at per-token granularity, lifting utilization 2-4× - the single biggest cost lever. *Red flag:* "just send bigger batches" with no awareness of the variable-length problem or the TTFT cost.
@@ -293,7 +293,7 @@ One client firing 100K-token prompts can monopolize KV and decode cycles - a hot
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating it like a CRUD/read-heavy service.** The bottleneck is GPU HBM + compute; the asymmetry is prefill vs decode. Mis-framing this mis-sizes everything.
 - **Sizing "per GPU" for a model that needs several.** 70B fp16 = 140 GB > 80 GB HBM → 2 GPUs/node; ignore it and the fleet and cost are 2× wrong.
@@ -303,7 +303,7 @@ One client firing 100K-token prompts can monopolize KV and decode cycles - a hot
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate the fleet size and the cost floor, and explain what drives the numbers.**
 > *Model:* **30M DAU × 10 msgs/day = 300M requests/day**; at ~500 output tokens that's **1.7M output tokens/sec average, ~10M peak**. Pin the serving unit: 70B fp16 = 140 GB > 80 GB, so a **2-GPU node (TP=2)**. A node does ~**2,000 tok/s** (batch ~64 × ~30 tok/s), so **~850 nodes average → ~4,500 peak (~9K GPUs)**. At ~$3/GPU-hr, ~$6/node-hr ÷ 7.2M tokens/hr → **~$0.85 per 1M output tokens** as a compute floor (public prices ~$10-15/1M add margin + input tokens). The two biggest dials: **model size** (an 8-13B model cuts the fleet ~10×) and the **~5× peak-vs-average gap** - which is exactly why autoscaling and utilization are the budget conversation.

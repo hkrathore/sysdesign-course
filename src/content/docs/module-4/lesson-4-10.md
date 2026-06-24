@@ -271,7 +271,7 @@ Stress your own design: re-check the NFRs, hunt the bottlenecks, fix each **nami
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C (chosen, usually) | Use when… |
 |---|---|---|---|---|
@@ -282,7 +282,7 @@ Stress your own design: re-check the NFRs, hunt the bottlenecks, fix each **nami
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 They are not checking whether you can name HLS, they're checking that you grasp video as offline-encode + static-edge-delivery, can **price** the bandwidth, and know what to delegate.
 
@@ -294,7 +294,7 @@ They are not checking whether you can name HLS, they're checking that you grasp 
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Thinking video is "streamed" from a server.** It's pre-encoded into a static ladder served as files from a CDN; the client adapts. Missing this misses the whole problem.
 - **Transcode-on-the-fly or whole-file serial encode.** Uncacheable / hours of latency with all-or-nothing failure. Chunked parallel jobs off a queue.
@@ -304,7 +304,7 @@ They are not checking whether you can name HLS, they're checking that you grasp 
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. A user uploads a 2-hour 4K film. Walk me from the PUT to it being watchable, where does the time go?**
 > *Model:* Resumable multipart PUT straight to the object store (app servers out of the byte path); completion fires `source-uploaded` and commits a `processing` metadata row. The orchestrator splits at GOP boundaries and fans **thousands of (chunk × rung × codec) jobs** across a stateless fleet via Kafka, that parallelism is why the ladder finishes in **minutes, not hours**. To minimize time-to-watchable, the **universal H.264 ladder encodes first** and the row flips to `ready` when it's packaged; VP9/AV1 backfill asynchronously. The time goes into encode CPU, exactly why it's chunked, and why the cheap codec gates watchability. A worker crash re-queues one idempotent chunk, not the film.
@@ -320,7 +320,7 @@ They are not checking whether you can name HLS, they're checking that you grasp 
 
 ---
 
-## Key takeaways
+### Key takeaways
 
 - **Video is offline-encode + static-edge-delivery, not server-side streaming.** Pre-chop into a **ladder of static segments** (resolutions × codecs) on a **CDN/edge**, and let the **client adapt** (HLS/DASH), the read path is a file server, the only way to serve ~1B watch-hours/day.
 - **Drive it with three numbers:** **~1,400:1 watch:upload**, **~125 Tbps egress** (the dominant cost; AV1 ≈ −37 Tbps), and **media ≫ metadata by ~5 orders of magnitude** (~2 EB/yr vs ~6 TB/yr). The architecture falls out of the arithmetic.

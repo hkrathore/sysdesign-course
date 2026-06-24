@@ -279,7 +279,7 @@ At 3,000+ QPS, the broker's scatter-gather fan-out and merge becomes the bottlen
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -290,7 +290,7 @@ At 3,000+ QPS, the broker's scatter-gather fan-out and merge becomes the bottlen
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"User-facing or internal ad-hoc?"**, *Strong:* asks it *first*, then picks the store, a real-time OLAP serving store for user-facing/high-concurrency/bounded/fresh, the warehouse for ad-hoc/flexible/low-concurrency, and states the answer flips the architecture. Knows they're *complementary*, not competing. *Red flag:* points the user-facing dashboard at the warehouse (or "just use Postgres with indexes") and never distinguishes the workloads.
 - **"How do you serve a sub-second group-by over billions of rows at thousands of QPS?"**, *Strong:* it's structural, **time-partitioned + rolled-up + bitmap-indexed immutable segments** shrink bytes-scanned ~100×, a broker prunes and scatter-gathers, segments replicate for concurrency; quantifies the scan reduction. *Red flag:* "add a cache" or "bigger machine" without the segment/rollup architecture.
@@ -300,7 +300,7 @@ At 3,000+ QPS, the broker's scatter-gather fan-out and merge becomes the bottlen
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Serving user-facing dashboards from the warehouse.** Flexible and cheap, but seconds-to-minutes latency at low concurrency, structurally wrong for sub-second-at-thousands-of-QPS. Use a purpose-built serving store for the user, the warehouse for the analyst; they're complementary.
 - **Rolling up by a high-cardinality dimension.** Putting `user_id`/`session_id` in the rollup makes every event its own group, compression collapses, segments bloat, and you've rebuilt a slow raw store. Keep bounded dimensions in-store; use sketches for uniques; drill down in the lakehouse.
@@ -310,7 +310,7 @@ At 3,000+ QPS, the broker's scatter-gather fan-out and merge becomes the bottlen
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through a single "views by region this hour" query for a viral post.**
 > *Model:* The request hits a **broker**, which uses segment metadata to **prune** to the segments covering *this hour* for that content, a handful, not the year, and recognizes the most recent minutes are still in the **real-time tier** while the rest are sealed **historical segments**. It **scatters** sub-queries: the real-time nodes aggregate their in-memory rolled-up rows for the latest window; the historical nodes (hot tier, the recent segments are heavily replicated, so a viral item's load spreads) use **bitmap indexes on `region`/`content_id`** to skip straight to matching rows and aggregate the pre-rolled per-minute-per-region tallies. The broker **gathers and merges** the partials (sums are mergeable; uniques merge via HLL sketches) into one answer, stitching real-time + historical seamlessly, and may **serve it from its result cache** for a few seconds since thousands of users request this identical slice. Net: tens of MB scanned across a few segments, ~20–50 ms, fresh to the second. The viral hot spot is handled by replication + result caching, not by a bigger machine.

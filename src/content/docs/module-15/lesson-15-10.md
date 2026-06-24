@@ -107,7 +107,7 @@ This cluster got re-scored along seven lines, and a 2015 answer trips most of th
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Who was the disagreement *with*, and what were the stakes?"**, *Strong:* a VP/CTO/CEO, on a roadmap, architecture, or business bet, with a data-backed case and a concrete alternative. *Red flag:* every disagreement is with a PM or someone junior, across- or down-only is the signature L7+ failure.
 - **"What did you tell your team after you lost?"**, *Strong:* presented it in your own voice as the plan, with the real reasoning, staffed it with your best people, never signaled dissent below the line. *Red flag:* "I told them it was leadership's call, not mine", commit theater, the cluster's cardinal fail.
@@ -117,7 +117,7 @@ This cluster got re-scored along seven lines, and a 2015 answer trips most of th
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Every disagreement is down-chart.** A story where you overruled someone junior isn't backbone, it's your job. The scored version is up-chart against a VP or CEO with real stakes; without one loaded, you read as never having pushed up.
 - **"Leadership decided, not me" to the team.** The most common fail in the cluster. Carrying a decision down while signaling "I fought this" protects you and poisons the decision. Commit means *your voice, the real reasoning, no daylight*.
@@ -127,7 +127,7 @@ This cluster got re-scored along seven lines, and a 2015 answer trips most of th
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Run disagree-and-commit on the spine, with a tripwire.** "Tell me about committing to a decision you disagreed with." *(Sketch: STAR-L, steel-man the exec's case generously and quantified; bring a costed alternative, not an objection; make it once in the right forum; lose; then the commit half, strongest people staffed, message down in *your voice* with the real reasoning, never "not my call", plus a named tripwire (metric + window). Close with an honest split "was I right," naming what they saw that you didn't. Hold every number for the probe.)*
 2. **Deliver a slip to the exec team, headline-first.** "The migration is six weeks late, tell the VP." *(Sketch: SCQA, Complication first (six weeks late, end of Q3 not Q2), the decision needed (hold the dependent launch or ship on the old stack), options *with* a recommendation in the same conversation, own the miss ("my milestone tracking should have caught this in week 2"), and the cadence you tightened. No options-without-recommendation; no sitting on it.)*

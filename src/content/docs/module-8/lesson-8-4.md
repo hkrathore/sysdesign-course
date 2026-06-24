@@ -278,7 +278,7 @@ Hundreds of teams emitting free-form events produce `btn_click` / `button_clicke
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
@@ -290,7 +290,7 @@ Hundreds of teams emitting free-form events produce `btn_click` / `button_clicke
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Interactive self-serve, deep ad-hoc/ML, or both, and how does that change the architecture?"**, *Strong:* asks it *first*, then designs a **dual path** (real-time OLAP for bounded interactive funnels, lakehouse for flexible complete truth), fed by one firehose and reconciled; names that one store can't be both (funnel latency vs flexibility). *Red flag:* builds one event pipeline into one database and never distinguishes the two question shapes.
 - **"A PM's funnel takes 40 seconds. Fix it."**, *Strong:* it's running on the wrong store, serve it from the **real-time OLAP store** with **event-time-ordered, date-partitioned layout** and **pre-aggregate the hot funnels**; quantifies the scan reduction; never "bigger cluster." *Red flag:* reaches for more lakehouse compute or a generic cache without addressing store choice and layout.
@@ -300,7 +300,7 @@ Hundreds of teams emitting free-form events produce `btn_click` / `button_clicke
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **One store for both question shapes.** A single warehouse is too slow for sub-second self-serve; precomputed cubes are too rigid to explore. The design is a **dual path** (real-time OLAP + lakehouse) from one firehose, deliberately, the synthesis the problem is testing.
 - **Ignoring identity stitching.** Treating anonymous and logged-in activity as separate users double-counts people and wrecks every signup funnel; resolve identity (stream + batch back-correction), and handle retroactive merges over retained raw.
@@ -310,7 +310,7 @@ Hundreds of teams emitting free-form events produce `btn_click` / `button_clicke
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through a single `button_clicked` event from the SDK to a funnel a PM sees.**
 > *Model:* The SDK stamps **event time** and POSTs to the collector, which validates the event name against the **semantic catalog**, enriches geo/device, and appends to the **Kafka firehose** partitioned by a stable identity key. Two consumers fan out. The **stream processor** resolves identity (anonymous→user against the identity store) and sessionizes using **event-time + watermarks**, then writes the resolved, sessionized event into the **real-time OLAP store**, event-time-ordered and date-partitioned. The same event lands in **lakehouse bronze** as retained raw, refined by batch into sessionized/identity-resolved silver and gold marts. When the PM runs a funnel, the **self-serve query layer** hits the OLAP store, which prunes by date partition and event-name and evaluates the ordered sequence near-single-pass in tens of milliseconds (or hits a pre-aggregate for a hot funnel). If late events or a retroactive identity merge change the picture, the lakehouse batch back-corrects the OLAP store, so the PM's number is "live, converging to truth."

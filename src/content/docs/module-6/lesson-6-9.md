@@ -195,7 +195,7 @@ Rook/bishop/queen share one helper: `slides(board, from, to, directions)`, confi
 
 ---
 
-## Trade-offs table: the pivotal decision
+### Trade-offs table: the pivotal decision
 
 | Decision | A, Polymorphic `Piece.canMove` | B, Strategy `MoveValidator` per type | C, Centralized rules engine for everything | Use when… |
 |---|---|---|---|---|
@@ -207,7 +207,7 @@ The meta-decision framing the table: **geometry in pieces, game-state legality i
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What will you build in 45 minutes?"**, *Strong:* the negotiation script, quantified split (150 vs 400+ lines), geometry implemented, legality stubbed behind an interface with the *right signature*. *Red flag:* opens an editor and starts typing `class Knight`.
 - **"Why inheritance? Isn't composition preferred?"**, *Strong:* closed taxonomy + type-varying behavior + no combination = inheritance's home turf; names the requirement change (variants) that flips it to Strategy. *Red flag:* dogma in either direction.
@@ -217,7 +217,7 @@ The meta-decision framing the table: **geometry in pieces, game-state legality i
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Coding before negotiating.** Ten minutes into the Knight with no scope contract, the outcome is decided. The negotiation *is* the senior deliverable; the code is evidence.
 - **Check detection inside `King` (or `Board`).** Check is a whole-board predicate over enemy geometry, it fails the litmus test. The most reliable junior tell on this problem.
@@ -227,7 +227,7 @@ The meta-decision framing the table: **geometry in pieces, game-state legality i
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. "Forget the stub, implement castling, now."**
 > *Model:* First, the receipt: castling is exactly why `RulesEngine` takes `history`. Five preconditions: king unmoved, rook unmoved (both from the log, or `hasMoved` flags maintained from it), path empty, king not currently in check, king doesn't cross an attacked square. Implement as a guard list in `RulesEngine.isLegal` for the castle-flagged move; `Move.execute` moves both king and rook, the one move touching two pieces, which is why castling lives at the rules layer, not in `King.canMove`. Cost: ~30 lines, and nothing in the piece classes changed, the open-closed claim from my NFRs, demonstrated.

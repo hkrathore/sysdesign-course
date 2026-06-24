@@ -100,7 +100,7 @@ This question had **no 2015 equivalent**, there was no assistant to govern, no d
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"Forget adoption, did *delivery* actually improve? Prove it."**, *Strong:* a baseline taken first, then delivery metrics (lead time, change-failure, review load) with an *honest* mixed result, improvement in some teams, flat in others, a regression caught and fixed. *Red flag:* acceptance rate, LOC, commits, or a vendor stat, and no answer when pressed on whether anything *shipped* faster.
 - **"What's your governance on AI-generated code?"**, *Strong:* human review gate, security/IP policy and no customer data in prompts on day one, an AI-authored label so reviewers calibrate, IP/license awareness on generated code. *Red flag:* "we trust our engineers" (no guardrails) *or* "we banned it" (testing a world that ended), both are ditches.
@@ -110,7 +110,7 @@ This question had **no 2015 equivalent**, there was no assistant to govern, no d
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Vanity metrics as success.** Citing acceptance rate, lines of code, or commits is the cardinal tell, it measures activity, not delivery, and AI inflates exactly those numbers while distorting self-reported speed. Use lead time, change-failure, and review load against a baseline.
 - **No baseline, so no defensible ROI.** Adopting first and measuring after means you can never prove the dividend. The discipline is *baseline → target → instrument → kill-what-doesn't-move*, skip the baseline and the claim is unfalsifiable.
@@ -120,7 +120,7 @@ This question had **no 2015 equivalent**, there was no assistant to govern, no d
 
 ---
 
-## Practice prompts
+### Practice prompts
 
 1. **Deliver your AI rollout in 100 seconds, then stop.** Adoption → measurement → governance → org shape → personal usage. *(Sketch: platform investment not mandate; baseline first then 2-3 named pain points; refuse acceptance-rate/LOC and say why; an honest mixed result with a regression caught and fixed; day-one guardrails; juniors-plus-loop-redesign; one personal-usage number; close on the DORA amplifier thesis, then tee up the "did delivery really improve" probe.)*
 2. **An exec mandates AI-usage quotas. Respond.** *(Sketch: push back on the quota not the intent; name the failure mode, gaming acceptance rate while change-failure climbs; reframe to outcome metrics the exec can take to the board; refuse mandated usage with no quality gate; commit to data within a quarter.)*

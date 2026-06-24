@@ -201,7 +201,7 @@ GET /api/v1/urls/{code}/stats
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | A | B | C | Use when… |
 |---|---|---|---|---|
@@ -209,7 +209,7 @@ GET /api/v1/urls/{code}/stats
 | **Primary store** | **KV / wide-column** (DynamoDB, Cassandra) | **Relational** (Postgres + read replicas) | **Document/graph DB** | **A** at billions-scale point-lookups (our case); **B** at thousands-scale or when you need transactions/SQL; **C** essentially never, no relationships or nesting exist |
 | **Redirect status code** | **301 Moved Permanently** (browser-cached) | **302 Found** (always hits server) |, | **301** when scale/cost dominates and links are fire-and-forget; **302** when analytics or revocation/repointing is a requirement (Bitly-style) |
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Why a counter-based KGS over hashing the URL?"**, *Strong:* counter guarantees uniqueness *by construction* with **no read-before-write**, keeping the create path cheap; ranges remove the SPOF/throughput ceiling; hashing forces a collision-check read on every write and collision rate grows. *Red flag:* "hash it with MD5" with no mention of the collision-check read or the birthday problem.
 - **"301 or 302, pick one and defend it."**, *Strong:* names the **analytics/revocation vs. cost/latency** trade explicitly and ties the choice to a requirement. *Red flag:* picks one with no awareness that 301 caching blinds analytics and freezes the target.
@@ -217,7 +217,7 @@ GET /api/v1/urls/{code}/stats
 - **"What does this cost to run, and what would you delegate?"**, *Strong:* ~9 TB replicated storage + ~50 GB cache + ~10 app nodes is **cheap**; delegates the DynamoDB-vs-Cassandra benchmark and the abuse policy *with a stated prior.* *Red flag:* no cost instinct, or insists on personally tuning the store.
 - **"How does it behave globally / at 10×?"**, *Strong:* push reads to the **edge/CDN** (mappings are near-immutable), partition the **code namespace by region** for write uniqueness without coordination. *Red flag:* "add more servers" with no edge or namespace reasoning.
 
-## Common mistakes
+### Common mistakes
 
 - **Over-engineering the write path.** The math says ~40 writes/s, building a heavyweight write pipeline ignores the numbers the E step produced.
 - **Hashing the URL and forgetting the collision-check read** (and the growing birthday-collision rate), then claiming it's collision-free.
@@ -227,7 +227,7 @@ GET /api/v1/urls/{code}/stats
 - **Putting analytics on the redirect critical path**, click counting belongs on an async queue, never in the synchronous redirect.
 - **Reaching for a relational DB by reflex** without noting you'll get zero value from joins/transactions and pay in horizontal-scaling pain.
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. Same long URL submitted twice, one code or two? Defend it.**
 > *Model:* By default, **two distinct codes.** Counter-based generation makes that the natural, free behaviour; forcing one code means a **read-before-write on every create** (look up "does this URL already exist?"), which is the exact cost the whole design avoids and which doesn't scale as a default. I'd offer **opt-in dedup** only if a requirement demanded it, and implement it with a secondary `url → code` index that's *consulted only when the caller asks for reuse*, so the firehose path stays clean. The trade is **wasted code space (trivial at `62^7` headroom) vs. a guaranteed extra read per create**, and code space is the cheap side.
@@ -244,7 +244,7 @@ GET /api/v1/urls/{code}/stats
 **Q5. Make Bitly's analytics first-class, what changes?**
 > *Model:* Three things. (1) Likely move to **302** so *every* click reaches the server (301's browser caching would hide repeat clicks). (2) Build a real **streaming pipeline**, emit each click to **Kafka**, process with a stream processor, land it in a **columnar/time-series store** for slice-and-dice by day/geo/referrer. (3) For the raw per-link **click count**, use **sharded counters**, incrementing one row per viral link is a write-hotspot, so spread the count across shards and sum on read. This graduates analytics from an async footnote into its own system, and I'd **delegate its detailed design to the analytics/data team** with the prior that pre-aggregation beats raw-event scans for the common dashboards.
 
-## Key takeaways
+### Key takeaways
 - **RESHADED is a sequence, not a checklist**, run R→E→S→H→A→D→E→D in order; the warm-up exists to make that order automatic, with the *signal concentrated in the back-end E (Evaluation) and D (Design evolution) steps.*
 - **Let the numbers decide.** ~40 writes/s, ~4k reads/s (100:1), ~9 TB, ~50 GB hot set, those figures *chose* the cache-first, KV-store, don't-touch-the-write-path design. No unquantified "it scales."
 - **The crux is short-code generation:** counter + base62 via a range-allocating **key-gen service** beats hash-and-check because it's unique *by construction* with **no read-before-write**, and ranges kill the SPOF.

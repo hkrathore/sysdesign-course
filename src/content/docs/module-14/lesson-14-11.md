@@ -232,7 +232,7 @@ The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The def
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -243,7 +243,7 @@ The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The def
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"What prevents a bad update from bricking the whole fleet?"** *Strong:* wave 1 = 500 machines (0.1%); watchdogs revert autonomously; gate sees 100% error → HALTED before wave 2; cascade is structurally blocked. Names the distinction: abort gates stop the *next wave*, watchdog stops the *current machine*. *Red flag:* "monitoring catches it", no mechanism; no blast-radius math.
 
@@ -257,7 +257,7 @@ The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The def
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Treating the queue as the safety mechanism.** Admission control (metering how many machines start downloading) is useful for relay bandwidth management, but it does not prevent a bricked machine. Blast-radius control comes from **wave size + abort gates**, not from download throttling.
 - **Relying on Earth-side abort to stop a bricked machine.** Earth learns about a brick at the next contact window, potentially 12 hours later. The device-side watchdog must revert without waiting. Conflating these two mechanisms is the most common error.
@@ -267,7 +267,7 @@ The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The def
 
 ---
 
-## Practice questions (with model answers)
+### Practice questions (with model answers)
 
 **Q1. Your wave 2 (2,500 machines) has a 7% error rate at gate close. What do you do?**
 

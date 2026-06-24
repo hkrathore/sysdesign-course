@@ -211,7 +211,7 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
@@ -222,7 +222,7 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 
 ---
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here (Director altitude)
 
 - **"Would you actually do this migration?"** - *Strong:* resists by default; demands the quantified pain; offers the modular monolith first; shows where the math flips (growing vs flat headcount). *Red flag:* starts drawing services immediately, or argues from "best practice" / scale the monolith doesn't lack.
 - **"What do you extract first, and why?"** - *Strong:* the three heuristics (domain boundaries, data ownership, change frequency); a low-stakes high-churn seam whose job is building organizational muscle. *Red flag:* "the most important domain," or a technical layer.
@@ -232,7 +232,7 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Justifying the migration by scale instead of organization.** At 100 engineers the problem is 12 teams in one release train, not QPS. Argue traffic and you've signaled you don't know why this hurts.
 - **Splitting the code but sharing the database.** The distributed monolith: lockstep deploys over a network. Data ownership is the migration.
@@ -242,7 +242,7 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. The CEO read that Amazon uses microservices and wants the migration started this quarter. You have 40 engineers and flat headcount. What do you say?**
 > *Model:* I'd bring numbers, not philosophy. At 40 engineers (~5 teams) the coordination tax is modest, while the migration costs ~$8M-equivalent effort plus a permanent platform team and 1.5-2× infra - double-digit percent of all engineering, forever. Most of the velocity outcome comes from a **modular monolith**: enforced module boundaries, module ownership, a parallelized suite, trunk-based deploys with flags - ~10% of the cost, reversible. Measure deploys/week and blast radius for two quarters; if pain persists *and* headcount scales, the strangler-fig case writes itself - and the modular-monolith work is its mandatory first phase anyway, so nothing is wasted. I won't start a 2-year migration to satisfy an article.

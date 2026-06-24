@@ -225,7 +225,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 
 ---
 
-## Trade-offs table: the pivotal decisions
+### Trade-offs table: the pivotal decisions
 
 | Decision | Option A | Option B | Option C (chosen, usually) | Use when… |
 |---|---|---|---|---|
@@ -237,7 +237,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 
 ---
 
-## What interviewers probe here
+### What interviewers probe here
 
 - **"How do you build the home feed?"**, *Strong:* frames push vs pull, does the write-amplification arithmetic (celebrity = ~100M inserts/post), lands on the **hybrid with a follower threshold**, names the read-cost trade. *Red flag:* "query everyone they follow and sort" with no cost awareness, or precompute-everything with no celebrity carve-out.
 - **"Why two stores for photos vs metadata?"**, *Strong:* the **~1,500× ratio** (55 PB vs 36 TB); object store + CDN for immutable bytes, partitioned DB for rows. *Red flag:* "store the image in a Postgres column."
@@ -247,7 +247,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 
 ---
 
-## Common mistakes
+### Common mistakes
 
 - **Only fan-out-on-write (or only on-read).** Either alone breaks at social scale; skipping the celebrity case is the single most common failure.
 - **Photo bytes in the database.** Melts the DB cache, can't reach 11 nines economically, can't sit on a CDN.
@@ -257,7 +257,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+### Interviewer follow-up questions (with model answers)
 
 **Q1. A user posts, then immediately opens their own feed and doesn't see the post. What happened?**
 > *Model:* Classic **read-your-writes** miss, fan-out is async, so the post hasn't landed in the author's own feed list yet. Fix: merge the author's own recent posts from `posts_by_user` into their feed read for a short window (cheap, bounded), and/or write the author's own feed entry synchronously while follower fan-out stays async. Trade: a touch more work on the post path so authors always see their own post; everyone else tolerates seconds of lag.
@@ -273,7 +273,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 
 ---
 
-## Key takeaways
+### Key takeaways
 
 - **The feed-build decision is the whole problem:** push (precompute, instant reads, write amplification) vs pull (cheap writes, expensive reads), at social scale the answer is the **hybrid**, because one celebrity post = **~100M feed inserts** otherwise.
 - **Drive it with two numbers:** **~100:1 read:write** (→ CDN + cache + precompute) and **media ≫ metadata by ~1,500×** (→ bytes in object store + CDN, records in a partitioned DB). The architecture falls out of the arithmetic.
