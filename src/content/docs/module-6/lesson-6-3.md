@@ -1,5 +1,5 @@
 ---
-title: "6.3 — Vending Machine"
+title: "6.3 - Vending Machine"
 description: The textbook explicit state machine - making illegal transitions unrepresentable with the State pattern, and owning the refund, jam, and idempotency paths most candidates hand-wave - the module's canonical State-pattern lesson.
 sidebar:
   order: 3

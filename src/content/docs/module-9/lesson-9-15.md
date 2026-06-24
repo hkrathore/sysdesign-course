@@ -1,5 +1,5 @@
 ---
-title: "9.15 — AI Strategy & Build-vs-Buy"
+title: "9.15 - AI Strategy & Build-vs-Buy"
 description: The Director-level AI strategy question — frontier API vs open-weights self-host vs fine-tune vs build-from-scratch — answered as sequencing and optionality rather than model-picking, with the cost crossover math, the lock-in trade, and why the moat is data, eval, and product, not the model.
 sidebar:
   order: 15

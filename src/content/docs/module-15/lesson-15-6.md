@@ -1,5 +1,5 @@
 ---
-title: "15.6 — Hard People Calls"
+title: "15.6 - Hard People Calls"
 description: The low-performer, firing, PIP, brilliant-jerk, and flight-risk cluster, answered in STAR-L with a diagnose-feedback-plan-decide-cost-learn spine, built to survive a four-level probe, and calibrated to the 2026 decisiveness-plus-compassion bar.
 sidebar:
   order: 6

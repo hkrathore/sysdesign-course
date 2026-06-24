@@ -1,5 +1,5 @@
 ---
-title: "10.2 — ChatGPT-Style Conversational Assistant"
+title: "10.2 - ChatGPT-Style Conversational Assistant"
 description: Design the product layer of a large-scale conversational assistant — multi-turn context and memory management, streaming UX, safety, personalization, and multi-model routing — on top of the GPU serving tier, where the binding constraints are context-window economics and conversation continuity.
 sidebar:
   order: 2

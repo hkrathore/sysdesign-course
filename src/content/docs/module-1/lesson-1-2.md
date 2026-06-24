@@ -1,5 +1,5 @@
 ---
-title: "1.2 — Functional vs. non-functional requirements"
+title: "1.2 - Functional vs. non-functional requirements"
 description: "Functional vs. non-functional requirements"
 sidebar:
   order: 2

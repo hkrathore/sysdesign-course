@@ -1,5 +1,5 @@
 ---
-title: "5.2 — Digital Wallet / P2P Transfer"
+title: "5.2 - Digital Wallet / P2P Transfer"
 description: Atomic cross-shard balance transfer, 2PC vs saga vs event-sourced ledger, sized by TPS before reaching for complexity, at Director altitude.
 sidebar:
   order: 2

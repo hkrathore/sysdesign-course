@@ -1,5 +1,5 @@
 ---
-title: "14.6 — Build vs Buy"
+title: "14.6 - Build vs Buy"
 description: "The decision-memo variant of RESHADED: multi-year TCO and opportunity-cost math against the differentiation test, with reversibility and written exit triggers, buy to accelerate, build only what differentiates."
 sidebar:
   order: 6

@@ -1,5 +1,5 @@
 ---
-title: "6.4 — LRU Cache with Pluggable Eviction"
+title: "6.4 - LRU Cache with Pluggable Eviction"
 description: The classic LLD curveball reframed for Director altitude - design the Cache interface contract and a Strategy-pluggable eviction policy, state the HashMap+DLL result in one sentence, and pick lock granularity by arithmetic instead of reflex.
 sidebar:
   order: 4

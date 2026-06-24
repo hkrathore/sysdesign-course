@@ -1,5 +1,5 @@
 ---
-title: "5.1 — Payment Processing System"
+title: "5.1 - Payment Processing System"
 description: Design a Stripe-style payments platform where exactly-once money movement on at-least-once infrastructure, anchored by idempotency keys, an immutable double-entry ledger, and reconciliation as a first-class operational process, is the only thing that matters.
 sidebar:
   order: 1

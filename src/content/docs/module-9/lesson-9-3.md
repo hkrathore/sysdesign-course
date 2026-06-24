@@ -1,5 +1,5 @@
 ---
-title: "9.3 — Retrieval-Augmented Generation (RAG)"
+title: "9.3 - Retrieval-Augmented Generation (RAG)"
 description: The default architecture for grounding an LLM in private, fresh, citable facts — the ingest/chunk/embed/index and retrieve/rerank/assemble/generate pipeline, why retrieval (not the model) is the quality bottleneck, and how eval gates it.
 sidebar:
   order: 3

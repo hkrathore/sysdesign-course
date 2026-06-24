@@ -1,5 +1,5 @@
 ---
-title: "Module 7 — Data Platform Foundations Cheat Sheet"
+title: "Module 7 - Data Platform Foundations Cheat Sheet"
 description: "The 13 data-platform building blocks, decision → trade-off → the number, plus the cross-cutting laws and the Director through-line. Skimmable in 5 minutes."
 sidebar:
   order: 7

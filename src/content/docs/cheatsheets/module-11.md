@@ -1,5 +1,5 @@
 ---
-title: "Module 11 — Security, Privacy & Trust Cheat Sheet"
+title: "Module 11 - Security, Privacy & Trust Cheat Sheet"
 description: "The 6 security/privacy/trust building blocks — decision → trade-off → the number — plus the recurring laws and the Director through-line. Skimmable in 5 minutes."
 sidebar:
   order: 11

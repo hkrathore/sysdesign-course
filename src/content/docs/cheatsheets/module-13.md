@@ -1,5 +1,5 @@
 ---
-title: "Module 13 — Production Troubleshooting & Incident Response Cheat Sheet"
+title: "Module 13 - Production Troubleshooting & Incident Response Cheat Sheet"
 description: "The 6 troubleshooting/incident building blocks — decision → trade-off → the number — plus the recurring laws and the Director through-line. Skimmable in 5 minutes."
 sidebar:
   order: 13

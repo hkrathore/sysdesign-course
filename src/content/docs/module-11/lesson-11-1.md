@@ -1,5 +1,5 @@
 ---
-title: "11.1 — Security & Trust for System Designers"
+title: "11.1 - Security & Trust for System Designers"
 description: What "secure by design" actually means from an architecture POV — security as a system property built from trust boundaries, paved-road defaults, and assume-breach blast-radius thinking, plus the STRIDE/zero-trust mental model you reason in before reaching for any control.
 sidebar:
   order: 1

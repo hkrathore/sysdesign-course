@@ -1,5 +1,5 @@
 ---
-title: "14.9 — Competing Proposals & Technical Direction"
+title: "14.9 - Competing Proposals & Technical Direction"
 description: "Two senior engineers, two defensible architectures, one deadlock, resolve it on requirements, cost, risk, and team capability instead of taste: criteria before scoring, one-way vs two-way doors, an ADR that records the dissent, and breaking points named before the interviewer asks the 10x question."
 sidebar:
   order: 9

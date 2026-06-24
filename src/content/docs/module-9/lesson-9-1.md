@@ -1,5 +1,5 @@
 ---
-title: "9.1 — LLMs for System Designers"
+title: "9.1 - LLMs for System Designers"
 description: What a large language model actually is from an architecture POV — a stochastic, stateless, token-metered next-token predictor — and the token, context-window, prefill/decode, latency, and cost models you must design around.
 sidebar:
   order: 1

@@ -1,5 +1,5 @@
 ---
-title: "5.8 — Top-K / Trending / Leaderboard"
+title: "5.8 - Top-K / Trending / Leaderboard"
 description: The pure altitude test, top-K heavy hitters and real-time leaderboards are the same precision-vs-cost-vs-freshness problem, and a Director frames exact-Redis vs approximate-sketch vs batch in five minutes instead of drowning in sketch math.
 sidebar:
   order: 8

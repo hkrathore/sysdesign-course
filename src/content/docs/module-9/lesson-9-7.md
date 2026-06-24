@@ -1,5 +1,5 @@
 ---
-title: "9.7 — Evaluation & LLMOps"
+title: "9.7 - Evaluation & LLMOps"
 description: Why evaluating a non-deterministic, open-ended system is the hardest and most-skipped part of shipping AI — offline eval sets, LLM-as-judge and its biases, online eval, regression gating in CI, and the tracing/observability stack for prompts, retrievals, tokens, and cost.
 sidebar:
   order: 7

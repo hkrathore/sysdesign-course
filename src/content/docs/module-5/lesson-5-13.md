@@ -1,5 +1,5 @@
 ---
-title: "5.13 — Design Kafka (Distributed Message Queue)"
+title: "5.13 - Design Kafka (Distributed Message Queue)"
 description: The senior-loop building-block question, designing the durable, partitioned, replicated log you usually pick off the shelf, where durability, ordering, and delivery semantics surface as API contracts and the ordering-is-per-partition-only trap is the core probe.
 sidebar:
   order: 13

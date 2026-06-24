@@ -1,5 +1,5 @@
 ---
-title: "10.4 — LLM-Powered Content Moderation at Scale"
+title: "10.4 - LLM-Powered Content Moderation at Scale"
 description: Design a Trust & Safety system that classifies a massive content firehose with low latency, where the binding constraints are the precision/recall trade-off as a business-and-legal knob, the cost of not running an LLM on every item, and an adversarial environment — solved with a tiered cheap-classifier → LLM → human-review cascade.
 sidebar:
   order: 4

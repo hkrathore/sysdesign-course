@@ -1,5 +1,5 @@
 ---
-title: "Module 12 — Testing & Quality Engineering Cheat Sheet"
+title: "Module 12 - Testing & Quality Engineering Cheat Sheet"
 description: "The 6 testing/quality building blocks — decision → trade-off → the number — plus the recurring laws and the Director through-line. Skimmable in 5 minutes."
 sidebar:
   order: 12

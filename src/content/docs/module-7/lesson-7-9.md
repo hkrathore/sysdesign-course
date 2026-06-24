@@ -1,5 +1,5 @@
 ---
-title: "7.9 — Data Quality, Testing & Contracts"
+title: "7.9 - Data Quality, Testing & Contracts"
 description: How to engineer trust in a data platform, the seven data-quality dimensions, dbt/Great-Expectations tests as the regression suite for data, shift-left contracts at the producer boundary, shift-right observability, and the circuit-break-vs-alert decision that stops a confident wrong number from propagating.
 sidebar:
   order: 9

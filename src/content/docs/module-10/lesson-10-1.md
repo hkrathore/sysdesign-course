@@ -1,5 +1,5 @@
 ---
-title: "10.1 — Enterprise RAG / Document Q&A System"
+title: "10.1 - Enterprise RAG / Document Q&A System"
 description: Design a grounded question-answering assistant over a large private corpus, where the binding constraints are retrieval quality, citation/faithfulness, freshness, and per-user access control — not model choice or QPS — reasoned through RESHADED at Director altitude.
 sidebar:
   order: 1

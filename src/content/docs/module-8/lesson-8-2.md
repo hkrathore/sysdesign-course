@@ -1,5 +1,5 @@
 ---
-title: "8.2 — Real-Time OLAP Serving"
+title: "8.2 - Real-Time OLAP Serving"
 description: Design a Druid/Pinot-style store that serves sub-second analytical aggregations at high concurrency over seconds-fresh data, reasoned through RESHADED at Director altitude, with the real-time-vs-historical split, pre-aggregated immutable segments, scatter-gather brokers, and hot/cold tiering as the load-bearing decisions.
 sidebar:
   order: 2

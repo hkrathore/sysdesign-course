@@ -1,5 +1,5 @@
 ---
-title: "10.3 — LLM Gateway / Model Router"
+title: "10.3 - LLM Gateway / Model Router"
 description: Design the control plane every AI feature in the company calls — a thin, ultra-reliable layer in front of many model providers that adds single-digit-ms latency, routes and falls back across models, enforces per-tenant quotas, caches, meters cost, and is the one place lock-in avoidance and governance actually live.
 sidebar:
   order: 3

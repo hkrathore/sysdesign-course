@@ -1,5 +1,5 @@
 ---
-title: "7.12 — Data Strategy & Build-vs-Buy"
+title: "7.12 - Data Strategy & Build-vs-Buy"
 description: The Director-level data-platform strategy question, managed SaaS warehouse vs the assembled modern data stack vs a self-hosted open lakehouse vs build-from-scratch, answered as sequencing, optionality, and total cost of ownership rather than vendor-picking, with the cost crossover, the open-table-format escape hatch, and why consolidation now beats the fragmented seven-tool stack.
 sidebar:
   order: 12

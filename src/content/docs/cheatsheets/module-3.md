@@ -1,5 +1,5 @@
 ---
-title: "Module 3 — Building Blocks Cheat Sheet"
+title: "Module 3 - Building Blocks Cheat Sheet"
 description: "The 16 building blocks, when to use, the key trade-off, the one number to remember."
 sidebar:
   order: 3

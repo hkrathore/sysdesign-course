@@ -1,5 +1,5 @@
 ---
-title: "9.10 — Tool Use, Function Calling & MCP"
+title: "9.10 - Tool Use, Function Calling & MCP"
 description: How an agent reaches out of the text box and acts on the world — structured function calling, designing a tool surface the model can use reliably, and the Model Context Protocol as the emerging integration standard — plus why every tool is also an attack surface.
 sidebar:
   order: 10

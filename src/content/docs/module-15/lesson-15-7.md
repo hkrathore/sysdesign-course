@@ -1,5 +1,5 @@
 ---
-title: "15.7 — Managing Managers & Org Design"
+title: "15.7 - Managing Managers & Org Design"
 description: The Director-vs-EM leveling round, building org capability instead of managing individuals, with the span math behind a 15→50 scaling plan (and the inverted version that grows scope without headcount), the inherited-low-delivery-team 90-day walkthrough annotated line by line, a failed-manager-transition told honestly, skip-levels run as a deliberate system, and succession that survives you leaving.
 sidebar:
   order: 7

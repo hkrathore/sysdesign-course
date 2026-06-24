@@ -1,5 +1,5 @@
 ---
-title: "6.10 — Amazon Locker (The Cold-Open Rep)"
+title: "6.10 - Amazon Locker (The Cold-Open Rep)"
 description: The module's cold-open drill, an unmemorizable constraint-allocation problem attempted solo against a 35-minute timer, testing requirement scoping, a size-matching allocation strategy argued by capacity math, and an expiry lifecycle where reclaim is physical.
 sidebar:
   order: 10

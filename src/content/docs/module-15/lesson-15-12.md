@@ -1,5 +1,5 @@
 ---
-title: "15.12 — AI-Era Engineering Leadership"
+title: "15.12 - AI-Era Engineering Leadership"
 description: The round with no 2015 ancestor, answered as an accountable operator who already ran an AI rollout and defends its ROI with adoption anchored to real pain, measurement beyond acceptance-rate vanity, the 2025 DORA amplifier finding, a junior-pipeline stance, and personal hands-on usage, avoiding both ditches, hype and wait-and-see.
 sidebar:
   order: 12

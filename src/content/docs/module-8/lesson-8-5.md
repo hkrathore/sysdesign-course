@@ -1,5 +1,5 @@
 ---
-title: "8.5 — Data Lake + Governance / Data Mesh"
+title: "8.5 - Data Lake + Governance / Data Mesh"
 description: Design the organizing-and-governance layer over the lakehouse — catalog and discovery, column-level access control and lineage, data products and contracts — and make the org-architecture call between a centralized data-platform team and a federated data mesh, reasoned through RESHADED at Director altitude, with the central-team-bottleneck crossover and federated computational governance as the load-bearing decisions.
 sidebar:
   order: 5

@@ -1,5 +1,5 @@
 ---
-title: "9.11 — Agent Memory & Context Management"
+title: "9.11 - Agent Memory & Context Management"
 description: The context window is the agent's finite, metered RAM — so the real architecture is what you keep in-context, what you retrieve on demand, and what you summarize away, across short-term scratchpad, long-term episodic/semantic/procedural memory, and cross-session state.
 sidebar:
   order: 11

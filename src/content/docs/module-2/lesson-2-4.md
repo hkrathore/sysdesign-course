@@ -1,5 +1,5 @@
 ---
-title: "2.4 — Replication (leader-follower, multi-leader, leaderless)"
+title: "2.4 - Replication (leader-follower, multi-leader, leaderless)"
 description: "Replication (leader-follower, multi-leader, leaderless)"
 sidebar:
   order: 4

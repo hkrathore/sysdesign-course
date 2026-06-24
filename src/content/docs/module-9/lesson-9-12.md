@@ -1,5 +1,5 @@
 ---
-title: "9.12 — Multi-Agent Orchestration"
+title: "9.12 - Multi-Agent Orchestration"
 description: When and how to split work across multiple cooperating agents — orchestrator-worker, hierarchical, and handoff patterns — and the hard Director truth that multi-agent multiplies cost and failure surface, so most problems are better served by a single agent or a plain workflow.
 sidebar:
   order: 12

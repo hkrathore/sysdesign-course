@@ -1,5 +1,5 @@
 ---
-title: "4.1 - TinyURL — RESHADED Warm-Up"
+title: "4.1 - TinyURL - RESHADED Warm-Up"
 description: The teaching warm-up, running all eight RESHADED steps end-to-end on a read-skewed URL shortener, modelling the method a Director uses to scope, quantify, decide, and stress a design.
 sidebar:
   order: 1

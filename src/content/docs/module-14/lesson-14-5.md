@@ -1,5 +1,5 @@
 ---
-title: "14.5 — Cut Infrastructure Cost 30–50%"
+title: "14.5 - Cut Infrastructure Cost 30-50%"
 description: "Cutting a $10M cloud bill 30-50% as a sequenced 72-hour / 30-day / 6-month program, guardrails first, the savings ladder in order, and the one cut you refuse to make."
 sidebar:
   order: 5

@@ -1,5 +1,5 @@
 ---
-title: "12.4 — Flaky Tests & Test Health"
+title: "12.4 - Flaky Tests & Test Health"
 description: "A 1% flake rate at scale silently destroys signal and trust — engineers stop believing red, retry to green, and real failures slip through. Flake is an economics problem you manage as a system: detect, quarantine, bound retries, assign ownership, and treat test health as a tracked metric."
 sidebar:
   order: 4

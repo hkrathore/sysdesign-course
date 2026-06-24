@@ -1,5 +1,5 @@
 ---
-title: "8.4 — Product / Behavioral Analytics Platform"
+title: "8.4 - Product / Behavioral Analytics Platform"
 description: Design Amplitude/Mixpanel — a behavioral-event platform where apps emit user events and product teams ask funnel, retention, and cohort questions both interactively and in scheduled reports; the synthesis problem where the track's pieces compose, reasoned through RESHADED at Director altitude, with the dual real-time-OLAP-plus-lakehouse path, event-time sessionization, and identity stitching as the load-bearing decisions.
 sidebar:
   order: 4

@@ -1,5 +1,5 @@
 ---
-title: "7.11 — Data Platform Economics & FinOps"
+title: "7.11 - Data Platform Economics & FinOps"
 description: How a Director owns the data-platform bill, two decoupled bills (storage $/TB-month + compute bytes-scanned or cluster-hours), the runaway-query failure mode, and the layout-and-policy levers (partition pruning, materialization, tiering, on-demand vs reserved, chargeback) that control cost without buying hardware.
 sidebar:
   order: 11

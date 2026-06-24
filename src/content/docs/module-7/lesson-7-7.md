@@ -1,5 +1,5 @@
 ---
-title: "7.7 — Orchestration & Transformation"
+title: "7.7 - Orchestration & Transformation"
 description: A data platform is a graph of interdependent jobs; orchestration (Airflow/Dagster/Prefect) schedules, sequences, retries, and backfills them, and dbt does the versioned, tested "T" of ELT, together they make the platform reliable and rebuildable.
 sidebar:
   order: 7

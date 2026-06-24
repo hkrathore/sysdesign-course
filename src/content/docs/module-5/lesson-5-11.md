@@ -1,5 +1,5 @@
 ---
-title: "5.11 — LeetCode / Online Judge"
+title: "5.11 - LeetCode / Online Judge"
 description: Run untrusted code at scale, the design lives or dies on the isolation choice (containers vs microVMs vs language sandboxes) traded against cold-start latency and contest-spike burst economics, where the Director probe lands on blast radius and cost per execution, not cgroup flags.
 sidebar:
   order: 11

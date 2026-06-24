@@ -1,5 +1,5 @@
 ---
-title: "Module 9 — Gen AI & Agentic Foundations Cheat Sheet"
+title: "Module 9 - Gen AI & Agentic Foundations Cheat Sheet"
 description: "The 16 GenAI/agentic building blocks — decision → trade-off → the number — plus the cross-cutting laws and the Director through-line. Skimmable in 5 minutes."
 sidebar:
   order: 9

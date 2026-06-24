@@ -1,5 +1,5 @@
 ---
-title: "5.9 — Facebook Live Comments"
+title: "5.9 - Facebook Live Comments"
 description: The extreme one-to-millions fan-out problem with no durable inbox, where the connection-server fleet is the dominant cost, SSE beats WebSocket on price, and graceful degradation is a designed product behavior rather than an outage.
 sidebar:
   order: 9

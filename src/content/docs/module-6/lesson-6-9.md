@@ -1,5 +1,5 @@
 ---
-title: "6.9 — Chess Game"
+title: "6.9 - Chess Game"
 description: The games-family senior version, inheritance vs composition argued by the shape of variation, and a live scope negotiation that is itself the score, because 45 minutes cannot implement castling, en passant, and check.
 sidebar:
   order: 9

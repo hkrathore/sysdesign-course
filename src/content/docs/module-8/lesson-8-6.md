@@ -1,5 +1,5 @@
 ---
-title: "8.6 — Data Quality & Observability Platform"
+title: "8.6 - Data Quality & Observability Platform"
 description: Design the platform that monitors the health of thousands of tables — freshness, volume, schema, distribution, and lineage — where the load-bearing tensions are ML anomaly detection vs declarative tests, and metadata-based checks vs full-data scans (monitoring mustn't cost more than the platform it watches), reasoned through RESHADED at Director altitude.
 sidebar:
   order: 6

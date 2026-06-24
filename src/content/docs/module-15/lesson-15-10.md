@@ -1,5 +1,5 @@
 ---
-title: "15.10 — Influence, Disagreement & Executive Communication"
+title: "15.10 - Influence, Disagreement & Executive Communication"
 description: The up-chart disagreement, disagree-and-commit, influence-without-authority, bad-news-to-execs, and senior-report-conflict cluster, answered with explicit disagreement mechanics (steel-man, data-backed case, forum and time-box, commit-with-tripwire), SCQA for bad news, and business acumen scored inside every answer.
 sidebar:
   order: 10

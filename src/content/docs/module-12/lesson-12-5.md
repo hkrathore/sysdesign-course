@@ -1,5 +1,5 @@
 ---
-title: "12.5 — Shift-Left vs Test-in-Production"
+title: "12.5 - Shift-Left vs Test-in-Production"
 description: You cannot catch everything before prod — progressive delivery (feature flags, canary, rings, shadow traffic) plus synthetic monitoring make testing in production safe and sometimes better than a heavier pre-prod suite, balanced against catching defects early where it is cheapest.
 sidebar:
   order: 5

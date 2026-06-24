@@ -1,5 +1,5 @@
 ---
-title: "15.14 — Demonstrate, Don't Describe (Capstone)"
+title: "15.14 - Demonstrate, Don't Describe (Capstone)"
 description: The modern loop replaced "tell me your philosophy" with live exercises, critique broken OKRs, read an org-health survey and act, deliver hard feedback in roleplay, present a first-90-days plan, so this capstone runs one full worked exercise of each, a reusable 90-day template, and a self-scoring rubric keyed to the five interviewer dimensions.
 sidebar:
   order: 14

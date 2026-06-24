@@ -1,5 +1,5 @@
 ---
-title: "7.10 — Governance, Catalog, Lineage & Data Mesh"
+title: "7.10 - Governance, Catalog, Lineage & Data Mesh"
 description: At scale the platform's hardest problems are organizational — can people find the right data, are they allowed to see it, can you trace where a number came from, and who owns its quality — and that governance plane forces the centralized-vs-federated (data mesh) org decision, Conway's law applied to data.
 sidebar:
   order: 10

@@ -1,5 +1,5 @@
 ---
-title: "11.2 — AuthN / AuthZ at Scale"
+title: "11.2 - AuthN / AuthZ at Scale"
 description: Identity as the new perimeter — authentication (who) vs authorization (what) as distinct problems, the session-vs-token decision and its revocation tax, RBAC vs ABAC vs ReBAC, multi-tenant isolation by construction, and service-to-service identity with mTLS/workload identity.
 sidebar:
   order: 2

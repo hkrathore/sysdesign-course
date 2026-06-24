@@ -1,5 +1,5 @@
 ---
-title: "5.5 — Food Delivery Marketplace"
+title: "5.5 - Food Delivery Marketplace"
 description: Design the three-sided DoorDash/Uber Eats marketplace around its load-bearing tension, one order state machine coordinating eater, restaurant, and courier under a 5-10× lunch/dinner peak, choosing actor-boundary service decomposition, an event-driven state machine, and a dispatch optimizer that trades delivery speed against courier fairness and cost.
 sidebar:
   order: 5

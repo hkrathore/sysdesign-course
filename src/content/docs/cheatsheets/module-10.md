@@ -1,5 +1,5 @@
 ---
-title: "Module 10 — Gen AI & Agentic Problems Cheat Sheet"
+title: "Module 10 - Gen AI & Agentic Problems Cheat Sheet"
 description: "The load-bearing decision and canonical one-line answer for all 8 GenAI/agentic design problems — RAG, assistants, the gateway, moderation, tool-using and multi-agent agents, image generation, and the meeting assistant — on one page."
 sidebar:
   order: 10

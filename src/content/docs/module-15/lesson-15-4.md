@@ -1,5 +1,5 @@
 ---
-title: "15.4 — Leadership Philosophy & Style"
+title: "15.4 - Leadership Philosophy & Style"
 description: The "who are you as a leader" round, answering style, hands-on depth, culture, psychological safety, and RTO in Position-Mechanism-Number-Limit, calibrated past founder-mode and the psych-safety backlash so the philosophy survives a four-level probe.
 sidebar:
   order: 4

@@ -1,5 +1,5 @@
 ---
-title: "14.3 — Zero-Downtime Data Migration"
+title: "14.3 - Zero-Downtime Data Migration"
 description: "Migrating live production data, re-shard, engine swap, vendor exit, without loss or downtime: CDC + backfill vs dual-write, dark-read verification, and the expand-migrate-contract ladder with a rehearsed rollback at every rung."
 sidebar:
   order: 3

@@ -1,5 +1,5 @@
 ---
-title: "7.6 — Data Ingestion & Change Data Capture"
+title: "7.6 - Data Ingestion & Change Data Capture"
 description: How operational data gets into the platform reliably — full vs incremental loads vs change data capture, why log-based CDC reading the WAL/binlog beats polling, why ELT beat ETL, and the buy-vs-build connector call — the "EL" that is the most common source of platform pain.
 sidebar:
   order: 6

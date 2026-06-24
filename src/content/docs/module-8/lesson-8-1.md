@@ -1,5 +1,5 @@
 ---
-title: "8.1 — Data Warehouse / Lakehouse"
+title: "8.1 - Data Warehouse / Lakehouse"
 description: Design the company's central analytical store — the build-vs-buy, open-vs-managed decision between a turnkey cloud warehouse and an open lakehouse on object storage, reasoned through RESHADED at Director altitude, with decoupled storage/compute, open table formats, the medallion architecture, and the scan-cost model as the load-bearing decisions.
 sidebar:
   order: 1

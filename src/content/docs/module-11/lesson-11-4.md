@@ -1,5 +1,5 @@
 ---
-title: "11.4 — Privacy Engineering & Data Deletion"
+title: "11.4 - Privacy Engineering & Data Deletion"
 description: Right-to-be-forgotten as a distributed-systems problem, not a policy doc — deletion that propagates across replicas, caches, search indexes, warehouses, backups, logs and third parties, with crypto-shredding for immutable stores, data minimization as the cheapest control, and an audit trail that proves completion.
 sidebar:
   order: 4

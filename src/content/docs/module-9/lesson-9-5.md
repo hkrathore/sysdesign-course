@@ -1,5 +1,5 @@
 ---
-title: "9.5 — Adapting the Model: Prompt vs RAG vs Fine-Tune"
+title: "9.5 - Adapting the Model: Prompt vs RAG vs Fine-Tune"
 description: The spectrum from prompt engineering through context engineering and RAG to fine-tuning and continued pretraining — when each is the right tool, the data/eval/ops cost of each, and why "fine-tuning to add facts" is the classic mistake.
 sidebar:
   order: 5

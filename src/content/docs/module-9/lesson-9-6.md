@@ -1,5 +1,5 @@
 ---
-title: "9.6 — Guardrails, Safety & Security"
+title: "9.6 - Guardrails, Safety & Security"
 description: The model boundary as an attack surface — prompt injection (direct and indirect), jailbreaks, PII leakage, and unsafe output — and a defense-in-depth design (input filtering, output filtering, grounding, structured output, least privilege). Why prompt injection is unsolved and you design for containment, not prevention.
 sidebar:
   order: 6

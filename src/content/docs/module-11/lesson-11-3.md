@@ -1,5 +1,5 @@
 ---
-title: "11.3 — Secrets, Keys & Encryption (KMS)"
+title: "11.3 - Secrets, Keys & Encryption (KMS)"
 description: Encryption is table stakes; key management is the engineering — envelope encryption with a KMS/HSM, automated rotation, never-in-code secrets, tokenization to shrink compliance scope, and a key hierarchy that bounds the blast radius of a single key compromise.
 sidebar:
   order: 3

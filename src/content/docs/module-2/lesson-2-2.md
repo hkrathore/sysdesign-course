@@ -1,5 +1,5 @@
 ---
-title: "2.2 — SQL vs. NoSQL; when each wins"
+title: "2.2 - SQL vs. NoSQL; when each wins"
 description: "SQL vs. NoSQL; when each wins"
 sidebar:
   order: 2

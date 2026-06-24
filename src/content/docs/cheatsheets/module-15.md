@@ -1,5 +1,5 @@
 ---
-title: "Module 15 — Leadership Track Cheat Sheet"
+title: "Module 15 - Leadership Track Cheat Sheet"
 description: "The four answer shapes, one crux per behavioral category, the mandatory story slots, the probe-resistance rule, and 2015→2026 phrase swaps, one page."
 sidebar:
   order: 15

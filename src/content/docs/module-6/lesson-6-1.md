@@ -1,5 +1,5 @@
 ---
-title: "6.1 — Parking Lot"
+title: "6.1 - Parking Lot"
 description: The #1 LLD curveball as a restraint test, lock scope to three entities, apply Strategy only where a requirement demands it, and volunteer the last-spot race with an atomic claim before the interviewer asks.
 sidebar:
   order: 1

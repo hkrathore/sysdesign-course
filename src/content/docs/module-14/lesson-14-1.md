@@ -1,5 +1,5 @@
 ---
-title: "14.1 — Monolith → Microservices"
+title: "14.1 - Monolith → Microservices"
 description: The decompose-or-don't decision - quantify the monolith's velocity tax, make the migration clear a business case, extract seams in reversible strangler-fig increments, and name what you will never extract.
 sidebar:
   order: 1

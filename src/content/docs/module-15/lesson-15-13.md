@@ -1,5 +1,5 @@
 ---
-title: "15.13 — Company Calibration"
+title: "15.13 - Company Calibration"
 description: How the same true story scores differently at Amazon, Meta, Google, Netflix, and a founder-led startup, the LP-mapping, bar-raiser veto, G&L packet, keeper test, and stage-fit that re-grade an identical answer, worked through one termination story re-told three ways.
 sidebar:
   order: 13

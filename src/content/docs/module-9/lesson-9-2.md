@@ -1,5 +1,5 @@
 ---
-title: "9.2 — Embeddings & Vector Search"
+title: "9.2 - Embeddings & Vector Search"
 description: How text becomes geometry — dense embeddings, the approximate-nearest-neighbor problem, and the HNSW/IVF/PQ index trade-offs — plus when a dedicated vector DB beats bolting kNN onto Postgres or OpenSearch.
 sidebar:
   order: 2

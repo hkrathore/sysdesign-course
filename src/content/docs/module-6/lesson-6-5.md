@@ -1,5 +1,5 @@
 ---
-title: "6.5 — Rate Limiter (LLD Form)"
+title: "6.5 - Rate Limiter (LLD Form)"
 description: The in-process half of the rate limiter, algorithm selection as class design, a Strategy seam, per-client concurrency, and the climb to 50 servers that hands off to 3.10/5.2.
 sidebar:
   order: 5

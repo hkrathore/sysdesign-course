@@ -1,5 +1,5 @@
 ---
-title: "Module 2 — Core Concepts & Trade-offs Cheat Sheet"
+title: "Module 2 - Core Concepts & Trade-offs Cheat Sheet"
 description: "Core-concepts & trade-offs cheat sheet."
 sidebar:
   order: 2

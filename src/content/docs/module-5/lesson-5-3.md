@@ -1,5 +1,5 @@
 ---
-title: "5.3 — Hotel Reservation System"
+title: "5.3 - Hotel Reservation System"
 description: How fungible room inventory, count decrements, not seat locks, forces a different consistency split than Ticketmaster, with overbooking as a deliberate business knob and a 1000:1 search-to-book ratio demanding strongly-consistent booking behind an eventually-consistent search tier.
 sidebar:
   order: 3

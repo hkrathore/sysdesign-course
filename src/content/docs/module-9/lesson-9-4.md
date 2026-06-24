@@ -1,5 +1,5 @@
 ---
-title: "9.4 — LLM Inference & Serving"
+title: "9.4 - LLM Inference & Serving"
 description: "Why GPU memory bandwidth — not disk or CPU — is the binding resource for LLM inference, and the mechanics that bound it: prefill vs decode, the KV cache, continuous batching, quantization, and the throughput-vs-latency trade."
 sidebar:
   order: 4

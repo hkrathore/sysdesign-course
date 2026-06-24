@@ -1,5 +1,5 @@
 ---
-title: "15.8 — Your Operating System & Metrics"
+title: "15.8 - Your Operating System & Metrics"
 description: The operating-cadence, visibility-without-micromanaging, and metrics-literacy cluster, a layered system where every meeting has an owner, an artifact, and a decision right, calibrated to the 2026 DORA/SPACE bar where metrics diagnose systems and never rank individuals.
 sidebar:
   order: 8

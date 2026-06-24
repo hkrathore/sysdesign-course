@@ -1,5 +1,5 @@
 ---
-title: "Module 8 — Data Platform Problems Cheat Sheet"
+title: "Module 8 - Data Platform Problems Cheat Sheet"
 description: "The 6 data-platform RESHADED problems, opening move → pivotal decision/trade-off → the numbers, plus the recurring moves and Director through-line. Skimmable in 5 minutes."
 sidebar:
   order: 8

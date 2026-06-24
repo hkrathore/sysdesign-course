@@ -1,5 +1,5 @@
 ---
-title: "2.3 — Indexing (B-tree vs. LSM-tree, the write/read trade)"
+title: "2.3 - Indexing (B-tree vs. LSM-tree, the write/read trade)"
 description: "Indexing (B-tree vs. LSM-tree, the write/read trade)"
 sidebar:
   order: 3

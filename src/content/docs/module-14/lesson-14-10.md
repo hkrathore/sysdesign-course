@@ -1,5 +1,5 @@
 ---
-title: "14.10 — Defend Your Own Design (Netflix Format)"
+title: "14.10 - Defend Your Own Design (Netflix Format)"
 description: "The pre-submitted design-doc round, how to survive hostile cross-examination by Staff engineers on a real system you led: prep your rationale, own your mistakes, and use 'what I'd do differently' as a live Evaluation step that builds credibility instead of destroying it."
 sidebar:
   order: 10

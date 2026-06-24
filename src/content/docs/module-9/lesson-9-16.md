@@ -1,5 +1,5 @@
 ---
-title: "9.16 — Leading AI Adoption: Governance, Risk & Cost"
+title: "9.16 - Leading AI Adoption: Governance, Risk & Cost"
 description: The Director's accountabilities beyond the architecture — AI governance and responsible-AI, data governance and privacy with model vendors, the exploding usage-based cost line, org and talent, and the courage to say no to AI-for-AI's-sake.
 sidebar:
   order: 16

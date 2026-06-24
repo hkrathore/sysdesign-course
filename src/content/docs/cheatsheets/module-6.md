@@ -1,5 +1,5 @@
 ---
-title: "Module 6 — LLD & OOD Curveballs Cheat Sheet"
+title: "Module 6 - LLD & OOD Curveballs Cheat Sheet"
 description: "The load-bearing decision and canonical Director answer for all 10 LLD/OOD curveballs, restraint, invariants, and the one race, on one page."
 sidebar:
   order: 6

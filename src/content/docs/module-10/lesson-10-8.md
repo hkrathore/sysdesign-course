@@ -1,5 +1,5 @@
 ---
-title: "10.8 — Real-Time AI Meeting Assistant"
+title: "10.8 - Real-Time AI Meeting Assistant"
 description: Design a transcription-and-summarization assistant (Otter / Granola / Zoom AI Companion) where two workloads with opposite constraints live in one system — a low-latency streaming ASR + diarization path for live captions, and a batch long-context map-reduce summarization path for notes and action items — with recording consent and privacy as a first-class requirement, not an afterthought.
 sidebar:
   order: 8

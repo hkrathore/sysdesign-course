@@ -1,5 +1,5 @@
 ---
-title: "5.10 — Google Docs (Collaborative Editing)"
+title: "5.10 - Google Docs (Collaborative Editing)"
 description: The convergence problem - many people editing one document at once must merge into a single shared state with zero lost keystrokes, solved by choosing a concurrency-control strategy (OT vs CRDT vs locking) at decision altitude, delegating the algorithm proof with a stated prior, and fanning out cheap ephemeral presence on a separate axis.
 sidebar:
   order: 10

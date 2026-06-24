@@ -1,5 +1,5 @@
 ---
-title: "14.8 — Org + Architecture Co-Design (Conway)"
+title: "14.8 - Org + Architecture Co-Design (Conway)"
 description: "Draw the org chart and the architecture diagram as one artifact, shape teams to induce the services you want (inverse Conway), keep every boundary owned by one team, budget cognitive load like QPS, and sequence the reorg against migration milestones because attrition risk is part of the architecture decision."
 sidebar:
   order: 8

@@ -1,5 +1,5 @@
 ---
-title: "15.11 — Efficiency-Era Leadership"
+title: "15.11 - Efficiency-Era Leadership"
 description: The layoff, budget-cut, and unpopular-mandate cluster, answered as own-it-end-to-end STAR-L across selection, communication, and the survivor-rebuild half that differentiates, with RTO as disagree-and-commit-with-mitigation, calibrated to the post-ZIRP, AI-justified-cut world.
 sidebar:
   order: 11

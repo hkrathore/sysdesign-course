@@ -1,5 +1,5 @@
 ---
-title: "1.5 — Common failure modes & how to recover live"
+title: "1.5 - Common failure modes & how to recover live"
 description: "Common failure modes & how to recover live"
 sidebar:
   order: 5

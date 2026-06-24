@@ -1,5 +1,5 @@
 ---
-title: "11.5 — Compliance as Architecture"
+title: "11.5 - Compliance as Architecture"
 description: Make compliance a property of the platform, not a per-team tax — what SOC 2, PCI-DSS and HIPAA each force into the design (audit-by-default, segmentation, retention floors), scope reduction via tokenization and isolation, controls-as-code for continuous evidence, and the retention-vs-deletion tension.
 sidebar:
   order: 5

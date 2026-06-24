@@ -1,5 +1,5 @@
 ---
-title: "14.4 — Multi-Region & Disaster Recovery"
+title: "14.4 - Multi-Region & Disaster Recovery"
 description: "Active-active vs active-passive is the wrong question, tier services by revenue-at-risk, pin RTO/RPO per tier as business sign-offs, pay 2× only where the money flows, and rehearse the region-death runbook until the only live decision is declaring."
 sidebar:
   order: 4

@@ -1,5 +1,5 @@
 ---
-title: "10.6 — Multi-Agent Autonomous Coding / Research Agent"
+title: "10.6 - Multi-Agent Autonomous Coding / Research Agent"
 description: Design a Devin/Claude-Code-style system that takes a high-level goal and works autonomously over a long horizon — planning, parallel sub-agents, sandboxed tool execution, durable checkpoints, and verification — where the binding constraints are reliability under compounding error, runaway cost, and sandbox safety, not model IQ.
 sidebar:
   order: 6

@@ -1,5 +1,5 @@
 ---
-title: "11.6 — Abuse, Fraud & DDoS"
+title: "11.6 - Abuse, Fraud & DDoS"
 description: Availability and integrity under adversarial load — layered rate limiting and quotas, volumetric and L7 DDoS absorption, bot and account-takeover defense, and fraud scoring, every control named with the legitimate-user friction and false-positive cost it buys.
 sidebar:
   order: 6

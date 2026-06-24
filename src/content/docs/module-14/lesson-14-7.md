@@ -1,5 +1,5 @@
 ---
-title: "14.7 — Internal Developer Platform"
+title: "14.7 - Internal Developer Platform"
 description: "Internal developers are customers who can refuse the product, design the golden path with escape hatches, price it against toil removed, and sequence an 8-team Jenkins migration that never blocks a release, measured in adoption and time-to-first-deploy."
 sidebar:
   order: 7

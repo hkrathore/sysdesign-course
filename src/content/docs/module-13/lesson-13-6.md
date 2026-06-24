@@ -1,5 +1,5 @@
 ---
-title: "13.6 — Graceful Degradation & On-Call Health"
+title: "13.6 - Graceful Degradation & On-Call Health"
 description: Build systems that bend rather than break — load shedding, circuit breaking, backpressure and fallbacks keep the core alive when a dependency fails, the replay/backfill path fixes "the number is wrong", and on-call load is a system you manage with symptom-only alerts and a sustainable rotation.
 sidebar:
   order: 6

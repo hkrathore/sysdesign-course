@@ -1,5 +1,5 @@
 ---
-title: "7.1 — Data Platforms for System Designers"
+title: "7.1 - Data Platforms for System Designers"
 description: What an analytical data platform actually is from an architecture POV — a continuously-rebuilt, append-mostly, scan-optimized projection of operational truth on decoupled storage and compute — and the freshness, scan-cost, volume, and trust model you must design around.
 sidebar:
   order: 1

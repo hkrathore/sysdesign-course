@@ -1,5 +1,5 @@
 ---
-title: "14.2 — Inherited Legacy System"
+title: "14.2 - Inherited Legacy System"
 description: The first-90-days modernization scenario, audit before touching, stabilize-then-strangle over the rewrite instinct, and a quarter-by-quarter sequence where every quarter ships business-visible value, defended to a CEO who wants features.
 sidebar:
   order: 2

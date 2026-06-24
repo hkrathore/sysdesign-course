@@ -1,5 +1,5 @@
 ---
-title: "12.3 — Test Environments & Data"
+title: "12.3 - Test Environments & Data"
 description: Realistic environments and data are the hidden cost of testing — ephemeral per-PR environments beat a contended shared staging that everyone breaks, masked or synthetic data keeps tests PII-safe and compliant, and prod-like fidelity is a dial you buy only where the risk needs it.
 sidebar:
   order: 3

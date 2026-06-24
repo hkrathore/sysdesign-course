@@ -1,5 +1,5 @@
 ---
-title: "7.8 — Analytical Data Modeling"
+title: "7.8 - Analytical Data Modeling"
 description: Why analytical tables are modeled for scans and human questions, the opposite of OLTP normalization, dimensional modeling (facts, dimensions, grain, star vs snowflake, slowly-changing dimensions) and the medallion layering that produce a scan-cheap, denormalized, governed analytical store.
 sidebar:
   order: 8

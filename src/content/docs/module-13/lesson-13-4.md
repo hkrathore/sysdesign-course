@@ -1,5 +1,5 @@
 ---
-title: "13.4 — Incident Command"
+title: "13.4 - Incident Command"
 description: A single decision-maker beats a crowd in the war room — the Incident Commander / comms / ops role split, clear severity levels and declaring early, a steady comms cadence and single source of truth, and building the incident system so the org responds without you in the room.
 sidebar:
   order: 4

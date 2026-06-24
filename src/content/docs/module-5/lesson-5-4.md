@@ -1,5 +1,5 @@
 ---
-title: "5.4 — Online Auction (eBay)"
+title: "5.4 - Online Auction (eBay)"
 description: The second face of the contention pattern, compare-and-set on the highest bid with broadcast fan-out to thousands of watchers across 10M concurrent auctions, solved at Director altitude with a strongly-consistent CAS core, an eventually-consistent notification tier, and the anti-sniping edge.
 sidebar:
   order: 4

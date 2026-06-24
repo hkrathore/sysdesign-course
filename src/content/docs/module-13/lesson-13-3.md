@@ -1,5 +1,5 @@
 ---
-title: "13.3 — SLOs & Error Budgets"
+title: "13.3 - SLOs & Error Budgets"
 description: SLOs turn reliability into a quantified, negotiated target and the error budget is the shared currency that decides what pages, what waits, and when to freeze — user-centric SLIs, multi-window burn-rate alerting, and using the budget to arbitrate the reliability-versus-velocity fight with data.
 sidebar:
   order: 3

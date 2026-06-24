@@ -1,5 +1,5 @@
 ---
-title: "8.3 — CDC Ingestion & Streaming ETL"
+title: "8.3 - CDC Ingestion & Streaming ETL"
 description: Design the pipeline that gets operational data into the lakehouse reliably and correctly — log-based CDC (Debezium) → Kafka → Flink → idempotent MERGE into bronze — reasoned through RESHADED at Director altitude, where freshness sets streaming-vs-micro-batch, effectively-once upserts keyed on the primary key are the correctness spine, and schema drift plus snapshot-then-stream backfill are the silent killers.
 sidebar:
   order: 3

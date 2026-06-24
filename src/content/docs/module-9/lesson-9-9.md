@@ -1,5 +1,5 @@
 ---
-title: "9.9 — Agentic AI: The Agent Loop"
+title: "9.9 - Agentic AI: The Agent Loop"
 description: What turns an LLM into an agent — a model in a loop with tools, memory, and a goal, deciding its own next action — and why that autonomy trades reliability for capability. ReAct, planning, reflection, the stopping problem, and the all-important agent-vs-workflow decision.
 sidebar:
   order: 9

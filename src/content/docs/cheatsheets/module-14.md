@@ -1,5 +1,5 @@
 ---
-title: "Module 14 — Architecture & Org Strategy Cheat Sheet"
+title: "Module 14 - Architecture & Org Strategy Cheat Sheet"
 description: "The load-bearing decision and canonical Director answer for all 11 architecture-strategy problems, one page."
 sidebar:
   order: 14

@@ -1,5 +1,5 @@
 ---
-title: "6.7 — Splitwise / Expense Sharing"
+title: "6.7 - Splitwise / Expense Sharing"
 description: The invariant-first LLD problem - make balances-sum-to-zero structurally unviolable with an immutable ledger and integer cents, use Strategy for split types, and earn Director credit by naming the min-cash-flow rabbit hole and deferring it.
 sidebar:
   order: 7

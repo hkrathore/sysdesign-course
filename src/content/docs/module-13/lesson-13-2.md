@@ -1,5 +1,5 @@
 ---
-title: "13.2 — Observability in Anger"
+title: "13.2 - Observability in Anger"
 description: Observability is what lets you ask new questions of a live system mid-incident — metrics, logs, traces and continuous profiling used together, USE and RED to localize the bottleneck fast, trace-ID correlation across the pillars, and the cardinality and cost limits you design around.
 sidebar:
   order: 2

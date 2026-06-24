@@ -1,5 +1,5 @@
 ---
-title: "15.5 — Hiring Philosophy & the Talent Bar"
+title: "15.5 - Hiring Philosophy & the Talent Bar"
 description: The hiring round, designing the loop as an instrument you own (rubrics, round-per-competency, debrief discipline, funnel metrics, quality-of-hire at 12 months), the AI-era redesign that killed take-homes and replaced "can they write code" with "can they direct and verify it," and a defensible junior-pipeline stance, all in the system-description answer shape.
 sidebar:
   order: 5

@@ -1,5 +1,5 @@
 ---
-title: "9.13 — Durable Agent Runtime & Human-in-the-Loop"
+title: "9.13 - Durable Agent Runtime & Human-in-the-Loop"
 description: Production agents are long-running, stateful, failure-prone distributed workflows that call flaky tools — so they need durable execution, idempotent tool calls, and human-approval gates, reusing the exactly-once machinery from the payments and job-scheduler problems.
 sidebar:
   order: 13

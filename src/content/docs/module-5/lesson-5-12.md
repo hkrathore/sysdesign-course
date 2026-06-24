@@ -1,5 +1,5 @@
 ---
-title: "5.12 — Metrics & Monitoring Platform"
+title: "5.12 - Metrics & Monitoring Platform"
 description: A write-heavy time-series platform where cardinality is the cost function, hosts × series × samples drives the ingest math, retention tiers are budget decisions, and the build-vs-buy crossover is the design's center of gravity, reasoned through RESHADED at Director altitude.
 sidebar:
   order: 12

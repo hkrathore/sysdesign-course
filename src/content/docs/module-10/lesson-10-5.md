@@ -1,5 +1,5 @@
 ---
-title: "10.5 — Tool-Using Customer-Support Agent"
+title: "10.5 - Tool-Using Customer-Support Agent"
 description: Design a support agent that answers from a knowledge base via RAG and takes real actions on a customer's behalf — order changes, cancellations, refunds — where the design problem inverts from "is the answer good?" to "what can it do, and what's the blast radius when it's wrong or manipulated?" Bounded autonomy, idempotent actions, injection containment, and human escalation are the whole game.
 sidebar:
   order: 5

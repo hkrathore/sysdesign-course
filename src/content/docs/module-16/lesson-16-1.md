@@ -1,5 +1,5 @@
 ---
-title: "16.1 — Capstone: Drive Your Own Design"
+title: "16.1 - Capstone: Drive Your Own Design"
 description: A fresh, meaty problem, a real-time collaborative document editor, that you design end-to-end yourself, then critique against a RESHADED-keyed strong-signal/red-flag rubric. The exercise is the lesson; the critique loop is the skill.
 sidebar:
   order: 1

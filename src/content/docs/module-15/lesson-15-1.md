@@ -1,5 +1,5 @@
 ---
-title: "15.1 — The Leadership Round, Recalibrated for 2026"
+title: "15.1 - The Leadership Round, Recalibrated for 2026"
 description: What the Director leadership loop actually scores, altitude, currency, and probe-survival, and the six environmental shifts since 2015 that silently re-grade every behavioral answer.
 sidebar:
   order: 1

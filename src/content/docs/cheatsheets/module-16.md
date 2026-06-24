@@ -1,5 +1,5 @@
 ---
-title: "Module 16 — Director Rubric Cheat Sheet"
+title: "Module 16 - Director Rubric Cheat Sheet"
 description: "Red-flags vs strong-signals scorecard, 5 axes, 8 RESHADED steps, 2 fatal altitude modes."
 sidebar:
   order: 16

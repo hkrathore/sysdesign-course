@@ -1,5 +1,5 @@
 ---
-title: "6.8 — Movie Ticket Booking (Seat-Locking LLD)"
+title: "6.8 - Movie Ticket Booking (Seat-Locking LLD)"
 description: The BookMyShow seat-locking problem at LLD altitude, entity model, hold-TTL state machine, and pessimistic vs optimistic vs hold-table argued by traffic shape, with the climb to Ticketmaster's distributed form.
 sidebar:
   order: 8

@@ -1,5 +1,5 @@
 ---
-title: "6.6 — Meeting / Calendar Scheduler"
+title: "6.6 - Meeting / Calendar Scheduler"
 description: The LLD curveball with the best teachable Director move in the set - interval overlap as a first-class abstraction, a check-then-book race solved by per-room serialization, and the recurrence trap named, bounded with a generator, and walked past.
 sidebar:
   order: 6

@@ -1,5 +1,5 @@
 ---
-title: "9.14 — Agent Safety, Governance & Evaluation"
+title: "9.14 - Agent Safety, Governance & Evaluation"
 description: Once an agent takes actions, the question shifts from "is the output good?" to "what can it do, and what's the blast radius when it's wrong?" — autonomy levels gated by reversibility, least-privilege tool scopes, sandboxing, the injection-to-action threat, and trajectory evaluation.
 sidebar:
   order: 14

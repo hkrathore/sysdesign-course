@@ -1,5 +1,5 @@
 ---
-title: "12.2 — Contract & Integration Testing"
+title: "12.2 - Contract & Integration Testing"
 description: In a microservices world the bugs live at the seams — consumer-driven contract testing catches integration breaks without the cost and flake of full end-to-end, the flake-vs-fidelity tension governs test doubles vs real dependencies, and API compatibility direction lets teams deploy independently.
 sidebar:
   order: 2

@@ -1,5 +1,5 @@
 ---
-title: "13.5 — Blameless Postmortems"
+title: "13.5 - Blameless Postmortems"
 description: The postmortem converts an outage into organizational learning — blameless framing (human error as a symptom of system design, not a cause) makes honesty safe, contributing factors beat a single root cause, and action items with owners that actually close are what make it worth doing.
 sidebar:
   order: 5

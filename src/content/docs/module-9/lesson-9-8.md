@@ -1,5 +1,5 @@
 ---
-title: "9.8 — LLM Cost & Latency Optimization"
+title: "9.8 - LLM Cost & Latency Optimization"
 description: The levers that decide whether an AI feature is economical — prompt and semantic caching, model routing and cascades, distillation, batching, streaming, and token-budget discipline — each with the quality or latency it trades away.
 sidebar:
   order: 8

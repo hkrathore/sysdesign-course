@@ -1,5 +1,5 @@
 ---
-title: "5.7 — Ad Click Aggregator"
+title: "5.7 - Ad Click Aggregator"
 description: The streaming-analytics problem where every event is money, exactly-once counting at 100k+ events/sec forces a speed-vs-truth split, with an approximate stream for dashboards and a batch recompute as the billing source of truth, reasoned through RESHADED at Director altitude.
 sidebar:
   order: 7

@@ -1,5 +1,5 @@
 ---
-title: "Module 4 — System-Design Problems Cheat Sheet"
+title: "Module 4 - System-Design Problems Cheat Sheet"
 description: "The crux decision and canonical answer for all 15 RESHADED design problems, one page."
 sidebar:
   order: 4

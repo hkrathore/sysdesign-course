@@ -1,5 +1,5 @@
 ---
-title: "7.2 — OLTP vs OLAP & Columnar Storage"
+title: "7.2 - OLTP vs OLAP & Columnar Storage"
 description: Why columnar storage makes an analytical scan orders of magnitude cheaper than the same query on a row store — physical layout, vectorized execution, compression on homogeneous columns, and the Parquet/ORC block-skipping that turns the scan-cost claim into mechanics.
 sidebar:
   order: 2

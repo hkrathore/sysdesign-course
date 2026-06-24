@@ -1,5 +1,5 @@
 ---
-title: "10.7 — Text-to-Image Generation Service"
+title: "10.7 - Text-to-Image Generation Service"
 description: Design a Midjourney/DALL·E-style diffusion image service — where the binding resource is the GPU but the workload is a multi-second asynchronous batch job, so the system is a fair-scheduled job queue over a pre-warmed GPU pool, with two-sided (prompt + image) safety and cost-per-image as the design's spine.
 sidebar:
   order: 7

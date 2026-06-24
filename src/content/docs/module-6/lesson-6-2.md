@@ -1,5 +1,5 @@
 ---
-title: "6.2 — Elevator System"
+title: "6.2 - Elevator System"
 description: The classic LLD curveball - a clean UP/DOWN/IDLE state machine carrying a dispatch-strategy argument (FIFO vs nearest-first vs SCAN) into the multi-elevator allocation problem, scoped with the one question seniors are scored on asking first.
 sidebar:
   order: 2

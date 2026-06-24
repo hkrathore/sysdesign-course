@@ -1,5 +1,5 @@
 ---
-title: "5.6 — Stock Exchange / Matching Engine"
+title: "5.6 - Stock Exchange / Matching Engine"
 description: The canonical 'when NOT to distribute' problem, strict price-time priority demands a single-threaded deterministic matching engine, scaled by partitioning symbols across engines rather than distributing one book.
 sidebar:
   order: 6

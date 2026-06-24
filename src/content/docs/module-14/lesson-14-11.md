@@ -1,5 +1,5 @@
 ---
-title: "14.11 — Fleet Upgrade on the Moon (OTA Rollout)"
+title: "14.11 - Fleet Upgrade on the Moon (OTA Rollout)"
 description: How to roll software to hundreds of thousands of machines under extreme constraints, high latency, intermittent connectivity, no physical access, by designing canary waves with quantified blast radius, abort gates, and watchdog-driven auto-revert so a single bricked wave cannot cascade into a bricked fleet.
 sidebar:
   order: 11

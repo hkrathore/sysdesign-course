@@ -1,5 +1,5 @@
 ---
-title: "12.6 — Quality Gates, DORA & the CI/CD Platform"
+title: "12.6 - Quality Gates, DORA & the CI/CD Platform"
 description: Quality gates encode the bar in the paved road, DORA metrics measure whether the delivery system is healthy, and the CI/CD platform makes the safe path the easy path — tied to incentives without becoming a velocity tax, with a build-vs-buy call and a platform-not-bottleneck org design.
 sidebar:
   order: 6

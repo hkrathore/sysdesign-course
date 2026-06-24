@@ -1,5 +1,5 @@
 ---
-title: "7.4 — Distributed Processing Engines: Spark & Flink"
+title: "7.4 - Distributed Processing Engines: Spark & Flink"
 description: How Spark (DAG + the shuffle as the cost center) and Flink (event-time, watermarks, keyed state, checkpoint barriers) actually work as platform components, so you can reason about their bottlenecks, recovery, and cost.
 sidebar:
   order: 4

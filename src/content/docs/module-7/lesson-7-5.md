@@ -1,5 +1,5 @@
 ---
-title: "7.5 — Real-Time OLAP & Serving Engines"
+title: "7.5 - Real-Time OLAP & Serving Engines"
 description: The analytical store that answers simple aggregation queries in sub-second p99 at hundreds-to-thousands QPS over seconds-fresh data, columnar segments, rollup, and a real-time/historical node split, contrasted with the warehouse and reasoned at Director altitude.
 sidebar:
   order: 5

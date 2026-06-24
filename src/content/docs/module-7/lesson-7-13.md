@@ -1,5 +1,5 @@
 ---
-title: "7.13 — Leading a Data Platform Org"
+title: "7.13 - Leading a Data Platform Org"
 description: The Director's data job is the operating model, not the pipeline, how you organize the data function (centralized vs embedded vs hub-and-spoke vs mesh), set reliability contracts and run data on-call, and make data a trustworthy product the business self-serves.
 sidebar:
   order: 13

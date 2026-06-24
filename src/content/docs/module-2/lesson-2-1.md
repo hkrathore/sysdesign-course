@@ -1,5 +1,5 @@
 ---
-title: "2.1 — Networking, DNS, proxies (forward vs. reverse)"
+title: "2.1 - Networking, DNS, proxies (forward vs. reverse)"
 description: "Networking, DNS, proxies (forward vs. reverse)"
 sidebar:
   order: 1
