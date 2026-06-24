@@ -1,5 +1,5 @@
 ---
-title: "12.9 — Execution Under Pressure"
+title: "15.9 — Execution Under Pressure"
 description: The deadlines, failing-projects, incident-command, and own-bad-call cluster, answered in STAR-L on a system spine (early detection, options costed, headline-first renegotiation, quantified recovery, durable mechanism change), built to survive a four-level probe and calibrated to the post-ZIRP, post-flattening 2026 bar.
 sidebar:
   order: 9
@@ -144,4 +144,4 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 
 ---
 
-*End of Lesson 12.9. Execution under pressure is the system-not-sprint cluster; the next lesson carries the same instincts sideways to influence, disagreement, and executive communication, where the pressure isn't a deadline but a VP who outranks you and a decision you have to either change or commit to.*
+*End of Lesson 15.9. Execution under pressure is the system-not-sprint cluster; the next lesson carries the same instincts sideways to influence, disagreement, and executive communication, where the pressure isn't a deadline but a VP who outranks you and a decision you have to either change or commit to.*

@@ -1,5 +1,5 @@
 ---
-title: "11.2 — Inherited Legacy System"
+title: "14.2 — Inherited Legacy System"
 description: The first-90-days modernization scenario, audit before touching, stabilize-then-strangle over the rewrite instinct, and a quarter-by-quarter sequence where every quarter ships business-visible value, defended to a CEO who wants features.
 sidebar:
   order: 2
@@ -230,4 +230,4 @@ Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, co
 
 ---
 
-*End of Lesson 11.2. The inherited-legacy question is architecture strategy in its purest form: almost no new components, the grade rides on sequencing, evidence, and the discipline not to touch what doesn't need touching. It reuses the strangler façade, and it is where the line between "system design round" and "how you'd run the org" disappears.*
+*End of Lesson 14.2. The inherited-legacy question is architecture strategy in its purest form: almost no new components, the grade rides on sequencing, evidence, and the discipline not to touch what doesn't need touching. It reuses the strangler façade, and it is where the line between "system design round" and "how you'd run the org" disappears.*

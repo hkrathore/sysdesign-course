@@ -1,5 +1,5 @@
 ---
-title: "11.9 — Competing Proposals & Technical Direction"
+title: "14.9 — Competing Proposals & Technical Direction"
 description: "Two senior engineers, two defensible architectures, one deadlock, resolve it on requirements, cost, risk, and team capability instead of taste: criteria before scoring, one-way vs two-way doors, an ADR that records the dissent, and breaking points named before the interviewer asks the 10x question."
 sidebar:
   order: 9
@@ -303,4 +303,4 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 
 ---
 
-*End of Lesson 11.9. The Ticketmaster lesson taught you to co-design a shard key with a queue; this one teaches you to co-design a decision with its own revisit, the ADR's tripwires are to architecture choices what the waiting room was to the hot shard: the mechanism that makes an otherwise dangerous commitment safe. Same Director instinct throughout this track: the artifact that matters is rarely the diagram, it's the requirement sheet, the criteria, and the written record that lets the org change its mind cheaply.*
+*End of Lesson 14.9. The Ticketmaster lesson taught you to co-design a shard key with a queue; this one teaches you to co-design a decision with its own revisit, the ADR's tripwires are to architecture choices what the waiting room was to the hot shard: the mechanism that makes an otherwise dangerous commitment safe. Same Director instinct throughout this track: the artifact that matters is rarely the diagram, it's the requirement sheet, the criteria, and the written record that lets the org change its mind cheaply.*

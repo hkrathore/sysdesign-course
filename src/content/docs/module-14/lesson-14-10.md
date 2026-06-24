@@ -1,5 +1,5 @@
 ---
-title: "11.10 — Defend Your Own Design (Netflix Format)"
+title: "14.10 — Defend Your Own Design (Netflix Format)"
 description: "The pre-submitted design-doc round, how to survive hostile cross-examination by Staff engineers on a real system you led: prep your rationale, own your mistakes, and use 'what I'd do differently' as a live Evaluation step that builds credibility instead of destroying it."
 sidebar:
   order: 10
@@ -238,4 +238,4 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 ---
 
-*End of Lesson 11.10. The pre-submitted design-doc round tests the same trade-off fluency as the live whiteboard format but with no place to hide: your design is already on record, and the session scores whether your reasoning is legible and self-aware. Cross-references: The capstone (capstone rubric, what strong vs weak Director answers look like end-to-end), the Director rubric (self-evaluation against the rubric), the competing-proposals lesson (competing proposals, related format for architectural decision-making under social pressure). Next: 8.11.*
+*End of Lesson 14.10. The pre-submitted design-doc round tests the same trade-off fluency as the live whiteboard format but with no place to hide: your design is already on record, and the session scores whether your reasoning is legible and self-aware. Cross-references: The capstone (capstone rubric, what strong vs weak Director answers look like end-to-end), the Director rubric (self-evaluation against the rubric), the competing-proposals lesson (competing proposals, related format for architectural decision-making under social pressure). Next: 8.11.*

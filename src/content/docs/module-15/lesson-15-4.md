@@ -1,5 +1,5 @@
 ---
-title: "12.4 — Leadership Philosophy & Style"
+title: "15.4 — Leadership Philosophy & Style"
 description: The "who are you as a leader" round, answering style, hands-on depth, culture, psychological safety, and RTO in Position-Mechanism-Number-Limit, calibrated past founder-mode and the psych-safety backlash so the philosophy survives a four-level probe.
 sidebar:
   order: 4
@@ -141,4 +141,4 @@ This is the category the modern world re-scored most violently. Five shifts sepa
 
 ---
 
-*End of Lesson 12.4. Philosophy is the calibrated-general round; the next lesson narrows to the hiring bar, designing the loop, the AI-era assessment redesign, and the junior-pipeline stance, where the same "designed mechanism, with a number" instinct from this lesson becomes a system you own.*
+*End of Lesson 15.4. Philosophy is the calibrated-general round; the next lesson narrows to the hiring bar, designing the loop, the AI-era assessment redesign, and the junior-pipeline stance, where the same "designed mechanism, with a number" instinct from this lesson becomes a system you own.*

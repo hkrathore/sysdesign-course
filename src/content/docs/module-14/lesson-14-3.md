@@ -1,5 +1,5 @@
 ---
-title: "11.3 — Zero-Downtime Data Migration"
+title: "14.3 — Zero-Downtime Data Migration"
 description: "Migrating live production data, re-shard, engine swap, vendor exit, without loss or downtime: CDC + backfill vs dual-write, dark-read verification, and the expand-migrate-contract ladder with a rehearsed rollback at every rung."
 sidebar:
   order: 3
@@ -258,4 +258,4 @@ Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliati
 
 ---
 
-*End of Lesson 11.3. Where a strongly-consistent core is protected with a queue, this lesson protects a* **transition** *with a ladder, replication, partitioning, and pub-sub machinery repurposed so two stores can be one system of record, briefly and provably, while trust moves. The playbook is the takeaway: six phases that survive any migration an interviewer can invent.*
+*End of Lesson 14.3. Where a strongly-consistent core is protected with a queue, this lesson protects a* **transition** *with a ladder, replication, partitioning, and pub-sub machinery repurposed so two stores can be one system of record, briefly and provably, while trust moves. The playbook is the takeaway: six phases that survive any migration an interviewer can invent.*

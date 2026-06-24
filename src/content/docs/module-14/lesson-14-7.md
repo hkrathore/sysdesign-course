@@ -1,5 +1,5 @@
 ---
-title: "11.7 — Internal Developer Platform"
+title: "14.7 — Internal Developer Platform"
 description: "Internal developers are customers who can refuse the product, design the golden path with escape hatches, price it against toil removed, and sequence an 8-team Jenkins migration that never blocks a release, measured in adoption and time-to-first-deploy."
 sidebar:
   order: 7
@@ -267,4 +267,4 @@ What I keep: the metrics, the voluntary-adoption posture, the hatch contract, th
 
 ---
 
-*End of Lesson 11.7. The IDP problem inverts the product-design instincts: the load is trivial (200 deploys/day), and the entire difficulty is product-market fit with internal customers plus the change management of migration, the build-vs-buy rule applied to your own tooling, executed by the platform-team shape that org design makes precise. Next: org design and Conway's law, where the team boundaries themselves become the architecture.*
+*End of Lesson 14.7. The IDP problem inverts the product-design instincts: the load is trivial (200 deploys/day), and the entire difficulty is product-market fit with internal customers plus the change management of migration, the build-vs-buy rule applied to your own tooling, executed by the platform-team shape that org design makes precise. Next: org design and Conway's law, where the team boundaries themselves become the architecture.*

@@ -1,5 +1,5 @@
 ---
-title: "11.4 — Multi-Region & Disaster Recovery"
+title: "14.4 — Multi-Region & Disaster Recovery"
 description: "Active-active vs active-passive is the wrong question, tier services by revenue-at-risk, pin RTO/RPO per tier as business sign-offs, pay 2× only where the money flows, and rehearse the region-death runbook until the only live decision is declaring."
 sidebar:
   order: 4
@@ -281,4 +281,4 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 
 ---
 
-*End of Lesson 11.4. Multi-region DR closes the strategy arc the way the migration lessons opened it: the technology is the easy 30%, replication, quorums, and CAP's bill, and the Director's 70% is the tier catalog, the signed RTO/RPO price list, the $18M/yr delta defended to a CFO, and a game-day program that turns a region's death at peak into twelve scripted minutes.*
+*End of Lesson 14.4. Multi-region DR closes the strategy arc the way the migration lessons opened it: the technology is the easy 30%, replication, quorums, and CAP's bill, and the Director's 70% is the tier catalog, the signed RTO/RPO price list, the $18M/yr delta defended to a CFO, and a game-day program that turns a region's death at peak into twelve scripted minutes.*

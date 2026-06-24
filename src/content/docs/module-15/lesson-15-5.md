@@ -1,5 +1,5 @@
 ---
-title: "12.5 — Hiring Philosophy & the Talent Bar"
+title: "15.5 — Hiring Philosophy & the Talent Bar"
 description: The hiring round, designing the loop as an instrument you own (rubrics, round-per-competency, debrief discipline, funnel metrics, quality-of-hire at 12 months), the AI-era redesign that killed take-homes and replaced "can they write code" with "can they direct and verify it," and a defensible junior-pipeline stance, all in the system-description answer shape.
 sidebar:
   order: 5
@@ -140,4 +140,4 @@ This category was re-scored harder than almost any other, because AI broke the a
 
 ---
 
-*End of Lesson 12.5. Hiring is the instrument that fills the org; the next lesson turns to the harder edge of the same bar, the people calls once someone is already inside: low performers, PIPs, the brilliant jerk, and the termination you have to run with dignity and decisiveness.*
+*End of Lesson 15.5. Hiring is the instrument that fills the org; the next lesson turns to the harder edge of the same bar, the people calls once someone is already inside: low performers, PIPs, the brilliant jerk, and the termination you have to run with dignity and decisiveness.*

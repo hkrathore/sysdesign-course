@@ -1,5 +1,5 @@
 ---
-title: "12.13 — Company Calibration"
+title: "15.13 — Company Calibration"
 description: How the same true story scores differently at Amazon, Meta, Google, Netflix, and a founder-led startup, the LP-mapping, bar-raiser veto, G&L packet, keeper test, and stage-fit that re-grade an identical answer, worked through one termination story re-told three ways.
 sidebar:
   order: 13
@@ -160,4 +160,4 @@ Meta and Google follow the same dials: at Meta, lead with how you pulled the tea
 
 ---
 
-*End of Lesson 12.13. Company calibration is the last layer over every story you've built, the same facts, re-aimed to the rubric in the room. Next: the demonstrate-don't-describe capstone, where the modern loop stops asking for stories and makes you *perform*, critique a bad set of OKRs live, read a synthesized org-health survey and act, present a first-90-days plan, scored against the rubric this whole track has been teaching you to see.*
+*End of Lesson 15.13. Company calibration is the last layer over every story you've built, the same facts, re-aimed to the rubric in the room. Next: the demonstrate-don't-describe capstone, where the modern loop stops asking for stories and makes you *perform*, critique a bad set of OKRs live, read a synthesized org-health survey and act, present a first-90-days plan, scored against the rubric this whole track has been teaching you to see.*

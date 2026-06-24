@@ -1,5 +1,5 @@
 ---
-title: "12.11 — Efficiency-Era Leadership"
+title: "15.11 — Efficiency-Era Leadership"
 description: The layoff, budget-cut, and unpopular-mandate cluster, answered as own-it-end-to-end STAR-L across selection, communication, and the survivor-rebuild half that differentiates, with RTO as disagree-and-commit-with-mitigation, calibrated to the post-ZIRP, AI-justified-cut world.
 sidebar:
   order: 11
@@ -155,4 +155,4 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 
 ---
 
-*End of Lesson 12.11. Efficiency-era leadership is the own-it-end-to-end cluster; "how did you know the org could absorb the cut?" hands directly to AI-era leadership, where the absorption model has to survive "did delivery actually improve?" and conviction-with-instrumentation replaces the hand-wave.*
+*End of Lesson 15.11. Efficiency-era leadership is the own-it-end-to-end cluster; "how did you know the org could absorb the cut?" hands directly to AI-era leadership, where the absorption model has to survive "did delivery actually improve?" and conviction-with-instrumentation replaces the hand-wave.*

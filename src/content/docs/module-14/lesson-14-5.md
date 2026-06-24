@@ -1,5 +1,5 @@
 ---
-title: "11.5 — Cut Infrastructure Cost 30–50%"
+title: "14.5 — Cut Infrastructure Cost 30–50%"
 description: "Cutting a $10M cloud bill 30-50% as a sequenced 72-hour / 30-day / 6-month program, guardrails first, the savings ladder in order, and the one cut you refuse to make."
 sidebar:
   order: 5
@@ -267,4 +267,4 @@ Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cr
 
 ---
 
-*End of Lesson 11.5. The cost question inverts the usual design problem: instead of spending money to buy reliability and scale, you remove money while proving reliability and velocity never moved, the guardrail dashboard plays the role the waiting room played for a hot-shard queue, the rung ordering is as load-bearing as the expand-migrate-contract ladder of a live migration, and the refused cut is where the interviewer learns whether you know what the spend was buying.*
+*End of Lesson 14.5. The cost question inverts the usual design problem: instead of spending money to buy reliability and scale, you remove money while proving reliability and velocity never moved, the guardrail dashboard plays the role the waiting room played for a hot-shard queue, the rung ordering is as load-bearing as the expand-migrate-contract ladder of a live migration, and the refused cut is where the interviewer learns whether you know what the spend was buying.*

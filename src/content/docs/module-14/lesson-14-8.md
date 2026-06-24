@@ -1,5 +1,5 @@
 ---
-title: "11.8 — Org + Architecture Co-Design (Conway)"
+title: "14.8 — Org + Architecture Co-Design (Conway)"
 description: "Draw the org chart and the architecture diagram as one artifact, shape teams to induce the services you want (inverse Conway), keep every boundary owned by one team, budget cognitive load like QPS, and sequence the reorg against migration milestones because attrition risk is part of the architecture decision."
 sidebar:
   order: 8
@@ -298,4 +298,4 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 
 ---
 
-*End of Lesson 11.8. The org-design case closes the strategy module's loop: the strangler-fig migration needs teams shaped for the target seams, build-vs-buy decides which teams exist at all, the platform team is one of the four types deployed here, and Conway's law is the reason all of them are architecture decisions wearing org-chart clothes. No IC can fake this question; after this lesson, you shouldn't have to.*
+*End of Lesson 14.8. The org-design case closes the strategy module's loop: the strangler-fig migration needs teams shaped for the target seams, build-vs-buy decides which teams exist at all, the platform team is one of the four types deployed here, and Conway's law is the reason all of them are architecture decisions wearing org-chart clothes. No IC can fake this question; after this lesson, you shouldn't have to.*

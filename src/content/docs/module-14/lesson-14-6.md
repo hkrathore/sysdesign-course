@@ -1,5 +1,5 @@
 ---
-title: "11.6 — Build vs Buy"
+title: "14.6 — Build vs Buy"
 description: "The decision-memo variant of RESHADED: multi-year TCO and opportunity-cost math against the differentiation test, with reversibility and written exit triggers, buy to accelerate, build only what differentiates."
 sidebar:
   order: 6
@@ -279,4 +279,4 @@ What I keep, the differentiation verdict, the crossover number, the exit trigger
 
 ---
 
-*End of Lesson 11.6. Build vs buy is the live-migration problem decided in advance, the seam and export you create at signing are what make the migration playbook runnable if the exit trigger ever fires. The developer-platform lesson applies this memo to a live platform case, Backstage vs an in-house developer portal, and the behavioral pairing tells a build-vs-buy call you owned.*
+*End of Lesson 14.6. Build vs buy is the live-migration problem decided in advance, the seam and export you create at signing are what make the migration playbook runnable if the exit trigger ever fires. The developer-platform lesson applies this memo to a live platform case, Backstage vs an in-house developer portal, and the behavioral pairing tells a build-vs-buy call you owned.*

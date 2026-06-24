@@ -74,12 +74,17 @@ export default defineConfig({
 					{ label: 'Module 9 · Gen AI & Agentic Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-9' } }] },
 					{ label: 'Module 10 · Gen AI & Agentic Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-10' } }] },
 				] },
-				{ label: 'Part IV · Strategy & Leadership', collapsed: false, items: [
-					{ label: 'Module 11 · Architecture & Org Strategy', collapsed: true, items: [{ autogenerate: { directory: 'module-11' } }] },
-					{ label: 'Module 12 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-12' } }] },
+				{ label: 'Part IV · Engineering Excellence & Operations', collapsed: false, items: [
+					{ label: 'Module 11 · Security, Privacy & Trust', collapsed: true, items: [{ autogenerate: { directory: 'module-11' } }] },
+					{ label: 'Module 12 · Testing & Quality Engineering', collapsed: true, items: [{ autogenerate: { directory: 'module-12' } }] },
+					{ label: 'Module 13 · Production Troubleshooting & Incident Response', collapsed: true, items: [{ autogenerate: { directory: 'module-13' } }] },
 				] },
-				{ label: 'Part V · Capstone', collapsed: false, items: [
-					{ label: 'Module 13 · Capstone & Rubric', collapsed: true, items: [{ autogenerate: { directory: 'module-13' } }] },
+				{ label: 'Part V · Strategy & Leadership', collapsed: false, items: [
+					{ label: 'Module 14 · Architecture & Org Strategy', collapsed: true, items: [{ autogenerate: { directory: 'module-14' } }] },
+					{ label: 'Module 15 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-15' } }] },
+				] },
+				{ label: 'Part VI · Capstone', collapsed: false, items: [
+					{ label: 'Module 16 · Capstone & Rubric', collapsed: true, items: [{ autogenerate: { directory: 'module-16' } }] },
 				] },
 				{ label: 'Cheat Sheets', collapsed: true, items: [{ autogenerate: { directory: 'cheatsheets' } }] },
 			],

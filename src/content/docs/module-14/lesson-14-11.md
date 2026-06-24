@@ -1,5 +1,5 @@
 ---
-title: "11.11 — Fleet Upgrade on the Moon (OTA Rollout)"
+title: "14.11 — Fleet Upgrade on the Moon (OTA Rollout)"
 description: How to roll software to hundreds of thousands of machines under extreme constraints, high latency, intermittent connectivity, no physical access, by designing canary waves with quantified blast radius, abort gates, and watchdog-driven auto-revert so a single bricked wave cannot cascade into a bricked fleet.
 sidebar:
   order: 11
@@ -299,4 +299,4 @@ The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The def
 
 ---
 
-*End of Lesson 11.11. This lesson closes the architecture-strategy track. The constraints-first habit, naming physical and operational limits before drawing boxes, is the Director move that separates a prepared answer from a memorized one. It applies to every curveball problem in this track, and to every novel problem you'll face on the job. The business-domain problems that follow draw their constraints from business rules, compliance, and org dynamics rather than physics.*
+*End of Lesson 14.11. This lesson closes the architecture-strategy track. The constraints-first habit, naming physical and operational limits before drawing boxes, is the Director move that separates a prepared answer from a memorized one. It applies to every curveball problem in this track, and to every novel problem you'll face on the job. The business-domain problems that follow draw their constraints from business rules, compliance, and org dynamics rather than physics.*

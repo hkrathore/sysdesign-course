@@ -1,5 +1,5 @@
 ---
-title: "12.14 — Demonstrate, Don't Describe (Capstone)"
+title: "15.14 — Demonstrate, Don't Describe (Capstone)"
 description: The modern loop replaced "tell me your philosophy" with live exercises, critique broken OKRs, read an org-health survey and act, deliver hard feedback in roleplay, present a first-90-days plan, so this capstone runs one full worked exercise of each, a reusable 90-day template, and a self-scoring rubric keyed to the five interviewer dimensions.
 sidebar:
   order: 14
@@ -242,4 +242,4 @@ Two columns are this track's house rules: **quantification** is "always quantify
 
 ---
 
-*End of Lesson 12.14, and of the Leadership Track. You arrived with frameworks, built a probe-hardened story bank, calibrated a position for every category, and tuned it to the room. This capstone is where it all has to leave your mouth under observation, the OKR you rewrite, the survey you act on, the feedback you deliver to a face, the plan you present on day one. The two house rules, quantify everything, name every trade-off, govern the RESHADED system-design track too, because the same senior interviewer increasingly scores both your rounds and calibrates your altitude across them. Don't read this again. Drive the four exercises out loud, on a timer, until the wobble is gone.*
+*End of Lesson 15.14, and of the Leadership Track. You arrived with frameworks, built a probe-hardened story bank, calibrated a position for every category, and tuned it to the room. This capstone is where it all has to leave your mouth under observation, the OKR you rewrite, the survey you act on, the feedback you deliver to a face, the plan you present on day one. The two house rules, quantify everything, name every trade-off, govern the RESHADED system-design track too, because the same senior interviewer increasingly scores both your rounds and calibrates your altitude across them. Don't read this again. Drive the four exercises out loud, on a timer, until the wobble is gone.*

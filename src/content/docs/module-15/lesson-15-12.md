@@ -1,5 +1,5 @@
 ---
-title: "12.12 — AI-Era Engineering Leadership"
+title: "15.12 — AI-Era Engineering Leadership"
 description: The round with no 2015 ancestor, answered as an accountable operator who already ran an AI rollout and defends its ROI with adoption anchored to real pain, measurement beyond acceptance-rate vanity, the 2025 DORA amplifier finding, a junior-pipeline stance, and personal hands-on usage, avoiding both ditches, hype and wait-and-see.
 sidebar:
   order: 12
@@ -140,4 +140,4 @@ This question had **no 2015 equivalent**, there was no assistant to govern, no d
 
 ---
 
-*End of Lesson 12.12. AI-era leadership is the efficiency era's most concrete lever, the same accountable-operator discipline from the efficiency era (defend every spend, leverage before bodies), now pointed at the tool that boards most want a dividend from. Next: company calibration tunes every position in this track to the specific company you're interviewing, Amazon's Leadership Principles, Meta's talent-density bar, Google's org-design round, the startup's founder-mode reality, so the same answer lands at the right altitude in the room you're actually in.*
+*End of Lesson 15.12. AI-era leadership is the efficiency era's most concrete lever, the same accountable-operator discipline from the efficiency era (defend every spend, leverage before bodies), now pointed at the tool that boards most want a dividend from. Next: company calibration tunes every position in this track to the specific company you're interviewing, Amazon's Leadership Principles, Meta's talent-density bar, Google's org-design round, the startup's founder-mode reality, so the same answer lands at the right altitude in the room you're actually in.*

@@ -1,5 +1,5 @@
 ---
-title: "12.7 — Managing Managers & Org Design"
+title: "15.7 — Managing Managers & Org Design"
 description: The Director-vs-EM leveling round, building org capability instead of managing individuals, with the span math behind a 15→50 scaling plan (and the inverted version that grows scope without headcount), the inherited-low-delivery-team 90-day walkthrough annotated line by line, a failed-manager-transition told honestly, skip-levels run as a deliberate system, and succession that survives you leaving.
 sidebar:
   order: 7
@@ -154,4 +154,4 @@ This category was re-scored hard: the efficiency era inverted the default (growt
 
 ---
 
-*End of Lesson 12.7. Org design is the people-side twin of the Conway's-Law architecture round, same load-path thinking, applied to managers instead of services. The next lesson turns to how you actually *run* the org you've built: the operating system, cadence, the visibility layer that catches a slipping migration at week 3, and the engineering-metrics literacy (DORA, DX Core 4) a 2026 panel now assumes.*
+*End of Lesson 15.7. Org design is the people-side twin of the Conway's-Law architecture round, same load-path thinking, applied to managers instead of services. The next lesson turns to how you actually *run* the org you've built: the operating system, cadence, the visibility layer that catches a slipping migration at week 3, and the engineering-metrics literacy (DORA, DX Core 4) a 2026 panel now assumes.*

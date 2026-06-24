@@ -1,5 +1,5 @@
 ---
-title: "12.10 — Influence, Disagreement & Executive Communication"
+title: "15.10 — Influence, Disagreement & Executive Communication"
 description: The up-chart disagreement, disagree-and-commit, influence-without-authority, bad-news-to-execs, and senior-report-conflict cluster, answered with explicit disagreement mechanics (steel-man, data-backed case, forum and time-box, commit-with-tripwire), SCQA for bad news, and business acumen scored inside every answer.
 sidebar:
   order: 10
@@ -147,4 +147,4 @@ This cluster got re-scored along seven lines, and a 2015 answer trips most of th
 
 ---
 
-*End of Lesson 12.10. Influence and disagreement is where backbone meets alignment, the diplomat who can lose to her VP, carry the loss to her org without a trace of "not my call," and still keep a tripwire. The next lesson carries the same commercial fluency into the efficiency era, layoffs, budget cuts, and the unpopular mandates you didn't choose but must own end to end.*
+*End of Lesson 15.10. Influence and disagreement is where backbone meets alignment, the diplomat who can lose to her VP, carry the loss to her org without a trace of "not my call," and still keep a tripwire. The next lesson carries the same commercial fluency into the efficiency era, layoffs, budget cuts, and the unpopular mandates you didn't choose but must own end to end.*

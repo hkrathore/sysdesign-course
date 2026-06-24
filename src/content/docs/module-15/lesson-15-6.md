@@ -1,5 +1,5 @@
 ---
-title: "12.6 — Hard People Calls"
+title: "15.6 — Hard People Calls"
 description: The low-performer, firing, PIP, brilliant-jerk, and flight-risk cluster, answered in STAR-L with a diagnose-feedback-plan-decide-cost-learn spine, built to survive a four-level probe, and calibrated to the 2026 decisiveness-plus-compassion bar.
 sidebar:
   order: 6
@@ -146,4 +146,4 @@ This cluster got re-scored hard in both directions at once, more decisive *and* 
 
 ---
 
-*End of Lesson 12.6. Hard people calls is the decisiveness-with-dignity cluster; the next lesson lifts the same instincts up a level to managing managers and org design, where the underperformer is a manager you can't directly observe, and diagnosis runs on second-hand, delayed signal.*
+*End of Lesson 15.6. Hard people calls is the decisiveness-with-dignity cluster; the next lesson lifts the same instincts up a level to managing managers and org design, where the underperformer is a manager you can't directly observe, and diagnosis runs on second-hand, delayed signal.*

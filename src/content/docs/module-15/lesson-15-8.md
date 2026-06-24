@@ -1,5 +1,5 @@
 ---
-title: "12.8 — Your Operating System & Metrics"
+title: "15.8 — Your Operating System & Metrics"
 description: The operating-cadence, visibility-without-micromanaging, and metrics-literacy cluster, a layered system where every meeting has an owner, an artifact, and a decision right, calibrated to the 2026 DORA/SPACE bar where metrics diagnose systems and never rank individuals.
 sidebar:
   order: 8
@@ -151,4 +151,4 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 
 ---
 
-*End of Lesson 12.8. The operating system is how you run the org day to day; the next lesson takes the same instruments into the crucible, execution under pressure, where the dashboard you built here is what lets you see the slip at week three instead of week twelve, and the exception protocol gets the sev-1 to your desk in time to command it.*
+*End of Lesson 15.8. The operating system is how you run the org day to day; the next lesson takes the same instruments into the crucible, execution under pressure, where the dashboard you built here is what lets you see the slip at week three instead of week twelve, and the exception protocol gets the sev-1 to your desk in time to command it.*
