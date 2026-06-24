@@ -5,7 +5,7 @@ description: "Course syllabus, Director-altitude system-design and engineering-l
 
 ### Modern System Design Interview, taught the RESHADED way
 
-> **Calibrated for you:** Director / Senior Director of Engineering · FAANG + high-scale startups · 2-week runway. The aim is **not** IC-level implementation depth, it's the **architectural judgment and trade-off fluency at the right altitude** that earns credibility with the senior engineers and architects who run this round (see §2a).
+> **Calibrated for you:** Director / Senior Director of Engineering · FAANG + high-scale startups · 2-week runway. The aim is **not** IC-level implementation depth, it's the **architectural judgment and trade-off fluency at the right altitude** that earns credibility with the senior engineers and architects who run this round (see §3).
 
 ---
 
@@ -49,7 +49,7 @@ Run this exact 8-step roadmap on *every* problem. You'll see it named in every w
 
 ---
 
-## 2a. What the Director-level system-design round actually tests
+## 3. What the Director-level system-design round actually tests
 
 This round is usually run by Principal/Staff engineers or Architects, your future peers or reports. They are **not** scoring whether you can hand-derive the optimal shard key like a staff IC. They're scoring whether a leader can:
 
@@ -70,7 +70,17 @@ Because of this, the course foregrounds the **trade-offs table** and RESHADED's 
 
 ---
 
-## 3. How each lesson is structured (pedagogy contract)
+## 4. The other half of the loop: leadership (Module 15)
+
+At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority**, far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is a full track: **Module 15, Leadership**, fourteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 15.2 generalizes it into the **four answer shapes**, STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
+
+The track's defining promise is **currency**: every category lesson carries an explicit *2015-vs-2026* calibration, because the answers that won offers a decade ago (servant-leadership labels, "hire great people and get out of the way," coach-a-low-performer-forever) now read as out of level in a post-founder-mode, post-ZIRP, AI-era, hybrid world.
+
+**Recommendation:** spend serious time building a **quantified, probe-resistant story portfolio** (Lesson 15.3) covering the mandatory slots interviewers check, an up-chart disagreement you won *and* one you lost and committed to, a termination you ran, a layoff or hard constraint you owned, a decision you got wrong, an incident you commanded. Drill it against the **probe simulator** (15.2) until each story survives three levels of follow-up. When you're ready, we can run a live working session to extract and pressure-test your real stories against the matrix.
+
+---
+
+## 5. How each lesson is structured (pedagogy contract)
 
 Every lesson delivers all of these, in this order:
 
@@ -90,7 +100,7 @@ The specialized tracks adapt this to their format, the LLD lessons add interface
 
 ---
 
-## 4. The interactive widgets you'll get
+## 6. The interactive widgets you'll get
 
 Built as self-contained React artifacts, no network calls, at the module where each lands:
 
@@ -107,7 +117,7 @@ Built as self-contained React artifacts, no network calls, at the module where e
 
 ---
 
-## Director's Fast Path
+## 7. Director's Fast Path
 
 An honest accounting: the full course is **~740k words across 16 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
 
@@ -133,16 +143,6 @@ An honest accounting: the full course is **~740k words across 16 modules**, far 
 **The Engineering Excellence track (Modules 11–13) is the operational half of the Director remit.** Two kinds of question live here, and both are now standard: a security/quality *design* round ("design auth for this," "make this PCI-compliant," "design our CI/CD and test platform") and an operational-*leadership* probe ("latency just doubled, walk me through how you'd investigate," "how do you run on-call and incidents for a large org?"). The signal is whether you own these as **systems with paved-road defaults and guardrails**, not checklists bolted on at the end, and whether you know where the decision turns on depth versus where you delegate with a stated prior. **Module 11** is security, privacy & trust: the threat-model/zero-trust lens, auth at scale, secrets/KMS and envelope encryption, privacy and right-to-be-forgotten as an *architectural* constraint, compliance-as-architecture, and abuse/fraud/DDoS. **Module 12** is testing & quality as an *operating system*: the test pyramid and where the ROI actually is, contract testing, ephemeral environments, flaky-test economics, shift-left vs test-in-prod, and quality gates/DORA. **Module 13** is production troubleshooting: the diagnostic method, observability-in-anger, SLOs and error budgets, incident command, blameless postmortems, and graceful degradation/on-call health. Read the **11.1, 12.1, and 13.1** framing lessons as the spine, then the topics your loop will probe, fintech and regulated targets lean Module 11, platform and infra roles lean Modules 12–13. The two non-negotiables hold here too: quantify (latency, blast radius, error budget, the flake math), and name the trade-off and the rejected alternative.
 
 **One convention to know:** lessons park optional IC-level detail in collapsible **"Go deeper"** blocks. Skip them by default; open one only when a decision you're defending turns on that detail. They exist for depth-on-demand, not for the first pass.
-
----
-
-## 5. The other half of the loop: leadership (Module 15)
-
-At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority**, far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is a full track: **Module 15, Leadership**, fourteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 15.2 generalizes it into the **four answer shapes**, STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
-
-The track's defining promise is **currency**: every category lesson carries an explicit *2015-vs-2026* calibration, because the answers that won offers a decade ago (servant-leadership labels, "hire great people and get out of the way," coach-a-low-performer-forever) now read as out of level in a post-founder-mode, post-ZIRP, AI-era, hybrid world.
-
-**Recommendation:** spend serious time building a **quantified, probe-resistant story portfolio** (Lesson 15.3) covering the mandatory slots interviewers check, an up-chart disagreement you won *and* one you lost and committed to, a termination you ran, a layoff or hard constraint you owned, a decision you got wrong, an incident you commanded. Drill it against the **probe simulator** (15.2) until each story survives three levels of follow-up. When you're ready, we can run a live working session to extract and pressure-test your real stories against the matrix.
 
 ---
 
