@@ -1,274 +1,320 @@
 ---
-title: "5.7 - Uber / Proximity Service"
-description: Match riders to nearby drivers at a write-dominated 0.5M-pings/sec ingest - geospatial indexing (geohash vs quadtree vs S2/H3), dense-city hot-spotting, the nearby query, dispatch, and ETA - reasoned through RESHADED at Director altitude.
+title: "5.7 — Ad Click Aggregator"
+description: The streaming-analytics problem where every event is money, exactly-once counting at 100k+ events/sec forces a speed-vs-truth split, with an approximate stream for dashboards and a batch recompute as the billing source of truth, reasoned through RESHADED at Director altitude.
 sidebar:
   order: 7
 ---
 
+> **This is the most-cited "modern infra" question, #1 among Meta's most-asked, and frequent at Amazon and Google, because it's the cleanest test of whether you can reason about a *streaming data pipeline* where the numbers are money.** A weak answer builds one Kafka-to-database flow and calls it done. A Director-level answer opens with a single question, *is this for billing, or for analytics?*, and lets the answer flip the whole architecture, because **exactly-once counting at scale and approximate-but-fast counting are two different systems that happen to share a firehose.** The signal is recognizing that you cannot bill an advertiser from a number you computed approximately, and designing the two paths deliberately rather than pretending one path can be both.
+
 ### Learning objectives
-- Run the full **RESHADED** spine on a *write-dominated* geospatial problem, and recognize why that inversion (pings in ≫ nearby queries out) flips the read-heavy intuition from Twitter/Instagram.
-- **Estimate** the headline number - **driver-location write QPS** - from active-driver count and ping interval, and show why the *live* index is a RAM/throughput problem, not a storage-capacity one.
-- Choose a **geospatial index** from the access pattern, and explain why a uniform grid hot-spots in a dense city while an adaptive structure (quadtree / S2 / H3) does not.
-- Design the **nearby-driver query** and the **matching/dispatch** service, then stress the design for hot regions, write amplification, and dispatch failure, fixing each with a named trade-off.
-- Operate at **Director altitude**: tie every choice to a requirement, quantify the cost, and delegate the deep-dives (ETA, the index bake-off) with a stated prior.
+- Run the **RESHADED** spine on a **streaming-analytics** problem and surface its load-bearing tension out loud: **every click is revenue, so the speed-vs-truth split is forced**, a fast approximate stream for dashboards, a slow exact batch as the billing source of truth.
+- Open with the **billing-or-analytics** clarifying question and show how the answer **flips the architecture**, the opening Director move on this problem.
+- Decide where **exactly-once counting** is mandatory (billing) and where **at-least-once with eventual correction** is fine (live dashboards), and place **dedup, late-event handling, and idempotent reprocessing** accordingly.
+- Treat **raw-event retention** as a real budget line in estimation, the batch source of truth needs the raw events kept, and that storage is a number you defend.
+- Frame the **Lambda-vs-Kappa** design-evolution argument by reference rather than re-teaching it, and hand the same pipeline off to top-K.
 
 ### Intuition first
-Picture a city carved into neighborhood squares on a giant board. Every few seconds, **every** taxi drops a pin in whatever square it's standing in. When a rider raises their hand, you don't search the whole city - you look only at *their* square and the eight touching it, and offer the ride to the closest cab. The whole system is two motions: **a firehose of pins being rewritten** (millions of cars, every few seconds) and **a tiny, cheap lookup** in one small patch of the board. The hard part isn't the lookup - it's that downtown at 6 p.m. one square holds *ten thousand* cabs while a suburban square holds three, so a board drawn with equal-sized squares has a few squares that melt and most that sit empty. The design problem: draw the squares so no single one melts, and absorb the pin firehose without it becoming the bottleneck.
+Picture a **cash register at a stadium concession stand** wired to two displays. One is a **big scoreboard** the manager glances at all night, "we've sold about 40,000 drinks so far", updated live, roughly right, and nobody cares if it's off by a few hundred at any instant. The other is the **end-of-night till reconciliation** the accountant runs: every receipt counted, every refund applied, every duplicate swipe removed, and the number that actually settles the books. **Same stream of sales, two completely different machines**, one optimized for *now and roughly*, the other for *eventually and exactly*, because one drives a glance and the other drives money.
 
-That asymmetry - **a write firehose feeding a small, local read** - is the opposite of a social feed, and getting it backwards is the first thing this problem tests.
+An ad click aggregator is exactly this. A hundred thousand ad events a second pour in. Advertisers' live dashboards want the scoreboard: "your campaign got ~12,400 clicks in the last 5 minutes", fast, approximate, good enough to make a budget decision. But the **invoice** at month's end is the till reconciliation: every billable click counted exactly once, every fraudulent or duplicate click removed, every late-arriving event from a phone that was offline for an hour folded in. The mistake almost everyone makes is trying to build one pipeline that serves both, **you cannot bill an advertiser from the scoreboard.** The whole design is two paths from one firehose: a **stream** that's fast and forgivably wrong, and a **batch** that's slow and the source of truth.
+
+That asymmetry, *speed for the dashboard, truth for the bill*, is the opposite of a single-source-of-truth instinct, and learning to hold two reconcilable numbers at once is what this question tests.
 
 ---
 
-## R - Requirements
+## R: Requirements
 
-**Functional (the defensible core):**
-1. A driver's app **reports its location** continuously while online (the write firehose).
-2. A rider can **find nearby available drivers** for their pickup point (the nearby query).
-3. The system **matches** a ride request to a driver and **dispatches** the offer (accept/decline, fallback to the next driver).
-4. Return an **ETA / distance** for the matched driver.
+> Pin the scope, and lead with the one clarifying question that flips the architecture. **The spine is standard, but R does double work here: the billing-vs-analytics answer decides whether exactly-once is a hard invariant or a nice-to-have.**
 
-**Explicitly CUT (scoping *is* the signal):** surge pricing, fares, payments, post-match live trip tracking, turn-by-turn navigation, onboarding/ratings, map rendering. Each is a real subsystem; including all of them is the "too high, hand-wavy" failure. I scope to **location ingest → index → nearby query → match/dispatch → ETA** and say so out loud.
+**The opening Director move, the question I ask first:** *"Is this number used to bill advertisers, or to power live analytics dashboards?"* The answer changes everything:
+- **Billing** → exactly-once counting is a hard correctness invariant; a batch recompute over retained raw events becomes the source of truth; the stream is a convenience, never the bill.
+- **Analytics only** → at-least-once with bounded error is fine; you can skip the batch path entirely and serve everything from the stream.
 
-**Clarifying questions I'd ask (and the assumptions I'll proceed on):**
-- *How fresh must a driver's position be?* → **~4 s** staleness is fine (<60 m off at city speed). This sets the ping interval and therefore the write QPS.
-- *Search radius / latency budget?* → radius ~**1-5 km**, p99 nearby-query latency **< 100-200 ms** (a human is on the "finding your driver" spinner).
-- *Global or single-city?* → **global**, but matching is inherently **local** - a rider in Delhi is never matched to a driver in Berlin. This hands us a natural geographic shard and is the single most useful fact in the problem.
-- *Consistency bar on positions?* → **eventual / best-effort.** Losing one ping is harmless (the next arrives in 4 s); the live location store needs **no durability or strong consistency**. Trips and payments (out of scope) do.
+I'll design for the **harder, real case: both.** Advertisers see a near-real-time dashboard *and* get billed, so I build both paths and reconcile them.
+
+**Clarifying questions I'd ask (with assumed answers):**
+- *Billing or analytics?* → **Both.** Dashboards from the stream, invoices from the batch. This is the whole design.
+- *Dashboard freshness bar?* → **~1 minute end-to-end** is plenty for a budget glance; not sub-second.
+- *Exactly-once where?* → **Billing only.** The dashboard tolerates small, self-correcting error.
+- *How late can events arrive?* → Mobile clients offline for minutes-to-hours; design for **late events up to ~24h**, dropped beyond that.
+- *Fraud/invalid-click filtering in scope?* → **Acknowledge it, delegate the model.** Billing must exclude invalid clicks; the detection logic is a trust-and-safety system.
+
+**Functional requirements:**
+1. **Ingest** ad click/impression events at high volume.
+2. **Aggregate** counts by `(ad_id, campaign_id, time_window)`, plus common dimensions (region, device).
+3. **Serve a near-real-time dashboard** (per-minute counts, ~1-min fresh).
+4. **Produce an exact billable count** per campaign per billing period, the source of truth.
+5. **Handle late events and reprocessing** without double-counting.
+
+**Explicitly CUT (scoping is the signal):** ad serving / auction (that's the ad-exchange problem), targeting, the fraud *model* itself (delegated), advertiser UI, budget pacing/throttling. I scope to **ingest → aggregate → two read paths (live + billable)**, and say so.
 
 **Non-functional requirements:**
-- **High write availability** for ingest - the ingest path must never block a driver's app.
-- **Low read latency** (< ~200 ms p99) on the rider's critical path.
-- **Eventual consistency** on positions; **no durability requirement** on live location (it's reconstructed every 4 s).
-- **Geographic locality / regional isolation** - a city outage shouldn't take down another continent.
-- **Elasticity for hot spots** - the design must survive a downtown cell 1000× denser than average.
+- **Exactly-once for billing**, each billable click counted once and only once; the cardinal correctness invariant.
+- **At-least-once + eventual correction for the dashboard**, fast, approximate, self-healing as the batch catches up.
+- **High write availability at ingest**, never drop a billable event; an event lost is revenue lost.
+- **Freshness:** dashboard ~1 min; billable numbers settle within the late-event window (~24h).
+- **Durability of raw events**, the batch source of truth depends on raw events being retained and replayable.
 
-**Read:write skew - the crux, stated up front.** Unlike a feed (≈100:1 *read*:write), this is **write-dominated**: every online driver writes every 4 s (~**0.5M writes/s**, derived next) while nearby queries fire only on ride requests (~**20K/s**) - roughly **25:1 write:read**, inverted. The architecture follows: the expensive thing to scale is *ingesting and indexing positions*, not serving reads.
-
----
-
-## E - Estimation
-
-*Enough math to make a defensible call - round hard, state assumptions, flex the knobs.*
-
-**Driver-location write QPS (the headline number):**
-- Registered drivers globally: assume **5M**; **~20% online at peak ≈ 1M concurrent active drivers**.
-- Each pings every **4 s** → `1M ÷ 4 s =` **250K writes/s** baseline; peak/burst factor → **~0.5M location writes/sec**.
-- *Flex:* if "all 5M online," it's `5M ÷ 4s ≈ 1.25M/s`. The formula `online_drivers ÷ ping_interval` is the thing to show. **Headline: ~500K write QPS, ~100% location pings.**
-
-**Nearby-query (read) QPS:**
-- **~100M rides/day** → `÷ 86,400 ≈ 1.2K/s` average; ~10× peak plus refreshes → **~20K nearby reads/sec**.
-- **Confirms the inversion: 0.5M writes/s vs 20K reads/s ≈ 25:1 write:read.**
-
-**Storage - the key realization that this is *not* a storage problem:**
-- A live position is **ephemeral**: only the *latest* point matters; no history. One record ≈ `driverId + lat/lng + ts + status ≈ 40 B`, call it **~100 B** with overhead.
-- `1M active drivers × 100 B =` **~100 MB** of hot location state - it fits in **RAM on one beefy node**. The live index is a **throughput/RAM** problem, not capacity. (Replicate and shard for QPS and blast-radius, not size.)
-- *Durable* data (off the hot path): drivers ~5 GB; trips ~`100M/day × 1 KB × 365 ≈ 36 TB/yr` → a sharded durable store, but **not** what the matching path touches.
-
-**Bandwidth:** ingest ≈ `0.5M/s × 100 B ≈ 50 MB/s ≈ 0.4 Gbps` of payload. Reads are negligible by comparison.
-
-**Cache / working set:** the entire live index (~100 MB) *is* the working set and lives in memory - there's no cold tier to cache from.
-
-**Instance count (ingest tier):** an in-memory location node sustains ~**10-50K ops/s**; `0.5M ÷ ~20K ≈` **~25 nodes**, sharded by region, each replicated. That fleet, not a database, is the spend.
-
-**The one-line takeaway from E:** **~0.5M position writes/s into a ~100 MB in-RAM index, serving ~20K tiny local reads/s** - optimize the *write+index* path and keep the index in memory.
+**The skew, stated:** this is **write-heavy at ingest, read-light at query.** 100k+ events/sec in; a few thousand dashboard reads/sec out. That inverts the social-feed shape, the hard part is the **ingest firehose and the exactly-once accounting over it**, not fan-out reads.
 
 ---
 
-## S - Storage
+## E: Estimation
 
-Two data classes with opposite needs - matching them to stores is the S step.
+> Enough math to make a defensible call, and on this problem, **raw-event retention is a real budget line**, because the batch source of truth can't exist without the raw events kept.
 
-**1. Live driver location + the geo-index (ephemeral, write-hot, read-local).**
-- *Access pattern:* ~0.5M writes/s of last-known position; point-and-radius reads; no history; loss-tolerant; ~100 MB.
-- *Choice:* an **in-memory store** - **Redis** (its geospatial commands `GEOADD`/`GEOSEARCH` encode points as geohash-scored sorted-set members) or an in-process sharded geo-index service. Positions in RAM, sharded by region, replicated async.
-- *Rejected:* a disk-backed store (Postgres/Cassandra) as the *live* index - it would durably persist 0.5M writes/s of data we **explicitly don't need to keep**, paying write-amplification for a value overwritten 4 s later. The R step said positions are reconstructed every 4 s; persisting them is the classic over-engineering tell.
+**Assumptions:** **100k events/sec** sustained, peak ~3× → **300k/sec**; each raw event ~**200 bytes** (ad_id, campaign_id, user/device id, timestamp, geo, type); ~500k active campaigns.
 
-**2. Durable entities: drivers, riders, trips, match records (read-mostly, must persist).**
-- *Choice:* a **partitioned key-value / wide-column store** (**DynamoDB** or **Cassandra**), or sharded **Postgres** if relational integrity on trips matters more than raw scale. The system of record, off the matching hot path.
-- *Rejected:* the in-memory tier - losing trip records on a node failure is unacceptable (unlike positions). Different durability requirement → different store. *Also rejected:* a single unsharded Postgres at 36 TB/yr.
+**Ingest throughput:** `100k/sec × 200 B ≈ 20 MB/s` sustained, **~60 MB/s peak.** Per day: `100k × 86,400 ≈ 8.6B events/day`. This is a partitioned-log problem (Kafka), not a single-database problem.
 
-**The index *structure*** (geohash vs quadtree vs S2/H3) is the heart of the problem and is decided in **Evaluation**, where the dense-city hot spot forces the choice.
+**Raw-event retention (the line item people forget):**
+- `8.6B events/day × 200 B ≈ 1.7 TB/day raw.`
+- The batch source of truth needs raw events for the **whole billing + late-event window**. Keep **~30 days hot**: `1.7 TB × 30 ≈ ~50 TB`, on cheap object storage (S3); compressed ~3-5× → **~10-15 TB billed.**
+- **The decision this forces:** raw retention is the price of having a recomputable source of truth. *Trade-off named:* ~50 TB/month of S3 (a few hundred dollars) buys the ability to replay and re-bill correctly. *Rejected:* keep only aggregates → you can never recompute, audit, or fix a counting bug after the fact. For a system where the output is invoices, retaining raw is non-negotiable.
+
+**Aggregated output (tiny by comparison):** counts by `(campaign, minute, a few dimensions)`. `500k campaigns × 1,440 min/day × ~tens of dimension combos × ~30 B ≈ low tens of GB/day`, orders of magnitude smaller than raw. The aggregates fit comfortably in an OLAP store; the raw is what costs.
+
+**Read load:** dashboards, say 10k advertisers polling every ~30s → **~few hundred reads/sec**, trivially cached. Billing, a periodic batch job, not interactive.
+
+**Instance count:** the spend concentrates in **(1) the ingest log + stream-processing tier** (sized for 300k/sec peak, tens of partitions, a handful of stream-processor workers) and **(2) raw object storage.** The OLAP serving store and dashboard tier are small. The headline: **this is a throughput-and-retention problem, not a storage-volume-of-results problem.**
+
+**What estimation decided:** ingest is a partitioned-log firehose; raw retention (~50 TB/mo) is the defensible cost of a recomputable billing truth; aggregates are tiny; reads are trivial. The numbers point straight at a two-path (stream + batch) architecture.
 
 ---
 
-## H - High-level design
+## S: Storage
+
+> Three data classes with different durability and consistency needs; pick stores by access pattern.
+
+**1. Raw event log (durable, replayable, append-only), the spine of the whole system.**
+- *Access pattern:* append at 100k+/sec, partitioned, retained, replayed by both the stream processor (live) and the batch job (truth).
+- *Choice:* **Kafka** (partitioned, durable, replayable log) as the ingest buffer, tee'd to **S3** (cheap long-term raw retention for the batch source of truth).
+- *Rejected, write events straight into a database:* no store absorbs 300k/sec of small writes cheaply, and you'd lose the *replay* property that makes idempotent reprocessing possible. The log decouples bursty ingest from downstream consumers and is the foundation of both exactly-once and reprocessing.
+
+**2. Aggregated counts for the dashboard (fast read, time-series, approximate-OK).**
+- *Choice:* an **OLAP / time-series store**, Druid, ClickHouse, or Pinot, fed by the stream processor, serving per-minute rollups. Tuned for fast group-by-time-window reads.
+- *Rejected, serve dashboards from a row store:* per-minute group-bys over high-cardinality dimensions are exactly what columnar OLAP does well and OLTP does badly.
+
+**3. Billable aggregates (exact, auditable, settled).**
+- *Choice:* a **transactional/warehouse table** written by the batch job, exact counts per campaign per period, with the raw events retained behind them for audit. This is the number that goes on the invoice.
+- *Rejected, bill from the OLAP store:* that store holds the *approximate* stream output; billing from it means billing from a number you computed at-least-once. **Never bill from the stream.**
+
+**Dedup state** (for exactly-once) lives in the stream processor's **keyed state store** (e.g. RocksDB-backed Flink state), recent event IDs, windowed so it doesn't grow unbounded.
+
+---
+
+## H: High-level design
+
+> The shape to make visible: **one firehose, two paths**, a fast approximate stream for the dashboard and a slow exact batch for the bill, reconciling into the same campaign.
 
 ```mermaid
 flowchart TB
-    DRV["Driver app<br/>GPS ping every ~4s"] -->|"updateLocation"| LB1["Ingest gateway"]
-    LB1 --> LOC["Location service<br/>(sharded by region)"]
-    LOC -->|"write last position"| GIDX[("In-memory geo-index<br/>Redis / sharded<br/>geohash · S2 · H3")]
-    LOC -.->|"async, sampled"| TRACK[("Durable trip/track store<br/>Cassandra / DynamoDB")]
+    CLIENT["Ad clients<br/>web and mobile"] --> ING["Ingest service<br/>validate and enrich"]
+    ING --> LOG["Kafka<br/>partitioned event log"]
 
-    RDR["Rider app<br/>request ride"] -->|"requestRide(pickup)"| LB2["API gateway"]
-    LB2 --> MATCH["Matching / dispatch service"]
-    MATCH -->|"getNearbyDrivers(cell±neighbors)"| GIDX
-    GIDX -->|"candidate driver ids"| MATCH
-    MATCH -->|"rank + ETA"| ETA["ETA service<br/>(road-network / ML)"]
-    MATCH -->|"offer ride"| DRV
-    MATCH -->|"persist match"| DB[("Trips / match store")]
-    MATCH -->|"matched + ETA"| RDR
+    LOG --> STREAM["Stream processor<br/>windowed aggregation"]
+    STREAM --> OLAP[("OLAP store<br/>per-minute counts approximate")]
+    OLAP --> DASH["Dashboard API<br/>near real time"]
 
-    style GIDX fill:#1f6f5c,color:#fff
-    style MATCH fill:#e8a13a,color:#000
-    style DB fill:#7a1f1f,color:#fff
+    LOG --> S3[("S3 raw events<br/>retained and replayable")]
+    S3 --> BATCH["Batch job<br/>exact recompute"]
+    BATCH --> BILL[("Billable table<br/>exact source of truth")]
+    BILL --> INVOICE["Billing service"]
+
+    BATCH -.->|correct| OLAP
+
+    style LOG fill:#e8a13a,color:#000
+    style STREAM fill:#2d6cb5,color:#fff
+    style BATCH fill:#7a1f1f,color:#fff
+    style BILL fill:#1f6f5c,color:#fff
 ```
 
-**Happy path, in prose:** drivers ping `updateLocation` every ~4 s; the regional **location service** shard overwrites that driver's position in the **in-memory geo-index**, re-bucketing them if they crossed a cell boundary - fire-and-forget, because it runs 0.5M times/sec. A rider's `requestRide` hits **matching**, which queries the geo-index for the pickup's **cell plus its neighbors** (a driver 50 m away in the adjacent cell must still be found), filters to available drivers, ranks by **ETA** (not straight-line distance - a driver 200 m away across a river is 15 min by road), and **offers** the ride - falling back to the next candidate on decline/timeout, persisting the match to the durable store on accept.
+**Happy path, compressed:** a click hits the **ingest service** (validate, enrich with geo/device, stamp event time), which appends to **Kafka**, partitioned by `campaign_id` (or `ad_id`) so a campaign's events land in order on one partition. From the log, **two consumers fan out**:
+- **The speed path:** a **stream processor** (Flink / Kafka Streams) does windowed aggregation, per-minute counts per campaign and dimension, and writes to the **OLAP store**, which the **dashboard** reads. This is at-least-once and fast; small over/under-counts are tolerated and self-correct.
+- **The truth path:** the same events land in **S3** as retained raw. A periodic **batch job** (hourly/daily) recomputes exact counts over the raw, applying full dedup, late-event inclusion, and fraud filtering, and writes the **billable table**, the source of truth the **billing service** invoices from. The batch also **back-corrects** the OLAP store so the dashboard converges to truth.
 
-The asymmetry is visible in the diagram: the thick, hot edge is **driver → geo-index** (0.5M/s); the rider path is thin and local.
+**The shape to notice:** the load-bearing wall runs between the **approximate stream (dashboard, speed)** and the **exact batch (billing, truth)**. They share the ingest log but diverge on the correctness contract. This is the **Lambda-style two-path** structure, and whether to collapse it to one path is the central design-evolution argument.
 
 ---
 
-## A - API design
+## A: API design
 
-Kept deliberately small - the four functional requirements map to four calls.
+> Two writes-in and two reads-out; the idempotency and the event-time field *are* the correctness story.
 
 ```
-# Driver ingest (the firehose) - tiny payload, fire-and-forget
-POST /v1/drivers/{driverId}/location
-  body: { lat, lng, ts, status }          # status: available | on_trip | offline
-  → 202 Accepted                          # no body; never block the driver app
+# --- Ingest (write path; at-least-once, never drop) ---
+POST /v1/events
+  body: {
+    eventId,            # client- or gateway-assigned UUID -> dedup key
+    adId, campaignId,
+    eventType,          # "click" | "impression"
+    eventTime,          # client event timestamp (drives windowing + late handling)
+    userId, geo, device
+  }
+  -> 202 Accepted       # appended to the log; processed async
 
-# Nearby query (internal, used by matching; also exposable for "cars near you")
-GET  /v1/drivers/nearby?lat=&lng=&radius_m=2000&limit=20
-  → 200 { drivers: [ { driverId, lat, lng, etaSeconds } ] }
+# --- Dashboard read (approximate, fast) ---
+GET /v1/campaigns/{campaignId}/stats?from=&to=&granularity=minute
+  -> 200 { series:[{window, clicks, impressions}], asOf: <ts>, source: "stream" }
+                        # source flags this as the APPROXIMATE number
 
-# Rider requests a match (orchestrates nearby → rank → dispatch)
-POST /v1/rides/request
-  body: { riderId, pickup:{lat,lng}, dropoff:{lat,lng} }
-  → 200 { rideId, driver:{ driverId, lat, lng }, etaSeconds }
-  → 503 if no driver found in radius (caller widens radius / retries)
-
-# Driver responds to an offer
-POST /v1/rides/{rideId}/respond
-  body: { driverId, decision }            # accept | decline
-  → 200 { status }                        # confirmed | reoffered
+# --- Billable read (exact, settled) ---
+GET /v1/campaigns/{campaignId}/billable?period=2026-06
+  -> 200 { billableClicks, settledAt, source: "batch" }
+                        # the source of truth; only present after the batch settles
 ```
 
-**Design notes (each a choice with a rejected alternative):**
-- `updateLocation` returns **202** - we **reject** any synchronous read-back on ingest; the driver app must never wait, and we won't serialize a response 0.5M times/sec.
-- `requestRide` is a **single orchestrating call** - we **reject** client-side chaining of `nearby` → `respond`, because dispatch logic (fallback ordering, locking a driver) must be server-authoritative.
-- Ingest is plain **HTTPS POST** in v1; a persistent **gRPC/WebSocket** stream removes per-ping handshake overhead and is the first ingest optimization (Design evolution).
+**Design notes (each with its rejected alternative):**
+- **Every event carries an `eventId`**, the dedup key that makes exactly-once possible downstream. *Rejected: dedup on (adId, userId, timestamp)*, collisions and clock skew make it unreliable; an explicit ID is unambiguous.
+- **`eventTime` is the client's event timestamp, not arrival time.** Windowing and late-event handling key off *event* time. *Rejected: processing-time windows*, they misattribute a late mobile event to the wrong minute and can't be corrected.
+- **The dashboard response is explicitly tagged `source: "stream"`** and the billable response `source: "batch"`. The API makes the speed-vs-truth split visible to the caller, you can never confuse the dashboard number for the bill.
+- **Ingest returns 202, not 200**, the event is durably logged, not yet processed. Honest about the async pipeline.
 
 ---
 
-## D - Data model
+## D: Data model
 
-**Live position (in-memory):** `driverId → {lat, lng, cellId, status, ts}` plus the bucket map **`cellId` → set of drivers in that cell** - so a nearby query is "read these few cell buckets." In Redis this is a geo sorted-set per region.
+> The aggregation key and the dedup key are the two consequential decisions.
 
-**Partition / shard key = geographic region (a coarse cell, e.g. city or S2 level-8).** The load-bearing decision: because **matching is always local**, a nearby query hits **one shard**, and a city's traffic is isolated to its shard's blast radius. We **reject sharding by `driverId` hash** - it would scatter one neighborhood's drivers across every shard, turning a single local query into a fleet-wide scatter-gather.
+**Raw event**, keyed by `eventId` (dedup), partitioned in Kafka by `campaign_id`. Carries `ad_id`, `campaign_id`, `event_type`, **`event_time`** (the windowing key), `user_id`, `geo`, `device`. Retained raw in S3 for the batch.
 
-**Durable entities (off the hot path):** `drivers` (keyed/sharded by `driverId`), `trips` (by `tripId` or city), `match_log` (by `rideId`) - in DynamoDB/Cassandra, with secondary indexes by `driverId`/`riderId` for history built lazily. We **reject** rich secondary indexing on the live store - it's a transient bucket map, not a query database. Positions live in RAM in regional shards; trips/profiles in the durable partitioned store.
+**Aggregate row**, keyed by **`(campaign_id, time_window, dimension_tuple)`** → `count`. The window is a fixed bucket (e.g. 1-minute). This is what both the stream (approximate) and batch (exact) produce; they write to different stores but share this shape, which is what lets them reconcile.
 
----
-
-## E - Evaluation
-
-Re-check against the NFRs and break the design on purpose. Three bottlenecks, each fixed with a *named* trade-off.
-
-**Bottleneck 1 - the dense-city hot spot (the central problem).**
-A **uniform grid** (equal-sized cells, e.g. fixed-precision geohash) *hot-spots* because **driver density is wildly non-uniform**: a downtown cell at rush hour holds 10,000 drivers while a rural cell holds 3. The crowded cell's bucket is huge, its owning shard saturates, and a nearby query there scans thousands of candidates - while 95% of cells sit empty. *Equal-area cells, unequal load* - the grid choice is a **load-balancing** decision, not a geometry detail.
-
-*Fix - an **adaptive, variable-resolution index** that matches cell size to density:* a **quadtree** (split a cell only when it exceeds a capacity threshold) or a hierarchical cell scheme - Google's **S2** or Uber's production choice **H3**, whose uniform hexagonal neighbors make k-ring "expand the search" queries clean. Trade: more machinery than a flat hash, bought so bucket sizes stay bounded regardless of density. We **reject** the fixed grid (hot-spots) and **reject** shrinking the grid globally (it just trades the dense hot spot for sparse-region read amplification).
+**Billable row**, `(campaign_id, billing_period)` → `exact_count`, `settled_at`. Written only by the batch, after dedup + late-event + fraud filtering.
 
 <details>
-<summary>Go deeper - quadtree vs S2 vs H3 geometry (IC depth, optional)</summary>
+<summary>Go deeper, exactly-once mechanics: dedup, watermarks, idempotent reprocessing (IC depth, optional)</summary>
 
-- **Quadtree:** recursively split a cell into 4 quadrants only when it exceeds a capacity threshold (say 100 drivers) - dense downtown subdivides deep, empty countryside stays one big cell. Cost: an in-memory tree that must be rebuilt/rebalanced as density shifts; every update pays a traversal.
-- **S2 (Google):** projects the sphere via a **Hilbert curve** into hierarchical 64-bit cell ids, levels 0-30 (level-12 ≈ 3.3-6.4 km², level-16 ≈ ~150 m). Hilbert ordering keeps spatially-near cells numerically-near, so a radius query becomes a few range scans over id intervals, and you can mix levels (coarse where sparse, fine where dense) to bound bucket size. Cost: you manage a cell-covering per query.
-- **H3 (Uber):** a hexagonal hierarchical grid. Square/geohash cells have non-uniform neighbors - edge neighbors at distance `d`, diagonal at `d√2` - so "expand the search ring" is ambiguous; hexagons have **6 neighbors all at equal distance**, making k-ring expansion and density/dispatch math uniform. Cost: hexes can't tile perfectly hierarchically (a parent's children are approximate subdivisions) - accepted for the adjacency win.
-- **Why not just shrink a uniform grid globally:** uniformly tiny cells make a *sparse* nearby query touch hundreds of empty cells and explode the cell count - you trade the dense-city hot spot for a sparse-region scan. Variable resolution exists precisely so you never pick one global cell size.
+**Exactly-once on the stream** is really *effectively-once* and rests on three legs:
+- **Dedup by `eventId`:** the stream processor keeps recent event IDs in keyed state (RocksDB-backed). A retried or duplicated event whose ID is already seen is dropped. State is windowed (e.g. last few hours) so it doesn't grow unbounded, older dups are caught by the batch instead.
+- **Transactional sink / offset commit:** Flink's checkpointing + Kafka transactions commit the aggregate write and the consumer offset atomically. On failure the processor rewinds to the last checkpoint and replays; because the sink write was transactional, no double-count results. This is what "exactly-once" means operationally, *replay is safe because the output commit is atomic with the input offset.*
+- **Watermarks for late events:** a **watermark** is the processor's estimate of "event time has progressed to T; I've probably seen everything up to T." Windows close when the watermark passes them, with a grace period (allowed lateness) for stragglers. Events later than the grace period are sent to a side output (or simply caught by the batch).
+
+**The batch is the safety net.** It owns *true* exactly-once because it sees the *complete* retained raw, including events that arrived after the stream's window closed, and recomputes from scratch. Its correctness is structural: idempotent recomputation over an immutable, deduped raw set always yields the same exact answer, no matter how many times you run it. That's why billing reads the batch, not the stream: the stream is exactly-once *within its window*; the batch is exactly-once *over all events, ever*.
+
+**Idempotent reprocessing:** because raw is retained and the recompute is a pure function of (raw events, dedup rule, fraud rule), you can re-run any historical period, to fix a counting bug, apply a new fraud rule, or fold in very-late events, and overwrite the billable row deterministically. This is the property aggregate-only systems can never have.
 
 </details>
 
-**Bottleneck 2 - write amplification on cell crossings.**
-A moving driver crossing a cell boundary must be removed from the old bucket and added to the new - and at fine resolution a driver near a boundary can flap between cells every few seconds, doubling index churn.
-*Fix:* **coarse-enough cells for ingest** (churn is rare) while answering fine radius queries via the hierarchy, plus **hysteresis** (only move a driver clearly inside the new cell). Trade: slightly coarser buckets mean a few more candidates per query - cheap against constant re-bucketing at 0.5M/s.
-
-**Bottleneck 3 - dispatch as a single point of failure / double-booking.**
-Two riders must not be offered the same car, and a crashed matcher mid-dispatch shouldn't strand a ride.
-*Fix:* matching is **stateless and regionally partitioned**, with a **short TTL'd lock/reservation** on a driver in the in-memory store the instant they're offered - a crashed matcher's lock auto-expires and the driver re-enters the pool. Trade: a lock adds a round-trip and brief driver under-utilization - accepted to prevent double-booking, with the TTL bounding crash damage.
-
-**Re-check vs NFRs:** write availability (202, fire-and-forget, regionally sharded ✓); read latency (one-to-few in-memory shards, bounded buckets → well under 200 ms ✓); eventual consistency / no durability on positions (✓ by design); regional isolation (region = shard ✓); hot-spot survival (adaptive index + replication ✓).
+**Partition key = `campaign_id`.** Co-locates a campaign's events on one Kafka partition (in-order, single-consumer aggregation) and matches the query shape (per-campaign dashboards and bills). *Rejected: partition by `user_id`*, scatters a campaign's events across all partitions, forcing a cross-partition shuffle to aggregate per campaign. *Hot-campaign caveat:* a viral campaign overloads one partition (the hot-key shape); sub-partition it by `(campaign_id, hash(ad_id) % k)` and sum on read, the sharded-counter pattern applied to the log.
 
 ---
 
-## D - Design evolution
+## E: Evaluation
 
-**At 10× (10M concurrent drivers, ~5M writes/s, ~200K nearby reads/s):**
-- **Ingest becomes the dominant cost.** Move drivers to a **persistent gRPC/WebSocket stream** (kill the handshake tax) and/or front ingest with a **partitioned log (Kafka)** so bursts are absorbed. Trade: a log adds latency to position freshness - acceptable because positions are already ~4 s stale by spec.
-- **Adapt the ping rate dynamically** - the cost lever: an idle or stationary driver backs off to 10-30 s, a fast-moving one stays at 4 s. This cuts write QPS by a large factor for free, at the price of client logic and variable freshness. Every second shaved off the ping interval multiplies write QPS linearly; the 4 s choice is a product decision (match quality) traded against fleet cost, and dynamic rate is how you escape the linear penalty.
-- **A hot metro that outgrows its shard gets sub-divided across several nodes** and its index replicated for reads - accepting a small 2-4-shard fan-out on boundary queries (the 3.7 hot-key lesson, applied to geography).
+> Re-check against the NFRs and hunt the bottlenecks, naming each trade-off.
+
+**Re-check vs NFRs:** exactly-once billing, the batch recompute over deduped raw; dashboard freshness, the ~1-min stream; never-drop ingest, the durable log; late events, watermarks (stream) + the full-raw recompute (batch). Now the bottlenecks.
+
+**Bottleneck 1, double-counting (the cardinal billing risk).**
+A client retries a click, or the stream replays after a crash, and the same click is counted twice, directly inflating the bill.
+*Fix:* **dedup by `eventId`** in the stream's keyed state for the live number, and, the real guarantee, the **batch recomputes exactly-once over the complete deduped raw set**, which is the number that bills. *Rejected:* relying on the stream alone for billing, its dedup state is windowed and finite, so a duplicate arriving days late slips through. The batch, seeing all raw, catches it. **The batch is why billing is correct; the stream is just fast.**
+
+**Bottleneck 2, late events (the offline-mobile problem).**
+A phone is offline for an hour, then floods in events stamped with old `event_time`s, after the stream's window already closed.
+*Fix:* **watermarks with a grace period** on the stream (so moderately-late events still land in the right minute), and, definitively, the **batch sees them in the raw and attributes them correctly** regardless of how late. The dashboard may briefly under-count; it converges when the batch back-corrects. *Trade-off:* event-time windowing plus a late window is more complex than processing-time, accepted because misattributing a billable click to the wrong period is a billing error, not a cosmetic one.
+
+**Bottleneck 3, billing from the approximate stream (the architecture-defining mistake).**
+Someone wires the invoice to the OLAP store because it's already there.
+*Fix:* **never bill from the stream.** Billing reads the **batch billable table only.** The stream is structurally at-least-once and lossy on very-late events; the batch is the source of truth. This separation *is* the design. *Rejected:* a single path serving both, it forces you to either make the stream exactly-once over an unbounded late window (impractical) or accept approximate billing (unacceptable).
+
+**Bottleneck 4, ingest firehose / hot campaigns.**
+300k/sec peak, with one viral campaign overloading a single partition.
+*Fix:* **partition the log** for parallelism; **sub-partition hot campaigns** by `(campaign_id, hash(ad_id) % k)` and sum on read (the sharded-counter pattern); buffer in Kafka so bursts don't backpressure ingest. *Trade-off:* sub-partitioning makes per-campaign reads fan across k partitions, cheap, and only for the rare hot campaign.
+
+**Bottleneck 5, fraud / invalid clicks inflating the bill.**
+Bots and duplicate-intent clicks must not be billed.
+*Fix:* **filter invalid clicks in the batch** before settling the billable number; flag them in the stream best-effort for the dashboard. *Delegate the model*, the detection logic is a trust-and-safety system; I own the *integration point* (the batch applies the fraud verdict before billing), with a stated prior: rules + behavioral scoring, re-runnable over retained raw so a new rule can re-settle a past period.
+
+**Closing re-check:** exactly-once billing holds (batch over deduped raw); dashboard is fast and self-correcting (stream + back-correction); ingest never drops (durable log); late events are attributed correctly (watermarks + full recompute); fraud is filtered before settlement. The two paths each do the one job they're good at.
+
+---
+
+## D: Design evolution
+
+> Push the dimensions up and find what breaks, and on this problem, the central evolution argument is **Lambda vs Kappa** (referenced, not re-taught).
+
+**The Lambda-vs-Kappa question (the headline trade-off).** The two-path design above is **Lambda**, a stream layer for speed and a batch layer for truth, reconciled. Its well-known cost is **maintaining two codebases** that must compute the *same* aggregation and agree. The **Kappa** alternative: one stream path, and to "recompute," you **replay the retained log** through the same stream code. Where each wins:
+- **Stay Lambda when** the batch's correctness contract genuinely differs from the stream's, here it does: billing needs exactly-once over an *unbounded* late-event window and re-runnable fraud filtering, which is naturally a batch recompute over retained raw. The two paths aren't redundant; they have different correctness guarantees.
+- **Move toward Kappa when** you can express the exact recompute as a *replay* of the same streaming job over the retained log (which we already keep in S3). Modern stream engines make this viable, collapsing two codebases into one. *Trade-off:* a full historical replay through the stream is operationally heavier than a batch scan, and the engine must guarantee exactly-once on replay.
+- **My prior:** keep the raw log retained (we already do, it's the enabler of *both*), start Lambda for the clear billing/dashboard correctness split, and migrate the recompute to log-replay (Kappa-style) once the streaming engine's exactly-once-on-replay is proven, to kill the dual-codebase tax. This is a *managed evolution*, not a day-one bet.
+
+**At 10× (1M events/sec):** the ingest log and stream tier scale horizontally on partitions (the design's whole point); raw retention grows linearly (~500 TB/mo, a real cost to revisit with tiering and aggressive compression); the OLAP and billing stores barely move (aggregates stay tiny). The bottleneck shifts to **partition count and stream-processor parallelism**, both horizontal.
 
 **Hardest trade-offs to defend:**
-- **Index granularity:** coarse cells minimize ingest churn but bloat candidate sets; fine cells bound query work but explode bucket-crossing writes. The honest answer is **variable resolution** - that's *why* Uber didn't ship a uniform grid.
-- **Local sharding vs cross-border trips:** region sharding is the win, but airport/border cases force boundary fan-out. Accepted as a small minority of queries.
+- **Two numbers for one thing.** The dashboard and the bill can briefly disagree; the dashboard converges to the batch. Defending *why that's correct* (speed vs truth, not a bug) is the senior tell.
+- **Raw retention cost vs recomputability.** Keeping ~50 TB/mo of raw is the price of audit, bug-fix, and re-billing. Drop it and you lose the source of truth forever.
+- **Lambda's dual codebase** vs Kappa's heavier replay, a live architectural choice, not a settled one.
 
-**What I'd revisit:** whether Redis-geo suffices or a purpose-built in-memory geo-service is warranted - benchmark before committing. Whether trips need a relational store (disputes, accounting) vs wide-column - a data-integrity call, not a scale call.
+**Where I'd delegate (the explicit Director move):**
+- **Fraud/invalid-click model:** *"Trust-and-safety owns the detection model behind `isValid(event) -> verdict`; I own the integration, the batch applies the verdict before settling the billable number, and because raw is retained, a new rule can re-settle a past period. My prior is rules + behavioral scoring."*
+- **The stream engine bake-off:** *"Data-platform benchmarks Flink vs Kafka Streams vs Spark Structured Streaming on our 300k/sec exactly-once-with-late-events workload; my prior is Flink for mature event-time + exactly-once, escalating only if operational cost dominates."*
+- **The OLAP store choice:** *"Analytics benchmarks Druid vs ClickHouse vs Pinot on our per-minute group-by read shape; my prior is whichever the org already runs."* What I keep, the **two-path speed/truth split, never-bill-from-the-stream, and raw retention as the recompute enabler**, and what I delegate, with a stated prior, is the altitude.
 
-**Where I'd delegate (the Director move):**
-- **ETA / routing:** the **Maps team owns ETA** behind a clean `etaSeconds(from, to)` interface with its own SLA - real drive-time needs a road graph, live traffic, and models, a discipline I scope out rather than whiteboard. Naming the boundary and the interface is the altitude signal.
-- **Index bake-off (geohash vs S2 vs H3):** *"I'd have the platform team benchmark bucket-size distribution and query p99 under real density on the top-20 metros; my prior is H3 for the adjacency uniformity, but I want that measured, not asserted."*
-- **Surge/pricing and fraud:** adjacent systems consuming the same location signal; scoped out and delegated.
+**Handoff:** the exact same ingest log + aggregation pipeline is the substrate for **top-K** ("the 100 highest-clicked ads right now"), same firehose, a different read shape (heavy-hitters over a window rather than per-campaign totals).
 
 ---
 
-## Trade-offs table - the pivotal decisions
+## Trade-offs table: the pivotal decisions
 
-| Decision | Option A | Option B | Option C | Use when… |
+| Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
-| **Geo-index structure** | **Uniform grid / fixed geohash** - dead simple | **Quadtree** - adaptive split on capacity | **S2 / H3** - hierarchical cells / hexagons | Grid: uniform density / prototype. Quadtree: skewed density, in-memory. **S2/H3: production geo at scale (H3 = Uber's choice).** |
-| **Live-location store** | **In-memory (Redis-geo / sharded service)** | **Disk-backed durable DB** |, | In-memory: positions are ephemeral, rewritten every 4 s (the right call). Durable DB: only if you need position *history* (you don't, for matching). |
-| **Shard key for the index** | **Geographic region / cell** | **`driverId` hash** |, | Region: matching is local → one-shard reads + regional isolation (the right call). driverId-hash: rejected - scatter-gathers every nearby query. |
+| **Counting paths** | **Two paths, stream + batch** (Lambda) | **Stream only** (Kappa / replay) | **Batch only** | **A** when billing needs exact + late-tolerant *and* dashboards need fast, the real case (our choice). **B** when the recompute can be a log-replay of the same job and exactly-once-on-replay is proven. **C** only for pure analytics with no freshness need. |
+| **Bill from which path** | **Batch billable table** | **Stream OLAP output** | Hybrid reconcile-then-bill | **A** always for billing, exact over complete deduped raw (our choice). **B never**, billing from an approximate at-least-once number. **C** is just A with extra steps. |
+| **Window / time basis** | **Event-time + watermarks** | **Processing-time windows** | **Ingest-time** | **A** when late events must be attributed correctly, billing does (our choice). **B** when late events are rare and approximate is fine. **C** as a cheap middle ground for analytics-only. |
+| **Log partition key** | **`campaign_id`** | **`user_id`** | **Round-robin** | **A** matches the per-campaign query + in-order aggregation (our choice); sub-shard hot campaigns. **B** scatters a campaign across partitions. **C** maximizes spread but forces a full shuffle to aggregate. |
 
 ---
 
 ## What interviewers probe here (Director altitude)
 
-- **"What's the read:write ratio, and why does it matter?"** - *Strong signal:* names it **write-dominated** (~0.5M pings/s vs ~20K reads/s, ~25:1) and designs the ingest+index path as the thing to scale. *Red flag:* assumes read-heavy "like every web app" and over-builds a read cache.
-- **"Why does a uniform grid fall over in a dense city?"** - *Strong:* equal-area cells, wildly unequal density → one bucket holds thousands, hot-spotting a shard; fix with **variable resolution** (quadtree/S2/H3), and knows a globally-tiny grid just swaps in a sparse-region scan. *Red flag:* "just add more cells."
-- **"Do you persist driver locations? At what consistency?"** - *Strong:* **no durability, eventual consistency** - a position is rewritten every 4 s; keep it in RAM. *Red flag:* a durable, strongly-consistent write per ping at 0.5M/s.
-- **"Where would you delegate, and how?"** - *Strong:* hands **ETA/routing** to the Maps team behind a clean interface, and proposes a **measured bake-off** for the index structure. *Red flag:* whiteboards Dijkstra and traffic modeling personally - or hand-waves "the ETA service computes it" with no interface.
-- **"What does this cost to run?"** - *Strong:* the **ingest+index fleet**, driven by ping rate × online drivers - with **dynamic ping rate** and **streamed ingest** as the levers. *Red flag:* sizes a giant database and ignores that the live index is ~100 MB.
+- **"Is this for billing or analytics?"**, *Strong:* asks it *first*, then designs two paths, fast approximate stream for dashboards, exact batch for the bill, and states that the answer flips the architecture. *Red flag:* builds one pipeline and never distinguishes the two contracts.
+- **"How do you count each click exactly once for billing?"**, *Strong:* dedup by explicit `eventId`; the **batch recompute over complete deduped raw is the real guarantee** (exactly-once over *all* events, not just a window); never bill from the stream. *Red flag:* "exactly-once on the stream" with no batch, ignoring late events outside the window.
+- **"A mobile event arrives 3 hours late. Where does it land on the bill?"**, *Strong:* watermarks give the stream a grace window; definitively, the **batch sees it in retained raw and attributes it to the correct period**; the dashboard converges via back-correction. *Red flag:* processing-time windows that silently misattribute it.
+- **"Why keep all the raw events, that's a lot of storage."**, *Strong:* raw retention (~50 TB/mo, a defended line item) is what makes the billing number **recomputable, auditable, and re-billable** when a fraud rule or counting bug changes; aggregate-only can never do that. *Red flag:* keeps only aggregates and can't audit or correct.
+- **"Lambda or Kappa here, and why?"**, *Strong:* names the dual-codebase cost of Lambda and the heavier-replay cost of Kappa; keeps Lambda while the billing/dashboard correctness contracts genuinely differ; migrates to log-replay once exactly-once-on-replay is proven (by reference, doesn't re-derive). *Red flag:* picks one by fashion with no trade-off.
 
 ---
 
 ## Common mistakes
 
-- **Treating it as read-heavy.** It's write-dominated; mis-sizing this mis-designs everything downstream.
-- **A uniform grid / fixed geohash precision.** Guarantees a dense-city hot spot. Use quadtree/S2/H3 for variable resolution.
-- **Persisting every ping durably.** Positions are ephemeral and rewritten every 4 s; durability here is pure waste.
-- **Sharding the index by `driverId` instead of region.** Turns a one-shard local query into a fleet-wide scatter-gather.
-- **No reservation/lock on dispatch.** Two riders get offered the same car. A short TTL'd lock prevents double-booking and self-heals on matcher crash.
+- **Billing from the stream.** The OLAP/stream number is at-least-once and lossy on very-late events. Bill from the **batch** over complete deduped raw, full stop. This is the single most important rule on the problem.
+- **One pipeline for both jobs.** Speed (dashboard) and truth (billing) are different correctness contracts; forcing one path makes you either accept approximate bills or build impractical unbounded-window exactly-once.
+- **Processing-time windows.** They misattribute late mobile events to the wrong minute and can't be corrected. Use **event-time + watermarks**, with the batch as the authority.
+- **Dropping raw events to save storage.** Without retained raw you can never recompute, audit, or re-bill after a bug or a new fraud rule. Raw retention is the enabler of the whole truth path.
+- **No explicit `eventId`.** Dedup on derived fields (user+timestamp) is unreliable under clock skew and collisions; an assigned ID makes exactly-once tractable.
 
 ---
 
 ## Interviewer follow-up questions (with model answers)
 
-**Q1. Estimate the driver-location write QPS, and explain why that number drives the architecture.**
-> *Model:* ~5M registered drivers, ~20% online at peak ≈ **1M concurrent**, pinging every **4 s** → `1M ÷ 4s = 250K/s`, ~**0.5M writes/s** peaked. Nearby reads are only ~**20K/s**, so it's **~25:1 write:read - write-dominated**, the inverse of a feed. That inversion is the whole architecture: keep the ~100 MB index **in RAM**, shard **by region**, and make the write path cheap (202 fire-and-forget, eventually streamed ingest with dynamic ping rate). No giant read cache - there's barely any read load.
+**Q1. Walk me through counting a single click exactly once for the invoice.**
+> *Model:* The click arrives with an assigned `eventId` and durably lands on the Kafka log, partitioned by `campaign_id`, and is tee'd to S3 as retained raw. The **stream** dedups by `eventId` in keyed state and produces a fast approximate count for the dashboard, but that's not the bill. The **bill** comes from a **batch job that recomputes over the complete retained raw**: it dedups across *all* events (not just a window), folds in late arrivals, applies the fraud filter, and writes an exact count to the billable table. The invoice reads only that table. So exactly-once for billing is structural: idempotent recomputation over an immutable, deduped raw set yields the same exact number however many times it runs. The stream is fast; the batch is true.
 
-**Q2. Why does a naive grid hot-spot, and what do you use instead?**
-> *Model:* A uniform grid has equal-area cells but wildly unequal density - a downtown cell holds thousands of drivers, a rural one three, so one bucket saturates its shard while most sit empty. Shrinking the global cell size just makes sparse queries scan hundreds of empty cells. The fix is **variable resolution**: a quadtree that splits on capacity, or hierarchical cell schemes - S2, or H3, Uber's production choice, whose hexagons have six equidistant neighbors so ring-expansion is uniform. I'd pick via a measured bake-off on real metro density; my prior is H3.
+**Q2. The same firehose, but now show me top-10 ads by clicks in the last 5 minutes.**
+> *Model:* That's the **top-K / heavy-hitters** read shape over the *same* ingest log and stream layer. Same partitioned firehose, same windowing, but instead of per-campaign totals I maintain a bounded top-K structure (e.g. Count-Min Sketch for frequencies + a heap of candidates) per window, so I don't sort the full cardinality. Crucially, for a *dashboard* top-K, approximate is fine, so it stays purely on the stream, no batch needed unless top-K ever drives money. The reusable substrate is the log + stream aggregation; only the aggregation function and read shape change.
 
-**Q3. Do you store driver location in a database? Defend the consistency and durability choice.**
-> *Model:* **No durable database for the live position** - in-memory (Redis-geo or a sharded geo-index), async-replicated, eventually consistent, loss-tolerant. From the requirements: a position is overwritten every 4 s, so it has no archival value and losing one ping is invisible. Paying durability and strong consistency on 0.5M writes/s of disposable data is the classic over-engineering trap. The durable store is reserved for trips, matches, and profiles - different durability requirement → different store.
+**Q3. Your stream processor crashes mid-window. Did you lose or double-count clicks for the dashboard?**
+> *Model:* Neither, if exactly-once is configured: the processor checkpoints state and commits aggregate writes transactionally with the consumer offset (Flink + Kafka transactions). On restart it rewinds to the last checkpoint and replays from the log; because the output commit was atomic with the input offset, replay doesn't double-count, and nothing is lost because the log retained the events. The dashboard may stall for the restart window, then catch up. And even if the stream got it slightly wrong, the **batch back-corrects** the dashboard and *is* the bill, the stream never has to be perfect.
 
-**Q4. A driver is 50 m from the rider but in the next cell over and gets missed. What's wrong?**
-> *Model:* The **cell-boundary problem** - a query reading only the rider's own cell misses closer drivers in adjacent cells. Fix: query the cell **plus its neighbor ring**, union the buckets, then rank by true ETA. H3's hexagonal k-ring makes this clean (6 equidistant neighbors, no edge-vs-corner asymmetry). Trade: a few extra buckets read per query - cheap and necessary for correctness.
+**Q4. Why not just make the stream exactly-once and drop the batch entirely (Kappa)?**
+> *Model:* You can move toward Kappa, recompute by replaying the retained log through the same stream job, killing Lambda's dual-codebase cost. I keep the raw log precisely so that's possible. But I hold Lambda while two things are true: billing needs exactly-once over an *unbounded* late-event window (a stream's dedup state is finite, so a click arriving days late slips its window, the batch, seeing all raw, doesn't), and fraud rules must be re-runnable over history to re-settle past periods. Both are naturally batch recomputes. Once the engine's exactly-once-on-replay is proven for our late-event profile, I'd collapse to Kappa, a managed migration, not a day-one bet.
+
+**Q5. What does this cost, and what would you delegate?**
+> *Model:* The spend is the **ingest log + stream tier** (sized for 300k/sec peak) and **raw retention** (~50 TB/mo S3, a few hundred dollars, the price of a recomputable, auditable bill). The aggregates and dashboard tier are small; reads are trivially cached. I delegate the **fraud model** to trust-and-safety behind `isValid(event)`, owning only the integration point (batch applies the verdict before settling). I delegate the **stream-engine and OLAP-store bake-offs** with stated priors (Flink for event-time + exactly-once; whichever OLAP the org runs). What I keep is the two-path speed/truth split, never-bill-from-the-stream, and raw retention as the recompute enabler.
 
 ---
 
 ### Key takeaways
-- This problem is **write-dominated** (~0.5M pings/s vs ~20K nearby reads/s, ~25:1) - the *inverse* of a feed; design the **ingest + index** path. Derive the headline as `online_drivers ÷ ping_interval`.
-- The live index is **~100 MB and ephemeral** - keep it **in RAM**, async-replicated, **eventually consistent, no durability**. Durable trips/profiles live in a separate partitioned store.
-- A **uniform grid hot-spots** because density is non-uniform (equal-area cells, unequal load). Use **variable resolution** (quadtree / S2 / H3) and query the **cell + its neighbors** at boundaries.
-- **Shard the index by geographic region**, never by `driverId` hash - matching is local, so region-sharding gives one-shard queries, regional isolation, and a path to sub-shard a hot metro.
-- **Director moves:** the ingest fleet is the line item (dynamic ping rate + streamed ingest are the levers), a **TTL'd reservation lock** stops double-booking, and **ETA belongs to the Maps team** behind `etaSeconds(from,to)` - know where your depth ends.
+- **Every click is money, so the design splits speed from truth:** a fast **approximate stream** for live dashboards and a slow **exact batch** for the bill, two paths from one firehose (the Lambda shape). The opening Director move is asking **"billing or analytics?"**, it flips the architecture.
+- **Never bill from the stream.** The stream is at-least-once and lossy on very-late events; the **batch recompute over complete deduped raw is the source of truth**, exactly-once over *all* events, not just a window.
+- **Raw-event retention (~50 TB/mo) is a defended budget line, not waste:** it's what makes the billing number recomputable, auditable, and re-billable when a fraud rule or counting bug changes. Aggregate-only can never do that.
+- **Late events and dedup are correctness, not polish:** event-time windowing + watermarks on the stream, full-raw recompute in the batch, and explicit `eventId` dedup; the dashboard converges to truth via back-correction.
+- **It's a write-heavy, throughput-and-retention problem:** partition the durable log by `campaign_id`, sub-shard hot campaigns, scale stream parallelism horizontally; aggregates and reads are tiny. Delegate the fraud model and the engine/store bake-offs with stated priors.
 
-> **Spaced-repetition recap:** Uber proximity = a **write firehose** (~0.5M pings/s) feeding a **tiny local read** (~20K/s) - **write-dominated, ~25:1**, the inverse of a feed. Live positions are **ephemeral → ~100 MB in RAM**, no durability. A **uniform grid hot-spots** in dense cities → **quadtree / S2 / H3** variable resolution, querying **cell + neighbors**. **Shard by region**, TTL-lock the dispatch, **delegate ETA** to the Maps team.
+> **Spaced-repetition recap:** Ad click aggregator = **streaming analytics where every event is money.** Ask **billing or analytics** first, it flips the design. Build **two paths from one Kafka firehose**: a fast **approximate stream** (Flink → OLAP → dashboard, at-least-once, self-correcting) and a slow **exact batch** (S3 raw → recompute → billable table, exactly-once over complete deduped raw). **Never bill from the stream.** Handle **late events** (event-time + watermarks; batch is the authority) and **dedup** (explicit `eventId`). **Raw retention (~50 TB/mo)** is the recompute enabler. **Lambda now, Kappa once exactly-once-on-replay is proven**. Same pipeline feeds **top-K**. Delegate the fraud model + engine/store bake-offs.
 
 ---
 
-*End of Lesson 5.7. The geo-index here reuses consistent-hash sharding and the in-memory cache discipline, but inverts the read:write assumption that drove Twitter/Instagram - a reminder that **RESHADED's R and E steps decide the architecture before any box is drawn.** Next: 5.8 Dropbox/Drive - the large-file, sync-and-conflict problem.*
+*End of Lesson 5.7. The Ad Click Aggregator is the canonical streaming-analytics interview: the hard part isn't volume, it's that **the output is invoices**, forcing a deliberate speed-vs-truth split, an approximate stream for dashboards and an exact, recomputable batch as the billing source of truth, reusing batch-vs-stream and Lambda/Kappa reasoning and sharded counters.*

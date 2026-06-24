@@ -1,270 +1,338 @@
 ---
-title: "8.5 — Cut Infrastructure Cost 30–50%"
-description: "Cutting a $10M cloud bill 30-50% as a sequenced 72-hour / 30-day / 6-month program, guardrails first, the savings ladder in order, and the one cut you refuse to make."
+title: "8.5 — Data Lake + Governance / Data Mesh"
+description: Design the organizing-and-governance layer over the lakehouse — catalog and discovery, column-level access control and lineage, data products and contracts — and make the org-architecture call between a centralized data-platform team and a federated data mesh, reasoned through RESHADED at Director altitude, with the central-team-bottleneck crossover and federated computational governance as the load-bearing decisions.
 sidebar:
   order: 5
 ---
 
-> **This question is a fixture of post-ZIRP Director loops because it is the job.** Boards stopped paying for growth-at-any-cost around 2023 and never went back; loops now ask it straight, "your bill is $X, cut 30-50% without breaking anything: 72 hours, 30 days, 6 months", with a behavioral twin behind it. A junior answer is a grab-bag of tips: spot, reserved instances, delete old stuff. A Director answer is a **sequenced program with guardrails**: a decomposition saying where the money actually is, a savings ladder whose *ordering* is load-bearing, quick wins funding the slow re-architecture, named SLO and velocity metrics that must hold throughout, and **one cut you refuse to make, defended to the CFO's face**. The refusal is the credibility moment: anyone can cut; leaders know what the cheap-looking line items are buying.
+> **This is the question that hides an org chart inside an architecture diagram, and the trap is solving only half of it.** A weak answer hears "hundreds of datasets nobody can find or trust" and reaches for a tool ("we'll stand up a catalog"), drawing boxes for search and access control while the real failure, *a central data team that has become the bottleneck for every domain's data*, goes untouched. A Director-level answer recognizes that data sprawl at scale is a **Conway's-law problem**: the architecture mirrors the org, and a single central team owning all the data is a serialization point no catalog fixes. So the answer splits into two interlocking decisions, **the governance plane** (catalog, column-level access, lineage, the chokepoint that makes data findable, trustworthy, and compliant) *and* **the operating model** (centralized platform vs federated **data mesh** with domain-owned data products). The load-bearing move is refusing to cargo-cult mesh: at small scale, centralized governance is *correct* and mesh is over-engineering; mesh earns its considerable complexity only when the number of domains overwhelms a central team's throughput. The signal is naming that crossover with numbers, not reciting "data mesh" as a destination.
 
 ### Learning objectives
-- Decompose a cloud bill into its **5-6 spend drivers** and attach a realistic savings percentage to each, reason in dollars, not vibes.
-- Run the **savings ladder in order**, delete idle → rightsize → commitment discounts → re-architect, and explain why the ordering is a correctness property.
-- Structure the answer as the **72-hour / 30-day / 6-month plan**, where ~30% lands in 30 days and buys the budget and credibility for the 6-month tail.
-- Define the **guardrails before the cuts**: the SLOs, RTO/RPO, and velocity metrics that must hold, on a dashboard from hour zero.
-- Name the **one cut you refuse to make**, capacity whose job is to look idle, and defend it as risk management, not empire defense.
+- Run the **RESHADED** spine on an **org-plus-architecture** problem where **E becomes the scale of domains, datasets, teams, and access policies** (not QPS), and surface the load-bearing tension: **a governance plane over the lake, and centralized-platform vs federated-mesh as a Conway's-law operating-model choice.**
+- Open with the **"how many domains, and is the central data team the bottleneck?"** clarifying question, and show how the answer flips the operating model between centralized and federated.
+- Design the governance plane, **catalog/discovery, column- and row-level access control with PII tagging and policy-as-code, and column-level lineage**, as a central chokepoint, and reject ungoverned-lake and manual-review with reasons.
+- Define **data products** (domain-owned, with owners, SLAs, schemas, docs) and **data contracts** as the inter-domain interface, and explain **federated computational governance**, global standards enforced by a self-serve platform, local ownership of the data.
+- Name the crossover in numbers (domains, datasets, central-team queue depth, domain-onboarding time) where centralized stops scaling and mesh's complexity becomes worth paying, and **delegate the tooling bake-off and per-domain quality with stated priors.**
 
 ### Intuition first
-A turnaround consultant walks into a company bleeding cash. The amateur move is to cut 10% from every department by email, fast, fair-looking, and wrong: it starves the profitable lines and barely dents the bloated ones. The professional sequence is different. First, **read the books**, you cannot cut what you cannot see. Then **stop the obvious bleeding**: cancel unused licenses, sublet the empty floor, money nobody will miss, banked in days, buying the board's patience. Then **renegotiate the contracts** on what you're keeping, only *after* you know what you're keeping, because a three-year lease on an office you're about to vacate is waste with a signature on it. Only then the slow, structural work: change how the company operates so costs don't grow back. Throughout, two things stay sacrosanct: the **insurance policies**, pure waste right up until the fire, and the **pace of the business**, because a company that saves 30% and stops shipping has not been saved.
+Think of the company's data as a **city's worth of warehouses**, and the question as **who runs the city.** Early on there's one well-run central warehouse and a small staff who know where everything is, you ask them, they fetch it, they decide who's allowed in. That's the **centralized data team**, and at a handful of warehouses it's *great*: one consistent filing system, one access desk, one source of truth. But the city grows to hundreds of warehouses across dozens of neighborhoods (domains), and now every request, every "where is the customer-churn data," every "can marketing read this," every new dataset, queues at that one central desk. The staff become a **bottleneck**: they don't know every neighborhood's data, the backlog grows to weeks, and frustrated teams start hoarding their own unmarked copies in basements (the **data swamp**, sprawl nobody can find or trust).
 
-That is this lesson. Cloud bill = the books. Idle resources = the empty floor. Commitments = the contracts. Re-architecture = the re-org. SLOs, RTO, deploy frequency = the insurance and the pace. The interview tests which way you cut.
+The **data mesh** is the decision to **let each neighborhood run its own warehouse as a published, owned product**, while the *city* still enforces universal rules: every warehouse must have a posted address and inventory (a catalog entry), a named superintendent (an owner) and posted hours (an SLA), standard signage and a standard access-badge system (interoperable schemas and policy-as-code). Crucially, the city doesn't *inspect* each warehouse by hand, it builds the **standard shelving, the badge readers, and the inventory system once** (the self-serve platform) so that complying is the path of least resistance. That's **federated computational governance**: global standards, *automatically* enforced by shared infrastructure, with local teams owning their own warehouses. The neighborhoods scale independently; the city stays coherent.
+
+The mistake to avoid is treating mesh as a fashion. A single well-run central warehouse beats a sprawling mesh you don't have the maturity to govern, mesh trades a *central bottleneck* for *distributed inconsistency*, and that trade only pays once the bottleneck is real. The art is knowing **when** you've outgrown the central desk, and never before.
 
 ---
 
 ## R: Requirements
 
-> Adaptation, stated out loud: in a cost program, R gathers the **guardrails**, not product features. The "functional requirements" are the invariants that must hold *while* you cut, a savings target with no guardrails is how you buy an outage with the savings.
+> Pin the sprawl, the trust gap, the governance bar, and, the architecture-flipping question, **how many domains and whether the central team is the bottleneck.** R does double duty: it extracts both the governance requirements and the centralized-vs-mesh driver.
 
-**Anchor scenario:** a **$10M/yr cloud bill** (~$833K/mo) at a 400-engineer company, one hyperscaler, traffic growing ~20%/yr. Mandate: **cut 30-50% of run-rate within two quarters** without hurting reliability or delivery.
+**The opening Director move, the question I ask first:** *"How many distinct domains and teams produce data, how many datasets are we talking about, and is the central data team the bottleneck, i.e., are domains waiting weeks on a central queue to publish, change, or get access to data? Because at small scale a centralized platform team owning governance is the right, simpler answer, and a federated mesh is over-engineering; mesh only earns its complexity once the central team can't keep up with the domains."* The answer flips the operating model:
+- **Few domains (say <10), one team can hold the whole model in its head, central queue is days not weeks** → a **centralized data-platform team** owns ingestion, modeling, governance, and serving. One filing system, one source of truth, lowest coordination cost. Mesh here is pure overhead.
+- **Many domains (dozens to hundreds), the central team is a multi-week bottleneck, no one team understands every domain's data** → a **federated data mesh**: domains own their data as products, a central *platform* team owns the self-serve substrate and the global standards, governance is *computational* (enforced by the platform), not manual.
+
+I'll design for the **harder, increasingly-standard large-org case: the mesh with a strong governance plane**, because the scenario, hundreds of datasets across many teams, nobody can find or trust data, central team is the bottleneck, *is* the post-crossover case, and I'll name explicitly where the crossover sits so I'm not cargo-culting.
 
 **Clarifying questions I'd ask (with assumed answers):**
-- *Run-rate or absolute?* → **Run-rate, growth-normalized.** The honest metric is **unit cost** (per 1K requests / per DAU), not the headline bill, agree this with finance up front or argue about it forever.
-- *Reliability commitments?* → 99.9% SLO; **RTO 1 hour, RPO 5 minutes** on tier-1 data. Contractual; the program must not move them.
-- *Is engineering time a cost?* → Yes, saving $2M of cloud by burning $3M of payroll and a quarter of roadmap is a loss.
-- *Compliance floors?* → 7-year audit-log retention, 35-day backups. **Cuts below these are off the table regardless of how the line item looks.**
+- *How many domains/teams and datasets?* → **~30-50 producing domains, low-thousands of datasets/tables**, well past what one central team can model. The central decision.
+- *Is the central team the bottleneck?* → **Yes**, new-dataset publishing and access requests queue **2-6 weeks**; the symptom that justifies federation.
+- *Governance bar?* → **High**, PII/PCI columns, regulated data, column- and row-level access, audit trails, and **GDPR/CCPA lineage** (trace and erase). Table stakes.
+- *Trust bar?* → Consumers must **find** data (search/discovery), **judge** it (owner, freshness, quality, lineage), and **rely** on it (SLAs, contracts). The "can't trust data" half.
+- *What's the storage substrate?* → The **lakehouse** of 14.1 (object storage + Iceberg/Delta + a catalog). This lesson governs and organizes *that*; it does not re-pick storage.
 
-**The guardrails (this design's functional requirements):**
-1. **SLOs hold:** error-budget burn stays at baseline; any cut producing sustained burn reverts, no debate.
-2. **RTO/RPO hold, and are re-proven.** Every cut touching redundancy, backups, or failover triggers a **DR drill** before the saving is banked. Untested DR is the classic silent casualty of cost programs.
-3. **Velocity holds:** deploy frequency and lead time flat; product teams spend **≤10% of the quarter** on cost work, the heavy lifting belongs to a central team of 3-4.
-4. **Compliance floors are invariants.**
+**Functional requirements:**
+1. **Catalog & discovery**, a searchable inventory of all data: technical metadata (schema, location, format) *and* business metadata (owner, description, domain, sensitivity, SLA), so any analyst finds and judges a dataset without asking a human.
+2. **Access control**, column-level and row-level authorization with PII/sensitive tagging and masking, enforced at a central chokepoint, with audit.
+3. **Lineage**, column-level upstream/downstream lineage for trust ("where did this number come from"), impact analysis ("what breaks if I change this"), and compliance ("every table derived from this user's PII").
+4. **Data products & contracts**, the unit of ownership: a domain-published dataset with an owner, SLA, documented schema, and a **data contract** as the stable interface other domains depend on.
+5. **Self-serve platform & federated governance**, infrastructure that lets a domain publish a compliant, cataloged, access-controlled, lineage-tracked data product *without* the central team, with **global standards enforced computationally** by that platform.
 
-**Explicitly CUT from scope:** SaaS/vendor renegotiation (procurement's program), headcount, and cloud repatriation (returns in Design evolution as a deliberately rejected default). Scope: **the cloud bill, two quarters, guardrails as stated, one owner (me), weekly guardrail review.** Program NFRs: every cut **reversible or rehearsed** (commitments are the exception, why they come last among the quick wins); savings reported as **realized run-rate** against a baseline finance has signed.
+**Explicitly CUT (scoping is the signal):** the lakehouse storage internals (the warehouse/lakehouse problem owns format/layout/scan-cost), the ingestion/CDC mechanics that fill it, the BI/ML tools that consume it, and the *people-leadership* of building the data org, hiring, re-org, incentives (that's the domain; I'll name the org *shape* here but not the change-management playbook). I scope to **catalog → access → lineage → data-product/contract model → the federated operating model.**
+
+**Non-functional requirements:**
+- **Discoverability at scale**, a new analyst finds the right trustworthy dataset in **minutes, not by Slack-asking around for days**, across thousands of datasets.
+- **Governance that scales sub-linearly with datasets**, adding a domain or a dataset must **not** add proportional central-team toil; policy is **as-code and automated**, not per-request review.
+- **Compliance-grade access + lineage**, column/row-level enforcement, audit, and lineage complete enough to answer a GDPR erasure or a regulator's "who can see this" in hours.
+- **Domain autonomy with global coherence**, domains ship independently (the mesh promise) while every product is interoperable, discoverable, and policy-compliant (the federation guardrail).
+- **Fast domain onboarding**, a new domain stands up its first governed data product in **days**, via self-serve, not a central-team project.
+- **No new bottleneck**, the governance plane must be a *chokepoint for policy*, not a *queue for humans*; the failure mode is replacing the central modeling bottleneck with a central governance bottleneck.
+
+**The skew, stated:** this is a **discovery-, trust-, and governance-heavy, coordination-bound** problem, not a throughput one. The hard parts are *organizational scaling (Conway), policy-explosion management, lineage capture across heterogeneous engines, and keeping domain quality consistent without a central inspector*, not bytes or QPS. That shapes every downstream choice: automate governance, federate ownership, centralize standards.
 
 ---
 
 ## E: Estimation
 
-> Adaptation: E is the **spend decomposition and the savings ladder**, where the $10M sits and what each rung realistically takes. Cutting without decomposing is hand-waving in dollars instead of requests.
+> Enough math to make a defensible call. Here **E is not QPS, it's the scale of domains, datasets, policies, and team throughput**, the numbers that decide whether centralized governance still fits or the mesh crossover has arrived.
 
-**Decompose the $10M (typical product-company shape; round aggressively):**
+**Assumptions:** ~**40 producing domains**, ~**2,000 datasets/tables** (growing ~30%/yr), ~**500 data consumers** (analysts, scientists, apps), a central data team of ~**15 engineers**, regulated data (PII/PCI present).
 
-| Driver | $/yr | % | What's in it |
-|---|---|---|---|
-| Compute (VMs / k8s nodes) | $4.0M | 40% | prod + non-prod fleets, CI |
-| Managed databases + caches | $2.0M | 20% | RDS/Aurora, Redis, search |
-| Storage + snapshots | $1.5M | 15% | S3/blob, EBS, snapshot sprawl |
-| Data transfer + networking | $0.8M | 8% | egress, cross-AZ, NAT |
-| Observability + logging | $0.7M | 7% | log ingest, metrics, APM |
-| Support plan + everything else | $1.0M | 10% | enterprise support ≈ 3-10% of bill |
+**The crossover math (the load-bearing estimate):**
+- **Central-team throughput vs demand.** Suppose each new/changed data product needs ~2 days of central-team modeling+governance work, and there are ~**3 changes/dataset/year × 2,000 datasets ≈ 6,000 change-events/year** plus a steady stream of access requests. That's ~**12,000 engineer-days/year** of central work against a 15-person team's ~**3,300 productive engineer-days/year**, a **~3.6× shortfall.** *This is the bottleneck, quantified*: demand outruns a central team by multiples, so the queue grows without bound and onboarding stretches to weeks. **This number is what justifies federation**, the central team cannot linearly scale to 40 domains.
+- **Where centralized still wins.** Run the same math at **5 domains, 150 datasets**: ~450 change-events/year ≈ ~900 engineer-days against a 5-person team's ~1,100, *it fits.* **Below roughly ~10 domains / a few-hundred datasets, centralized governance is the right call**, and mesh's per-domain platform investment is unjustified overhead. **That's the crossover I name aloud.**
 
-Two insights fall out: **compute + databases are 60% of the bill**, the program lives there; and nobody reaches 30% by optimizing the 7% line, though observability is usually the most bloated *proportionally* (log-tiering fixes the log-ingest default).
+**Governance / policy scale (why manual review is impossible):**
+- Column-level access: ~2,000 datasets × ~30 columns × sensitivity classification = **~60,000 column-policy decisions**, multiplied across ~**dozens of roles/teams**. Hand-reviewing access for that surface is a full-time team forever and still inconsistent. *This number forces policy-as-code*: you write **~tens of tag-based rules** ("mask `pii.email` for all but the privacy-cleared role"), not 60,000 per-column grants.
 
-**The savings ladder, each rung with its number; the ordering is the design:**
+**Onboarding & discovery targets (the user-facing promise):**
+- **Domain onboarding:** from a central-team **multi-week project** today to a self-serve **~2-3 days** (provision a product, register in the catalog, attach the standard policy templates, lineage auto-captured).
+- **Dataset discovery:** from **days of Slack-archaeology** to a **catalog search of seconds**, with enough metadata (owner, freshness, lineage, quality score) to *judge* trust in minutes.
+- **Lineage coverage:** target **>90% of gold/silver tables** with automated column-level lineage; the long tail of hand-built pipelines is the gap to close.
 
-**Rung 1, Delete idle (72 hours → 2 weeks): ~8% ≈ $0.8M/yr.** Unattached volumes, orphaned snapshots, dead environments, over-retained logs, non-prod running nights and weekends (~65% of hours idle, scheduling it off is free money). Zero risk, instantly reversible, and the real product is **credibility**: $0.8M in two weeks is what makes the CFO fund the rest.
-
-**Rung 2, Rightsize (30 days): ~12% ≈ $1.2M/yr.** Typical prod fleets run **15-25% p95 utilization**; k8s requests sit 3-4× actual; gp2→gp3 and lifecycle tiering (70% of objects untouched in 90 days → infrequent-access at 45-80% off) are config changes, not projects. Reversible in minutes, which is what makes it safe to do fast.
-
-**Rung 3, Commitments (30 days, *after* rung 2): ~12% ≈ $1.2M/yr.** Savings Plans at ~30-35% off, ~75% coverage of the **post-rightsizing** baseline (~$5M compute + DB). **Ordering is load-bearing:** commit first and you've signed a 1-3 year contract to keep paying for the waste rung 2 was about to remove. The one rung that *reduces* reversibility, hence last among the quick wins.
-
-**30-day subtotal: ~32% (~$3.2M run-rate)**, the mandate's floor, met by configuration and procurement alone. Say that out loud.
-
-**Rung 4, Re-architect (6 months): another ~8-15%.** Spot for CI, batch, stateless workers (60-90% off that slice); ARM/Graviton (~15-20% price-perf); data-transfer surgery, CDN egress offload, cross-AZ chatter, NAT; log tiering and sampling (the $0.7M line typically halves); caching to shrink the DB tier. Lands at **~40-47%**, inside the band, honest about diminishing returns at the top.
-
-**What estimation decided:** the money is in compute + databases; 30 days delivers ~32% at near-zero risk via delete → rightsize → commit *in that order*; the last ~10-15% costs 6 months of real engineering; and the program reports unit cost, not the absolute bill.
-
-<details>
-<summary>Go deeper, rightsizing and commitment mechanics (IC depth, optional)</summary>
-
-**Rightsizing targets:** size to **p95 utilization + ~30% headroom**, never the mean (hides the daily peak), never p100 (one spike inflates the fleet forever). Kubernetes: set requests from observed p95 (VPA in recommendation mode), limits ~2× requests for burst; node utilization below ~50% usually means requests, not workloads, are wrong.
-
-**Commitment math:** coverage = committed $ / eligible $; utilization = used / committed. Target 70-80% coverage of the *post-rightsize* baseline so variance and later optimization don't strand the commitment, unused commitment is contractual loss, worse than on-demand waste. 1-year no-upfront (~28-35% off) is the default; 3-year (~45-55% off) only for the floor you'd bet the company keeps (core DB tier), because a 3-year commit also forecloses the Graviton/spot moves rung 4 wants.
-
-**Storage quick math:** gp2→gp3 ≈ 20% cheaper at equal baseline IOPS, no downtime; snapshot sprawl is typically 10-20% of the storage line; S3 lifecycle to IA at 30 days / archive at 90 for cold prefixes, but check retrieval pricing against access patterns first, or the savings reverse.
-
-</details>
+**What estimation decided:** the **~3.6× central-team shortfall at 40 domains** is the quantitative trigger for federation; the **~60,000-column policy surface** is the trigger for policy-as-code; and the **crossover sits near ~10 domains / a few-hundred datasets**, below it centralized wins. These numbers, not the buzzword, are what a Director defends, and they point straight at the data-product, policy-as-code, and self-serve-platform design below.
 
 ---
 
 ## S: Storage
 
-> Adaptation: S is **where the money sleeps**, the storage-shaped ~25% of the bill (storage, snapshots, logs, backups), plus the program's own storage problem: the cost-allocation data. You cannot run showback on an untagged bill.
+> The bytes live in the lakehouse, not here. What this layer *stores* is **metadata**: the catalog (technical + business), the policy store, and the lineage graph, three specialized stores chosen for their access patterns.
 
-**The storage-shaped spend, three moves, each with its guardrail:**
-- **Lifecycle tiering** for blobs (hot → IA → archive by access age) and **log tiering** (7-14 day hot window, then cheap object storage, delete at the compliance floor, *not before it*). *Rejected: "shorten retention everywhere"*, retention is where cost programs commit compliance violations.
-- **Snapshot hygiene as policy, not cleanup:** automated expiry, or the sprawl regrows in two quarters.
-- **Untouched:** backup frequency and the cross-region replica that honor RPO 5 min / RTO 1 hr, the insurance; more in Evaluation.
+**1. The catalog / metastore (the discovery + governance chokepoint).**
+- *What it holds:* every dataset's **technical metadata** (schema, location, format, partitioning) and **business metadata** (owner, domain, description, sensitivity tags, SLA, quality score), plus the table-format snapshots from 14.1.
+- *Choice:* a **central catalog** (Unity Catalog, Apache Polaris / Iceberg REST catalog, AWS Glue + a discovery layer like DataHub/Amundsen/Collibra for the rich business-metadata and search experience). The catalog is deliberately the **single chokepoint** through which engines resolve tables, so it's the natural home for access control and the anchor for lineage.
+- *Rejected, per-engine / per-team metadata (the swamp's status quo):* every tool keeps its own notion of what exists and who may read it, so discovery fails, governance has nowhere to live, and you get the unmarked-basement-copies failure. A central catalog is non-negotiable precisely *because* it's the one chokepoint.
 
-**The program's own data layer.** Untagged spend at this size is typically **30-50% of the bill**, per-team accountability is fiction until it's fixed. The 72-hour window turns on the resource-level billing export; the 30-day window adds a **tagging mandate enforced at provision time** in IaC. *Rejected: a manual tagging crusade*, it decays immediately; only enforcement at the gate sticks.
+**2. The policy store (access control as data).**
+- *What it holds:* **tag-based, as-code policies** ("role `analyst` may read columns not tagged `pii`; `pii.email` is masked except for role `privacy`; rows are filtered by `region` for regional teams") plus the audit log of every access decision.
+- *Choice:* a **policy engine** (the catalog's native ABAC like Unity Catalog, or OPA / Apache Ranger / a purpose-built engine) evaluating **attribute-based rules against column/row tags** at query time, with decisions logged. Policy lives in **version-controlled code**, reviewed and deployed like software.
+- *Rejected, per-object ACLs (grant-by-grant):* the ~60,000-column surface makes hand-maintained grants drift into chaos and audit-failure within a quarter. *Rejected, app-layer enforcement:* every consuming tool re-implements (and re-bugs) access control; the chokepoint must be *below* the engines, at the catalog.
+
+**3. The lineage graph.**
+- *What it holds:* a **column-level directed graph**, node = (dataset, column), edge = a transform that derived one from another, captured automatically from query/job execution.
+- *Choice:* a **graph store** (or graph-shaped index, e.g., OpenLineage emitting into DataHub/Marquez/Unity) because the queries are inherently traversals: *upstream* ("what feeds this column," for trust), *downstream* ("what breaks if I change it," for impact), and *transitive closure* ("every table touching this user's PII," for GDPR). 
+- *Rejected, a relational schema with recursive joins for deep lineage:* multi-hop transitive lineage across thousands of tables is exactly the recursive-traversal workload a graph model serves and a relational one fights. *Rejected, manually-maintained lineage docs:* stale the day they're written; lineage must be **captured from execution**, not authored.
+
+**The resolution:** these three metadata stores are **small relative to the data they describe** (kilobytes-to-megabytes of metadata per terabyte of data), so the engineering is about *access patterns and freshness* (search, policy-eval, graph-traversal, all auto-captured), not volume. They compose *onto* the lakehouse of 14.1, the data stays one open copy on object storage; this layer makes it findable, governed, and traceable.
 
 ---
 
 ## H: High-level design
 
-> Adaptation: H is the **architecture of the program**, the 72-hour / 30-day / 6-month plan, with the guardrail dashboard wired in parallel to every phase. The boxes are phases and feedback loops, not services.
+> The shape to make visible: **domains publish data products into one lakehouse, a governance plane (catalog + policy engine + lineage) spans all of them as the chokepoint, and a self-serve platform makes domain ownership feasible while enforcing global standards.** This is the centralized-platform-team vs data-mesh decision rendered as a picture.
 
 ```mermaid
-flowchart TD
-    V[72h Visibility<br/>billing export and tags] --> QW[72h to 2w<br/>delete idle spend]
-    QW --> RS[30d Rightsize<br/>compute storage k8s]
-    RS --> CM[30d Commit<br/>plans on new baseline]
-    CM --> RA[6mo Re-architect<br/>spot ARM egress logs]
-    RA --> GOV[Governance<br/>unit cost and showback]
-    GOV -. stops regrowth .-> V
-    G[Guardrail dashboard<br/>SLO RTO velocity] -.-> QW
-    G -.-> RS
-    G -.-> RA
-    style CM fill:#e8a13a,color:#000
-    style G fill:#7a1f1f,color:#fff
-    style GOV fill:#2d6cb5,color:#fff
+flowchart TB
+    subgraph DOM["Domains own their data as products (federated ownership)"]
+      D1["Domain: Orders<br/>data product + owner + SLA + contract"]
+      D2["Domain: Marketing<br/>data product + owner + SLA + contract"]
+      D3["Domain: Risk<br/>data product + owner + SLA + contract"]
+    end
+
+    LAKE[("Lakehouse — one open copy<br/>object storage + Iceberg/Delta")]
+    D1 --> LAKE
+    D2 --> LAKE
+    D3 --> LAKE
+
+    subgraph GOV["Governance plane (central chokepoint)"]
+      CAT["Catalog + discovery<br/>tech + business metadata, search"]
+      POL["Policy engine<br/>column/row access, PII masking, audit"]
+      LIN["Column-level lineage<br/>trust · impact · GDPR"]
+    end
+    LAKE --- CAT
+    CAT --- POL
+    CAT --- LIN
+
+    subgraph PLAT["Self-serve platform + federated computational governance"]
+      SS["Paved-road tooling:<br/>publish · register · tag · contract · test"]
+      STD["Global standards as code<br/>enforced automatically"]
+    end
+    DOM -. uses .-> PLAT
+    PLAT -. enforces .-> GOV
+
+    CONS["Consumers: analysts · ML · apps<br/>discover → request access → query"]
+    CAT --> CONS
+    POL --> CONS
+
+    style LAKE fill:#1f6f5c,color:#fff
+    style CAT fill:#2d6cb5,color:#fff
+    style POL fill:#7a1f1f,color:#fff
+    style LIN fill:#e8a13a,color:#000
+    style STD fill:#b08d57,color:#fff
 ```
 
-**72 hours, see, stop, freeze.** Billing export on; top-20 line items (~20 items ≈ 80% of any cloud bill); delete only the provably orphaned; **freeze new commitments and large provisioning**; stand up the **guardrail dashboard**, SLO burn, RTO drill status, deploy frequency, *before* any risky cut, because a guardrail added after the cuts is an alibi, not a control. Output: a one-page decomposition for the CFO and ~$0.5-0.8M banked.
+**Happy path, compressed (publish then consume).** A **domain team** (say Orders) builds a **data product**, a curated, documented dataset, *using the self-serve platform's paved road*: they land it in the **lakehouse** (one open copy), register it in the **catalog** with business metadata (owner, description, SLA, sensitivity tags), declare a **data contract** for the schema other domains will depend on, and the platform's standard pipeline **auto-tags PII columns, attaches the org's policy templates, runs the contract/quality tests, and emits lineage** as the job runs. Global standards (naming, required metadata, classification, contract presence) are **enforced computationally**, a product that doesn't comply can't publish, no human gate. On the **consume** side, an analyst **searches the catalog**, judges the dataset by its owner/freshness/lineage/quality, **requests access** (granted by a tag-based policy, not a ticket to the central team), and queries it through the **policy engine**, which masks the PII columns they're not cleared for and logs the access. The **lineage graph** lets anyone trace that number to its Orders-domain source, and lets a privacy engineer find every table derived from a deleted user.
 
-**30 days, the quick-win engine.** Rung 2 then rung 3: rightsize off p95 data, schedule non-prod off-hours, then commit at ~75% coverage of the new baseline. Each rightsizing wave ships like a deploy, canary a tier, watch the dashboard 48h, proceed or revert. Output: **~32% down**, guardrails demonstrably flat, political capital secured.
-
-**6 months, re-architecture, funded by the quick wins.** The central team of 3-4 runs the structural moves (spot, ARM, egress and cross-AZ surgery, log tiering); product teams contribute ≤10% capacity from a ranked backlog. The quick wins fund this phase twice over: the banked $3.2M makes the engineering spend obviously positive-ROI, and the early credibility is why the CFO tolerates a 6-month tail at all.
-
-**The shape to notice:** the guardrail dashboard runs parallel to *every* phase, the load-bearing wall of this design, as the waiting room was for a hot-shard queue. And the diagram is a **loop**: without the governance edge, the bill regrows to fill the budget in 4-6 quarters.
+**The shape to notice:** two load-bearing structures. (1) **Federated ownership over a shared substrate**, domains own *products*, not infrastructure; one lakehouse, many owners (the mesh). (2) **A central governance plane that is a policy chokepoint, not a human queue**, the catalog/policy/lineage triad spans every domain, but compliance is *automated by the platform*, so adding a domain doesn't add central toil. The whole design's tension is right there: **autonomy (domains ship independently) held coherent by computation (the platform enforces global rules), so you scale with domains without a data swamp.**
 
 ---
 
 ## A: API design
 
-> Adaptation: the "APIs" here are the program's **interfaces to teams and finance**, the contracts that make cost visible, attributable, and bounded. Vague interfaces are why most cost programs produce one good quarter and then decay.
+> The "API" of this layer is three contracts: the **data-product / data-contract** interface (how a domain publishes and how consumers depend), the **catalog/discovery** interface (find and judge), and the **policy** interface (tag-based access as code). These contracts *are* the federation, they're what lets domains ship independently while staying coherent.
 
+```yaml
+# 1) Data product + contract: the inter-domain interface (domain-published, 13.9)
+data_product:
+  name: orders.fulfilled_orders          # domain-namespaced; discoverable
+  domain: orders
+  owner: orders-data@company.com         # a named, on-call owner — not "the data team"
+  sla: { freshness: "≤1h", availability: "99.9%" }
+  classification: { pii_columns: [customer_email], pci: false }
+  contract:                               # the stable promise other domains build on
+    schema:
+      order_id:        { type: string, nullable: false }   # contract: never null
+      customer_email:  { type: string, tags: [pii] }       # auto-masked by policy
+      amount_cents:    { type: long,   nullable: false }
+      status:          { type: enum,   values: [placed, fulfilled, cancelled] }
+    guarantees: { backward_compatible: true }   # breaking change requires a new version
+    quality_tests: [not_null(order_id), unique(order_id), accepted_values(status)]
 ```
-# The four interfaces of the program (contract sketch)
 
-showback(team)        -> { spend_by_service, unit_cost_trend, vs_budget }
-                         # monthly, automatic — visibility precedes accountability
-unit_cost(service)    -> dollars per 1K requests | per DAU | per job
-                         # THE program metric; growth-normalized; finance signs it
-budget_alert(team)    -> page the owning team, not a central cop
-                         # anomaly + forecast; a $40K NAT surprise found week 1
-provision_gate(res)   -> ALLOW | DENY untagged | ESCALATE above $X/mo
-                         # tags + size policy enforced in IaC, not by audit
+```sql
+-- 2) Catalog / discovery: find and JUDGE a dataset without asking a human
+SEARCH CATALOG 'customer churn'                      -- full-text + tag + lineage search
+  WHERE classification = 'pii' AND owner IS NOT NULL
+  RETURN name, owner, sla.freshness, quality_score, lineage_upstream;
+
+-- 3) Policy as code: tag-based, attribute-driven access (NOT per-object grants)
+GRANT SELECT ON TAG 'domain:orders'  TO ROLE analyst   -- coarse: domain-level read
+  EXCEPT COLUMNS TAGGED 'pii';                          -- minus the PII columns
+MASK COLUMNS TAGGED 'pii.email'      FOR ROLE analyst   USING email_mask();  -- fine: masking
+ROW FILTER ON TAG 'regional'         FOR ROLE eu_team   USING (region = 'EU'); -- row-level
+-- every decision above is logged to the audit store
 ```
 
-**Design notes (each with the rejected alternative):**
-- **Showback before chargeback.** Showback changes behavior at low friction; chargeback (your P&L pays) adds real incentives *and* real gaming, reservation hoarding, shared-cost disputes. *Rejected as default: immediate chargeback*, it's the escalation for chronically unresponsive teams, not the opener.
-- **Unit cost, not absolute targets.** *Rejected: absolute spend caps*, at 20%/yr growth they force teams to "save" by blocking product growth, violating the velocity guardrail.
-- **Alerts page the owning team.** *Rejected: a central FinOps cop on every change*, it bottlenecks and teaches teams cost is someone else's job. The center owns leverage (commitments, platform moves); teams own their own curve.
+**Design notes (each with its rejected alternative):**
+- **The data contract is the inter-domain API, and a breaking change requires a new version**, this is what lets domain B depend on domain A's product without depending on A's *internals*. *Rejected: consumers reading another domain's raw tables directly*, which couples every consumer to a producer's private schema, so the producer can't evolve and you're back to a tangled monolith with no real ownership boundaries.
+- **Discovery returns enough to *judge* trust (owner, SLA, quality, lineage), not just to *find***, because the scenario's pain is "can't *trust* data," not only "can't find it." *Rejected: a bare name-and-location catalog*, which solves discovery but not trust; an analyst still can't tell if the dataset is authoritative or abandoned.
+- **Access is tag-based policy-as-code, evaluated at the catalog chokepoint**, you tag data (`pii`, `domain:orders`, `regional`) and write ~tens of rules over tags, so a new dataset inherits policy automatically the moment it's tagged. *Rejected: per-object ACLs granted on request*, which doesn't scale past the ~60,000-column surface and *recreates the central-team bottleneck* as an access-request queue, the exact failure we're designing away.
+- **Every access decision is audited**, non-negotiable for regulated data; audit is a first-class output of the policy engine, not bolted on. *Rejected: trust-and-log-nothing*, an instant compliance failure.
+- **Global standards (required metadata, classification, contract presence, naming) are enforced by the platform at publish time**, computational governance: non-compliant products *can't ship*. *Rejected: a governance committee that reviews each product*, which is manual review by another name, doesn't scale, and reintroduces the human queue.
 
 ---
 
 ## D: Data model
 
-> Adaptation: the schema of a cost program is the **allocation taxonomy**, the dimensions every dollar must be attributable to. Get this wrong and every later report is fiction.
+> Two models matter here, both metadata: the **data-product / catalog-entry model** (the unit of ownership and discovery) and the **lineage-and-policy metadata model** (trust and enforcement). The data itself is modeled in 14.1/13.8; this is the model *about* the data.
 
-Four mandatory dimensions on every resource: **`team`** (answers the budget alert), **`service`** (the unit-cost denominator), **`env`** (prod vs non-prod, entirely different cut policies), **`cost_center`** (finance's join key, COGS vs R&D decides whether a dollar hits gross margin). Shared-platform spend (k8s control plane, data platform, observability) is **allocated by a published formula**, by usage where measurable, by headcount where not. *Rejected: leaving shared costs unallocated*, they're 20-30% of the bill, and unallocated is unaccountable. Also rejected: a 15-tag taxonomy, beyond 4-5 enforced dimensions, compliance collapses.
+**The data-product entry (the unit of federated ownership):**
+- `data_product`: `(name [domain-namespaced], domain, owner, sla, classification, contract_ref, location_ref → lakehouse table, status [active/deprecated])`. The **owner** and **SLA** are what make it a *product* and not just a table, there's a named team on the hook for it, which is the organizational primitive the whole mesh rests on.
+- `contract` (versioned): the schema + guarantees + quality tests above; **versioned independently** so a breaking change is a new contract version, not a silent break. Consumers pin a version.
+- `tags`: the **classification and routing labels** (`pii`, `pci`, `domain:x`, `regional`, `gold/silver/bronze`) that policy and discovery key off. **Tags, not per-object rules, are the scaling primitive**: policy is written over tags once, and every newly-tagged column inherits it.
 
-One derived table outranks the rest: **`unit_cost(service, month)`**, allocated spend ÷ demand driver. The growth-normalizer, and the only number that proves savings *stuck* rather than merely happened.
+**The governance metadata model:**
+- **Lineage node/edge:** `node = (dataset, column)`; `edge = (from_node, to_node, transform_job, timestamp)`. Column-level, captured from execution. The three queries it must serve, stated as the model's reason to exist: **upstream** (trust), **downstream** (impact-analysis before a breaking change), **transitive closure** (compliance, "everything derived from this PII").
+- **Policy as data:** `(principal/role, action, tag-predicate, effect [allow/mask/row-filter], obligation [audit])`, ABAC rules over tags, not a grant matrix over objects. This is the single most consequential modeling choice for scale: **modeling access as *attributes over tags* makes governance grow sub-linearly with datasets**, whereas modeling it as *grants over objects* makes it grow with datasets × columns × roles and collapses.
+- **Audit record:** `(principal, dataset, columns, decision, policy_version, timestamp)`, append-only, the compliance evidence.
+
+*Rejected, modeling a data product as just a database table:* you lose the owner, SLA, contract, and classification, the very things that distinguish a *governed, trustworthy product* from an *anonymous table in the swamp*. The metadata *is* the product. *Rejected, table-level (not column-level) lineage and policy:* "this table is PII" is too coarse, it over-restricts (masking a whole table when one column is sensitive) and fails GDPR's column-precise erasure and the analyst's need to read the 29 non-PII columns. **Column-level granularity is what makes both access and lineage usable**, and it's the modeling decision a Director defends against the simpler table-level shortcut.
 
 ---
 
 ## E: Evaluation
 
-> Adaptation, the sharpest of the eight: Evaluation here is **proving the guardrails held**. A cost program is graded on two axes, dollars saved *and* damage avoided. Most candidates report only the first.
+> Re-check against the NFRs, then hunt the bottlenecks, naming each trade-off. The recurring theme: every fix must avoid *recreating a central human bottleneck*, the failure this whole design exists to kill.
 
-**Savings realized:** run-rate −32% at day 30, −42% at month 6; **unit cost −48%** against the signed baseline. Reported from the billing export, not project-team self-grading. *Rejected: counting "projected" savings*, only the invoice trend counts.
+**Re-check vs NFRs:** discoverability, the catalog + rich business metadata + search; sub-linear governance, tag-based policy-as-code; compliance-grade access+lineage, the policy chokepoint + column-level lineage graph + audit; domain autonomy with coherence, data products + contracts + self-serve platform; fast onboarding, the paved road; no new bottleneck, computational enforcement, not human review. Now the bottlenecks.
 
-**Guardrail evidence (the half juniors skip):**
-- **SLO:** error-budget burn flat through every rightsizing wave, with **one revert on the record** (a DB downsize pushed p99 past the SLO; canary caught it in 48h, rolled back in minutes). State the revert proudly: a program with zero reverts wasn't measuring.
-- **RTO/RPO:** re-drilled *after* the storage and replica changes, RTO 41 min against the 1-hour budget. An untested DR path post-cuts is a cut you made without admitting it.
-- **Velocity:** deploy frequency and lead time flat; product-team cost work peaked at 8%. If velocity dips, the program, not the roadmap, yields.
+**Bottleneck 1, governance-at-scale / policy explosion (the central money risk of mesh).**
+As domains and datasets grow, naive per-object access rules explode toward the ~60,000-column surface and become unmaintainable and inconsistent, *and* a poorly-designed governance process becomes the new central queue.
+*Fix:* **tag-based policy-as-code** evaluated at the catalog chokepoint, write ~tens of rules over tags (`pii`, `domain:x`, `regional`), so policy scales with *rule count* (near-constant) not *dataset count*; auto-tag PII at publish via the platform. *Trade-off named:* policy-as-code demands real upfront investment (a policy engine, a tagging discipline, classification automation) and a team to own the rule library, versus the deceptive "ease" of ad-hoc grants, *which is a debt that compounds into an audit failure.* *Rejected: manual access review*, it doesn't scale and reintroduces the human bottleneck.
 
-**Where these programs actually fail:**
-1. **Savings regrowth**, the #1 failure mode. Fix: the governance loop (next section).
-2. **Stranded commitments**, usage drops below coverage after later optimization; the discount becomes contractual loss. Fix: the 70-80% ceiling, quarterly review, the rung ordering.
-3. **The invisible reliability cut**, deleting capacity that was idle *by design*. Which is the refusal:
+**Bottleneck 2, the discovery / stale-catalog problem (the trust killer).**
+A catalog is only as good as its metadata; if datasets are uncataloged, undocumented, or the metadata is stale, discovery fails and you still can't *trust* what you find, the swamp persists *with* a catalog bolted on.
+*Fix:* **make cataloging automatic and mandatory at publish** (the platform won't ship an un-registered, un-tagged, owner-less product, computational governance), **auto-harvest technical metadata and lineage from execution**, and surface a **freshness/quality score** so consumers can judge staleness. *Trade-off:* mandatory metadata adds friction to publishing (you can't ship a quick untracked table), accepted because *untracked data is exactly the swamp.* *Rejected: voluntary cataloging*, it always decays to stale and partial; humans don't document under deadline.
 
-**The one cut I refuse, say it unprompted.** The decomposition will surface a line that looks like pure waste: **standby DR capacity and N+1 failover headroom**, ~$400K/yr, utilization ~0%. I don't cut it, and the CFO gets one sentence: *"Its job is to be idle, an insurance premium; cutting it converts $400K of visible cost into an invisible RTO regression we'd discover during the worst hour of the company's year."* Same protected class: backup retention at the compliance floor, and incident-time observability (sample logs in steady state; never the telemetry you'd debug an outage with). **The refusal, with its dollar figure, proves you know what the spend buys, anyone can read a utilization graph.**
+**Bottleneck 3, lineage capture across heterogeneous engines (the compliance gap).**
+Lineage is easy to claim and hard to capture: data flows through Spark, dbt, Trino, the warehouse, streaming jobs, hand-rolled scripts, and column-level lineage must span all of them or GDPR/impact-analysis has blind spots.
+*Fix:* **standardize on an open lineage spec** (OpenLineage) emitted by the platform's paved-road tools, so any job run on the standard rails contributes lineage automatically; **route as many pipelines as possible onto the paved road** to shrink the dark-lineage long tail; accept and *track* the residual gap from legacy jobs. *Trade-off:* full automated column-level lineage across every engine is genuinely hard, the honest target is **>90% coverage of gold/silver with a known, shrinking gap**, not a false 100%. *Rejected: hand-maintained lineage docs*, stale on day one.
 
-<details>
-<summary>Go deeper, egress, NAT, and cross-AZ transfer surgery (IC depth, optional)</summary>
+**Bottleneck 4, the central-team bottleneck itself (the org failure the design targets).**
+The originating pain: a central team serializing every domain's data work, *and* the subtle re-failure where the new platform/governance team becomes the next bottleneck (every publish or policy change queues on them).
+*Fix:* **federate ownership to domains and re-charter the central team from *doing the work* to *building the paved road and owning the standards*** (the platform-team model, Conway). Domains self-serve; the central team's throughput is no longer in the critical path of every dataset. *Trade-off, stated plainly:* this is an **org change, not just an architecture change**, it needs domain teams with the maturity and headcount to own data products, which many orgs lack; *that maturity gap is the real reason mesh fails*, and naming it (and the people-side handoff to 13.13) is the Director signal. *Rejected: a bigger central team*, you can't hire your way out of a serialization point; throughput scales with parallel domain ownership, not central headcount.
 
-Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cross-AZ ~$0.01-0.02/GB *each direction*, NAT gateways ~$0.045/GB *processing on top*, private-subnet traffic to S3 through a NAT pays triple for nothing (fix: VPC gateway endpoints, free for S3/DynamoDB). Cross-AZ microservice chatter is the silent one: topology-aware routing / zonal affinity in the mesh often cuts that line 50-70%, checked against the availability posture, since aggressive affinity concentrates failure domains. Internet egress is a CDN problem: every edge cache hit is a gigabyte that never bills as origin egress; media-heavy products find the CDN pays for itself in egress before counting latency. Order of attack: gateway endpoints (free, hours) → NAT consolidation → zonal affinity → CDN offload ratio.
+**Bottleneck 5, inconsistent domain quality / "distributed swamp" (mesh's signature failure mode).**
+Federation's risk: 40 domains produce 40 different levels of quality, naming, and documentation, and "find/trust" fails *across* domains even if each domain is internally fine, plus duplicated, subtly-different copies of the same entity proliferate.
+*Fix:* **federated computational governance**, global standards (naming, required metadata, contract presence, classification, interoperability of key entities) **enforced by the self-serve platform**, so a non-conforming product literally can't publish; and **identify and govern the few cross-domain "master" entities** (customer, account) centrally as shared products to prevent the duplicate-customer-table problem. *Trade-off:* global standards constrain domain autonomy, the federation tension is *real*, you trade some local freedom for cross-domain coherence, and getting that balance right (enough standard to interoperate, enough freedom to move) is the core mesh design judgment. *Rejected: pure domain autonomy with no global standards*, that's not a mesh, it's a sanctioned swamp.
 
-</details>
+**Closing re-check:** policy scales by tags-as-code, not per-object review; discovery and lineage are auto-captured and mandatory, not voluntary and stale; the central team is re-chartered to the paved road so it's not the queue; and global standards are *computed* by the platform so federation doesn't fragment into inconsistency. The plane is discoverable, governed, traceable, and, critically, *not a new bottleneck*.
 
 ---
 
 ## D: Design evolution
 
-> Adaptation: evolution here is **governance, the machinery that makes savings stick**, plus absorbing the next constraint. A 30% cut that regrows in a year is a failed program with a good first quarter.
+> Push the dimensions and find what breaks; here the central evolution argument is **centralized platform vs federated mesh**, *when* to make the move, and how to do it incrementally rather than as a big-bang reorg.
 
-**The governance loop (what survives the program team):**
-- **Unit-cost targets enter quarterly planning** beside latency and availability, cost becomes an NFR every design review states.
-- **Showback monthly and automatic; chargeback stays the escalation tool**, the friction trade argued in A holds in steady state.
-- **The provision gate stays on; commitment coverage reviewed quarterly**, a portfolio to manage, not a purchase to forget.
-- **A standing FinOps function of 2-3** owns leverage. *Rejected: "every team owns cost" with no center*, diffuse ownership means commitment management, the highest-ROI lever, belongs to nobody.
+**The headline trade-off, centralized governance vs data mesh (and why not to cargo-cult either).** Centralized is genuinely better on *consistency and simplicity*; mesh is better on *scaling with domains and removing the central bottleneck*, at a real cost in complexity and required org maturity. The honest Director position:
+- **Stay/Start centralized** when you're below the crossover, **<~10 domains, a few-hundred datasets, the central team's queue is days not weeks.** One filing system, one source of truth, lowest coordination cost; mesh here is over-engineering that buys distributed inconsistency you don't need. **Most companies are here and should stay here.**
+- **Move to / build mesh** when you're past the crossover, **dozens of domains, low-thousands of datasets, the central team is a multi-week bottleneck (my ~3.6× shortfall math), and no one team can understand every domain's data.** Federate ownership, invest in the self-serve platform, enforce standards computationally.
+- **My prior:** for *this* large-org, ~40-domain, bottlenecked profile, the **mesh with a strong central governance plane**, but I would **never lead with "we're doing data mesh."** I'd lead with the *bottleneck symptom and the crossover number*, then introduce mesh as the *response*, and I'd migrate **incrementally**: stand up the governance plane (catalog/policy/lineage) and the self-serve platform *first* (they help even a centralized org), then **peel off the highest-pain, highest-maturity domains into ownership one at a time**, leaving low-maturity domains centrally managed until they're ready. The two models **coexist during the transition**, which is the pragmatic end-state for years, not a clean cutover. **The deepest trap is treating mesh as the goal rather than the bottleneck as the problem**; mesh is a means, and below the crossover it's the wrong one.
 
-**Under new constraints:**
-- **Growth resumes at 40%/yr:** nothing breaks, because the metric was unit cost all along, the bill grows while unit cost falls.
-- **LLM/GPU spend arrives:** a new top-3 line with inverted physics, GPU capacity is scarce, so the idle-capacity reflex flips (you hold reserved GPU you can't instantly rebuy), and the unit metric becomes cost per 1K tokens, driven by batching and serving efficiency, not rightsizing. The governance loop absorbs it; the rung-1 reflexes don't.
-- **Repatriation** ("would colo beat 50% cloud savings?"): a deliberate non-default. The math can work for stable workloads at this scale, but it trades elasticity and managed-service leverage for capex, a hardware-ops capability you'd have to build, and a 12-18 month migration (the live-migration playbook at maximum size). Exhaust the ladder first; revisit only for stable-floor workloads if the unit-cost curve flattens.
+**At 10× (hundreds of domains, tens of thousands of datasets, thousands of consumers):** the **governance plane and standards become the binding complexity**, not the storage. Policy-as-code is now existential (no human could review the surface); the **catalog's discovery quality** (search relevance, metadata freshness, quality scoring) becomes the make-or-break UX, a bad search at this scale *is* a swamp; **cross-domain master-data governance** (the shared customer/account entities) becomes a dedicated function to stop entity-duplication sprawl; and **lineage's transitive-closure performance** matters for GDPR at scale (the graph store earns its keep). The central platform team's leverage is entirely in the **paved road**, the better the self-serve tooling, the more domains it scales to without a central queue.
 
-**Where I'd delegate (the explicit Director move):** *"Platform benchmarks ARM on our top-10 services; my prior is 15-20% price-perf with two weeks of toolchain work, since the stack is JVM and Go with no native exotica. Data-platform owns log-tiering against the observability pipeline; my prior is a 7-day hot window covers 95% of queries, they verify against query-age telemetry. Finance owns commitment mechanics; I own the coverage ceiling and the rung ordering."* I keep the guardrails, the ordering, the refusal, and the unit-cost definition; everything benchmarkable is delegated with a stated prior.
+**Hardest trade-offs to defend:**
+- **Mesh complexity vs centralized simplicity (the crossover).** You take on a self-serve platform, federated governance, and an org change to win domain-scaling and kill the bottleneck; defending *why that complexity is worth it at this scale, and would be wrong below it*, with the crossover number, is the senior tell.
+- **Domain autonomy vs global coherence.** Too much autonomy → distributed swamp; too much central standard → you've recreated the central bottleneck as a standards committee. Drawing that line (federated *computational* governance, enforced by the platform, not a committee) is the core mesh judgment.
+- **Org maturity as the real constraint.** Mesh assumes domain teams that can *own* data products, headcount, skills, on-call. Many orgs adopt the architecture without the org and get a worse swamp. Naming that *people-and-org* precondition (and that it's the usual failure cause) is the altitude; the change-management of getting there is the job.
+
+**Where I'd delegate (the explicit Director move):**
+- **Governance/catalog tooling bake-off:** *"Data platform benchmarks Unity Catalog vs Polaris+DataHub vs a Collibra/Atlan-class tool against our multi-engine lineage and column-level policy needs; my prior is the native catalog of our lakehouse for the chokepoint plus a discovery layer for business metadata, the category, central-chokepoint catalog + policy-as-code + auto-lineage, is decided; the specific product isn't load-bearing."*
+- **Per-domain data-product quality and the contract library:** *"Each domain owns its products' quality and SLAs against the global standard; the platform team owns the standard, the contract framework, and the quality-test harness. I own that *every* product has an owner, a contract, and a classification, not the per-domain schemas."*
+- **The org transition / change management:** *"The people side, which domains are mature enough to own products, the re-charter of the central team, the incentives, is the leadership work of 13.13; my prior is to peel off high-maturity domains first and keep the rest centrally managed until ready. I own the operating-model decision and the crossover; I delegate the rollout sequencing with that prior."* What I keep, **the governance-plane architecture (catalog/policy-as-code/lineage chokepoint), the data-product-and-contract model, federated computational governance, and the centralized-vs-mesh crossover call**, is the altitude.
+
+**Handoff:** this layer *governs and organizes* the lakehouse and the pipelines that fill it; the **data-contract and quality** mechanics it depends on are 13.9; the **people-and-org leadership** of standing up the data org and the mesh transition is 13.13; and the **Conway's-law operating-model reasoning** generalizes from the architecture-strategy track.
 
 ---
 
 ## Trade-offs table: the pivotal decisions
 
-| Decision | Option A | Option B | Option C | Use when... |
+| Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
-| **Commitment depth** | **1-yr no-upfront plans** ~30% off, flexible | **3-yr commitments** ~50% off, locked | **On-demand** 0% off, fully liquid | **A** default on the post-rightsize baseline (our choice, preserves rung-4 moves). **B** only for the floor you'd bet the company keeps (core DB tier). **C** for volatile workloads and anything spot-eligible. |
-| **Accountability model** | **Showback** + provision gate | **Chargeback** to team P&L | **Central mandate** FinOps approves all | **A** default, 80% of behavior, 20% of friction (our choice). **B** targeted escalation for unresponsive teams. **C** never steady-state, acceptable only as the 72-hour freeze. |
-| **Deep-savings path** | **Re-architect in cloud** spot, ARM, egress, tiering | **Repatriate** stable workloads to colo | **Renegotiate** the enterprise agreement | **A** first, most of the gap, least risk, reversible (our choice). **B** after the ladder is exhausted, hardware-ops capability priced in. **C** in parallel always, $10M/yr is leverage; procurement work, not engineering risk. |
+| **Operating model** | **Federated data mesh** (domain-owned products + central platform + federated governance) | **Centralized data-platform team** (one team owns ingest/model/govern/serve) | **Ungoverned lake** (teams dump data, no owners) | **A** past the crossover, dozens of domains, central team is a multi-week bottleneck (our choice). **B** below it, <~10 domains, few-hundred datasets, queue is days (the right default for most). **C never**, it *is* the data swamp. |
+| **Governance enforcement** | **Policy-as-code + computational** (tag-based ABAC, enforced by the platform) | **Governance committee / manual review** (humans approve products & access) | **Per-object ACLs** (grant-by-grant on request) | **A** at any real scale, scales with rule-count not dataset-count (our choice). **B never** alone, it's the human bottleneck reborn. **C** only at tiny scale; collapses past ~hundreds of datasets. |
+| **Access granularity** | **Column- & row-level** (mask PII columns, filter rows) | **Table-level** (allow/deny whole datasets) | **Database-level** (coarse, by schema) | **A** for regulated/PII data, the realistic default, GDPR-precise (our choice). **B** when no column is differentially sensitive. **C** only for fully-public or fully-internal coarse zones. |
+| **Catalog/tooling** | **Buy** (Collibra/Atlan/DataHub-class + native catalog) | **Use the lakehouse-native catalog** (Unity/Polaris/Glue) | **Build in-house** | **B** for the governance *chokepoint* (it's where engines resolve tables). **A** layered on top for rich discovery/business-metadata UX. **C** rarely, only if a unique requirement justifies owning it; mostly not worth the build. |
 
 ---
 
 ## What interviewers probe here (Director altitude)
 
-- **"You have 72 hours, what do you do?"**, *Strong:* visibility first (billing export, top-20 items), delete only the provably orphaned, freeze commitments, and stand up the guardrail dashboard *before* any risky cut. *Red flag:* cutting on day one with no decomposition, or spending the 72 hours forming a committee.
-- **"Why commitments after rightsizing?"**, *Strong:* a commitment is a contract on the baseline; commit first and you pay for the waste for 1-3 years, the ordering is a correctness property. *Red flag:* "buy reserved instances" as the opening move.
-- **"How do I know reliability didn't pay for this?"**, *Strong:* names evidence, flat error-budget burn, a *post-cut* DR drill with the RTO number, one revert on the record, and volunteers the refused cut. *Red flag:* "we were careful"; zero reverts (nothing was measured).
-- **"The bill is back up 18% a year later. What failed?"**, *Strong:* governance, not the cuts, names the loop, then checks whether regrowth is bad (unit cost up) or fine (growth with falling unit cost). *Red flag:* proposes another one-time purge, surgery for a chronic condition, twice.
-- **"What cut do you refuse?"**, *Strong:* a specific line with a dollar figure and a one-sentence CFO-language defense, insurance premium vs invisible RTO regression. *Red flag:* "nothing important" (content-free), or no refusal at all.
+- **"Centralized data team or data mesh, and why?"**, *Strong:* names the **crossover** first, centralized below ~10 domains / few-hundred datasets, mesh once the central team is a multi-week bottleneck, and quantifies it (the ~3.6× central-throughput shortfall); frames it as a **Conway's-law operating-model decision**, not a tooling one; refuses to cargo-cult mesh. *Red flag:* "we'll do data mesh" as a destination with no scale trigger, or "we'll add a catalog" while ignoring the org bottleneck entirely.
+- **"How does governance scale to thousands of datasets without becoming the new bottleneck?"**, *Strong:* **policy-as-code over tags** (ABAC), enforced *computationally* by the self-serve platform so non-compliant products can't publish and access is rule-based not ticket-based, scaling with rule-count, not dataset-count. *Red flag:* a governance committee or per-object grants, i.e., manual review, the human queue reborn.
+- **"A regulator asks who can see this customer's data and to delete it. Walk me through it."**, *Strong:* **column-level access policy** answers "who can see" from the policy store + audit log; **column-level lineage's transitive closure** finds every table derived from that user's PII for erasure; classification tags make both tractable; names snapshot/time-travel expiry as the gotcha. *Red flag:* table-level granularity, or no lineage, can't answer either precisely.
+- **"What actually makes data mesh fail in practice?"**, *Strong:* **org maturity**, domains lack the headcount/skills to own data products, so you get a *distributed* swamp; and **missing global standards**, autonomy without federated computational governance fragments into inconsistency. Names that it's a people problem as much as an architecture one. *Red flag:* treats mesh as a pure tech rollout, no mention of the org precondition.
+- **"You have a swamp today. What's the first thing you build, and what do you not do?"**, *Strong:* build the **governance plane (catalog + policy-as-code + auto-lineage) and the self-serve platform first** (they help even a centralized org), peel off high-maturity domains **incrementally**; do *not* big-bang-reorg into mesh or lead with the buzzword. *Red flag:* a top-down "everyone owns their data now" mandate with no platform and no sequencing.
 
 ---
 
 ## Common mistakes
 
-- **Cutting before decomposing.** Peanut-butter cuts ("everyone trims 20%") starve efficient teams, miss the concentrated waste, and break guardrails, designing before requirements, in dollars.
-- **Committing before rightsizing.** Locks the waste into a 1-3 year contract; the most expensive ordering mistake and the easiest probe to fail.
-- **Reporting absolute spend instead of unit cost.** At 20% growth, absolute targets put the program at war with the business.
-- **Cutting the insurance:** idle DR, N+1 headroom, backup retention, incident telemetry. Savings visible this quarter; the RTO regression invisible until the worst day. Name the refusal before being asked.
-- **No governance loop.** A one-time purge regrows in 4-6 quarters; you've scheduled a rerun of the same program with less credibility.
+- **Cargo-culting data mesh.** Adopting mesh because it's fashionable, below the crossover, where a centralized platform team is simpler and *correct*. Mesh trades a central bottleneck for distributed inconsistency; that trade only pays once the bottleneck is real and quantified.
+- **Solving discovery, ignoring the org.** Standing up a catalog while the central team stays the serialization point for every dataset. A catalog over a central bottleneck is a nicer-looking swamp; the architecture mirrors the org (Conway), and the org is the bottleneck.
+- **Manual governance.** A review committee or per-object access grants over thousands of datasets, it doesn't scale, drifts into inconsistency and audit failure, and *recreates the human bottleneck* as an access-request queue. Governance must be **policy-as-code, computationally enforced.**
+- **Treating data products as just tables.** Dropping the owner, SLA, contract, and classification, the very metadata that makes data *trustworthy and discoverable*, so consumers still can't judge or rely on it. The metadata *is* the product.
+- **Mesh without the platform or the org maturity.** Mandating domain ownership without building the self-serve paved road, or without domains that can actually own products. You get a *distributed* swamp, the signature mesh failure, and the cause is usually people, not technology.
 
 ---
 
 ## Interviewer follow-up questions (with model answers)
 
-**Q1. The CFO wants 40% in two quarters. Walk me through the first 30 days.**
-> *Model:* First 72 hours: visibility and freeze, billing export on, top-20 line items (~80% of a $10M bill), delete the provably orphaned (~$0.5-0.8M run-rate), freeze new commitments, stand up the guardrail dashboard before anything that could bite. Days 3-30, the ladder in order: rightsize compute, k8s requests, and storage off p95 utilization (~12%), shipped like deploys, canary, watch 48h, proceed or revert, *then* 1-year Savings Plans at ~75% coverage of the new baseline (~12%). That's ~32% at near-zero risk, the mandate's floor, and it funds the 6-month re-architecture that closes to ~40-45%. The ordering is the design: visibility before cuts, rightsize before commit, quick wins before structural work.
+**Q1. We have 2,000 datasets across 40 teams and nobody can find or trust anything. Where do you start, centralized cleanup or mesh?**
+> *Model:* First I'd confirm the **bottleneck**: are domains waiting weeks on a central team to publish or get access? At 40 domains the central-team math doesn't close, roughly 12,000 engineer-days of change-work a year against a ~15-person team's ~3,300, a ~3.6× shortfall, so the queue grows without bound; that *is* the bottleneck, and it's why a bigger central team can't fix it (you can't hire past a serialization point). So the direction is **federation**, but I would *not* big-bang reorg or lead with "data mesh." I'd build the **governance plane and self-serve platform first**, catalog with rich business metadata so people can *find and judge* data, policy-as-code so access stops queuing, auto-captured column-level lineage so people can *trust* it, then **peel off the highest-pain, highest-maturity domains into ownership one at a time**, leaving the rest centrally managed until ready. The two models coexist for years; the platform helps either way. The crossover I'd name aloud: below ~10 domains I'd stay centralized.
 
-**Q2. A team claims your rightsizing will blow their latency SLO. How do you adjudicate?**
-> *Model:* With the mechanism, not authority. The framework already defines the test: canary the downsize on a slice, watch p99 and error-budget burn 48 hours against baseline, and the data decides, sustained burn means automatic, pre-agreed revert in minutes; that reversibility is *why* rightsizing sits on rung 2. Either the team is padding out of habit (p95 utilization data settles it) or the cut is genuinely wrong, and the revert happening *visibly and cheaply* is what keeps every other team cooperating. A cost program that argues with its own guardrails once loses all of them.
+**Q2. How do you do access control over thousands of datasets and tens of thousands of columns without it becoming a full-time queue?**
+> *Model:* **Tag-based policy-as-code (ABAC), enforced at the catalog chokepoint.** I classify data with tags (`pii`, `pci`, `domain:orders`, `regional`) at publish, automatically where I can, then write ~tens of rules over *tags*, "role `analyst` reads any `domain:*` except columns tagged `pii`; `pii.email` is masked except for `privacy`; `regional` rows filter by the requester's region." A new dataset inherits all of that the moment it's tagged, so governance scales with **rule-count (near-constant), not dataset-count**. Every decision is audited. The alternative, per-object grants on request, is the ~60,000-column surface by hand: it drifts into inconsistency, fails audit, and recreates the central bottleneck as an access-ticket queue. The cost of policy-as-code is real upfront investment, a policy engine, a tagging discipline, classification automation, and that's the trade I'd defend, debt-free scaling for upfront effort.
 
-**Q3. Why not 3-year commitments everywhere? The discount is nearly double.**
-> *Model:* A commitment is a contract on a forecast, and the program is about to invalidate the forecast twice, rightsizing shrinks the baseline in month 1, and rung 4 (spot, ARM) restructures what's left. An early 3-year commit either strands (utilization below coverage, contractual loss, worse than on-demand waste) or forecloses the re-architecture by making the old fleet artificially cheap to keep. So: 1-year no-upfront at 70-80% coverage of the post-rightsize baseline as default, 3-year only on the floor I'd bet the company keeps, the core DB tier, with quarterly coverage review. I'll trade ~15 points of discount for not betting three years against my own roadmap.
+**Q3. What's the difference between a "data product" and just a table in the lake, and why does it matter?**
+> *Model:* A table is anonymous; a **data product** has a **named owner, an SLA, a documented schema published as a versioned data contract, and a sensitivity classification.** That metadata is exactly what the scenario is missing, it's why nobody can *trust* the data. The owner means someone's on the hook; the SLA means consumers know the freshness/availability they can build on; the **contract** means another domain can depend on the product's *interface* without coupling to its internals, and a breaking change requires a new version rather than silently breaking downstream; the classification drives automatic policy. The product is the **unit of federated ownership**, it's what makes the mesh a mesh rather than a shared dumping ground. Modeling data as products, not tables, is the decision that turns sprawl into a governed, discoverable catalog.
 
-**Q4. Name a cut you'd refuse under direct CFO pressure, and defend it.**
-> *Model:* The standby DR capacity and N+1 headroom, ~$400K/yr at ~0% utilization, the worst-looking line on the report. Its job is to be idle: it's an insurance premium, and cutting it converts $400K of visible cost into an invisible RTO regression that materializes during the worst hour of the company's year. Same protected class: backup retention at the compliance floor, incident-time observability. What I offer instead: rungs 1-3 deliver 8× that amount in 30 days from spend that buys nothing, and I re-drill DR after every change touching redundancy so the premium provably still pays for coverage. If the CFO still wants the $400K, I want the revised RTO in writing, then it's a business decision made with open eyes, not a cost cut.
+**Q4. A regulator demands you delete a specific customer's data everywhere within 30 days. How does this design make that tractable?**
+> *Model:* Two pieces do the work. **Column-level lineage**, captured automatically from job execution as a graph, lets me run a **transitive closure** from the source PII column to *every* downstream table derived from it across bronze/silver/gold, so I find all of it, not just the obvious tables. Then the **table format's column-precise delete** erases the rows, and I use **column-level classification** so I knew exactly which columns are that customer's PII in the first place. The gotcha I'd name: **time-travel snapshots**, the deleted data lingers in old snapshots, so snapshot expiry must be set inside the compliance window. The audit log proves who could access it before deletion. This is why I insist on **column-level** lineage and policy, not table-level: table-level can't answer "which columns, derived where" precisely, and GDPR is column-precise. Lineage that's hand-maintained would have blind spots; it has to be captured from execution.
+
+**Q5. Your CTO read about data mesh and wants it everywhere by next quarter. You run 6 domains and the team isn't backed up. What do you say?**
+> *Model:* I'd push back with the crossover. At **6 domains and a central team whose queue is days, not weeks, we're *below* the threshold where mesh pays.** Mesh trades a central bottleneck, which we don't yet have, for distributed inconsistency and a heavy self-serve-platform investment and an org change that demands domain teams mature enough to own products, which is the usual reason mesh *fails*. So forcing it now would likely give us a *worse* swamp and slower delivery. What I'd do instead: **invest in the parts that help us today regardless**, a real catalog, policy-as-code, automated lineage, all valuable in a centralized model, and **define the bottleneck metric** (central-team queue depth, onboarding time) that would *trigger* federation. When we cross it, dozens of domains, multi-week queue, we'll peel off mature domains incrementally with the platform already in place. That's leading with the *problem* (the bottleneck), not the *buzzword* (mesh), which is the whole discipline here.
 
 ---
 
 ### Key takeaways
-- **Decompose before you cut.** $10M ≈ 40% compute, 20% databases, 15% storage, 8% transfer, 7% observability, the program lives where the money is.
-- **The ladder's ordering is the design:** delete idle (~8%) → rightsize (~12%) → commit (~12%) → re-architect (~8-15%). Commit *after* rightsizing or you contract to keep the waste; ~32% lands in 30 days and funds the 6-month tail to ~40-47%.
-- **Guardrails precede cuts:** SLO burn, RTO/RPO re-drilled *after* changes, deploy frequency, on a dashboard from hour zero, reverts pre-agreed. Evaluation = dollars saved *and* damage provably avoided; one revert on the record is evidence, not embarrassment.
-- **The refusal is the credibility moment:** idle DR / N+1 headroom (~$400K) is an insurance premium, name it, with the dollar figure, unprompted, in CFO language.
-- **Savings stick only with governance:** growth-normalized unit cost as the signed metric, showback + provision gate as the interface, chargeback as escalation, commitments as a quarterly portfolio. Without the loop, the bill regrows in 4-6 quarters.
+- **This is an org-plus-architecture problem (Conway), not a tooling problem.** Data sprawl at scale is a *central-team bottleneck*; the architecture mirrors the org. Open with **"how many domains, and is the central team the bottleneck?"**, it flips the operating model between centralized and mesh, and **E becomes the scale of domains/datasets/policies/team-throughput**, not QPS.
+- **Don't cargo-cult mesh, name the crossover.** Below ~10 domains / a few-hundred datasets, a **centralized platform team is correct and simpler**; mesh earns its complexity only once the central team is a multi-week bottleneck (the ~3.6× throughput-shortfall math). Mesh trades a central bottleneck for distributed inconsistency, pay it only when the bottleneck is real.
+- **The governance plane is a policy chokepoint, not a human queue: catalog + policy-as-code + column-level lineage.** Discovery must let consumers *judge* trust (owner, SLA, quality, lineage), not just find; access is **tag-based ABAC enforced computationally** so it scales with rule-count, not dataset-count; **column-level** lineage and policy are what make GDPR and impact-analysis tractable.
+- **Data products + contracts are the unit of federated ownership.** A product has an owner, SLA, versioned contract, and classification, the metadata that turns an anonymous table into trustworthy, discoverable data; the contract is the inter-domain interface that lets domains ship independently.
+- **Federated computational governance is the resolution of the autonomy-vs-coherence tension:** global standards enforced *automatically* by a self-serve platform (non-compliant products can't publish), local ownership of the data. Mesh's real failure cause is **org maturity** (domains that can't own products) and **missing standards** (a distributed swamp), it's a people problem as much as an architecture one. Delegate the tooling bake-off and per-domain quality with priors; keep the operating-model call, the crossover, and the governance-plane architecture.
 
-> **Spaced-repetition recap:** Cost-cutting = a **sequenced program with guardrails**, not a tip list. Decompose (compute+DB ≈ 60%); run the ladder **in order**, delete > rightsize > **then** commit > re-architect, as **72h (see/stop/freeze) → 30d (~32%) → 6mo (~40-47%)**. Guardrails from hour zero: SLO burn, post-cut DR drill, deploy frequency; report **unit cost**, not the bill. Refuse the insurance cut (idle DR ≈ $400K, "its job is to be idle"). Governance loop or it all regrows.
+> **Spaced-repetition recap:** "Govern the data lake / data mesh" = **an org problem wearing an architecture diagram (Conway).** Open with **"how many domains, is the central team the bottleneck?"** Below the crossover (~<10 domains, few-hundred datasets, queue in days) → **centralized platform team**, simpler and correct. Past it (dozens of domains, low-thousands of datasets, multi-week central queue, the ~3.6× shortfall) → **federated data mesh**: domains own **data products** (owner + SLA + versioned **contract** + classification), a central **platform team** owns the **self-serve paved road** and the **global standards**. The **governance plane** is a *policy chokepoint, not a human queue*: **catalog** (find *and judge*: owner/freshness/quality/lineage), **policy-as-code** (tag-based ABAC, **column/row-level**, computationally enforced, scales with rule-count not dataset-count), **column-level lineage** (trust/impact/GDPR transitive-closure, auto-captured). **Federated computational governance** = global standards *automatically enforced* + local ownership; it resolves autonomy-vs-coherence. Bottlenecks: policy explosion (→ tags-as-code), stale catalog (→ mandatory auto-cataloging), heterogeneous-engine lineage (→ OpenLineage paved road, >90% coverage), the central-team bottleneck (→ re-charter to the paved road), inconsistent domain quality (→ computational standards + central master-data). **Never cargo-cult mesh**; lead with the *bottleneck*, not the buzzword; migrate incrementally, the models coexist for years. Real failure cause = **org maturity** (people). Governs the lakehouse, depends on contracts/quality. Delegate tooling + per-domain quality + rollout with priors; keep the operating-model call, the crossover, and the governance-plane architecture.
 
 ---
 
-*End of Lesson 8.5. The cost question inverts the usual design problem: instead of spending money to buy reliability and scale, you remove money while proving reliability and velocity never moved, the guardrail dashboard plays the role the waiting room played for a hot-shard queue, the rung ordering is as load-bearing as the expand-migrate-contract ladder of a live migration, and the refused cut is where the interviewer learns whether you know what the spend was buying.*
+*End of Lesson 8.5. The data-lake-governance / data-mesh question is the one that hides an org chart inside an architecture diagram: data sprawl at scale is a Conway's-law central-team bottleneck, and the answer is two interlocking decisions, a **governance plane** (catalog + policy-as-code + column-level lineage, a policy chokepoint, not a human queue) and an **operating model** (centralized below the crossover, federated mesh past it). The load-bearing discipline is refusing to cargo-cult mesh, naming the crossover in numbers, leading with the bottleneck rather than the buzzword, and recognizing that mesh's real failure mode is org maturity, not technology. Governs the lakehouse of 14.1, rests on the data contracts of 13.9, and hands the people-and-org transition to 13.13. Next: 14.6.*

@@ -1,319 +1,154 @@
 ---
-title: "7.7 — Splitwise / Expense Sharing"
-description: The invariant-first LLD problem - make balances-sum-to-zero structurally unviolable with an immutable ledger and integer cents, use Strategy for split types, and earn Director credit by naming the min-cash-flow rabbit hole and deferring it.
+title: "7.7 — Orchestration & Transformation"
+description: A data platform is a graph of interdependent jobs; orchestration (Airflow/Dagster/Prefect) schedules, sequences, retries, and backfills them, and dbt does the versioned, tested "T" of ELT, together they make the platform reliable and rebuildable.
 sidebar:
   order: 7
 ---
 
-> **Why this gets asked:** Splitwise is the machine-coding staple of Flipkart/Uber/Swiggy/Ola loops and a common US "design a real product" LLD prompt - the cleanest vehicle for **invariant-first design**. A junior writes `User`, `Expense`, `Split` classes and mutates a balance map. A Director states the invariant first - **all balances sum to zero, always** - builds a structure where violating it is *impossible by construction*, handles money in integer cents with a deterministic remainder rule, and names the min-cash-flow rabbit hole only to **defer it as an optimization**. The separation happens in the first five minutes.
-
 ### Learning objectives
-- Lead with the **invariant**: every expense posts ledger entries summing to zero; balances are **derived views**, never mutable truth - the ledger thinking at LLD scale.
-- Handle money correctly: **integer cents**, no floats ever, and a **deterministic rule** for who eats the remainder in a 1/3 split.
-- Use the **Strategy pattern** for split types (equal / exact / percent), with validation owned by the strategy and a contract that *enforces* the invariant.
-- Stress the invariant under **concurrent expense adds**, and show why an append-only ledger makes the race disappear.
-- Execute the Director move on **debt simplification**: name it, classify it as a read-side optimization, state its complexity, defer it.
+- State the thesis: a data platform is **not a pipeline, it's a graph of interdependent jobs**, and the layer that schedules, sequences, retries, backfills, and SLA-monitors that graph (the **orchestrator**) plus the layer that defines the transformations as versioned, tested code (**dbt**) are what make the platform reliable and *rebuildable* (the governing invariant).
+- Reason about a pipeline as a **DAG**: tasks, dependency edges, schedules, retries with backoff, and SLAs/alerting, reusing the scheduler/executor machinery of 3.15 and 5.14 rather than re-deriving it, and knowing where the data-platform orchestrator adds *data-aware* concerns the generic scheduler does not.
+- Internalize the property that makes everything survivable: **idempotent, partition-scoped tasks** so any date can be re-run deterministically, which is what makes **backfill** a bounded, costable operation (`N partitions × per-partition cost`) instead of an outage, the same instinct as the idempotent reprocessing.
+- Choose between **task-centric orchestration** (Airflow: mature, imperative, ubiquitous) and **data/asset-aware orchestration** (Dagster/Prefect: lineage- and freshness-native, better local dev, smaller ecosystem), naming the rejected alternative's cost.
+- Place **dbt** correctly: SQL models compiled to and run *in* the warehouse, a `ref()`-built DAG with lineage, built-in tests and docs, incremental models, the "analytics engineering" discipline, and know exactly **where orchestration ends and transformation begins**.
 
 ### Intuition first
-Splitwise is a tiny **accounting system wearing a consumer-app costume**. Accountants solved it 600 years ago with double-entry bookkeeping: every transaction records debits and credits in equal measure, so the books balance **by construction, not by audit**. The junior instinct is the opposite: keep a cell saying "Alice owes Bob $20" and mutate it per expense. Mutable cells drift - a bug, a retry, a crash between two updates - and corrupted state looks exactly like valid state. The accountant records **immutable journal entries** and *derives* balances by summing; the worst failure becomes a stale cache you recompute, never a corrupted truth. Everything here is that one idea applied: **make the invariant structural, so no code path - correct or buggy - can violate it.**
+Think of a data platform as a **commercial kitchen during dinner service.** The raw deliveries (ingested data) arrive at the back door, and a finished plate (a `gold` table a dashboard reads) is the result of a *chain* of prep steps: wash and chop, make the stock, build the sauce, plate. Two completely different people run this kitchen, and conflating them is the classic mistake.
 
-Two more traps frame the hour. Money: `$20.00 / 3` in floating point is `6.666…`, and three of those don't sum back to 20 - money is integer cents plus a stated rule for the leftover cent. And the shiny algorithm - "settle the group in fewest payments" - is a 15-minute rabbit hole producing zero working code. Name it, defer it.
+The **expediter** stands at the pass and calls the order: *"sauce can't start until the stock is done; the stock can't start until the bones are roasted; everything for table 9 must be out by 8:00."* The expediter doesn't cook a single thing. He owns **sequence, timing, dependencies, and the promise to the table**, start each station when its inputs are ready, re-fire a station that flubbed a step, and raise hell if table 9 is going to be late. That's the **orchestrator** (Airflow/Dagster/Prefect): it knows *when* each job is due and *what must finish first*, and it owns the SLA.
 
----
+The **line cook** at a station actually transforms ingredients into food: applies the recipe, turns stock and roux into sauce. The recipe is **written down, versioned, and tested**, not improvised from memory, so any cook can reproduce the same sauce tomorrow, and a new cook can read the recipe and see exactly which ingredients it depends on. That's **dbt**: the transformation logic as readable, version-controlled, tested SQL, with the dependency between recipes (this sauce *refs* that stock) declared so the lineage is explicit.
 
-## R - Requirements
+Hold that split, **expediter calls the order, line cook follows the recipe.** And the property that saves the kitchen on a bad night: every recipe is reproducible from the raw deliveries, so if you discover the stock was wrong all week, you don't panic, you **re-roast the bones and re-fire just the affected stations for just the affected days.** That deterministic re-cook is **idempotent partition-scoped backfill**, and it's the whole reason the platform is trustworthy.
 
-> **LLD adaptation:** in a machine-coding round, R scopes the **object model** and - critically - promotes the **invariants to first-class requirements**. Correctness properties *are* the non-functional requirements here; there is no QPS story to hide behind.
+### Deep explanation
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *Split types?* → **Equal, exact, percentage** - designed so a fourth (shares/weights) drops in without touching existing code.
-- *Multiple payers?* → Yes in the model (the ledger handles it for free); single-payer in the demo path.
-- *Edit/delete?* → Yes - as **reversal entries**, never in-place mutation.
-- *Simplify debts?* → Acknowledged, **explicitly out of v1** (see Design evolution).
-- *Currency?* → Single in v1; stored per expense so multi-currency is additive.
+**A data platform is a DAG of jobs, and that single fact creates the need for orchestration.** A real platform has hundreds of tables, each derived from others: ingestion lands `bronze`, a cleaning job builds `silver`, a rollup builds `gold`, a feature job reads three `gold` tables to build an ML feature set. These have **dependency edges** ("build `silver_orders` only after `bronze_orders` *and* `bronze_users` land") and **schedules** ("the daily marts run after the 02:00 ingestion completes"). Modeled as a **directed acyclic graph**, nodes are tasks, edges are "must finish before", this is the shape a generic cron cannot manage: cron fires job B at a guessed time and *prays* job A finished, which couples correctness to a timing guess. The orchestrator instead fires B **when A's success is recorded**, and that dependency-driven firing is the reason the discipline exists. At a mid-size company a single platform commonly runs **hundreds to low-thousands of DAGs** with **tens of thousands of task instances per day**; the orchestrator is the control plane that keeps that graph correct, retried, on time, and observable.
 
-**Functional requirements:**
-1. **Add expense:** payer(s), total, participants, split strategy.
-2. **View balances:** per user ("owed ₹540 net") and per pair ("Alice owes Bob ₹200").
-3. **Settle up:** record a payment that reduces a pair balance.
-4. **Groups:** expenses scoped to a group; per-group balances.
-5. **Expense history:** an auditable, ordered log.
+**What the orchestrator owns (and what it reuses).** The orchestrator is a specialized scheduler, and 3.15 / the job-scheduler problem already taught the hard mechanics, a durable job store as source of truth, leader election fenced against zombie double-fires, the scheduler/executor split through a queue, at-least-once execution made safe by idempotency. **Do not re-derive that here; reuse it.** Airflow's scheduler → executor → worker topology *is* the split. What the *data-platform* orchestrator adds on top of a generic task scheduler is four data-aware concerns:
 
-**Invariant requirements (the real NFRs):**
-- **Sum-to-zero:** across any group - and the whole system - signed balances sum to exactly 0, at all times, including mid-failure.
-- **Conservation of cents:** an expense's shares sum to *exactly* the total. Not within a cent - exactly.
-- **Determinism:** the same input always produces the same allocation (retries and reconciliation depend on it).
-- **Auditability:** every balance is explainable as a sum of immutable entries.
+- **Dependency-driven firing.** A task runs when its upstream tasks *succeed*, not at a wall-clock guess. The edge is the unit, not the time.
+- **Retries with backoff, per task.** A flaky source API or a transient warehouse error gets `retries=3, retry_delay=exponential+jitter` (the policy) so one blip doesn't fail a 200-task DAG; the task that genuinely can't recover surfaces, the rest don't.
+- **SLAs and alerting on lateness.** "The `dau_by_region` mart must land by 07:00." A *missed* run is silent (the silent-miss problem) unless the orchestrator alarms on `expected_completion vs actual`. This is the freshness contract of 13.1 made operational.
+- **Backfill as a first-class operation.** "Re-run every day from 2026-01-01 to today." The orchestrator parameterizes each run by its **partition** (usually a date) and can launch one run per partition deterministically, *if the tasks are idempotent*, which is the next point.
 
-**Cut:** receipt OCR, notifications, recurring expenses, currency conversion, simplify-debts. Scoping to *add expense → derive balances → settle* and saying so is itself the signal.
+**The load-bearing property: idempotent, partition-scoped tasks.** This is the single most important design rule in the lesson, and it ties straight back to the *rebuildable* invariant and the idempotent reprocessing. Each task run is **scoped to one partition** (e.g. `WHERE event_date = '2026-06-22'`) and is **idempotent**, re-running it for that date *replaces* that date's output rather than appending to it. The standard implementation is **delete-insert (or `INSERT OVERWRITE`) on the partition**: the task deletes the target partition and rewrites it from the retained raw input, so running it once or five times yields the identical result. Contrast the **rejected alternative, a non-idempotent append** (`INSERT INTO target SELECT … FROM source`): on any retry, a failover, or a backfill, the rows are added *again*, and you **double-count**. A retry of a flaky task silently inflates revenue 2×; nobody sees it until finance disputes the number. The Director-altitude statement: *I make every task idempotent and partition-scoped, delete-insert the partition, never blind-append, so a retry, a backfill, or a replay is deterministic and safe; that property is what makes the platform rebuildable rather than fragile.*
 
----
+**Backfill, quantified, the payoff of idempotency.** Because tasks are idempotent and partition-scoped, **backfill is a bounded, costable operation**, not an emergency. You found a bug in the `silver_orders` logic that's been wrong for 90 days; the fix is "re-run `silver_orders` and everything downstream of it for those 90 partitions." The cost is **`N partitions × per-partition cost`**, if each daily run scans 200 GB at \$5/TB, that's **90 × 200 GB × \$5/TB ≈ \$90**, and at, say, 20 parallel runs it finishes in **90 ÷ 20 ≈ 5 waves**, well under an hour. You can *quote that number before you run it*. Without idempotency the same fix is an outage: you'd have to manually figure out what to delete, risk double-counting, and probably take the table offline. The discipline of 13.1, rebuildable from retained raw via idempotent recomputation, is exactly what turns a logic bug from an incident into a parameterized re-run.
 
-## E - Estimation
+**Task-centric (Airflow) vs data/asset-aware (Dagster, Prefect).** The major orchestration decision. **Airflow** is task-centric and imperative: you write a DAG of *operators* ("run this Python", "run this SQL", "wait for this file"), and the unit Airflow reasons about is *the task and whether it ran*. It is the **mature, ubiquitous default**, vast ecosystem, every cloud has a managed version (MWAA, Cloud Composer), every data engineer knows it. Its cost: it is **task-aware, not data-aware**, Airflow knows task X ran, but not *what data asset* X produced, so lineage, freshness, and "which downstream assets are now stale" are bolted on, not native; local development and testing are historically awkward. **Dagster** (and to a lighter degree **Prefect**) is **asset-aware**: you declare the *data assets* (tables) and their dependencies, and the framework derives the DAG, tracks **asset lineage and freshness natively**, and offers far better local dev, typing, and testability. Its cost: a **smaller ecosystem and community**, fewer pre-built integrations, and a newer operational track record. The Director move: *reject Dagster's asset model for Airflow when the team already runs Airflow at scale and the ecosystem/hiring-pool advantage outweighs lineage ergonomics; reject Airflow for Dagster on a greenfield platform where asset lineage, freshness SLAs, and local testability are first-order and the smaller ecosystem is acceptable.* Tie the bake-off to a stated prior and delegate it.
 
-> **LLD adaptation:** estimation shrinks to a two-minute proof that **this is not a scale problem** - quantified, so the rest of the hour is spent where the difficulty actually lives: correctness.
+**Transformation: dbt, and the analytics-engineering discipline.** Once data is ingested as raw `bronze` (the **EL** of ELT), the **T**, turning raw into clean, conformed, business-ready tables, is where dbt lives. dbt's model: you write each transformation as a **`SELECT` statement in a `.sql` file**; dbt **compiles it and runs `CREATE TABLE/VIEW AS` inside the warehouse** (Snowflake/BigQuery/Databricks), so the heavy compute happens where the data already is, no separate processing cluster moving terabytes out and back. The defining mechanic is **`ref()`**: a model says `FROM {{ ref('silver_orders') }}` instead of hardcoding a table name, and from those `ref()` calls dbt **infers the dependency DAG and the full lineage graph automatically**, it knows `gold_revenue` depends on `silver_orders` depends on `bronze_orders`, builds them in the right order, and renders the lineage. On top of that dbt gives you four things hand-rolled SQL doesn't: **version control** (models are code in git, reviewed and rollback-able), **built-in tests** (`not_null`, `unique`, `accepted_values`, relationship tests, feeding 13.9), **auto-generated docs and lineage**, and **incremental models** (process only new/changed partitions instead of rebuilding the whole table, the same partition-scoped idea as above, so an incremental `silver` over 2 TB of history processes only today's few GB).
 
-**Load:** ~10M MAU × ~5 expenses/month ≈ 50M/month ≈ **20 writes/s** average, ~100/s peak; balance reads ~10× → **~1K reads/s**. A single Postgres yawns at this.
+**dbt vs the rejected alternatives, why "analytics engineering" beats scripts.** Before dbt, the T was a pile of **hand-rolled SQL scripts** run by a cron, or **stored procedures** living in the database. Both are **untested, unversioned, and opaque**: there's no dependency graph (you maintain run-order by hand and it rots), no tests (a column silently goes null and the metric is wrong, the silent-wrong-number failure), no lineage (when finance asks "where does this number come from?" you read 4,000 lines of SQL to find out), and stored procs are invisible to git and code review. **Reject hand-rolled scripts / stored procs for dbt** because dbt turns transformation into *software*: versioned, tested, documented, with an automatically-derived and rebuildable DAG. That is the whole "analytics engineering" discipline, applying software-engineering rigor (review, tests, CI, modularity) to the SQL transformation layer. The trade-off to name honestly: dbt adds a **build-and-deploy toolchain and a learning curve**, and it's SQL-centric (Python transforms need dbt's Python models or a separate processing step); for a three-table throwaway pipeline that overhead may not pay for itself, but at any real platform scale it does.
 
-**Storage:** ~700 B/expense (header + ~4 ledger lines) → **~35 GB/year** with indexes. Years of headroom on one primary + replica; sharding is a someday-by-`group_id` footnote.
+**Where orchestration ends and transformation begins, separation of concerns.** This boundary is a design decision interviewers probe. The clean answer: **the orchestrator schedules and sequences; dbt transforms.** dbt has its *own* internal DAG (the `ref()` graph of models), but dbt does **not** schedule itself, retry across infrastructure failures, or wait on external dependencies, that's the orchestrator's job. The standard, correct pattern is **orchestrate-the-transform**: the orchestrator runs ingestion, then triggers `dbt build` (often as a single task, or sharded into per-model tasks for granular retries), then triggers downstream consumers (BI refresh, reverse-ETL, ML feature jobs), and owns the SLA and alerting over the whole chain. The **rejected alternative, transform-inside-ingestion** (do the cleaning and conforming *during* the EL step, e.g. transform-on-the-fly in the ingestion job), couples two concerns that fail and evolve independently: you can't re-run a transform without re-ingesting, you can't test the transform in isolation, and a transform-logic change forces an ingestion redeploy. Keeping EL and T separate (ELT, not ETL) is what lets you re-run the T over already-landed raw, which is, once more, the rebuildable invariant of 13.1.
 
-**The numbers that actually matter are money numbers.** ₹2,000.00 split 3 ways: as floats, `666.67 × 3 = 2000.01` - the books are off by a paisa and the invariant is dead. As integers: `200000 / 3 = 66666` remainder `2` → shares `[66667, 66667, 66666]`. **Two cents must be deliberately assigned by a stated rule.** That arithmetic - not QPS - is this problem's estimation step, and saying so out loud is the altitude signal.
+<details>
+<summary>Go deeper, Airflow task semantics: execution_date, idempotency, and SKIP LOCKED (IC depth, optional)</summary>
 
-**What estimation decided:** one relational DB, ACID transactions, no distributed-systems machinery - 100% of the design budget goes to the invariant and the object model.
+- **`execution_date` / `logical_date` is the partition key.** Airflow passes each DAG run the *logical* date it represents (not wall-clock now), and idempotent tasks template their SQL on it: `WHERE event_date = '{{ ds }}'` with a delete-insert. This is what makes `airflow dags backfill --start-date … --end-date …` deterministic, each run rewrites exactly its own partition.
+- **Catchup and backfill.** Airflow's `catchup=True` will, on first deploy or after a pause, schedule a run for *every* missed interval, the 3.15 catch-up-firing behavior. Teams usually set `catchup=False` and backfill explicitly to avoid an accidental thundering herd of historical runs (the herd, applied to DAGs).
+- **HA scheduling reuses SKIP LOCKED.** Airflow 2.x runs multiple active schedulers against one metadata DB using `SELECT … FOR UPDATE SKIP LOCKED` (the exact pattern) so two schedulers never claim the same task instance, the decentralized-contention topology, not a single leader.
+- **dbt incremental internals.** An incremental model wraps its `SELECT` in a merge/insert against only rows newer than the current max (`{% if is_incremental() %} WHERE updated_at > (SELECT max(updated_at) FROM {{ this }}) {% endif %}`), and a `--full-refresh` rebuilds from scratch, the manual escape hatch when the incremental logic itself changed.
 
----
+</details>
 
-## S - Storage
-
-> **LLD adaptation:** S becomes "**what is the source of truth?**" - the single most consequential decision in the problem.
-
-**Truth = the immutable journal.** Two tables: an `expenses` header (immutable) and `ledger_entries` - one row per participant per expense with a **signed `amount_cents`**: the payer positive (what they fronted minus their own share), each ower negative. By construction, **entries for one expense sum to zero**. A settlement payment is *not a special case* - just another expense type posting two entries. One concept, uniform.
-
-**Balances = a derived view.** `SUM(amount_cents)` grouped by user (and by pair for "who owes whom"), **cached in a `balances` table updated in the same ACID transaction** - but rebuildable from the journal at any time, with a cheap **nightly reconciliation** asserting cache = journal and global sum = 0.
-
-- *Rejected - a mutable pairwise balance map as the truth:* every expense becomes a read-modify-write on N cells; a crash between updates corrupts silently; no audit trail; concurrent adds race. The design most candidates write first - and the one the interviewer is waiting to attack.
-- *Rejected - full event-sourcing/CQRS infrastructure:* Kafka, projections, snapshots - pure ceremony at 20 writes/s. The insight worth keeping: **the journal table already *is* event sourcing at table scale**. Take the idea, skip the infra.
-- *Store:* **Postgres** - the design leans on multi-row ACID transactions, exactly the workload relational stores exist for. A KV store would make us hand-build the atomicity the invariant needs.
-
-This is the payment-ledger discipline at LLD scale: same invariant, same append-only posture, one process instead of a distributed system.
-
----
-
-## H - High-level design
-
-> **LLD adaptation:** H is not a service-box diagram - it's the **object collaboration**: which component owns which responsibility, and where the Strategy seam sits.
+### Diagram: an orchestration DAG triggering a dbt medallion lineage
 
 ```mermaid
-flowchart TB
-    C[Client] --> ES[Expense Service]
-    ES --> SS{Split Strategy}
-    SS --> EQ[Equal]
-    SS --> EX[Exact]
-    SS --> PC[Percent]
-    ES --> TX[ACID transaction]
-    TX --> LG[(Ledger entries)]
-    LG --> BV[Balance view]
-    LG --> RJ[Reconciliation job]
-
-    style LG fill:#7a1f1f,color:#fff
-    style SS fill:#2d6cb5,color:#fff
-    style BV fill:#1f6f5c,color:#fff
+flowchart LR
+    subgraph ORCH["Orchestrator (Airflow / Dagster), schedules, retries, SLA"]
+      direction TB
+      ING["ingest_orders<br/>(EL → bronze) 13.6"]
+      ING2["ingest_users<br/>(EL → bronze) 13.6"]
+      DBT["run: dbt build<br/>(triggers the model DAG →)"]
+      PUB["publish<br/>BI refresh · reverse-ETL · ML features"]
+      ING --> DBT
+      ING2 --> DBT
+      DBT --> PUB
+    end
+    subgraph DBT_DAG["dbt model lineage (ref()-derived, runs IN the warehouse) 13.8"]
+      direction LR
+      BO["bronze_orders"] --> SO["silver_orders<br/>(idempotent: delete-insert partition)"]
+      BU["bronze_users"] --> SU["silver_users"]
+      SO --> GR["gold_revenue<br/>(incremental)"]
+      SU --> GR
+      GR --> TESTS{{"dbt tests<br/>not_null · unique 13.9"}}
+    end
+    DBT -.compiles & runs.-> DBT_DAG
+    SLA["SLA monitor: gold_revenue by 07:00<br/>alert if late (silent-miss, 3.15)"] -.watches.-> PUB
+    style DBT fill:#1f6f5c,color:#fff
+    style GR fill:#1f6f5c,color:#fff
+    style TESTS fill:#e8a13a,color:#000
+    style SLA fill:#2d6cb5,color:#fff
 ```
 
-**Flow, compressed:** `ExpenseService.addExpense` hands the request to the chosen **SplitStrategy**, which *validates* (percents sum to 100; exact amounts sum to total) and *allocates* - integer-cent shares summing **exactly** to the total, remainder assigned deterministically. The service converts shares to signed ledger entries (payer positive, owers negative - net zero by arithmetic) and appends header + entries + cached-balance updates in **one ACID transaction**. Reads hit the cache; reconciliation is cheap insurance against silent drift.
+The orchestrator owns the outer DAG (sequence, retries, the 07:00 SLA); dbt owns the inner `ref()`-derived model DAG and runs it inside the warehouse. The boundary between them is the `run: dbt build` task, that's where orchestration ends and transformation begins.
 
-**Why Strategy and not an enum-switch:** split types are the *axis of change* - interviews routinely add "now support split-by-shares" mid-round. A `SplitStrategy` interface makes that a new class with zero service edits; a switch makes it a shotgun edit. *Rejected - subclassing `Expense` per type:* couples the split *algorithm* to the expense *record*, which only cares that shares balance.
+### Worked example: nightly marts for a marketplace, with a 90-day backfill
+A marketplace runs nightly analytics: orders and users are ingested to `bronze`, transformed through `silver` to a `gold_revenue_by_seller` mart that feeds finance and a seller dashboard, with a contract that the mart **lands by 07:00**.
 
----
+- **The DAG.** One Airflow DAG, scheduled daily. Tasks: `ingest_orders` and `ingest_users` (EL) run in parallel; both must succeed before `dbt_build`, which compiles and runs the dbt models (`bronze → silver → gold`) inside BigQuery; then `refresh_bi` and `sync_to_finance` (reverse-ETL) run. ~40 task instances/night across this DAG; the platform has ~300 such DAGs.
+- **Idempotency and partitioning.** Every dbt model is partition-scoped on `event_date` with delete-insert semantics, and `gold_revenue_by_seller` is **incremental** (only today's partition is recomputed, ~8 GB, not the 2 TB of history). **Rejected alternative:** a blind `INSERT INTO gold_revenue SELECT …`, a single retried task would double-count a day's revenue and silently overstate seller payouts. The delete-insert is the safety property.
+- **Retries and SLA.** Each task has `retries=3` with exponential backoff + jitter so a transient BigQuery or source-API error self-heals. The orchestrator alarms if `gold_revenue_by_seller` hasn't landed by **07:00**, the freshness contract made operational; without that alarm a missed run is silent and finance discovers it, not on-call.
+- **The 90-day backfill, quantified.** A bug is found: `silver_orders` mishandled refunds for the last 90 days. The fix is a one-line dbt change, then `dbt build --select silver_orders+ ` (the `+` selects everything downstream) backfilled across **90 partitions**. Cost ≈ **90 × 8 GB × \$5/TB ≈ \$3.60** of scan; at 15 parallel runs it drains in **90 ÷ 15 = 6 waves**, ~30 minutes. We **quote that before running it**. Because the models are idempotent and partition-scoped, the backfill *replaces* each day's `silver`/`gold` deterministically, no double-count, no downtime. **Rejected alternative** (non-idempotent appends): a manual, error-prone delete-then-reload with the table offline, an incident, not a re-run. This is the rebuildable invariant and the idempotent reprocessing paying off directly.
+- **Trust and lineage.** dbt tests (`not_null` on `seller_id`, `unique` on the grain, a relationship test to `silver_users`) run as the final models build; dbt's `ref()`-derived lineage answers finance's "where does this number come from?" by tracing `gold_revenue_by_seller ← silver_orders ← bronze_orders ← the orders ingestion` automatically (the modeling of *what* those tables are is 13.8).
 
-## A - API design
+The number a Director carries out: *"day-fresh by 07:00 with an SLA alarm, every model idempotent so a logic bug is a ~\$4, 30-minute parameterized backfill instead of an outage, and lineage that traces every figure to source."*
 
-> **LLD adaptation:** A is the **interface contract** - and the contract is where the invariant gets enforced. The strategy's return type *is* the correctness story.
-
-```text
-interface SplitStrategy {
-  validate(totalCents, participants, params) -> ok | errors
-  allocate(totalCents, participants, params) -> shares: int[]
-  // CONTRACT: sum(shares) == totalCents, exactly.
-  //           Deterministic: same input -> same output.
-}
-
-class ExpenseService {
-  addExpense(groupId, payerId, totalCents, participants,
-             strategy, idempotencyKey) -> expenseId
-  reverseExpense(expenseId, idempotencyKey) -> expenseId
-  settle(fromId, toId, amountCents, idempotencyKey) -> expenseId
-  getBalance(userId) -> netCents
-  getPairBalances(groupId) -> [{from, to, cents}]
-}
-```
-
-**Design notes (each with its rejected alternative):**
-- **`allocate` returns integer cents summing exactly to total - by contract.** The invariant is enforced once, at the seam. *Rejected: strategies returning fractions for the service to round* - rounding (the hard part) gets duplicated in callers and the contract is unenforceable.
-- **Validation lives in the strategy.** Percent-sums-to-100 is a fact about percent splits; the service shouldn't know it exists. *Rejected: a god-validator in the service* - every new split type reopens it.
-- **`idempotencyKey` on every write.** Mobile clients retry; a double-posted dinner corrupts balances exactly like a race would (same defense as the purchase path). *Rejected: trusting clients not to retry* - they always retry.
-- **`reverseExpense`, not edit/delete.** Edit = reversal + repost; the journal stays append-only, the audit trail intact. *Rejected: in-place UPDATE* - destroys auditability and reintroduces the read-modify-write race we designed away.
-
----
-
-## D - Data model
-
-> **LLD adaptation - and the dominant step.** The spec said it: in this problem, D *is* the design. Everything above exists so these two tables can hold the invariant.
-
-**`expenses`** - immutable header: `expense_id`, `group_id`, `type` (`EXPENSE` / `SETTLEMENT` / `REVERSAL`), `total_cents`, `currency`, `created_by`, `idempotency_key` (**unique** - the exactly-once mechanism), `reverses` (nullable FK).
-
-**`ledger_entries`** - the truth: `expense_id`, `user_id`, **`amount_cents` (signed int64)**. Every expense, settlement, and reversal is rows in this one table, netting to **0** per expense.
-
-**`balances`** - derived cache: `(group_id, user_id, net_cents)` plus a pair-level view, updated in the posting transaction, rebuildable by `SUM` over entries.
-
-**Three layers of defense for sum-to-zero, in order of importance:**
-1. **Construction:** entries are generated from `allocate()` output, which sums to total by contract; signed entries then net to zero by arithmetic. No code path exists that writes unbalanced entries.
-2. **Atomicity:** header + entries + cache update commit in **one transaction** - no observable half-expense, even mid-crash.
-3. **Detection:** a post-time assertion (sum the entry set, reject ≠ 0) and the nightly reconciliation. Belt, suspenders - both cheap at 20 writes/s.
-
-**The remainder rule (state it explicitly).** `200000 / 3` leaves 2 cents. Rule: **sort participants by user id; the first `remainder` participants get one extra cent.** Which rule is *almost* irrelevant - payer-eats-it is equally fine - but it must be **deterministic and stated**: retries, reconciliation, and "why does Alice owe one cent more?" tickets all depend on same input → same allocation. *Rejected: random assignment or float-then-round* - non-determinism breaks idempotent retries; rounding breaks conservation. **Percent splits** get the same discipline via **largest remainder**: floor every share, give leftover cents to the largest fractional remainders (tie-break by id). Exact-amount splits don't allocate - they *validate* that the amounts sum to total, and reject otherwise.
-
-<details>
-<summary>Go deeper, full schema DDL and strategy class sketches (IC depth, optional)</summary>
-
-```sql
-CREATE TABLE expenses (
-  expense_id      BIGSERIAL PRIMARY KEY,
-  group_id        BIGINT NOT NULL,
-  type            TEXT NOT NULL CHECK (type IN ('EXPENSE','SETTLEMENT','REVERSAL')),
-  total_cents     BIGINT NOT NULL CHECK (total_cents > 0),
-  currency        CHAR(3) NOT NULL DEFAULT 'INR',
-  created_by      BIGINT NOT NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  idempotency_key TEXT NOT NULL UNIQUE,
-  reverses        BIGINT REFERENCES expenses(expense_id)
-);
-
-CREATE TABLE ledger_entries (
-  expense_id   BIGINT NOT NULL REFERENCES expenses(expense_id),
-  user_id      BIGINT NOT NULL,
-  amount_cents BIGINT NOT NULL,            -- signed; + = is owed, - = owes
-  PRIMARY KEY (expense_id, user_id)
-);
-CREATE INDEX ON ledger_entries (user_id);
-
-CREATE TABLE balances (
-  group_id  BIGINT NOT NULL,
-  user_id   BIGINT NOT NULL,
-  net_cents BIGINT NOT NULL DEFAULT 0,
-  PRIMARY KEY (group_id, user_id)
-);
-```
-
-Equal-split strategy (language-neutral):
-
-```text
-class EqualSplit implements SplitStrategy:
-  validate(total, users, _):
-    return users.nonEmpty and total > 0
-
-  allocate(total, users, _):
-    n     = users.size
-    base  = total / n          // integer division
-    rem   = total % n          // 0..n-1 leftover cents
-    sorted = users.sortBy(id)  // determinism
-    return [ base + (i < rem ? 1 : 0) for i, u in sorted ]
-```
-
-Percent-split allocation (largest remainder):
-
-```text
-allocate(total, users, pcts):           // validate: sum(pcts) == 10000 bps
-  raw    = [ total * p / 10000 for p in pcts ]      // floor
-  rem    = total - sum(raw)
-  order  = users.sortBy(fractionalPart desc, id asc)
-  give 1 cent to first `rem` users in order
-```
-
-Posting pseudocode: `BEGIN; INSERT expenses; INSERT entries (assert sum==0); UPDATE balances += entry per user; COMMIT;`, the idempotency key's unique index turns a retried `addExpense` into a clean conflict you map to "already posted, here's the id".
-
-</details>
-
----
-
-## E - Evaluation
-
-> **LLD adaptation:** Evaluation = attack the invariant. The designated stress test: **two expenses added concurrently between the same users.** Then retries, crashes, and edits.
-
-**Threat 1 - the concurrent add.** Alice posts a ₹900 dinner while Bob posts a ₹600 cab, same group, same instant. In the mutable-balance design this is a classic lost update: both read `bob_owes_alice = 0`, both write their delta, one vanishes. In our design **the race does not exist at the truth layer**: both transactions *append disjoint rows*. The only shared state is the `balances` cache, updated with `net_cents = net_cents + ?` - a commutative increment the DB serializes per row, rebuildable from the journal even if botched. **That is the payoff of derived balances, stated in one sentence.**
-
-**Threat 2 - the retried request.** Client times out, re-sends. The unique `idempotency_key` turns the second insert into a clean conflict → return the original `expense_id`. Without it, a double-posted dinner is invariant-preserving but *fact-corrupting*.
-
-**Threat 3 - crash mid-post.** One ACID transaction → nothing visible. This is exactly the failure that silently corrupts the mutable-balance design (one cell updated, the other not - books off forever, no error anywhere).
-
-**Threat 4 - edit/delete.** Reversal entries (negate the original set, which sums to zero, so the reversal does too) keep the journal append-only; "edit" = reverse + repost.
-
-**Threat 5 - drift anyway.** The nightly reconciliation re-derives balances and asserts global sum = 0 - a minutes-long query at 35 GB/year. *"My prior is it never fires; at this price I run it anyway - the day it fires it's the most valuable job we own."* Cheap detection behind structural prevention is the Director operational instinct.
-
-**Re-check:** sum-to-zero - structural; conservation of cents - the `allocate` contract + post-time assert; determinism - sorted allocation + idempotency keys; auditability - append-only journal. All four hold by *design*, not by discipline.
-
----
-
-## D - Design evolution
-
-> **LLD adaptation:** evolve along the product axes - groups, settlement UX, currencies - and execute the deferral of the one famous algorithm.
-
-**Groups & scale-out (boring, say so fast):** `group_id` is already on every row. If the product 100×'s, shard by `group_id` - expenses never span groups, so transactions stay single-shard. Multi-currency: store `currency` per expense, **never convert inside the ledger** (a ledger holds facts, not exchange-rate opinions); convert at display. Reminders and feeds are read-side features off the journal.
-
-**The min-cash-flow deferral (the Director move, scripted).** The interviewer will ask: *"Six people, 14 pairwise debts - minimize the settlement payments?"* The trap is diving in. The answer:
-
-> *"That's the min-cash-flow problem - find a minimal set of transfers that settles everyone's net balance. Two things make me defer it: it's a **read-side optimization over derived balances** - it never touches the ledger or the invariant, so it bolts on later with zero schema change; and truly minimizing the transfer **count** is NP-hard, while the standard greedy - match the largest debtor with the largest creditor - gives at most n−1 transfers and is what's actually shipped. v2, behind `suggestSettlements(groupId)` - and suggestions are advisory; only a recorded payment changes the books."*
-
-Four signals in one breath: the algorithm, its complexity class, its severability, and suggestion ≠ posting.
-
-<details>
-<summary>Go deeper, min-cash-flow greedy and why exact-minimum is NP-hard (IC depth, optional)</summary>
-
-Compute net balance per user from the ledger (sum of signed entries). Creditors (net > 0) and debtors (net < 0) go into two max-heaps by magnitude. Loop: pop the largest creditor C and largest debtor D, transfer `m = min(|C|, |D|)` from D to C, push back whichever has residue. Each iteration zeroes out at least one participant, so it terminates in ≤ n−1 transfers, O(n log n). Note the greedy operates only on *net* balances - pairwise history is irrelevant to settlement, which is itself an insight: simplification may route Alice's repayment to Carol even though Alice's debt was "to" Bob.
-
-Minimizing the *number* of transfers exactly is NP-hard: the core subproblem is finding subsets of debtors and creditors whose sums match (each zero-sum subset that settles internally saves a transfer), which reduces from subset-sum / set partition. n−1 is the greedy's guarantee; the optimum can be lower when such subsets exist, and finding them is the hard part. For a 6-person trip, exhaustive search is feasible; nobody bothers - the greedy's output is already psychologically acceptable.
-
-Production wrinkle: simplification suggestions go stale the moment a new expense posts. Treat them as a pure function of a balance snapshot, recomputed on read - never stored, never authoritative.
-
-</details>
-
----
-
-## Trade-offs table - the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
+### Trade-offs table: orchestration and transformation choices
+| Decision | Option A | Option B | Rejected-alternative cost | Use when… |
 |---|---|---|---|---|
-| **Source of truth** | **Immutable ledger entries, balances derived** | Mutable pairwise balance map | Full event-sourcing + CQRS infra | **A** - invariant by construction, auditable, race-free appends (our choice). **B** never - drift is silent and unauditable. **C** when you genuinely need replay at scale; here it's ceremony. |
-| **Split-type handling** | **Strategy interface per type** | Enum + switch in the service | Subclass Expense per type | **A** - split types are the axis of change; new type = new class (our choice). **B** acceptable for a throwaway script. **C** couples algorithm to record - rejected. |
-| **Money + remainder** | **Integer cents, deterministic remainder** | Decimal type, round half-even | Floats | **A** - exact conservation, idempotent retries (our choice). **B** workable but rounding rules still needed, easier to get wrong. **C** banned - conservation fails. |
+| **Orchestrator model** | **Airflow**, task-centric, imperative, mature, huge ecosystem, managed everywhere | **Dagster / Prefect**, asset-aware, native lineage + freshness, better local dev/testing | A: not data-aware (lineage/freshness bolted on, awkward local dev). B: smaller ecosystem, fewer integrations, newer ops track record | A: team already runs Airflow at scale, ecosystem/hiring wins. B: greenfield where asset lineage + freshness SLAs are first-order |
+| **Transform layer** | **dbt**, SQL models in git, `ref()` DAG, tests, docs, incremental | **Hand-rolled SQL scripts / stored procs** | B: untested, unversioned, opaque, no lineage, run-order maintained by hand and rots (silent-wrong-number risk) | A: any real platform, versioned, tested, rebuildable T. B: ~never at scale; only a throwaway 2–3 table job |
+| **Task semantics** | **Idempotent, partition-scoped** (delete-insert / `INSERT OVERWRITE`) | **Non-idempotent append** (`INSERT INTO … SELECT`) | B: retries, failovers, and backfills **double-count**, silent revenue inflation | A: always. There is no good case for B in a platform that retries or backfills |
+| **Transform placement** | **Orchestrate-the-transform** (EL, then trigger dbt, then publish) | **Transform-inside-ingestion** (clean/conform during EL) | B: can't re-run T without re-ingesting; can't test T in isolation; transform change forces ingestion redeploy | A: ELT, almost always, keeps T rebuildable over landed raw |
 
----
+The Director move across all four rows: match the choice to **rebuildability and operational cost**, and never let the transform double-count or couple to ingestion.
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here
+- **"How do you handle re-running a pipeline after you fix a bug, say the logic was wrong for the last three months?"**, *Strong signal:* tasks are **idempotent and partition-scoped** (delete-insert per date), so a backfill is `N partitions × per-partition cost`, a bounded operation you can *quote a number for* (e.g. "90 days × 8 GB × \$5/TB ≈ \$4, ~30 min at 15-way parallelism") and run with no downtime and no double-count, the rebuildable invariant. *Red flag:* "I'd write a script to delete and reload" with no idempotency, no partition scoping, and no awareness that a blind append double-counts.
+- **"Airflow or Dagster, and why?"**, *Strong:* names the **task-centric vs asset-aware** axis, picks against a stated prior (Airflow for ecosystem/scale-of-team, Dagster for native lineage/freshness on greenfield), and delegates the bake-off. *Red flag:* "Airflow, it's the standard" with no notion of what asset-awareness buys or costs.
+- **"Where does dbt fit, and what does it replace?"**, *Strong:* dbt is the **T** of ELT, SQL models compiled and run *in the warehouse*, `ref()`-derived DAG and lineage, built-in tests and docs, incremental models, replacing untested/unversioned scripts or stored procs with versioned, tested, rebuildable transformation (analytics engineering). *Red flag:* thinks dbt ingests data, or that dbt schedules itself.
+- **"Where does orchestration end and transformation begin?"**, *Strong:* the orchestrator **schedules, sequences, retries, and owns the SLA**; dbt **transforms** via its own internal model DAG; the seam is the `dbt build` task; keep EL and T separate (orchestrate-the-transform) so the T is re-runnable over landed raw. *Red flag:* transforms inside ingestion, coupling two concerns that fail and evolve independently.
+- **"A nightly mart didn't land. How do you even know?"**, *Strong:* an **SLA/freshness alarm** on `expected vs actual completion` (the freshness contract of 13.1, the silent-miss discipline of 3.15), a missed run is silent unless you alarm on the non-event. *Red flag:* "someone would notice the dashboard is stale", i.e. the customer is the alarm.
 
-- **"What stops balances from drifting?"** - *Strong:* nothing *needs* to - balances derive from entries that sum to zero by construction; reconciliation is cheap insurance, not the mechanism. *Red flag:* "we carefully update both balances in a transaction" - discipline where structure should be.
-- **"Split ₹100 three ways."** - *Strong:* `10000 → [3334, 3333, 3333]` cents, extra cent by a stated deterministic rule, largest-remainder for percents, floats banned with the one-line reason. *Red flag:* "₹33.33 each" with the lost cent unaccounted.
-- **"Two expenses post concurrently between the same users."** - *Strong:* appends to disjoint rows - no read-modify-write on truth; the cache increment is commutative and rebuildable. *Red flag:* reaching for locks to protect a balance cell.
-- **"Can you minimize settlement payments?"** - *Strong:* names min-cash-flow, classifies it as read-side, states greedy ≤ n−1 vs NP-hard exact, defers to v2, notes suggestions never touch the ledger. *Red flag:* ten minutes of graph algorithm, no working expense flow.
-- **"A user edits last week's dinner."** - *Strong:* reversal + repost; journal append-only. *Red flag:* `UPDATE expenses SET ...`.
+The through-line at Director altitude: a data platform is a **DAG of idempotent, partition-scoped jobs**; the orchestrator owns scheduling/retries/SLA (reusing the machinery), dbt owns the versioned, tested transform, and idempotency is what makes the whole thing **rebuildable**, a logic bug becomes a costable backfill, not an outage.
 
----
+### Common mistakes / misconceptions
+- **Non-idempotent appends.** `INSERT INTO target SELECT …` double-counts on every retry, failover, or backfill, silent revenue/metric inflation. The fix is delete-insert (or `INSERT OVERWRITE`) on the partition so a re-run is deterministic.
+- **Treating the platform as one big pipeline instead of a DAG.** Without dependency-driven firing you schedule job B at a guessed time and pray A finished; the orchestrator fires B on A's *recorded success*, decoupling correctness from a timing guess.
+- **Thinking dbt ingests or schedules.** dbt only transforms (the T), runs *in* the warehouse, and has its own model DAG, but the orchestrator schedules it, retries it, and owns the SLA. Confusing the two is the most common altitude miss.
+- **Transform-inside-ingestion.** Coupling cleaning/conforming to the EL step means you can't re-run or test the transform independently and a logic change forces an ingestion redeploy; keep EL and T separate (ELT) so the T stays rebuildable over landed raw.
+- **No freshness/SLA alarm.** A late or missed run is silent; without an alarm on `expected vs actual completion`, the stakeholder discovers staleness before on-call does.
 
-## Common mistakes
+### Practice questions
 
-- **Floats for money.** `0.1 + 0.2 ≠ 0.3`; three thirds of ₹20 don't make ₹20. Integer minor units, full stop.
-- **Mutable pairwise balances as truth.** The drift is silent, the race is real, there's no audit trail. Balances are views.
-- **An undefined remainder.** "Roughly a third each" is not an allocation. Name the deterministic rule - retries and reconciliation depend on it.
-- **Special-casing settlement.** A payment is just another zero-sum posting; a second code path is a second place for the invariant to break.
-- **Chasing simplify-debts in the core hour.** Candidates who fail this problem usually fail it *while implementing the most interesting part*.
+**Q1.** A teammate's pipeline appends to a `gold_revenue` table on every run. After a transient error, Airflow retried one task and finance now sees revenue 2× too high for a day. What happened, and how do you fix it permanently?
+> *Model:* The task is **non-idempotent**, it `INSERT INTO`s the day's rows, so the retry added them a *second* time and double-counted. The permanent fix is **idempotent, partition-scoped** semantics: scope each run to its date (`event_date = '{{ ds }}'`) and **delete-insert** (or `INSERT OVERWRITE`) that partition so a re-run *replaces* the day rather than appending. Now a retry, a failover, or a backfill is deterministic, run it once or five times, same result. This is the rebuildable invariant and the idempotent reprocessing; it's also what makes the bad day fixable with a single re-run of that partition rather than a manual surgery.
 
----
+**Q2.** You discover a transformation bug that's been wrong for 60 days. Walk through the backfill and estimate its cost and time.
+> *Model:* Because models are idempotent and partition-scoped, backfill is "re-run the affected model **and everything downstream** for those 60 partitions": fix the dbt model, then `dbt build --select the_model+` backfilled `--start-date` 60 days back. Cost = **`N partitions × per-partition scan × $/TB`**, if each daily run scans ~150 GB at \$5/TB, that's **60 × 150 GB × \$5/TB ≈ \$45**; at 20 parallel runs it drains in **60 ÷ 20 = 3 waves**, well under an hour. I'd quote that number *before* running. No table goes offline and nothing double-counts because each partition is *replaced* deterministically, the difference between a parameterized re-run and an outage is exactly the idempotency property.
 
-## Interviewer follow-up questions (with model answers)
+**Q3.** Airflow vs Dagster for a brand-new analytics platform with a small team that cares a lot about data freshness SLAs and being able to test transforms locally. Make the call and name what you give up.
+> *Model:* I'd lean **Dagster**: it's **asset-aware**, so lineage and **freshness** are native (you declare freshness policies on assets and it tracks staleness), and local dev/typing/testing are markedly better, both first-order for this team. What I give up: a **smaller ecosystem** (fewer pre-built integrations than Airflow's), a smaller hiring pool, and a newer operational track record, so I'd verify the integrations we need exist. If instead this were an org already running Airflow at scale with deep operational muscle and a big hiring pool, I'd **reject Dagster for Airflow**, the ecosystem and team-familiarity win outweighs asset ergonomics. Either way I'd state the prior and delegate the bake-off on our integration and scale profile.
 
-**Q1. ₹2,000 dinner, split equally among 3, payer included. Show the exact ledger rows.**
-> *Model:* Total `200000` cents; equal-split shares `[66667, 66667, 66666]` (sorted by user id, first two take the remainder cents). Payer (user 1, share 66667) fronted 200000 and consumed 66667 → entry **+133333**; users 2 and 3 get **−66667** and **−66666**. Sum: `133333 − 66667 − 66666 = 0`. Deterministic, so a retry with the same idempotency key reproduces - and dedups to - the identical posting.
+**Q4.** Explain to a skeptical engineer why dbt is worth the toolchain overhead versus the SQL scripts and stored procedures they run today.
+> *Model:* Their scripts are **untested, unversioned, and opaque**: run-order is maintained by hand and rots, there are no tests so a column silently going null produces a confidently wrong metric (the silent-wrong-number), there's no lineage so "where does this number come from?" means reading thousands of lines, and stored procs are invisible to git and code review. dbt turns the **T** into software: models in git (reviewed, rollback-able), a **`ref()`-derived DAG and lineage** built automatically, **built-in tests** (`not_null`/`unique`/relationships, feeding 13.9), auto docs, and **incremental models** that process only new partitions. The cost is honest, a build/deploy toolchain and a learning curve, but at any real platform scale it buys rebuildability, trust, and reviewability that scripts can't. For a literal 2–3 table throwaway, the overhead may not pay; for a platform, it always does.
 
-**Q2. Two roommates add expenses against each other at the same millisecond. Why is nothing lost?**
-> *Model:* Each `addExpense` is one transaction appending its own header + entry rows - disjoint writes, nothing read-then-written at the truth layer, so no interleaving can lose data. The shared touch point is the cached balance row, updated as a relative increment (`net += x`) the DB serializes per row; both land commutatively in either order - and the cache is derived, rebuildable if ever doubted. In the mutable-balance design both writers read 0 and one delta silently overwrites the other. The race wasn't *handled*; it was *deleted by the data model*.
-
-**Q3. Percent split: 33.33% / 33.33% / 33.34% of ₹999.99. What goes wrong naively?**
-> *Model:* Two failures hide here. Validation: take percents as integer basis points (3333+3333+3334 = 10000) so the sums-to-100 check is exact, not float-fuzzy. Allocation: `99999 × 3333 / 10000 = 33332.66…` - floor each share, and the floors undershoot the total by a few cents; distribute them by **largest remainder** (tie-break by user id). The `allocate` contract - integer shares summing exactly to total, deterministically - catches both, which is why validation and allocation live inside the strategy.
-
-**Q4. "Our 8-person Goa trip ended with 19 IOUs. Build debt simplification into v1?"**
-> *Model:* No - and here's the shape of the no. Min-cash-flow operates on *net balances*, already a derived view, so it's a pure read-side feature: a v2 `suggestSettlements` endpoint with zero schema or ledger impact. The greedy (largest debtor ↔ largest creditor) guarantees ≤ n−1 transfers - 7 payments instead of 19 - while the exact minimum is NP-hard and not worth chasing at trip-sized n. Suggestions are advisory - only a recorded settlement posting moves the books - and they go stale on every new expense, so compute on read, never store. I'd have product validate whether users accept net routing (paying Carol for a debt "to" Bob surprises people); my prior is yes with clear UX - Splitwise shipped exactly this.
-
----
+**Q5.** Where exactly is the boundary between the orchestrator (Airflow/Dagster) and dbt? Give the pattern and the anti-pattern.
+> *Model:* The orchestrator **schedules, sequences across systems, retries on infra failure, and owns the SLA**; dbt **transforms**, with its own internal `ref()` model DAG, running *inside* the warehouse. The **pattern (orchestrate-the-transform):** the orchestrator runs ingestion (EL), then triggers `dbt build`, then triggers publish steps (BI refresh, reverse-ETL, ML features), alarming if the whole chain misses its freshness SLA. dbt does *not* schedule itself or wait on external dependencies, that's the orchestrator's job. The **anti-pattern (transform-inside-ingestion):** doing the cleaning/conforming during the EL step couples two concerns that fail and evolve independently, you can't re-run or test the transform without re-ingesting, and a transform change forces an ingestion redeploy. Keeping EL and T separate (ELT) is what keeps the transform rebuildable over already-landed raw.
 
 ### Key takeaways
-- **State the invariant first, then make it structural:** every posting is signed entries summing to zero; balances are derived views. No code path - buggy or not - can write unbalanced truth. the ledger discipline at LLD scale.
-- **Money is integer cents with a stated, deterministic remainder rule** (sorted-order extra cents; largest-remainder for percents). Floats fail conservation; non-determinism breaks retries and reconciliation.
-- **Strategy is the seam:** split types validate and allocate behind one contract - shares sum exactly to total - so a new type is a new class and the invariant is enforced once.
-- **Concurrency is solved by the data model, not locks:** adds append disjoint rows; the balance cache is a commutative, rebuildable increment; idempotency keys make retries exactly-once; edits are reversals.
-- **Name and defer min-cash-flow:** a read-side optimization over derived balances - greedy ≤ n−1 transfers, exact minimum NP-hard, suggestions never touch the ledger. Deferring it crisply *is* the Director signal.
+- **A data platform is a DAG of interdependent jobs, not a pipeline.** The **orchestrator** (Airflow/Dagster/Prefect) is the control plane that schedules by dependency (fire B on A's *recorded success*, not a timing guess), retries with backoff, and owns freshness **SLAs/alerting**, reusing the durable-store + leader-election + scheduler/executor machinery of 3.15 / 5.14, adding *data-aware* concerns on top.
+- **Idempotent, partition-scoped tasks are the load-bearing property.** Delete-insert (or `INSERT OVERWRITE`) each partition so a re-run *replaces* rather than appends; the **rejected non-idempotent append double-counts** on every retry, failover, or backfill. This is the rebuildable invariant and the idempotent reprocessing.
+- **Backfill is therefore bounded and costable:** `N partitions × per-partition cost`, quote the number before you run it (e.g. 90 × 200 GB × \$5/TB ≈ \$90, minutes at parallelism), with no downtime and no double-count. A logic bug becomes a parameterized re-run, not an outage.
+- **dbt is the T of ELT:** SQL models compiled and run *in* the warehouse, a **`ref()`-derived DAG and lineage** built automatically, **built-in tests** and docs, and **incremental models**. It **replaces untested, unversioned, opaque scripts/stored procs** with versioned, tested, rebuildable transformation, the analytics-engineering discipline.
+- **Know the boundary:** the orchestrator schedules/sequences/retries/SLA-monitors; dbt transforms via its own model DAG; the seam is the `dbt build` task. Keep EL and T separate (orchestrate-the-transform), not coupled inside ingestion, so the T stays re-runnable over landed raw. *What* to model (star/SCD/medallion) is 13.8.
 
-> **Spaced-repetition recap:** Splitwise = **invariant-first LLD**. Truth is an **append-only ledger of signed integer-cent entries summing to zero per expense**; balances are derived (cached, rebuildable, reconciled nightly). **Strategy** per split type owns validate + allocate; contract: shares sum *exactly* to total, **deterministic remainder**. Settlement = another posting; edit = reversal; concurrent adds append disjoint rows - no race by construction. **Min-cash-flow: name it, call it read-side (greedy ≤ n−1, exact NP-hard), defer it.**
+> **Spaced-repetition recap:** A data platform is a **kitchen at dinner service**: the **expediter** (orchestrator, Airflow task-centric vs Dagster/Prefect asset-aware) calls the order, sequence, dependency-driven firing, retries+backoff, the 07:00 **SLA** (reusing 3.15/the scheduler machinery, silent-miss alarmed), and the **line cook** (dbt) follows a **versioned, tested recipe**: SQL models run *in* the warehouse, `ref()`-derived DAG + lineage, tests + incremental models, replacing opaque scripts/stored procs. The property that saves a bad night: every task **idempotent + partition-scoped** (delete-insert, never blind-append → no double-count), so **backfill = N partitions × per-partition cost**, a costable re-run not an outage, the rebuildable invariant, the idempotent reprocessing. Orchestrate-the-transform; don't transform-inside-ingestion. Next: 13.8, the dimensional/medallion modeling those dbt models actually build.
 
 ---
 
-*End of Lesson 7.7. Splitwise is Ticketmaster's quiet sibling: there the invariant was one-seat-one-owner, held by an atomic CAS; here it's books-balance, held by making unbalanced writes structurally impossible. Same lesson at two scales - choose designs where the invariant cannot be violated, then spend a few cheap cycles verifying it anyway.*
+*End of Lesson 7.7. The control plane is what turns a heap of jobs into a reliable, rebuildable platform: an orchestrator that schedules a DAG of idempotent, partition-scoped tasks (so backfill is a costable re-run, not an outage), and dbt doing the versioned, tested "T" inside the warehouse. Next: 13.8, dimensional modeling and the medallion architecture (star schemas, SCDs, bronze/silver/gold), the *what* those dbt models build, to this lesson's *how* they run.*

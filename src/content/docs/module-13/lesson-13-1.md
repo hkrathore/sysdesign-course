@@ -1,150 +1,181 @@
 ---
-title: "13.1 — Data Platforms for System Designers"
-description: What an analytical data platform actually is from an architecture POV — a continuously-rebuilt, append-mostly, scan-optimized projection of operational truth on decoupled storage and compute — and the freshness, scan-cost, volume, and trust model you must design around.
+title: "13.1 — Capstone: Drive Your Own Design"
+description: A fresh, meaty problem, a real-time collaborative document editor, that you design end-to-end yourself, then critique against a RESHADED-keyed strong-signal/red-flag rubric. The exercise is the lesson; the critique loop is the skill.
 sidebar:
   order: 1
 ---
 
+> This is the **capstone**, and it inverts every lesson before it. The walkthrough and the design problems watched *me* run RESHADED on sixteen problems, you read a finished design and absorbed the moves. That builds recognition, not production. The interview tests production: under pressure, *you* must scope, quantify, decide, and stress a design that doesn't exist yet, with no answer key on the wall. So this lesson hands you a **fresh problem and an empty whiteboard**, and then, and this is the part that actually moves the needle, a **critique framework** to turn on your own work, keyed step-by-step to RESHADED. The spine here is not a solution. It is the **drive-then-critique loop**: you produce a first-pass design, then interrogate it with the exact questions a Staff/Principal interviewer would ask, marking each answer **strong-signal** or **red-flag**. Run the loop, find your own gaps, close them. That self-critique reflex, *"where would a good interviewer push, and would my answer survive it?"*, is the single most transferable thing this course can give a Director. Drive it yourself. Paste your design into an AI and have it ask you the §C questions verbatim. The point is the loop, not my approval.
+
 ### Learning objectives
-- State the **OLTP ↔ OLAP divide** as the foundational split: an operational store answers *"what is the state of this one entity right now?"*, an analytical platform answers *"what happened across all entities over time?"*, and the two access patterns force different storage, engines, and cost models.
-- Describe a data platform at **architecture altitude**: a **continuously-rebuilt, append-mostly, scan-optimized, decoupled storage/compute projection of operational data** you reshape for questions, not a database of record.
-- Reason in the platform's four governing quantities, **freshness, scan-cost, volume, and trust**, the way you reasoned in QPS and storage for OLTP, and know that pushing freshness costs money and complexity.
-- Build the **analytical cost model**, *bytes scanned × $/TB* (or *compute-hours × cluster*), and know the lever is **how much data each query touches** (partition pruning, columnar projection), not "add a cache."
-- Name the **failure modes** a data-platform designer engineers around, stale-presented-as-fresh, silently-wrong numbers, runaway cost, painful backfills, schema drift, before reaching for any tool.
+- **Drive** a complete RESHADED design end-to-end on a problem you have not seen worked, a real-time collaborative document editor, producing the named artifact at each of the eight steps yourself.
+- **Quantify** the load that actually defines this system: that **presence/cursor traffic dwarfs edit traffic**, that concurrent editors per doc is *tens, not thousands*, and that the durable write rate is far smaller than the connection count, and let those numbers pick your architecture.
+- **Critique** your own design with a RESHADED-keyed rubric, scoring each answer **strong-signal vs red-flag**, and recognize the capstone's signature altitude trap: convergence correctness (OT/CRDT) is IC-deep, so the Director move is to *name the pivotal call and delegate the proof*, not hand-roll a CRDT at the whiteboard.
+- **Run the loop**: first-pass answer → self-ask the probe → spot the red flag → revise, and feel why that loop, not the diagram, is what earns the offer.
 
-### Intuition first
-A data platform is the machinery between the **cash registers** and the **analyst's desk**. Every operational database in your company is a cash register: it records one transaction at a time, instantly and exactly, and answers *"what does this customer owe right now?"* It is tuned for a million tiny, precise, present-tense questions. The analyst upstairs has the opposite job: she wants *"revenue by region by month for the last two years,"* a question no single register can answer because it spans every register and all of time. So someone has to **continuously copy every receipt off every register, reshape the pile into something you can sweep through fast, and lay it on her desk fresh enough to be useful.** That copying-and-reshaping machine is the data platform.
-
-That single image carries the design consequences. **You are working on a copy, not the original**, the platform never owns the source of truth, so it must be *rebuildable* from the registers when it drifts or breaks. **The analyst sweeps, she doesn't look up**, her queries scan millions of rows to return one number, which is the opposite of the cash register's point lookup and demands a completely different storage layout. **"Fresh enough" is a dial with a price tag**, getting last night's receipts onto her desk by morning is cheap; getting each receipt there within a second of the swipe is a different, far more expensive machine. And **the pile is only as trustworthy as the copying**, if a register quietly starts mislabeling receipts, her beautiful chart is confidently, precisely wrong, and nobody notices for a week. Get this picture right and the rest of the module is detail.
-
-### Deep explanation
-
-**The OLTP ↔ OLAP divide is the foundational fact, and everything else falls out of it.** the earlier modules of this course live in the **OLTP** world, *online transaction processing*: serve a user, read or write one entity (a user, an order, a message) with millisecond latency, keep it normalized and consistent, optimize for high-concurrency point access. A data platform lives in the **OLAP** world, *online analytical processing*: scan billions of rows, group and aggregate across time and dimensions, return a comparatively tiny result, optimize for throughput-over-volume rather than latency-per-row. The Director-altitude statement: *OLTP answers questions about one entity now; OLAP answers questions about all entities over time, and trying to serve one with the other's machinery is the most common and most expensive mistake on this whole topic.* You **reject** "just run the analytics query against the production Postgres" because a full-table aggregate scan competes with, and starves, the point-lookup traffic that pays the bills, and the row-oriented layout reads every column to use one. The divide is why analytical systems exist as a separate discipline.
-
-**A data platform is a projection, not a database of record, and that word governs its architecture.** The operational stores are the source of truth; the platform holds a **derived, reshaped, denormalized copy** of their data, continuously rebuilt and optimized for questions. Four consequences a designer must internalize:
-
-- **It is read-optimized for scans, not point lookups.** Analytical queries touch huge row counts and few columns, so the storage is **columnar** and the engines are built to stream gigabytes through aggregation, not to fetch one row fast.
-- **It is append-mostly and time-partitioned.** Data arrives as a flow of events or periodic loads and is rarely updated in place; history is retained and sliced by time. The instinct "delete the old rows" is replaced by "partition by day and tier the cold partitions to cheap storage."
-- **Storage and compute are decoupled.** The defining architectural shift of the modern era: data sits in cheap object storage (S3/GCS) and **elastic, ephemeral compute** is pointed at it on demand. You pay for scan and for the hours a cluster runs, not for an always-on box sized to peak. This is the opposite of the OLTP server you keep hot 24/7.
-- **It must be rebuildable.** Because it is a copy, every table should be reproducible from retained raw inputs by re-running a transformation. That single property, *idempotent recomputation over retained raw*, is what makes backfills, bug fixes, and schema changes survivable.
-
-**You design in four quantities, not in QPS alone: freshness, scan-cost, volume, and trust.** OLTP design reasons in requests/sec, latency, and storage. Analytical design adds and reweights:
-
-- **Freshness** is how stale the served data is, the lag from an event happening to it being queryable. It is a *requirement you extract*, not a default, and every rung up the ladder (hours → minutes → seconds) costs more money and operational complexity (the batch-vs-stream trade).
-- **Scan-cost** is the dominant cost axis: analytical cost scales with **bytes scanned**, not rows returned or requests served. A query that returns one number can cost dollars if it scans a terabyte.
-- **Volume** grows effectively without bound, you retain history, so the design must assume TB→PB and lean on storage/compute separation, partitioning, and tiering rather than a bigger box.
-- **Trust** is whether the number is *right*, the analytical analog of correctness. It is engineered with data-quality tests, contracts, and lineage, and its absence is the failure mode nobody sees until a decision is made on a wrong figure.
-
-**The cost model is bytes-scanned, and the lever is how much data each query touches.** Two pricing shapes dominate, and you design the model, not this month's price (the same discipline you apply to LLMs):
-
-> **On-demand / serverless** (e.g. BigQuery): cost ≈ **bytes scanned × \$/TB**. A 1 TB scan at ~\$5/TB is **~\$5 per query**; 10,000 such queries a day is **~\$50k/day** if you let every query read the whole table.
-> **Provisioned compute** (e.g. Snowflake/Spark clusters): cost ≈ **cluster size × hours running**, plus **\$/TB-month** for storage, decoupled.
-
-The headline a Director carries: **analytical cost is controlled by data layout, not by caching.** You cut the bill by making each query scan less, **partition pruning** (skip whole days/regions the query doesn't ask for), **columnar projection** (read only the columns selected), **clustering/sorting**, and **pre-aggregation**. A well-partitioned table turns that \$5 scan into a \$0.05 scan by reading 1% of the bytes. "It scales" is banned here exactly as everywhere else: you quantify the scan.
-
-**Freshness is a lag budget you assemble from three hops.** Served freshness ≈ **ingestion lag + processing lag + serving lag**. Batch loads give hours; micro-batch gives minutes; true streaming gives seconds; a real-time OLAP store gives sub-second *queries* over seconds-fresh *data*. Each rung is a real engineering and cost step, so you set the freshness contract from the requirement, "finance reports tolerate a day, the ops dashboard needs a minute, the fraud signal needs a second", and pay only for the rung you need. This is the batch-vs-stream decision, now made per data product.
-
-**The failure modes you design around (before any tool).** These are properties of the discipline, not edge cases:
-
-- **Stale presented as fresh.** A pipeline silently falls hours behind and the dashboard still renders a confident, wrong-because-old number. Freshness must be *monitored and surfaced*, not assumed.
-- **Silently wrong numbers (the analytical hallucination).** An upstream schema change nulls a column, a join fans out, a timezone is mishandled, and the metric is precise, beautifully charted, and wrong. This is why data quality, tests, and contracts are first-class, not polish.
-- **Runaway cost.** One unpartitioned table, one accidental cross join, one `SELECT *` over a petabyte, and you get a surprise five-figure bill. Cost guards (partitioning, quotas, query limits) are a design concern.
-- **Backfill and reprocessing pain.** A logic bug means recomputing months of history; if the platform isn't built to replay from retained raw idempotently, this is an outage-grade event instead of a re-run.
-- **Schema and data drift.** Operational teams change a field and break every downstream consumer who didn't know. Contracts and lineage turn a silent break into a caught one.
-
-<details>
-<summary>Go deeper, why the same query is fast in an OLAP store and slow in Postgres (IC depth, optional)</summary>
-
-- **Row vs column on disk.** A row store (Postgres, MySQL) lays out all of row 1's columns, then all of row 2's. `SELECT SUM(amount) FROM orders` must read every row's *every* column off disk just to touch `amount`. A columnar store stores all `amount` values contiguously, so the same query reads ~1/N of the bytes (N = column count) and the values compress far better because they're homogeneous.
-- **Vectorized execution.** OLAP engines process columns in batches through SIMD-friendly loops rather than a tuple-at-a-time iterator, often 10–100× the per-core throughput on aggregation.
-- **Pruning and zone maps.** Columnar files (Parquet/ORC) carry per-block min/max statistics, so a `WHERE day = '2026-06-01'` skips blocks whose range can't match, reading only relevant data without an index. Combined with partitioning, this is how a petabyte table answers a query by scanning gigabytes.
-- **Why not just index Postgres?** Indexes accelerate selective point/range lookups; an analytical aggregate is *unselective* (it touches most rows), so the planner ignores the index and table-scans anyway, now competing with your OLTP traffic for the same buffer pool and IOPS. The fix isn't a better index; it's a different storage paradigm.
-
-</details>
-
-### Diagram: the modern data platform reference architecture
-
-```mermaid
-flowchart LR
-    subgraph SRC["Sources (truth)"]
-      OLTP[("OLTP DBs<br/>Postgres / DynamoDB")]
-      EVT["Event streams<br/>clicks / logs"]
-      SAAS["SaaS APIs<br/>Salesforce / Stripe"]
-    end
-    SRC --> ING["Ingestion<br/>CDC · ELT · streaming"]
-    ING --> STORE[("Storage layer<br/>lake / warehouse / lakehouse<br/>columnar · decoupled")]
-    STORE --> PROC["Processing<br/>batch (Spark) + stream (Flink)"]
-    PROC --> MODEL["Modeling / transform<br/>dbt · medallion"]
-    MODEL --> SERVE["Serving<br/>BI · real-time OLAP<br/>reverse-ETL · ML features"]
-    GOV["Cross-cutting: orchestration · catalog · lineage · quality · governance · cost"]
-    GOV -.-> ING
-    GOV -.-> STORE
-    GOV -.-> PROC
-    GOV -.-> MODEL
-    GOV -.-> SERVE
-    style STORE fill:#1f6f5c,color:#fff
-    style PROC fill:#e8a13a,color:#000
-    style GOV fill:#2d6cb5,color:#fff
-```
-
-### Worked example: serving "daily active users by region," end to end
-A product team wants a dashboard of **DAU by region**, plus the same number in the monthly board deck. One metric, and the platform's whole shape shows up in serving it.
-
-- **Path.** App click events land in a stream (Kafka), operational user/region data lives in Postgres. **Ingestion** streams the events into the **lake** and **CDC-replicates** the Postgres `users` table alongside it. A **batch job** each hour joins events to users, rolls up distinct users per region per day, and writes a small **aggregate table**; **dbt** models it into a clean `dau_by_region` mart. BI reads the mart.
-- **Freshness.** The board deck tolerates day-old data, so the hourly batch is plenty, *rejected: a streaming pipeline*, which would buy minute-freshness nobody asked for at multiples of the cost. If the team later needs a live ops view, that's a *second*, real-time path, not a rebuild of this one.
-- **Scan-cost.** The raw events are ~2 TB/day. A naive dashboard query scanning raw events at \$5/TB is ~\$10 *per refresh*; partitioning by day and pre-aggregating to a daily rollup means the dashboard scans **megabytes**, well under a cent. The cost win came from **layout and pre-aggregation**, not a cache, which is the lesson.
-- **Trust.** A freshness test ("the mart has today's partition by 7am") and a volume test ("row count within ±20% of yesterday") catch the silent breaks; lineage tells the analyst the number traces to those events and that table when finance asks "where does this come from?"
-
-The number a Director brings out of this isn't "we built a pipeline"; it's *"day-fresh, traces to source, costs cents, and here's the second path if you need it live."*
-
-### Trade-offs table: the first analytical decision, where does this query run?
-| Decision | OLTP store (Postgres/Dynamo) | Cloud warehouse (Snowflake/BigQuery) | Lake + query engine (S3 + Spark/Trino) | Real-time OLAP (Druid/Pinot) |
-|---|---|---|---|---|
-| **Best at** | point reads/writes, ms latency | governed SQL analytics, scans | cheap PB-scale, open formats, ML | sub-second aggregates on fresh data |
-| **Freshness** | real-time (it *is* the source) | minutes–hours (loads) | hours (batch) | seconds |
-| **Cost shape** | always-on server | \$/TB scanned or cluster-hours | cheapest storage; compute on demand | always-on, memory-heavy |
-| **Use when…** | serving the app | the default analytical store | huge volume, open/ML, cost-sensitive | live dashboards, user-facing analytics |
-
-The Director move is matching the **query's access pattern and freshness need** to the store, and never serving analytics from the OLTP source of truth.
-
-### What interviewers probe here
-- **"They ask for analytics on your operational data, what's your first move?"**, *Strong signal:* separate OLTP from OLAP immediately, get the data into an analytical store via ingestion/CDC, and never run scan-heavy aggregates against the production DB (it starves point traffic and reads row-oriented data the wrong way). *Red flag:* "add a read replica and query it", which just moves the row-oriented full-scan problem one box over.
-- **"What does this cost, and what's your lever?"**, *Strong:* cost ≈ bytes scanned × \$/TB (or cluster-hours); the lever is partition pruning + columnar projection + pre-aggregation so each query touches less data; quantify a scan. *Red flag:* "we'll cache it", with no notion that the bill is set by scan volume and data layout.
-- **"How fresh does it need to be?"**, *Strong:* treats freshness as an extracted requirement with a price, picks the cheapest rung that meets it (batch vs micro-batch vs stream), and is willing to run two paths for two needs. *Red flag:* defaults to "real-time" with no requirement and no awareness of the operational tax.
-- **"The dashboard number is wrong. How would you even know?"**, *Strong:* data-quality tests (freshness/volume/schema), contracts at the source boundary, and lineage to trace it, trust is engineered. *Red flag:* treats correctness as given and has no detection story, the silent-wrong-number trap.
-
-The through-line at Director altitude: reason in **freshness, scan-cost, volume, and trust**; set those contracts per data product; and delegate the engine bake-off with a stated prior ("data platform benchmarks Snowflake vs a Trino-on-S3 lakehouse on our scan and concurrency profile; my prior is the lakehouse for our volume and open-format needs").
-
-### Common mistakes / misconceptions
-- **Running analytics on the OLTP database.** A full-scan aggregate starves point traffic and reads a row-oriented layout column-by-column; the fix is a separate analytical store, not a replica.
-- **Reasoning in QPS instead of bytes scanned and freshness.** The analytical cost and latency are set by scan volume and the freshness rung, not by request rate; a request-based estimate misleads.
-- **Treating a bigger context… bigger box as the answer to volume.** Volume grows unbounded; the answer is decoupled storage/compute, partitioning, and tiering, not vertical scaling.
-- **Assuming the numbers are right.** Without freshness/volume/schema tests and lineage, a silent upstream change yields a confident wrong metric, the analytical hallucination.
-- **Defaulting to streaming.** Most analytics tolerate hours of lag; streaming's windowing/state/exactly-once cost is only worth it where a real requirement demands seconds.
-
-### Practice questions
-
-**Q1.** Stakeholders ask you to "just add a dashboard" on top of the production orders database. Walk through your response.
-> *Model:* I'd push back on querying production directly: an analytical dashboard runs unselective aggregate scans (`SUM`, `GROUP BY` over all orders), which on a row-oriented OLTP store reads every column of every row and competes with the point-lookup traffic that serves customers, risking latency regressions on the paying path. Instead I'd land the data in an analytical store, CDC-replicate `orders` into a columnar warehouse or lake, pre-aggregate to the dashboard's grain, and serve from there. Freshness: if a day old is fine, an hourly batch; if they need live, a separate real-time path, not this one. The cost is set by bytes scanned, so I partition by day and project only needed columns. Net: the dashboard is fast and cheap, and production is untouched.
-
-**Q2.** Estimate the monthly cost of a dashboard that scans a 3 TB events table on every refresh, refreshed 200×/day, on serverless \$5/TB pricing. Then name the cheapest fix.
-> *Model:* Per refresh: 3 TB × \$5/TB = **\$15**. Per day: 200 × \$15 = **\$3,000**. Per month: ~**\$90,000**, for one dashboard, the runaway-cost failure mode. The cheapest fix is **not** a bigger cluster or a cache; it's cutting bytes scanned: **pre-aggregate** the events into a daily rollup table the dashboard reads (megabytes, not terabytes) and **partition by day** so even ad-hoc queries prune. That turns ~\$90k/mo into tens of dollars. Layout and pre-aggregation are the lever; this is the core analytical cost discipline.
-
-**Q3.** A VP says "the revenue dashboard and the finance report disagree by 3%, which is right?" What's actually going on and how is it prevented?
-> *Model:* Almost certainly two paths computing "revenue" with slightly different logic, definitions (gross vs net, timezone of "day," late-arriving refunds), or freshness (the dashboard is a fast approximate stream; finance is the settled batch), the same speed-vs-truth split as the billing-batch problem. Neither is "wrong"; they answer subtly different questions. Prevention: a **single governed definition** of the metric (one dbt model both consume), explicit handling of late events and timezone, and **lineage** so each number's source and logic are inspectable. The Director point: this is a *governance and modeling* problem, not a query bug, and it's why a semantic layer and metric ownership exist.
-
-**Q4.** Why is "decoupled storage and compute" the defining feature of modern data platforms, and what does it let you do that an old on-prem Hadoop cluster couldn't?
-> *Model:* In the old model, storage and compute were bolted together on the same nodes (HDFS + MapReduce), so to store more you bought compute you didn't need, and to compute more you bought storage you didn't need, and the cluster ran 24/7 sized to peak. Decoupling puts data in cheap object storage (S3, pennies/GB-month) and points **elastic, ephemeral compute** at it: you scale them independently, run ten isolated warehouses on one copy of the data, spin compute to zero when idle, and pay per scan or per cluster-hour. The consequences a Director cares about: cost tracks usage not peak provisioning, teams don't contend for one cluster, and storage growth is nearly free. It's the same "pay for usage, not provisioned capacity" shift that makes serverless attractive elsewhere.
-
-### Key takeaways
-- **OLTP vs OLAP is the foundational divide:** operational stores answer "this entity now" with point access; a data platform answers "all entities over time" with scans, and serving one from the other is the classic, costly mistake. Get the data into a separate analytical store.
-- **A data platform is a projection, not a database of record:** a continuously-rebuilt, append-mostly, scan-optimized, **decoupled storage/compute** copy of operational truth, and it must be **rebuildable** from retained raw (idempotent recompute) to survive bugs, backfills, and schema changes.
-- **Design in freshness, scan-cost, volume, and trust**, not QPS alone. Freshness is a priced dial (pick the cheapest rung that meets the requirement); volume grows unbounded (separate storage/compute, partition, tier).
-- **Analytical cost ≈ bytes scanned × \$/TB; the lever is data layout**, partition pruning, columnar projection, clustering, pre-aggregation, **not** caching. Always quantify the scan.
-- **Engineer trust and surface freshness:** the signature failure is a precise, confident, *wrong-or-stale* number, so data-quality tests, contracts, and lineage are first-class, and runaway cost is guarded by design.
-
-> **Spaced-repetition recap:** A data platform is the machine between the **cash registers** (OLTP, "this entity now," point access, row store) and the **analyst's desk** (OLAP, "all entities over time," scans, column store). It's a **projection, not a source of truth**, append-mostly, time-partitioned, **decoupled storage/compute**, and **rebuildable** from retained raw. Design in **freshness** (a priced ladder, pick the rung the requirement needs), **scan-cost** (≈ bytes scanned × \$/TB; lever is layout/pruning/pre-aggregation, not caching), **volume** (unbounded → separate storage/compute, partition, tier), and **trust** (tests + contracts + lineage; the failure is the confident wrong number). Never run analytics on the OLTP store.
+### Intuition first: why this one is genuinely harder than anything in the canonical design problems
+Every problem in the canonical design problems let you escape the hardest version of concurrency. TinyURL's mappings are immutable, so a stale cached read is harmless. Instagram and Twitter tolerate a feed that's a few seconds behind. WhatsApp orders messages *per conversation* but never has to merge two people typing into the **same word**. Even Dropbox, the closest cousin, ducks it: when two devices edit the same file, Dropbox keeps **both** as a "conflicted copy" and lets a human sort it out, that is a legitimate answer precisely because file sync can punt. A collaborative editor **cannot punt.** When Alice and Bob both type into the same sentence at the same instant, there is no "conflicted copy of paragraph 3", there is one document, on both screens, and it must **converge to a single state both users see, with no keystroke silently lost and no screen showing a different sentence than the other.** That is the crux, and it is a different *class* of problem: not "tolerate staleness" but "guarantee that independent, concurrent, intention-carrying edits merge deterministically into one shared truth." Hold that picture, *one document, many cursors, zero lost keystrokes, both screens identical*, because it is the requirement that makes or breaks the whole design, and it is the one you will be tempted to wave away.
 
 ---
 
-*End of Lesson 13.1. This is the mental model the whole Data Platforms track rests on: an analytical platform is a continuously-rebuilt, scan-optimized projection of operational truth, designed in freshness, scan-cost, volume, and trust.*
+## §A: The capstone problem (your brief)
+
+You are designing a **real-time collaborative document editor**, think Google Docs, Notion, or Figma's text layer, where multiple authenticated users edit the same rich-text document simultaneously and see each other's changes within a fraction of a second.
+
+This section frames the problem. It deliberately does **not** solve it. The clarifying questions, the requirement cuts, the numbers, the store choice, the convergence strategy, all of that is **yours to produce** in §B. Treat the brief the way you'd treat an interviewer's opening sentence: the start of a negotiation about scope, not a spec to implement.
+
+**The product, in one paragraph.** A user opens a document in a browser and starts typing. Anyone else with access who has the document open sees those keystrokes appear in near-real-time, character by character, with the other person's **cursor and selection** visible and labelled. Multiple people edit the same paragraph at once and the document stays coherent, no lost edits, no diverged copies, no "your version / their version." A user can go **offline** (laptop lid closes, train enters a tunnel), keep editing locally, and on reconnect their changes **merge** cleanly with everything that happened while they were gone. The full document is **persistent**, **versioned** (you can see history and restore), and loads quickly even when it's large and has a long edit history.
+
+**Functional surface to consider (you decide what's core vs stretch, that cut is part of the exercise):**
+- Open / create / load a document; render its current state fast.
+- Apply local edits and **propagate** them to all other active editors with sub-second latency.
+- **Converge** concurrent edits from multiple users into one consistent document state.
+- **Presence**: show who is in the document, where their cursor is, what they have selected.
+- **Offline edit + reconnect merge.**
+- **Persistence + version history** (snapshots, restore, "see changes since…").
+- *(Likely stretch, name and park them):* comments/suggestions mode, access control / sharing model, rich media embeds, full-text search across a user's docs, export.
+
+**Non-functional pressure (this is where the design is won or lost):**
+- **Edit-propagation latency**, local echo must feel instant; remote edits should appear in **well under ~200 ms** for editors in the same region. A laggy collaborative editor is a broken product.
+- **Convergence correctness**, *the* hard requirement. All replicas of a document **must** reach the same final state given the same set of edits, regardless of arrival order or network delay. No lost keystrokes; no two screens showing different text. This is a **correctness invariant**, not a nice-to-have.
+- **Concurrency profile**, a document has **many viewers but few simultaneous editors**; you should *cap* concurrent editors per doc (Google Docs historically capped around the low hundreds) and design for the common case of **single-digit-to-tens** of active editors.
+- **Availability & durability**, never lose a committed edit; the document must survive node/region loss; aim high (≥ 99.9% on the editing path) but be honest that the *editing session* (the live socket) is more fragile than the *stored document*.
+- **Offline tolerance**, edits made while disconnected must survive and merge on reconnect, possibly **minutes or hours** later.
+- **Scale**, assume a large consumer product: on the order of **100M+ documents**, **tens of millions of DAU**, millions of documents open concurrently, with the editor count *per document* small but the *connection* count huge.
+
+**Constraints and assumptions to pin down yourself (don't proceed until you've stated them):** rich text or plain text for v1? hard cap on concurrent editors per doc? acceptable staleness for *presence* (cursors) vs for *content* (they are not the same)? is the document a single shared object or can it be sharded into sub-trees? what's the latency budget split between *local echo* (should be ~0, optimistic) and *remote apply*? These are the questions whose answers *make* the design, which is exactly why the brief leaves them open.
+
+---
+
+## §B: Self-driving guide: what to produce at each RESHADED step
+
+This is your scaffold, not your solution. For each of the eight steps it tells you **what the step is for**, the **artifact to produce**, and the **specific numbers or decisions** that must appear in your answer. Produce all eight before you read §C. Resist the urge to look for "the right answer", the exercise is the act of deriving and defending one. Keep it at **Director altitude**: components and trade-offs, not algorithm pseudocode.
+
+**R: Requirements.** *Produce:* a crisp split of **functional vs non-functional**, an explicit **scope cut** (what's v1, what's parked), and, the load-bearing move here, a clear statement of the **two distinct traffic classes** you've noticed: high-volume, loss-tolerant **presence/cursor** updates vs lower-volume, loss-**intolerant** **content edits**. State your **concurrent-editors-per-doc cap** and the **read(view):write(edit)** shape. *The number that must appear:* an order-of-magnitude DAU and document count, and the assertion that editors-per-doc is *tens*, viewers-per-doc can be *thousands*.
+
+**E: Estimation.** *Produce:* back-of-envelope math that proves you understand where the load actually is. *Compute, with stated assumptions:* (1) **edit ops/sec per active document**, a fast typist is ~6-8 keystrokes/s; with batching/coalescing the *committed* op rate is lower; (2) **presence messages/sec per document**, cursor-move + selection events, which fire *far more often* than content edits and, multiplied by N editors fanned out to N editors, scale as **~N²** per doc; (3) **concurrent open documents** and total **live socket connections** (this is your big number, millions of mostly-idle WebSockets); (4) **op-log storage per document per year** and total, plus **snapshot** size/cadence; (5) a rough **edit-fan-out server count**. *The insight the math must surface:* presence traffic ≫ edit traffic, and idle-connection count ≫ active-edit rate, two different scaling problems, sized separately.
+
+**S: Storage.** *Produce:* a decision on what persists and in which store, justified by access pattern. *Must address:* the **op-log** (the ordered sequence of edits, append-heavy, replay-by-doc), periodic **snapshots** (so you don't replay millions of ops on load), and **document metadata** (owner, ACL, title, cursor of last snapshot). Name real stores and **reject at least one alternative on the access pattern** (e.g., why not store only the latest blob and lose history; why not a relational row per character). *Decision to make explicit:* op-log + snapshot vs last-state-only, and where each lives.
+
+**H: High-level design.** *Produce:* a component/box diagram and the **two happy paths** (an edit round-trip; a presence round-trip), plus, unavoidable here, your stance on the **pivotal call**: how edits **converge**. Name the contenders (**central-server ordering / OT** vs **CRDT** vs naive last-write-wins) and pick one *with* a reason tied to a requirement. *Must show:* where the live edit session lives (a stateful **collaboration/session server** that owns a document's active editors), how a document is **routed** to exactly one such server (so there's a single ordering authority), and how presence is fanned out on a **separate, cheaper path** than content.
+
+**A: API design.** *Produce:* the contract. *Must include:* the **WebSocket message protocol** (this is mostly a streaming/bidirectional problem, not request/response), message types for `edit op`, `ack`, `presence/cursor`, `join/leave`, `sync-since(version)`; plus a small REST surface for `create/load document`, `fetch snapshot+ops since v`, `list versions/restore`. *Decisions to voice:* how an op is **acknowledged and versioned** (server-assigned sequence number?), and how a reconnecting client says "give me everything since version V."
+
+**D: Data model.** *Produce:* the schema and, critically, the **shard key**. *Must specify:* the op-log table keyed and **partitioned by `document_id`** (so all ops for one doc are co-located and ordered), the snapshot record, the metadata record, and how **version/sequence numbers** are assigned per document. *The load-bearing decision:* `document_id` as the partition key, and why a single document's traffic landing on one partition/one session server is a feature (single ordering authority) and also your hot-spot risk (a viral doc). State how you'd handle the hot document.
+
+**E: Evaluation.** *Produce:* you turn on your own design and hunt bottlenecks, **naming the trade-off of each fix.** *Must stress, at minimum:* (1) **convergence under concurrency and reordering**, does your chosen scheme actually guarantee identical final state? (2) the **stateful session server as a single point of failure** for an active doc, what happens when it dies mid-session; (3) the **hot document** (a company all-hands doc with hundreds in it) against your editor cap; (4) **offline-for-hours then reconnect**, does the merge still converge, and how big is the catch-up; (5) **presence storms** (N² fan-out) overwhelming the content path. *For each:* the fix **and** what it costs.
+
+**D: Design evolution.** *Produce:* how it holds at 10×, the hardest trade-offs named, and **where you'd delegate.** *Must include:* the explicit **OT-vs-CRDT** trade as the central hard call (latency/server-authority and a mature ecosystem vs offline-friendliness/decentralization and per-character metadata bloat), a stance on **using a proven library** (Yjs/Automerge/ShareDB) vs building, geographic scaling of a *stateful* edit session, and a credible **delegation** of the convergence-correctness proof with a *stated prior*. *The Director sentence to land:* what you own (the architecture and the pivotal call) vs what you hand to a specialist (the merge-algorithm correctness), and why.
+
+> **Before you read §C:** write all eight artifacts down. Even rough. The critique only works on a real first-pass design, and the gap between what you produced and what §C probes for is precisely the thing you came here to find.
+
+---
+
+## §C: The critique framework (the spine of this lesson)
+
+This is the core of the capstone. For **each** RESHADED step, here are the questions to self-ask, or paste your design into an AI and have it ask you these *verbatim*, with the markers that separate a **strong signal** (Director altitude) from a **red flag**. Score yourself honestly at each step. Every strong-signal marker below carries either a **number** or a **named trade-off**; if your answer has neither, it is itself a red flag.
+
+A note on this problem's signature trap, because it governs half the markers below. The convergence machinery (OT transforms, CRDT tombstones) is **IC-deep**, and the rubric is two-sided on purpose: you can fail by going **too high** ("just use CRDTs, they merge", no awareness of metadata cost or the OT alternative) *or* **too deep** (whiteboarding tombstone garbage collection and transformation functions while the interviewer waits for an architecture). The Director answer lives between: *name the pivotal call, tie it to a requirement, state a prior, and delegate the proof.*
+
+### R: Requirements
+
+| Self-ask | Strong signal | Red flag |
+|---|---|---|
+| Did I separate the two traffic classes? | Explicitly names **presence/cursor (high-volume, loss-tolerant)** vs **content edits (lower-volume, loss-intolerant)** and says they get different paths and different consistency. | One undifferentiated "real-time updates" stream; treats a dropped cursor-move as seriously as a dropped keystroke. |
+| Did I cap concurrency and state the read shape? | Caps concurrent **editors/doc at tens-low-hundreds**, notes **viewers ≫ editors**, and uses the cap to bound fan-out cost. | "Unlimited simultaneous editors"; no cap, so fan-out and convergence cost are unbounded and unestimable. |
+| Did I cut scope deliberately? | v1 = open/edit/propagate/converge/persist + presence; **comments, ACL model, media, search explicitly parked** with a reason. | Tries to design comments, suggestions, sharing, and search in v1; drowns before the crux. |
+| Did I name convergence as *the* hard NFR? | Calls out **deterministic convergence / no lost keystrokes** as a correctness invariant up front. | Lists "low latency, high availability" generically; never names convergence as the defining requirement. |
+
+### E: Estimation
+
+| Self-ask | Strong signal | Red flag |
+|---|---|---|
+| Where is the load actually? | Shows **presence msgs/s ≫ edit ops/s** (cursor events fire constantly; N editors × N = ~N² fan-out per doc) and **idle-socket count ≫ commit rate**, sizes them separately. | One blended QPS number; never notices presence dwarfs edits or that the big number is *idle connections*, not writes. |
+| Did I quantify the edit rate sanely? | Typist ≈ 6-8 keys/s, **coalesced/batched** so committed ops/s is lower; multiplies by realistic concurrent editors, not viewers. | Assumes thousands of edits/s per doc (confuses viewers with editors); or no number at all, "it's real-time." |
+| Did I size the durable footprint? | Estimates **op-log bytes/doc/yr + snapshot size/cadence**, and notes ops are tiny but unbounded → **snapshots bound replay**. | Forgets the op-log grows forever; plans to replay millions of ops on every document open. |
+| Did the numbers pick the architecture? | Concludes: cheap fat-fan-out **presence path** + smaller **durable edit path** + **snapshotting**, each justified by a figure. | Numbers computed but ignored; architecture chosen by taste, not by the math. |
+
+### S: Storage
+
+| Self-ask | Strong signal | Red flag |
+|---|---|---|
+| What's the source of truth, state or log? | **Op-log (append-only, ordered per doc) + periodic snapshots** is the source of truth; current state is derived; reject "store only the latest blob" because it kills history/undo/merge. | Stores only the latest document blob; no op history → no version history, no clean offline merge, no audit. |
+| Did I match store to access pattern? | Op-log → append-friendly, replay-by-`document_id` (LSM/log-structured or an append store); metadata → KV/relational; **snapshots in blob store**. Names real systems, rejects "a relational row per character" on cost. | A row per character/keystroke in Postgres; or a single document store with no separation of log vs snapshot vs metadata. |
+| Did I bound load-time cost? | Load = **latest snapshot + ops since snapshot**, with snapshot cadence chosen so the tail of ops to replay is small (e.g., snapshot every N ops / minutes). | Reconstructs from the full op-log every open; load time grows unbounded with document age. |
+
+### H: High-level design
+
+| Self-ask | Strong signal | Red flag |
+|---|---|---|
+| How do concurrent edits converge? (the pivotal call) | Names **OT vs CRDT vs naive LWW**, picks one **tied to a requirement** (e.g., central-server **OT** for server-authoritative low-latency in-session ordering; **CRDT** if offline-first/decentralized dominates), and states convergence is **eventual**, a doc needs convergence, **not linearizability**. | "Last write wins on the paragraph" (silently loses keystrokes); *or* "just use CRDTs, they merge" with no awareness of the OT alternative or the cost; *or* whiteboards an OT transform function (too deep). |
+| Does each doc have a coherence point, and is its role correct for the chosen scheme? | **OT branch:** a doc routes to **one stateful session server** that assigns a **canonical order** to in-session ops, the ordering *is* the convergence mechanism. **CRDT branch:** the server is **not** an ordering authority (CRDTs merge regardless of order); it's a **relay for fan-out, persistence, and presence**, with at most a **display tie-break**. Either way, a doc has one coherence point. | Claims a "central ordering authority" while choosing CRDTs (contradicts the model, order-independence is *why* CRDTs converge); *or* no coherence point at all, so clients diverge or duplicate. |
+| Is presence on a separate, cheaper path? | Presence/cursors fan out via a **separate pub/sub channel**, ephemeral, **never persisted**, lossy-OK, explicitly cheaper than the content path. | Presence runs through the same durable, acked path as edits → pays correctness cost for data that doesn't need it. |
+| Is local echo optimistic? | Local keystrokes render **immediately** (optimistic), then reconcile with server order, so typing feels instant regardless of RTT. | Every keystroke round-trips to the server before rendering → typing feels laggy; product is broken. |
+
+### A: API design
+
+| Self-ask | Strong signal | Red flag |
+|---|---|---|
+| Right transport for the problem? | **WebSocket (bidirectional, persistent)** for the edit/presence stream; small REST surface for load/snapshot/version. Justifies why request/response is wrong for live edits. | Designs it as polling or per-keystroke REST POSTs; no persistent connection. |
+| Are ops versioned and acked? | Each op gets a **server-assigned sequence/version**; client tracks "last acked version"; protocol supports **`sync-since(V)`** for reconnect. | Fire-and-forget ops with no version/ack; reconnecting client can't tell what it missed. |
+| Is reconnect a first-class message? | Explicit **`join` → server returns snapshot + ops since the client's version**; clean catch-up path. | Reconnect re-downloads the whole doc, or has no defined catch-up → lost or duplicated ops. |
+
+### D: Data model
+
+| Self-ask | Strong signal | Red flag |
+|---|---|---|
+| What's the shard key? | **`document_id`** partitions the op-log and routes the session, all of a doc's ops are co-located and ordered; one doc = one ordering authority. | Shards by user, or by time → a single document's edits scatter across partitions and can't be ordered cheaply. |
+| Is the single-doc concentration acknowledged as both feature and risk? | Notes co-locating a doc on one partition/server **enables ordering** but creates a **hot-doc** risk; has a mitigation for the viral doc. | Treats `document_id` partitioning as free; never notices the all-hands doc is a hot partition + hot session server. |
+| How are version numbers assigned? | Monotonic **per-document sequence** assigned by the doc's session server / a per-doc counter, cheap because it's per-doc, not global. | Global monotonic sequence across all docs (needless coordination bottleneck), or no defined versioning. |
+
+### E: Evaluation
+
+| Self-ask | Strong signal | Red flag |
+|---|---|---|
+| Does convergence actually hold under reordering? | Argues *why* the chosen scheme converges (OT: server transforms ops against concurrent ones; CRDT: commutative merge) and **admits the limit** (e.g., OT's transform-correctness is hard → delegate/verify; CRDT carries per-element metadata that must be GC'd). | Asserts "it'll be consistent" with no mechanism; *or* dives into proving the transform at the whiteboard (wrong altitude). |
+| What happens when the session server dies mid-edit? | The op-log is **durable before ack** (or quorum-replicated), so a new session server **reloads snapshot + ops and resumes**; in-flight unacked ops replay from clients; bounded reconnection blip named. | "It's stateful so we lose the session" with no recovery; or assumes the live in-memory state was the only copy → data loss. |
+| Hot document / editor cap? | Enforces the **editor cap**, degrades extra users to **view-only/read replica**, and notes presence fan-out is the first thing to break (N²). | No cap; assumes one session server handles hundreds of editors + N² presence with no degradation plan. |
+| Offline-for-hours reconnect? | Client buffers ops locally; on reconnect, **merge converges** (the whole reason CRDT/OT was chosen) and catch-up is bounded by snapshot + delta; names the worst case (huge divergence). | Assumes short disconnects only; long-offline merge either silently drops edits or isn't addressed. |
+| Did every fix name its cost? | Each mitigation states the trade (e.g., "durable-before-ack adds write latency to the edit path, acceptable because we never lose a keystroke"). | Fixes listed with no trade-off; reads as a feature list, not engineering judgment. |
+
+### D: Design evolution
+
+| Self-ask | Strong signal | Red flag |
+|---|---|---|
+| Is OT-vs-CRDT named as the central hard trade? | States it crisply: **OT** = server-authoritative, lower per-op metadata, mature for text, but transform logic is intricate and needs the central order; **CRDT** = offline-/P2P-friendly, commutative merge, but **per-character metadata/tombstone bloat** and GC cost. Picks per requirement. | Picks one as "obviously better" with no trade; or can't articulate why both exist. |
+| Build vs buy? | Leans on **Yjs / Automerge / ShareDB** with a **stated prior** ("CRDT via Yjs for offline-first; I'd benchmark doc-size overhead") rather than hand-rolling convergence, and owns *that's a delegation, not a cop-out.* | Insists on hand-building the CRDT/OT engine from scratch at a Director level (wrong altitude, ignores mature ecosystem). |
+| Geographic scale of a *stateful* session? | Acknowledges the live session is **stateful and single-authority**, so you pin a doc's session to **one region** (the editors are usually co-located) and replicate the **durable log** cross-region for survivability, names the latency-vs-survivability trade. | "Put it behind a global load balancer", ignores that a single ordering authority can't be naively multi-region. |
+| Where do I delegate, with a prior? | Owns the **architecture + the OT/CRDT call**; **delegates the merge-correctness proof / library hardening** to a specialist with a stated prior, the explicit Director move. | Either personally tunes the transform function, or hand-waves the hardest correctness problem with no owner. |
+
+---
+
+## §D: One worked critique excerpt (the loop in action)
+
+One pass through the loop, on the pivotal step (**H: High-level design**, the convergence call), to show the *shape* of the self-critique. Run this same first-pass → probe → red-flag → revise cycle at every step above.
+
+**Your first-pass answer (H step):**
+> *"For convergence I'll use CRDTs, each client holds a CRDT replica of the document, edits are applied locally and broadcast to the others, and because CRDT operations are commutative they all merge to the same state automatically. No central coordination needed, which is great for offline too."*
+
+**Self-ask (from the §C / H rubric, verbatim):** *"How do concurrent edits converge, and what does your chosen scheme cost? Name the alternative you rejected and why."*
+
+**The red flag, spotted:** This is the **"just use CRDTs, they merge" too-high** failure the rubric warns about. It's not *wrong*, CRDTs do converge, but as stated it shows no awareness of (a) the **alternative** (OT, which is what Google Docs actually used, and why a central server changes the calculus), (b) the **cost** (CRDTs carry per-character metadata, unique IDs and tombstones for deleted characters, that inflates document size and demands garbage collection), or (c) the **trade** that picks one over the other. An interviewer hears "I read that CRDTs are magic," not "I made an engineering decision." It would also quietly drop the **single-ordering-authority** benefit a central session server gives you for in-region, online editing, the common case.
+
+**The revised answer (Director altitude):**
+> *"The pivotal call is how concurrent edits converge, and there are two real contenders. **OT (operational transform)** routes every op through a **central session server** that transforms it against concurrent ops and assigns a canonical order, lower per-op metadata, battle-tested for text (Google Docs's lineage), and it gives me a single ordering authority for free, which suits the common case: a handful of editors, online, in one region. Its cost is that the transform logic is intricate and historically bug-prone, a correctness risk I'd **delegate to a specialist and verify against a proven implementation**, not hand-roll. **CRDTs** converge by commutative merge with no central authority, which is strictly better for **offline-first and P2P**, but they pay **per-character metadata and tombstones** that bloat the document and need GC. My prior: since my requirements demand robust **offline merge**, I'd lean **CRDT via a mature library like Yjs or Automerge**, and I'd benchmark the metadata overhead on large documents before committing, but I'd still front it with a **session/relay server** per document. To be precise about that server's job: it is **not** an ordering authority, a CRDT converges *regardless* of the order ops arrive in, which is the whole point, it's there for **fan-out, durability (persisting the op-log / snapshots), and presence**, with at most a display tie-break. That's exactly why the server is optional for *correctness* and required for *operability*. The guarantee I'm buying is **eventual convergence**, not linearizability, a document doesn't need linearizability, and paying for it would wreck latency. The one thing I will **not** do at this altitude is whiteboard the transform function or the tombstone-GC policy; that's the deep-dive I'd own the *decision* on and delegate the *implementation* of."*
+
+Notice what the revision added: the **rejected alternative** (OT) with its reason, the **cost** of the chosen path (metadata bloat), a **stated prior** with a benchmark gate, the correct **guarantee** (eventual convergence, not linearizability), and an explicit **delegation** of the IC-deep part. Same step, same problem, the difference between the two answers is the entire offer. That delta is what the loop exists to surface.
+
+---
+
+## Key takeaways
+- **The capstone is the loop, not the answer.** Drive RESHADED end-to-end yourself, then turn the §C rubric on your own design, *"where would a Staff interviewer push, and would my answer survive it?"* That self-critique reflex is the most transferable thing here.
+- **This problem's crux is convergence**, and it's a harder *class* than anything in the canonical design problems: every prior problem tolerated staleness or a conflicted-copy; a collaborative editor must merge concurrent intention-carrying edits into **one state both screens show, zero lost keystrokes.** Name it as the defining requirement or you've already failed the R step.
+- **Let the numbers separate two systems**: presence/cursor traffic (high-volume, ~N² fan-out, loss-tolerant, *never persisted*) vs content edits (lower-volume, durable, acked, versioned), plus a huge **idle-connection** count that dwarfs the commit rate. Size them apart; route them apart.
+- **The signature altitude trap is two-sided.** Too high = "just use CRDTs, they merge" (no cost, no alternative). Too deep = whiteboarding the OT transform or tombstone GC. The Director answer: **op-log + snapshot**, a **single per-doc ordering authority**, OT-vs-CRDT named as the pivotal trade, **eventual convergence** (not linearizability) as the guarantee, and the merge-correctness proof **delegated with a stated prior** (lean on Yjs/Automerge/ShareDB).
+- **Every strong-signal marker carries a number or a named trade-off**, and so must yours. An answer with neither is a red flag in your own framework. That is the bar you're now able to hold yourself to without an answer key.
+
+> **Spaced-repetition recap:** Capstone = **you drive, you critique.** Problem: real-time collaborative editor, the one crux the canonical design problems never forced is **deterministic convergence of concurrent edits** (one doc, many cursors, zero lost keystrokes, both screens identical). Numbers split **presence (≫ volume, ~N², lossy, ephemeral)** from **edits (durable, acked, versioned)**, with **idle sockets ≫ commits**. Storage = **op-log + snapshots**, shard by **`document_id`** (one ordering authority, hot-doc risk). Pivotal call = **OT vs CRDT**, pick per requirement (offline → CRDT/Yjs; server-authoritative low-latency → OT), guarantee is **eventual convergence, not linearizability**, and you **delegate the merge proof with a prior**. Trap is two-sided: not "CRDTs just merge" (too high), not whiteboarding the transform (too deep). Run the §C rubric on your own design until the gaps close.
+
+---
+
+*End of Lesson 13.1, the capstone. This capstone closes the course: the earlier modules built the vocabulary and the building blocks, the RESHADED walkthrough taught the RESHADED method, the canonical design problems ran it on sixteen problems, and the capstone hands the method back to you, to drive, and to critique. The rubric pattern here (strong-signal vs red-flag, keyed to RESHADED) is the same lens to apply to any problem you meet in the room.*

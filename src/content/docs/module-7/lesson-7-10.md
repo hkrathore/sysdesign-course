@@ -1,263 +1,158 @@
 ---
-title: "7.10 — Amazon Locker (The Cold-Open Rep)"
-description: The module's cold-open drill, an unmemorizable constraint-allocation problem attempted solo against a 35-minute timer, testing requirement scoping, a size-matching allocation strategy argued by capacity math, and an expiry lifecycle where reclaim is physical.
+title: "7.10 — Governance, Catalog, Lineage & Data Mesh"
+description: At scale the platform's hardest problems are organizational — can people find the right data, are they allowed to see it, can you trace where a number came from, and who owns its quality — and that governance plane forces the centralized-vs-federated (data mesh) org decision, Conway's law applied to data.
 sidebar:
   order: 10
 ---
 
-> **This problem is asked precisely because you cannot have rehearsed it.** Parking Lot and LRU Cache have canned solutions on every prep platform; Amazon Locker does not, which is why it sits at #2 in recommended practice order and in heavy rotation at Amazon-flavored loops. With no template to recall, it isolates the skills templates hide: **requirement scoping under ambiguity** and **entity judgment**. A junior answer models cabinets and doors and drowns; a Director answer scopes to the allocation decision and the expiry-and-reclaim lifecycle, argues smallest-fit vs first-fit vs assign-on-arrival **with capacity arithmetic**, and notices the trap no memorized problem contains: **expiry here does not free the resource, a human has to come take the package away.** Treat this lesson as a drill, not a read.
-
-::tip[How to drill this, the cold-open protocol]
-**Do not read past the Intuition section until you have attempted this solo.** Set a 35-minute timer, blank document, and run the RESHADED spine from memory on "Design Amazon Locker": scope it, put rough numbers on capacity, name the entities and their state machines, defend an allocation strategy against one alternative, and find at least one race or lifecycle leak unprompted. When the timer fires, stop mid-sentence, that is what the real cut-off feels like, then read on and grade yourself section by section. The gap you find *is* the prep. (Want a 10-minute low-stakes warm-up first? The Connect Four rep in the chess LLD is the stretching exercise; this is the loaded set.)
-::
-
 ### Learning objectives
-
-- Run RESHADED **cold** on a problem with no circulating solution, and experience why **R dominates**: the scoping decisions *are* the test.
-- Model the three load-bearing entities, **slot, package, pickup code**, each with its own lifecycle; keep cabinets, doors, and firmware out of the model.
-- Argue the **allocation strategy** (smallest-fit vs first-fit vs assign-on-arrival) with **Little's-law capacity math**, not taste.
-- Design the **expiry-and-reclaim lifecycle** where, unlike every seat-booking problem in this course, expiry does **not** free capacity, reclaim is a physical carrier event.
-- Practice the Director moves under time pressure: cut scope out loud, quantify before choosing, delegate the kiosk edge with a stated prior.
+- State the **governance plane as four questions a platform must answer at scale**, *can I find it, am I allowed to see it, can I trace where it came from, who owns its quality*, and recognize that these are organizational problems wearing a technical mask.
+- Design a **data catalog** as the discovery and metadata layer (what tables exist, what they mean, who owns them) and make it the **governance chokepoint** where access control, classification, and lineage converge, not three disconnected tools.
+- Reason about **fine-grained access control**, column-level and row-level security, PII tagging, masking, and audit, as a *policy-count* problem that explodes with datasets × roles, and decide where coarse table-level grants are still the right call.
+- Treat **column-level lineage** as the trust-and-compliance backbone, trace a metric back to its source for debugging, impact analysis ("what breaks if I change this column?"), and audit ("prove this number's provenance").
+- Make the **centralized-platform-team vs decentralized-data-mesh** decision on the org axis, recognize when a central team becomes the bottleneck (the *only* condition that justifies mesh), and reject mesh-as-cargo-cult at small scale, with **data contracts** as the inter-domain interface either way.
 
 ### Intuition first
+Picture the platform once it has succeeded, **thousands of tables, hundreds of dashboards, dozens of teams all writing and reading.** The hard problems are no longer "is the scan fast" or "is the format open". They are the problems of a **large public library that grew without a librarian.** Walk in and four things go wrong at once. You can't *find* the book you need, there's no card catalog, so you ask around and someone points you at a shelf that might be right. You're not sure you're *allowed* to read it, some sections hold sealed records and nobody checks who opens them. When you finally cite a passage, you can't *prove where it came from*, the book quotes another book that quotes a third, and the trail is lost. And when a passage turns out to be wrong, there's *no one to blame or fix it*, because no author's name is on the spine. A library with a million books and no librarian, no catalog, no access desk, and no citations is not a library, it's a warehouse you can get lost in.
 
-A locker bank is a **coat check with no attendant**. The system must pick a cubby **big enough but no bigger**, burn the only extra-large cubby on a scarf and the next overcoat gets turned away, and hand the owner a numbered ticket (the pickup code) that opens exactly one door, once. Two things make it interesting. First, the cubby must be **promised before the coat arrives**: you choose a locker at checkout, but the package lands two days later, so the system either reserves capacity early (and lets it sit empty in transit) or gambles space exists on arrival. Second, **unclaimed coats don't vanish at closing time**: when the three-day ticket expires, the coat occupies the cubby until a courier physically carts it away, an "expired" hold and a "free" cubby are different states, and conflating them is the bug this problem is built to catch. Everything else, steel, touchscreen, solenoids, is scenery. The system is three lifecycles (slot, package, code) and one allocation decision, at a scale so small the hard part is **judgment, not throughput**.
+The governance plane is the **librarian function.** The **catalog** is the card catalog plus the index of what every book means and who wrote it, *discovery*. The **access desk** checks your badge at the door and redacts the sealed pages before handing the book over, *access control*. The **citation trail** lets you follow any quote back to its original source and forward to everything that cited it, *lineage*. And **ownership**, an author's name on every spine, is what makes "this is wrong" actionable instead of a shrug. The deep design question this forces is organizational: do you hire **one central librarian** who catalogs and shelves every book the whole institution produces (consistent, but one person can't keep up once the institution is large), or do you make **each department run its own well-run reading room to a shared standard** (scales with the institution, but risks every room cataloging differently)? That is the centralized-vs-data-mesh question, and it's a question about people and ownership, not about storage.
 
----
+### Deep explanation
 
-## R: Requirements
+**The governance plane answers four questions, and they are organizational problems with technical surfaces.** The earlier lessons built a platform that is fast, cheap, open, and rebuildable. None of that helps if a new analyst spends a day asking Slack "which table has revenue?", if anyone can read the PII column, if no one can prove where the board's number came from, or if a broken metric has no owner. **The Director-altitude statement: at scale, a data platform's hardest problems are organizational, can people *find* the right data, are they *allowed* to see it, can you *trace* a number's provenance, and *who owns* its quality, and the governance plane is the set of systems and ownership models that answer those four questions.** Each maps to a capability, *find* → catalog/discovery, *allowed* → access control, *trace* → lineage, *who owns* → ownership and contracts. They are usually built separately and that is the first mistake; they belong on one plane, anchored at the catalog.
 
-> **Adaptation, said out loud:** on an unmemorizable problem, R is not a warm-up, it is the scored event: can you carve a defensible core out of an ambiguous prompt in ~5 minutes? Spend a third of the timer here without guilt.
+**The data catalog is the discovery layer and the natural governance chokepoint.** A catalog is the **index of every dataset**, its schema, its meaning (descriptions, business definitions), its owner, its freshness and quality status, and its classification (does this hold PII?). Concretely it solves "what tables exist and what do they mean", a new hire searches `revenue` and finds the *one* authoritative `gold.finance_revenue` mart with its definition and owner, rather than guessing among forty tables with `rev` in the name. The deeper architectural point: **because every query and every access decision must consult the catalog to resolve a table, the catalog is the one place where access policy, PII classification, and lineage all naturally live.** This is why the modern catalogs, **Unity Catalog, AWS Glue Data Catalog, Apache Polaris / the Iceberg REST catalog**, Collibra/Alation on the enterprise side, are converging from "a searchable list of tables" into "the governance control plane." *The Director move: make the catalog the chokepoint, one place defines who-can-see-what and what-means-what, rather than scattering access rules across each query engine* (covered as the catalog design in 14.1, the full governance problem in 14.5).
 
-**Clarifying questions I'd ask (with assumed answers):**
+**Access control at scale is a policy-count problem, and granularity is the central trade.** The naive model is **table-level grants**, role X can read table Y. It's simple and it's what every system does by default, but it's leaky, the moment one table holds both a public `region` column and a sensitive `ssn` column, or holds EU and US customers' rows together, a table-level grant is too blunt: it leaks the sensitive column or the out-of-jurisdiction rows to everyone who can read the table. The fix is **fine-grained access**, and it comes in three flavors that compose:
+- **Column-level security**, grant `region`, `amount` but mask `ssn`, `email` for analysts; the column is the unit of policy.
+- **Row-level security**, an EU-based analyst sees only EU customers' rows via a predicate attached to their role; the row is the unit.
+- **Dynamic masking**, the column is visible but redacted (`***-**-1234`) for unprivileged roles, full value for privileged ones; same query, different result by identity.
+The thing a Director must quantify is **the policy explosion**: with *thousands* of datasets and *dozens* of roles, hand-managed per-column, per-row grants reach **datasets × roles × columns** policies, tens of thousands of rules nobody can audit. The scaling answer is **tag-based / attribute-based policy**: classify columns once (tag a column `PII` at the catalog), then write *one* policy, "mask everything tagged `PII` for any role lacking `pii-reader`", that applies across every table automatically. **PII tagging plus audit logging** (who read what, when) is the table-stakes pair for any regulated domain (GDPR, HIPAA, SOC 2). The decision and its rejected alternative: **coarse table-level access** (simple, low policy count, but leaks at the column/row boundary) **versus fine-grained row/column-level** (secure, satisfies regulators, but a policy-count and complexity tax), and you *reject blanket fine-grained-everywhere for the unmanageable rule count*, applying it where data is genuinely sensitive (PII, financial, regulated) and keeping coarse grants where a table is uniformly safe.
 
-- *Who are the actors?* → **Customer** (chooses locker, picks up), **courier** (deposits, collects returns), **system** (allocates, issues codes, expires). No staff on site.
-- *When is the locker chosen?* → **At checkout**, days before delivery, the answer that creates the central tension: reserve now vs assign on arrival.
-- *Slot sizes?* → **S / M / L**; a package fits any slot ≥ its size class.
-- *Pickup window?* → **3 days** after delivery, then carrier return and refund.
-- *One package per slot?* → **Yes**, simplifying invariant; consolidation is cut.
+**Data lineage is the trust-and-compliance backbone, and column-level lineage is the one that earns its keep.** Lineage is the **graph of how data flows**, which source tables and transforms produced a given table or column. **Table-level lineage** ("`gold.revenue` derives from `silver.orders` and `silver.refunds`") is useful; **column-level lineage** ("`gold.revenue.net_amount` = `orders.gross` − `refunds.amount`, traced through these three dbt models") is what makes three hard jobs tractable:
+- **Trust / debugging**, when a VP asks "the revenue number looks wrong," lineage traces it back through every transform to the source columns, so you find the broken join or the timezone bug instead of guessing (the silent-wrong-number failure of 13.1).
+- **Impact analysis**, before a source team renames `orders.amount`, lineage shows *every* downstream column, mart, and dashboard that breaks, turning a silent break into a planned migration (the contract-break problem of 13.9).
+- **Compliance / provenance**, auditors and regulators demand "prove where this figure came from," and lineage is the answer; for GDPR, lineage finds *every* table derived from a user's data so a deletion propagates everywhere (the erasure problem).
+Lineage is captured automatically by parsing transform SQL (dbt, Spark) or emitted via a standard like **OpenLineage**, and surfaced in the catalog. *The Director framing: lineage is not documentation, it's the system that makes "trace it" and "what breaks if I change this" answerable in minutes instead of an archaeology project.*
 
-**Functional requirements:** (1) at checkout, offer nearby locker locations **with availability for this package size**; (2) reserve capacity for the order; (3) on courier arrival, **bind a physical slot**, open it, mark delivered, notify the customer with a pickup code; (4) **pickup**: valid code opens exactly the right door, once, freeing the slot; (5) **expiry**: after 3 days, invalidate the code, notify, queue for carrier return, the slot frees only when the courier collects.
+**Then the org question the governance plane forces: who owns and operates all this, one central team or the domains?** This is **Conway's law applied to data** (8.x), the data architecture will mirror the org that builds it, so the org model *is* an architecture decision. Two models:
 
-**Explicitly cut (and say so):** courier-fleet routing, payment and refunds, hardware/firmware, fraud and lost-package disputes, multi-package consolidation. Scope is **choose → reserve → deliver → pick up or expire-and-return**. Hardware is the highest-value cut: candidates who model `Door`, `Solenoid`, and `Touchscreen` spend their 35 minutes on scenery.
+- **Centralized data platform team.** One team owns ingestion, the warehouse/lakehouse, the transforms, the catalog, and governance for the whole company. **Strength:** consistency, governance, and a single coherent platform, definitions don't drift, standards are uniform, there's one place accountable. **Weakness, and it's fatal at scale:** the central team becomes a **bottleneck** between every domain and its data. Every new dataset, every metric change, every pipeline waits in *their* queue; they lack the domain context to model the marketing or payments data well; and as the company grows to *dozens* of data-producing domains, a team of, say, 8–15 engineers cannot keep up with hundreds of requests, throughput collapses and quality suffers because they're modeling data they don't understand. You **reject centralized when the central team is provably the bottleneck**, long lead times, a deep backlog, domains routing around the platform, modeling errors from missing context.
 
-**Non-functional requirements:** no double-assignment of a slot (one package per slot, the correctness invariant); a code opens one door, once; couriers are rarely turned away (target **< 2% redirects**); kiosk pickup survives brief network blips (delegated below); availability for *browsing* locations, strict consistency for *claiming* capacity, the 5.13/7.8 boundary, drawn in five seconds because you've drawn it before.
+- **Decentralized, data-as-a-product (data mesh).** Flip the ownership: each **domain owns its data as a product** (the payments team owns the payments datasets end to end, models them, guarantees their quality, publishes them for others to consume), governed by four principles, **domain ownership**, **data-as-a-product** (discoverable, addressable, trustworthy, with SLAs and an owner), **self-serve data platform** (the central team builds the *paved road*, tooling, storage, catalog, CI/CD, so domains can ship without reinventing it), and **federated computational governance** (global standards, classification, security, interoperability, encoded *as platform policy* and enforced automatically, not by a central review board). **Strength:** it scales with the org, domains own the data they understand best, no central queue. **Weakness, and it's why mesh is over-applied:** it risks **inconsistency** (every domain models and defines differently, "revenue" means three things again), **duplicated effort** (each domain rebuilds similar pipelines), and a real **maturity bar**, mesh demands strong platform tooling, disciplined domains, and genuine federated governance, and most organizations adopting it are **cargo-culting the term** without the scale or maturity that justifies it.
 
----
+**The decision rule, and the rejected alternative on each side.** **Data mesh is justified when, and roughly only when, you have many data-producing domains, a large organization, and a central platform team that has become the demonstrable bottleneck.** Below that, **centralized is the right call**, a 30-person company with one data team does not have a Conway's-law problem; imposing mesh on it manufactures coordination overhead, inconsistency, and duplicated platforms to solve a bottleneck that doesn't exist. So you **reject centralized when it's the proven bottleneck across many domains** (it stops scaling and starves the org of data), and you **reject mesh as cargo-cult at small scale** (it adds federation cost and inconsistency risk with no bottleneck to relieve). The honest senior position is that this is a **spectrum, not a binary**, most successful large platforms run a **hybrid**: a central platform team owning the paved road, shared infrastructure, and the federated-governance policy *engine*, with domains owning their own data products on top. The platform team's job shifts from "build everyone's pipelines" to "build the road and enforce the standards everyone drives on."
 
-## E: Estimation
+**Data contracts are the inter-domain interface that makes either model safe.** Whether centralized or mesh, the boundary between a data producer and its consumers needs an **explicit, enforced schema-and-semantics agreement** (the producer guarantees this schema, these types, these freshness and quality SLAs; breaking changes are versioned), introduced in 13.9. In a centralized world the contract is internal hygiene; **in a mesh it is load-bearing**, it's the *only* thing keeping dozens of independently-owned data products interoperable, the API between domains. Federated computational governance is, concretely, the set of contracts and classification standards that every domain's data product must satisfy to join the mesh. *Reject "publish a table and let consumers figure out the schema" for an enforced contract*, because in a mesh the silent schema break isn't one team's problem, it's a cross-domain outage with no central owner to catch it.
 
-> **Adaptation:** estimation here sizes **capacity and dwell time, not fleets**. The decision the numbers must support is *when to bind capacity*, and Little's law answers it in four lines.
+<details>
+<summary>Go deeper — how lineage is captured and how tag-based policy is enforced (IC depth, optional)</summary>
 
-**Assumptions (one metro):** 300 locations × 100 slots (40 S / 40 M / 20 L) = **30K slots**. Average dwell per delivered package ≈ **1.5 days** (most pickups within 24h; the ~5% that expire sit ~5 days awaiting return and drag the mean up).
+- **Lineage capture.** Three mechanisms, in increasing fidelity: (1) **parse the transform code**, dbt builds a DAG from `ref()` calls (table-level, free); (2) **parse SQL ASTs**, tools resolve `SELECT a + b AS c` into column-level edges by analyzing the query plan (column-level, the useful tier); (3) **runtime emission**, engines emit lineage events to a standard like **OpenLineage** as jobs run, capturing even dynamic/programmatic transforms. The catalog ingests these and renders the graph. Column-level lineage across many engines is genuinely hard, the value is high but so is the engineering, which is why it's a buy-vs-build axis.
+- **Tag-based / attribute-based access control (ABAC).** Instead of N×M explicit grants, you (1) **classify** columns with tags (`PII`, `financial`, `pci`), often auto-detected by scanning column values/names against patterns, (2) **tag identities** with attributes (`role=analyst`, `region=EU`, `clearance=pii-reader`), and (3) write **policies over tags**: "mask columns tagged `PII` unless the principal has `pii-reader`"; "row-filter where `row.region = principal.region`." One policy covers thousands of tables. This is how Unity Catalog, Glue/Lake Formation tag-based policies, and Snowflake masking/row-access policies all scale governance, the policy count goes from datasets×roles to roughly number-of-tags.
+- **The masking-at-the-engine problem.** Fine-grained policy must be enforced *no matter which engine reads the open table* (Spark, Trino, the warehouse), or the lakehouse's open-format strength becomes a governance hole. This is the strongest argument for the **catalog as the enforcement chokepoint** (e.g. a credential-vending catalog that hands engines only the columns/rows the principal may see), versus per-engine ACLs that drift.
 
-**Throughput ceiling, Little's law, L = λW:** slots = arrival rate × dwell → `λ = 30K ÷ 1.5 days ≈ 20K packages/day` for the metro. That is the system's entire capacity, the number every allocation decision must defend.
+</details>
 
-**The reserve-early tax (the headline calculation):** if checkout **hard-reserves a physical slot** and transit takes ~2 days, dwell becomes `2 + 1.5 = 3.5 days` → capacity falls to `30K ÷ 3.5 ≈ 8.5K/day`. **Hard-reserving at checkout costs ~60% of the network's throughput**, empty steel held against a package still on a truck. That one division decides the design in §S/§H: reserve a *promise* early, bind the *slot* late.
-
-**Load is trivial, say so and move on:** 20K allocations/day ≈ 0.25/s average, ~2/s at evening peak metro-wide, ~7 reservations/hour per location. One Postgres yawns. Storage: 20K/day × ~1 KB ≈ **7 GB/year**. Codes: 6 digits = 1M combinations vs ≤100 active packages per location, guessing is handled by kiosk rate-limiting, not longer codes. **Verdict: a capacity-management and lifecycle-correctness problem at toy QPS**, the inverse of the canonical design problems, and noticing that inversion out loud is a senior signal.
-
----
-
-## S: Storage
-
-> **Adaptation:** as in the movie-booking LLD, "storage" at LLD altitude means **where does the arbiter live**, which component decides who got the last M slot.
-
-**Decision: one transactional relational database (Postgres) holds all three lifecycles and the per-location size-bucket counters.** At ~2 writes/s metro-wide, the only storage question is correctness of the contested transitions, last-slot reservation and single-use code redemption, both row-level atomic conditional updates, the primitive relational stores do best.
-
-- *Rejected, in-memory allocation state:* the movie-booking LLD argument verbatim, a second instance or a restart silently double-allocates; in-process memory cannot hold a business invariant.
-- *Rejected, a distributed lock or queue per location:* infrastructure bought to solve contention measured at **7 events/hour**. A conditional `UPDATE` on a counter row is the whole mechanism; more is résumé-driven design.
-- *Eligibility browsing* reads a cached, slightly stale availability view, a hint, exactly like the seat map; the reservation transaction is the truth.
-
----
-
-## H: High-level design
-
-> **Adaptation:** H shrinks to **four components inside one service plus the strategy seam**, and the design's center of gravity is the two-phase allocation that §E's math forced.
-
-**Components:** an **AllocationService** owning reserve/bind/release; an **AllocationStrategy** interface (the swappable size-matching policy); a **LifecycleService** driving package states, codes, expiry, and return queuing (scheduled scans, the task-scheduler building block in miniature); and the **Kiosk/Courier edge** treated as a client of clean APIs, its firmware delegated.
-
-**The two-phase allocation (the design's spine):**
-
-1. **Checkout, reserve a promise, not a slot.** Atomically decrement the `(location, size_class)` availability counter; no physical slot is bound, so nothing sits empty during transit. *Rejected, hard slot binding at checkout:* the 60% throughput tax from §E. *Rejected, pure assign-on-arrival:* couriers hit full lockers and redirect constantly; the customer was promised nothing. The middle path holds capacity in the cheapest unit that still makes the promise, a counter.
-2. **Courier arrival, bind late.** The scan picks the smallest free slot ≥ package size via the strategy, flips it `AVAILABLE → OCCUPIED`, opens the door, marks the package `DELIVERED`, issues the code, fires the notification (the pipeline, one line).
+### Diagram: centralized platform vs data mesh (the org-architecture contrast)
 
 ```mermaid
-stateDiagram-v2
-    [*] --> RESERVED: checkout decrements bucket
-    RESERVED --> IN_TRANSIT: order ships
-    IN_TRANSIT --> DELIVERED: courier scan binds slot
-    DELIVERED --> PICKED_UP: valid code opens door
-    DELIVERED --> EXPIRED: three day window lapses
-    EXPIRED --> RETURNED: courier collects package
-    PICKED_UP --> [*]
-    RETURNED --> [*]
+flowchart TB
+    subgraph CENTRAL["Centralized platform team"]
+      direction TB
+      CT["Central data team<br/>(owns ALL pipelines + governance)"]
+      D1["Marketing"] --> CT
+      D2["Payments"] --> CT
+      D3["Logistics"] --> CT
+      CT --> CW[("One warehouse / lakehouse")]
+      CW --> CC["Consumers"]
+      CNOTE["Consistent + governed,<br/>but central team = bottleneck<br/>once domains are many"]
+    end
+
+    subgraph MESH["Data mesh (federated)"]
+      direction TB
+      M1["Marketing<br/>owns its data product"]
+      M2["Payments<br/>owns its data product"]
+      M3["Logistics<br/>owns its data product"]
+      PLAT["Central PLATFORM team<br/>= self-serve paved road +<br/>federated governance policy engine"]
+      M1 -. contract .-> M2
+      M2 -. contract .-> M3
+      PLAT -.governs/enables.-> M1
+      PLAT -.governs/enables.-> M2
+      PLAT -.governs/enables.-> M3
+      MNOTE["Scales with org,<br/>but risks inconsistency +<br/>duplication; needs maturity"]
+    end
+
+    style CT fill:#e8a13a,color:#000
+    style PLAT fill:#2d6cb5,color:#fff
+    style CW fill:#1f6f5c,color:#fff
 ```
 
-The slot has its own, deliberately separate machine: `AVAILABLE → OCCUPIED → AWAITING_RETURN → AVAILABLE`. The asymmetry between the two machines is the lesson's core trap: **`EXPIRED` is a package state, not a slot state.** When the window lapses the code dies, but the slot stays `AWAITING_RETURN`, consuming capacity until a carrier sweep physically empties it. Contrast 7.8 and 5.13, where lazy expiry frees the seat at write time for free: here reclaim has a truck in it. Flip the slot to `AVAILABLE` on expiry and you assign the next package to a door with someone else's property behind it.
+### Worked example: a metric goes wrong at a 40-domain company, and the governance plane earns its cost
 
----
+A large marketplace runs **~6,000 tables** across **~40 data-producing domains** (payments, search, logistics, ads, growth, …). The board deck shows **GMV** (gross merchandise value); one quarter, finance says it's off by 4% from the settled ledger. Trace how each part of the governance plane does its job, and why the org model matters.
 
-## A: API design
+- **Find (catalog).** An analyst searches `gmv` in the catalog. Without it, she'd ask around and might pick the wrong one of several `gmv`-ish tables. With it, she lands on the *one* authoritative `gold.gmv_daily`, sees its owner (the **payments domain**), its definition ("booked order value, gross of refunds, in USD, by booking day"), and its freshness/quality status. **Discovery in seconds, not a day of Slack.**
+- **Trace (column-level lineage).** She follows lineage from `gmv_daily.gmv` backward: it sums `silver.orders.amount`, which derives from a CDC feed of the payments OLTP, joined to an FX-rate table for currency conversion. The lineage graph shows the FX-rate table's last partition is two days stale, conversions used an old rate. **The 4% gap is a stale upstream dependency**, found by *tracing*, not guessing. (Had the question instead been "we want to change `orders.amount`'s type," the *same* lineage answers impact analysis, every one of the 30+ downstream marts and dashboards that would break.)
+- **Allowed (access control).** `orders` contains a `card_last_four` column tagged `PII` in the catalog. The analyst, lacking `pii-reader`, sees it **masked** by a single tag-based policy, not by a hand-written grant on this one table; meanwhile every read is **audit-logged** for the next SOC 2 cycle. Coarse table-level access would have leaked the card data to anyone who could read `orders`.
+- **Who owns (ownership + contract + org model).** Because the **payments domain owns `gmv_daily` as a data product**, there is a named owner accountable for the fix and the SLA, not a shrug. The FX dependency is governed by a **data contract**: the FX team guarantees daily freshness, and its breach is what the contract's freshness check should have caught. And here the org model bites, **at 40 domains, a single central team could never own GMV, FX, search, and ads data with enough context to model and operate each well**; the central team's right job is the paved road and the federated policy (the catalog, the PII-tag enforcement, the contract standard) that made every step above *work the same way across all 40 domains*.
 
-> **Adaptation:** the API is small; what's scored is that each call maps to one lifecycle transition and contested ones are idempotent.
+The number a Director carries out: *"6,000 tables, 40 domains, and the reason a wrong metric was diagnosed in an afternoon, with the PII protected and the provenance provable, is the governance plane, catalog for discovery, column-level lineage for trust, tag-based policy for access, and domain ownership under federated governance for who-fixes-it. At this domain count, that's mesh-shaped; at 3 domains it would be a central team."*
 
-```
-GET  /v1/locations?near=&size=M          -> 200 { locations:[{id, dist, avail}] }   # cached hint
-POST /v1/reservations                     # atomic bucket decrement
-  body: { orderId, locationId, size }    -> 201 { reservationId } | 409 FULL
-POST /v1/packages/{id}/deliver            # courier scan; binds slot, idempotent
-  body: { courierId }                    -> 200 { slotId, doorOpened } | 409 NO_SLOT
-POST /v1/locations/{id}/pickup            # kiosk; single-use code
-  body: { code }                         -> 200 { slotId, doorOpened }
-                                         -> 410 EXPIRED | 429 too many attempts
-POST /v1/slots/{id}/return-collect        # courier sweep frees the slot
-DELETE /v1/reservations/{id}              # order cancelled in transit -> counter++
-```
+### Trade-offs table: centralized platform vs data mesh vs hybrid
 
-**Notes (each with its rejected alternative):** `deliver` is **idempotent on packageId**, couriers double-scan; without it one package eats two slots (*rejected: trusting the scan to happen once*). `pickup` redeems via an atomic single-use flip with per-kiosk attempt limits (*rejected: longer codes, usability beats entropy once guesses are capped*). Availability in `GET /locations` is a hint with the 409 as arbiter, the 5.13 pattern in one sentence.
-
----
-
-## D: Data model
-
-> **Adaptation per spec: D is the heart here, locker, package, and pickup-code lifecycles.** Four tables; the judgment is what's *absent* (no cabinet, door, or screen entities).
-
-- **`slots`**, `(location_id, slot_id)` PK, `size_class`, `state` (`AVAILABLE / OCCUPIED / AWAITING_RETURN`), `current_package_id`. The physical truth.
-- **`size_buckets`**, `(location_id, size_class)` PK, `available_count`. The checkout-time promise ledger; reserve = conditional decrement `WHERE available_count > 0`, one winner for the last M slot, loser gets 409, no lock held (the CAS reflex from 5.13, applied at 1/10,000th the QPS).
-- **`packages`**, `package_id` PK, `reservation_id`, `state` (the Mermaid machine), `slot_ref`, `delivered_at`, `expires_at`.
-- **`pickup_codes`**, `code` + `location_id` PK, `package_id`, `status` (`ACTIVE / USED / VOID`), single-use enforced by conditional update `WHERE status='ACTIVE'`.
-
-**The invariant ledger, stated:** `available_count` per bucket = physical `AVAILABLE` slots − outstanding unconsumed reservations. Every capacity-touching transition, reserve, cancel, bind, return-collect, adjusts counter and slot state **in one transaction**, or the promise ledger drifts from the steel. A nightly reconciliation job audits drift; paging on nonzero is cheap insurance.
-
-<details>
-<summary>Go deeper, full column schemas and indexes (IC depth, optional)</summary>
-
-**`slots`:** `location_id` (int, shard-irrelevant at this scale), `slot_id` (string, e.g. `C2-R4-S17`), `size_class` (enum S/M/L), `state` (enum), `current_package_id` (uuid nullable), `updated_at`. Index on `(location_id, size_class, state)` for the bind-time "smallest free slot" query.
-
-**`size_buckets`:** `(location_id, size_class)` PK, `available_count` (int, `CHECK >= 0`), `total_count`. Reserve: `UPDATE size_buckets SET available_count = available_count - 1 WHERE location_id=? AND size_class >= ? AND available_count > 0 ORDER BY size_class LIMIT 1` (smallest bucket with space, strategy in SQL).
-
-**`packages`:** `package_id` PK, `reservation_id` FK, `order_id`, `customer_id`, `state`, `slot_location_id` + `slot_id` (nullable until bind), `delivered_at`, `expires_at` (set at delivery = `delivered_at + 72h`), `returned_at`. Partial index on `(state, expires_at)` for the expiry scan.
-
-**`pickup_codes`:** `(location_id, code)` PK, codes are unique *per location*, not globally, which keeps 6 digits comfortable; `package_id` FK, `status`, `issued_at`, `attempt_count`. Redemption: `UPDATE pickup_codes SET status='USED' WHERE location_id=? AND code=? AND status='ACTIVE'`, 1 row = open door; 0 rows = reject.
-
-**`reservations`:** `reservation_id` PK, `order_id` unique (idempotent checkout), `location_id`, `size_class`, `state` (`HELD / CONSUMED / CANCELLED / LAPSED`), `created_at`. Lapse job releases counters for orders that never ship (cancelled upstream) after a transit-time ceiling.
-
-</details>
-
-**Interface seam, the strategy in ≤15 lines, language-neutral:**
-
-```
-interface AllocationStrategy {
-  SizeClass reserveBucket(locationId, pkgSize)   // checkout: which bucket to promise
-  SlotId    bindSlot(locationId, pkgSize)        // arrival: which physical slot
-}
-
-class SmallestFit implements AllocationStrategy   // default: tightest size >= pkg
-class FirstFit    implements AllocationStrategy   // any free slot >= pkg
-class NearestFallback decorates AllocationStrategy {
-  // chosen location full at bind time ->
-  // retry next size up, then nearest location within radius
-}
-```
-
-**Smallest-fit is the default, defended in one sentence:** L slots are 20% of inventory but the only home for L packages; first-fit burns them on S packages and converts a *size* mismatch into *rejected large packages* days later. *Rejected, score-based placement across locations at checkout:* optimizing distance × fill × size when the customer already chose their location solves a problem nobody has; keep the fallback for bind-time misses only.
-
----
-
-## E: Evaluation
-
-> Hunt the leaks. On a cold open, finding two of these unprompted separates the grades.
-
-**Leak 1, the last-bucket race.** Two checkouts grab the final M promise simultaneously. *Fix:* the conditional decrement, one statement, one winner, loser 409s to the next-nearest location. *Rejected:* read-count-then-write (TOCTOU) and per-location mutexes (a lock for 7 events/hour).
-
-**Leak 2, courier arrives, no physical slot.** The ledger said yes at checkout, but bind-time finds the bucket physically full, expired packages awaiting return ate the slack, or a package mis-declared its dims. *Fix:* the `NearestFallback` chain (size up → adjacent location → redirect as last resort), plus the real fix upstream: **count `AWAITING_RETURN` slots as unavailable in the promise ledger**, steel you cannot promise. Redirect rate < 2% is the system's primary health metric.
-
-**Leak 3, expiry treated as reclaim.** The classic wrong answer flips the slot `AVAILABLE` when the code expires, with a package still inside. *Fix:* expiry transitions the *package* (`DELIVERED → EXPIRED`, code `VOID`, return manifest queued); the *slot* moves `OCCUPIED → AWAITING_RETURN` and frees only at `return-collect`. The capacity model carries this dead time, it's why dwell averaged 1.5 days, not 1.0, in §E.
-
-**Leak 4, double scans and replayed codes.** Couriers re-scan; kiosks retry on flaky networks. *Fix:* `deliver` idempotent on packageId; code redemption single-use via conditional update; kiosk attempt counter (5 tries → lockout + alert). Three one-line conditional writes, named in passing, spending five minutes here is over-engineering theater.
-
-**Leak 5, the kiosk loses connectivity mid-pickup (delegated, with a prior).** *"The edge/device team owns offline behavior; my prior is fail-closed for code redemption, a door that opens on stale state hands out someone's package, with store-and-forward for non-contested events like return scans."* Naming fail-closed and delegating the firmware is the Director move; designing the retry buffer is not your altitude today.
-
-<details>
-<summary>Go deeper, sizing the promise ledger's overbooking margin (IC depth, optional)</summary>
-
-The promise ledger can deliberately overbook, airline-style: some reservations never arrive (order cancellations in transit, ~5-8%) and arrivals are spread over a 2-day window, so simultaneous peak occupancy of promises is below their count. With cancellation rate `c ≈ 0.06` and arrival spreading factor `s ≈ 0.85`, a bucket of `N` physical slots can safely promise `N / ((1−c) × s) ≈ 1.25N` before bind-time misses exceed the redirect budget. The binding constraint is the redirect SLO: solve for the overbook ratio where P(arrivals in window > free slots), a Poisson tail on per-location arrival counts, stays under 2%. At 7 arrivals/hour per location the tail is fat relative to N=40, so in practice the ratio lands nearer 1.1× than 1.25×; run it per location from observed cancellation and dwell, not from a global constant. This is a tuning knob owned by ops once the `AWAITING_RETURN` accounting from Leak 2 is correct, without that, overbooking compounds the miss rate instead of harvesting slack.
-
-</details>
-
----
-
-## D: Design evolution
-
-> **Adaptation per spec: evolution here is capacity rebalancing across locations**, the system's 10× problem is geography, not QPS.
-
-**The pressure:** demand is lumpy, downtown lockers run 95% full and redirect couriers; suburban ones idle at 40%. The 20K/day ceiling holds *in aggregate* and is violated *locally*.
-
-- **First lever, shape demand at checkout (software, cheap):** the eligibility API stops showing locations whose *projected* fill at expected arrival exceeds ~85% (current occupancy + in-transit promises − forecast pickups, the ledger already has the data). *Trade-off:* slightly worse customer distance for far fewer redirects, accept it; a redirect costs a courier round-trip (~$2-4) and a delivery-day slip.
-- **Second lever, tune dwell (policy, cheap):** the 3-day window is a capacity dial. Cutting hot locations to 2 days raises throughput ~25% (Little's law again) at the cost of more expiries and support contacts. Run it as a per-location experiment, not a fleet-wide edict.
-- **Third lever, move steel (capex, last):** re-fit size mixes (downtown skews S) and add cabinets only where the first two levers exhaust. A location runs **$15-30K capex plus rent**; levers one and two are free utilization before any purchase order, *"I'd have network planning model re-fit vs new sites from the ledger's per-size miss rates; my prior is re-fitting size mix beats new locations, because our misses are size-shaped, not location-shaped."*
-
-**What I'd revisit if requirements changed:** multi-package consolidation breaks the one-package-one-slot invariant (a packing problem, scope it before accepting it); third-party carriers turn the courier API into a partner surface with auth and SLAs; refrigerated lockers add a slot *attribute* to matching, which the Strategy seam absorbs without redesign, say that sentence, it's why the seam earned its place.
-
----
-
-## Trade-offs table: the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
+| Decision | Centralized platform team | Data mesh (federated, domain-owned) | Hybrid (central paved road + domain products) | Use when… |
 |---|---|---|---|---|
-| **When capacity binds** | **Soft-reserve a size-bucket promise at checkout; bind slot on arrival** | Hard-reserve a physical slot at checkout | Pure assign-on-arrival, no reservation | **A** (our choice), keeps the promise without the 60% dwell tax. **B** only if transit ≈ 0 (same-day, locker as origin). **C** only where redirects are free, they aren't. |
-| **Size matching** | **Smallest-fit** | First-fit | Score-based across locations | **A** (our choice), protects scarce L slots; defense is one sentence. **B** when sizes are uniform. **C** only as bind-time fallback, never at checkout. |
-| **Expiry reclaim** | **Package expires; slot waits for physical collection** | Slot freed on expiry | Long windows, no expiry | **A** (our choice), the only physically coherent option. **B** assigns doors over someone's property. **C** lets dwell eat the network (Little's law). |
+| **Ownership** | one team owns all data + governance | each domain owns its data as a product | central owns platform + policy; domains own data | **Central** for few domains/small org; **Mesh** for many domains + central bottleneck; **Hybrid** as the realistic large-org end-state. |
+| **Scales with org?** | no, central team is the bottleneck past ~dozens of domains | yes, ownership distributes with the org | yes, road scales centrally, data scales per-domain | **Mesh/Hybrid** once domain count outpaces a central team's throughput. |
+| **Consistency risk** | low, one team, uniform definitions | high, domains model/define differently | medium, federated governance + contracts constrain drift | **Central** when consistency dominates and scale is small. |
+| **Governance** | natural (one team) | hard, must be *computational/federated* (encoded as policy) | governed centrally, executed per-domain | **Hybrid/Mesh** require the catalog-as-chokepoint + tag-based policy to work. |
+| **Main risk** | throughput collapse, missing domain context | inconsistency, duplication, **cargo-culting at small scale** | boundary disputes (what's central vs domain) | Reject **mesh** with no bottleneck; reject **central** when it provably can't scale. |
 
----
+The Director move is choosing on the **org axis, not the tech axis**, count the data-producing domains and ask whether the central team is the proven bottleneck, then keep **data contracts** as the inter-domain interface whichever way you go.
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here
+- **"You have thousands of tables and a new analyst can't find anything. What's the system?"**, *Strong signal:* a **data catalog** as the discovery layer (searchable metadata, business definitions, owners, freshness/quality, PII classification), and the insight that the catalog is the natural **governance chokepoint** where access and lineage also live. *Red flag:* "write a wiki" or "they'll learn the tables", treating a scaling, organizational discovery problem as documentation.
+- **"How do you give analysts revenue but not the PII in the same table, across thousands of tables and dozens of roles?"**, *Strong:* **column/row-level security + dynamic masking**, made manageable by **tag-based policy** (classify `PII` once, write one policy), because hand-managed grants explode as datasets × roles; plus audit logging. *Red flag:* table-level grants only (leaks the sensitive column), or per-table hand-written rules (the unmanageable policy count).
+- **"The board's number is wrong, how do you find out why, and how do you know what a schema change will break?"**, *Strong:* **column-level lineage**, trace the metric back through transforms to source columns for debugging and provenance, and forward for impact analysis; lineage is the trust backbone, not documentation. *Red flag:* manual code-archaeology with no lineage, or treating correctness as given (the silent-wrong-number trap).
+- **"Should we adopt data mesh?"**, *Strong:* it's an **org decision (Conway's law)**, justified only with *many* data-producing domains and a central team that's the *proven* bottleneck; otherwise centralized is right, and most adoptions are cargo-culting the term; the realistic answer is a **hybrid** (central paved road + federated governance, domain-owned products) with **data contracts** as the interface. *Red flag:* "mesh is the modern way" with no notion of scale, or proposing mesh for a small org, manufacturing coordination cost to solve a bottleneck that doesn't exist.
+- **"Buy a catalog or build one?"**, *Strong:* **buy/adopt** (Unity Catalog, Glue/Polaris, Collibra/Alation), governance, lineage, and access are commodity, undifferentiated heavy lifting; build only the thin glue; the differentiation is your *data and definitions*, not the catalog software. *Red flag:* proposing to build lineage and column-level masking from scratch as a side quest.
 
-- **"Walk me through checkout to pickup."**, *Strong:* narrates two-phase allocation unprompted, promise at checkout, slot bound at courier scan, and quantifies why (the 60% dwell tax). *Red flag:* binds a slot at checkout without noticing transit time, or never asks when the locker is chosen.
-- **"A code expires. Is the slot free?"**, *Strong:* "No, the package is still in it. Expiry is a package transition; the slot waits in `AWAITING_RETURN` for the carrier sweep, and the ledger counts it unavailable." *Red flag:* the lazy-expiry reflex copied from seat-booking problems, memorized patterns misapplied.
-- **"Two orders race for the last medium slot."**, *Strong:* conditional decrement on a counter row, one winner, 409 → next location, noting contention is ~7/hour, so anything heavier is over-engineering. *Red flag:* distributed locks or queues at toy QPS.
-- **"How do you know the network is healthy?"**, *Strong:* redirect rate (<2%), per-location utilization vs the Little's-law ceiling, expiry rate, ledger-vs-steel reconciliation drift, and the dollar cost of a redirect. *Red flag:* only API latency; nothing about the physical network a Director would own.
-- **"Where do you stop designing?"**, *Strong:* delegates kiosk firmware/offline with a fail-closed prior; cuts courier logistics and disputes explicitly. *Red flag:* designs the touchscreen flow.
+The through-line at Director altitude: **the platform's hardest problems at scale are organizational**, findability, access, provenance, and ownership, answered by a governance plane anchored at the catalog, and the centralized-vs-mesh choice is a Conway's-law org decision you make on domain count and bottleneck, not on hype. Delegate the catalog bake-off and lineage tooling with a stated prior ("platform team evaluates Unity Catalog vs an open Polaris/OpenLineage stack on our engine mix; my prior is the managed catalog for governance ergonomics unless lock-in is the binding constraint", the design problem is 14.5; leading the *org* through this is 13.13).
 
----
+### Common mistakes / misconceptions
+- **Treating catalog, access control, and lineage as three separate tools.** They belong on **one governance plane anchored at the catalog**, the catalog is the chokepoint every query consults, so access policy, PII classification, and lineage naturally converge there; scattering them across engines breaks enforcement and discovery.
+- **Table-level access as the whole story.** A grant on a table that mixes a public column with PII, or EU with US rows, leaks; you need **column/row-level security and masking**, and you make it scale with **tag-based policy**, not thousands of hand-written grants.
+- **Lineage as nice-to-have documentation.** It's the **trust, impact-analysis, and compliance backbone**, without column-level lineage you can't diagnose a wrong metric, predict a schema change's blast radius, or prove provenance to an auditor; you're doing archaeology every time.
+- **Adopting data mesh as a trend.** Mesh solves *one* problem, a central team that's the bottleneck across *many* domains; below that scale it's **cargo-culting** that manufactures inconsistency, duplication, and coordination cost. Centralized is the correct call for small orgs.
+- **Skipping data contracts in a mesh.** Without an enforced inter-domain **contract** (schema + semantics + SLA, versioned), a producer's silent schema change becomes a cross-domain outage with no central owner to catch it; the contract is the API between domains.
 
-## Common mistakes
+### Practice questions
 
-- **Modeling the hardware.** `Cabinet`, `Door`, `Screen` entities burn the timer on scenery; the system is three lifecycles and a counter.
-- **Conflating package expiry with slot availability**, the signature trap; reclaim has a truck in it.
-- **Hard-reserving physical slots at checkout** without the dwell math, a 60% throughput tax taken silently.
-- **Heavyweight concurrency at toy QPS**, distributed locks for 7 events/hour is pattern-matching, not judgment.
-- **Skipping R because the timer is running.** Weak scoping compounds: every unscoped actor (returns? consolidation?) resurfaces as a mid-design ambush.
+**Q1.** Your company has grown from one product to twelve, each with its own engineering team, and the central data team's backlog is now ~4 months deep; domains have started building shadow pipelines to route around them. Diagnose the situation and recommend an org model.
+> *Model:* This is the textbook **central-team-as-bottleneck** signal, a deep backlog, shadow pipelines, and a central team that lacks the domain context to model twelve products' data well. Conway's law (8.x) says the architecture should mirror the org, and the org is now twelve domains, so the data architecture should distribute ownership. I'd move toward **data mesh / hybrid**: each domain owns its data as a product (models it, guarantees its quality and freshness SLAs, publishes it), the former central team pivots to a **platform team owning the self-serve paved road** (storage, catalog, CI/CD, lineage) and the **federated governance policy engine** (classification, security, contract standards enforced as code), and **data contracts** become the load-bearing interface between domains. I would *not* go pure-mesh overnight, I'd start with the highest-throughput, most-blocked domains and keep shared dimensions (the company-wide `customer`, `date`) centrally owned to prevent definition drift. The decision is on the **org axis** (domain count + bottleneck), not the tech, and the shadow pipelines are the proof the bottleneck is real.
 
----
+**Q2.** A 25-person startup with one data engineer asks you to set up "a data mesh because that's the modern architecture." What do you tell them?
+> *Model:* I'd reject it, this is **mesh as cargo-cult**. Data mesh solves a Conway's-law bottleneck that appears when *many* data-producing domains overwhelm a *central* team; a 25-person startup has neither many domains nor a central team to bottleneck. Imposing mesh here manufactures the exact costs mesh trades for scale, inconsistency (everyone defines "revenue" differently), duplicated platforms, and federation overhead, to relieve a bottleneck that doesn't exist, and it demands a platform-tooling and governance maturity they don't have. The right call is **centralized**: one data engineer, one warehouse/lakehouse, a single set of governed definitions, and a catalog the moment table count makes discovery hard. I'd tell them to revisit mesh only when they have *dozens* of domains and the central function is provably the bottleneck, and to invest the saved energy in clean modeling and contracts now, which is what makes a *later* mesh possible.
 
-## Interviewer follow-up questions (with model answers)
+**Q3.** Analysts need to query the `transactions` table, which holds `amount`, `merchant`, `card_number`, and `customer_country`. EU analysts must not see non-EU customers' rows, and no analyst may see raw card numbers. Design the access control, and explain why table-level grants fail.
+> *Model:* Table-level grants fail because they're all-or-nothing on the whole table, granting read leaks both `card_number` and every country's rows to every analyst; denying it blocks the legitimate `amount`/`merchant` analysis. The fix composes three fine-grained controls, anchored at the **catalog as chokepoint**: (1) **column masking**, tag `card_number` as `PII` and write one tag-based policy that masks any `PII` column for roles lacking `pii-reader` (so analysts see `***-****-1234`); (2) **row-level security**, attach a predicate to the EU-analyst role so they see only rows where `customer_country` is in the EU set; (3) **audit logging** of every read for compliance. The key scaling move is **tag-based / attribute-based policy**, classify the column once and write the policy once so it applies across all tables, rather than hand-writing a grant per table (which becomes datasets × roles × columns rules nobody can audit). And enforcement must be at the catalog/credential layer so it holds no matter which engine (Spark, Trino, the warehouse) reads the open table.
 
-**Q1. The courier scans in; no free slot of the right size. Now what?**
-> *Model:* Bind-time fallback chain: next size up (an M in an L, wastes capacity, saves the delivery), then the nearest location in a small radius, then courier redirect, each step logged against the <2% SLO. But the real answer is upstream: this mostly happens when `AWAITING_RETURN` slots were counted as promisable, so the fix is the ledger, expired-but-uncollected packages subtract from `available_count`, and the carrier return sweep becomes a capacity-critical operation with its own SLA, not housekeeping.
+**Q4.** Six months after launch, a Director asks "where does the `active_users` number on the exec dashboard actually come from, and what happens if we rename the source `events.uid` column?" What capability answers both, and how?
+> *Model:* **Column-level lineage** answers both. For provenance: lineage traces `active_users` backward through every transform, the dbt models that count distinct `uid`s, the silver table that cleaned the event stream, back to the source `events.uid` column, giving an auditable "this number comes from these sources via these transforms," which is the trust/compliance backbone (and what regulators demand). For the rename: the *same* lineage runs **forward** for **impact analysis**, listing every downstream column, mart, and dashboard that reads `events.uid`, so the rename becomes a *planned migration with a known blast radius* instead of a silent break that surfaces as broken dashboards days later (the contract-break problem). Lineage is captured by parsing the transform SQL or via OpenLineage and surfaced in the catalog, it's a system, not documentation, and "we'd grep the codebase" is the red-flag answer because it misses runtime/dynamic transforms and column-level edges.
 
-**Q2. Why a 6-digit code? Couldn't someone guess it?**
-> *Model:* The space is 1M codes against ≤100 active packages per location, and codes are scoped per location, so a guess must also be at the right kiosk. The defense is rate, not entropy: 5 attempts then lockout and alert makes brute force need ~2,000 visits for a coin-flip on one package; longer codes punish every legitimate customer to defend against an attack the rate limit already kills. I'd delegate the threat model to security with that prior, holding one requirement: single-use redemption via conditional update, so a shoulder-surfed code dies on first use.
-
-**Q3. Amazon wants same-day delivery to lockers. What changes?**
-> *Model:* Transit drops toward zero, collapsing the reserve-early tax, promise-to-bind shrinks from ~2 days to ~2 hours, so hard-reserving the physical slot at checkout becomes affordable (`dwell 1.5 + 0.1` vs `1.5 + 2`) and eliminates bind-time misses. The Strategy seam absorbs it: hard-bind for same-day orders, two-phase for standard. The deeper change is demand shape, same-day concentrates arrivals into evening windows, so the eligibility filter must project hour-level, not day-level, occupancy.
-
-**Q4. 35 minutes, cold. How do you split them?**
-> *Model:* ~8 on R, scoping is the scored event; every actor pinned now is an ambush avoided later. ~4 on E, Little's law and the dwell-tax division, the one number that picks the allocation design. ~15 on S/H/D, entities, the two state machines, two-phase allocation with one rejected alternative each. ~5 on Evaluation, volunteer the expiry-reclaim trap and the last-bucket race unprompted. ~3 in reserve for the curveball. Deliberately skipped: APIs beyond a sketch, hardware, any optimization I can't tie to a requirement. Saying "I'm cutting X" out loud is most of the grade.
-
----
+**Q5.** Argue both sides of "buy a data catalog vs build one," then make the call for a 6,000-table, multi-engine lakehouse.
+> *Model:* **Build** buys you exact fit to your engines and metadata model and no license cost, but catalog capabilities, search, lineage capture (especially *column-level*, across multiple engines), tag-based access policy, audit, are genuinely hard, commodity, and undifferentiated, so building them is a large, ongoing side quest that competes with your actual mission. **Buy/adopt** (Unity Catalog, AWS Glue/Lake Formation, Apache Polaris + OpenLineage, or Collibra/Alation) gives you those as a product and lets you focus on what's differentiated, *your data and your definitions*. For a 6,000-table multi-engine lakehouse, I'd **adopt** a catalog that doubles as the governance chokepoint and integrates with the open table format, and build only thin glue (custom metadata, internal search UX). My stated prior for delegation: "platform team benchmarks the managed catalog vs an open Polaris/OpenLineage stack on our Spark+Trino+warehouse mix and our PII-masking needs; prior is the managed catalog for governance ergonomics unless open-format lock-in is the binding strategic constraint." The differentiation is never the catalog software, so building it is rarely the right use of the team.
 
 ### Key takeaways
+- **At scale the hardest platform problems are organizational**, can people *find* the right data (catalog/discovery), are they *allowed* to see it (access control), can you *trace* a number's provenance (lineage), and *who owns* its quality (ownership/contracts). The governance plane answers these four, and they're people problems with technical surfaces.
+- **The catalog is the discovery layer and the governance chokepoint.** Make it the one place that defines what-tables-mean, who-can-see-what, and where-data-came-from (Unity Catalog / Glue / Polaris), rather than three disconnected tools; every query consults it, so access and lineage belong there.
+- **Access control is a policy-count problem.** Table-level grants leak at the column/row boundary; column/row-level security + dynamic masking fix it, and **tag-based (ABAC) policy** is what keeps it from exploding into datasets × roles × columns hand-written rules, with audit logging as the regulated-domain table stake.
+- **Column-level lineage is the trust, impact-analysis, and compliance backbone**, trace a metric back to source to debug it and prove provenance, and forward to know a schema change's blast radius. It's a system (parse SQL / OpenLineage, surfaced in the catalog), not documentation.
+- **Centralized vs data mesh is a Conway's-law org decision**, mesh (domain-owned data products + self-serve platform + federated computational governance + data contracts) is justified *only* with many domains and a central team that's the proven bottleneck; below that, centralized is right and mesh is cargo-cult. The realistic large-org answer is a **hybrid**, central paved road + federated policy, domain-owned products, with **contracts** as the inter-domain interface.
 
-- **The cold open tests scoping, not recall.** R dominates: pin the actors, the checkout-time locker choice, the 3-day window, and the cuts, out loud, before designing.
-- **Capacity math decides the design:** Little's law (30K slots ÷ 1.5-day dwell ≈ 20K/day) and the 60% reserve-early tax force **promise-at-checkout, bind-on-arrival**.
-- **Smallest-fit by default:** L slots are scarce and the only home for L packages; first-fit converts size waste into rejected packages.
-- **Expiry is not reclaim.** The package expires; the slot waits `AWAITING_RETURN` until a carrier collects, the trap that separates pattern-matchers from designers, and dead time the capacity model must carry.
-- **Contention is real but tiny:** conditional updates on a counter and a single-use code are the entire concurrency story at 7 events/hour; heavier machinery is a red flag, not rigor.
-
-> **Spaced-repetition recap:** Amazon Locker = the **unmemorizable cold-open**, three lifecycles (slot, package, code), one allocation decision, toy QPS. **Promise at checkout (bucket counter decrement), bind the slot at courier arrival**, hard-reserving through 2-day transit costs ~60% of throughput (Little's law: slots ÷ dwell). **Smallest-fit** protects L slots. **Expiry ≠ reclaim**: the code dies at 3 days; the slot frees only when the carrier collects (`AWAITING_RETURN`), and the ledger must count that dead steel. All races fall to one-line conditional updates. Evolution = rebalance capacity: eligibility filtering, dwell tuning, then capex.
+> **Spaced-repetition recap:** The governance plane is the **librarian** for a million-book library, four questions: *find it* (catalog/discovery, "what tables exist, what do they mean, who owns them"), *allowed to see it* (column/row-level security + masking + audit, scaled by **tag-based policy** because hand-grants explode as datasets × roles), *trace it* (**column-level lineage** for debugging a wrong metric, impact analysis on a schema change, and compliance/provenance, a system, not docs), and *who owns it* (ownership + **data contracts**). The **catalog is the chokepoint** where access + lineage converge (Unity Catalog / Glue / Polaris); **buy, don't build** it. Then the org fork (**Conway's law**, 8.x): **centralized team** (consistent, governed, but the **bottleneck** past dozens of domains) vs **data mesh** (domain-owned data products, self-serve platform, federated computational governance, scales with the org but risks inconsistency/duplication and is **cargo-culted at small scale**). Decide on **domain count + bottleneck**, not hype; the realistic answer is a **hybrid** (central paved road + federated policy + domain products), with **contracts** as the inter-domain API. The full mesh/governance *design* problem is 14.5; leading the data *org* through it is 13.13. Next: the platform's cost and reliability discipline.
 
 ---
 
-*End of Lesson 7.10. The locker problem closes the loop Parking Lot opened: the same restraint test, with no template to lean on, the condition the real interview always runs under. If your 35-minute attempt missed the expiry-reclaim asymmetry or the reserve-early tax, re-run the drill in a week on a cousin problem (library lockers, hotel luggage storage, EV charging bays) and check whether the* method *transferred, not the answer.*
+*End of Lesson 7.10. Governance is where the data platform's hardest problems turn out to be organizational, findability, access, provenance, and ownership, answered by a governance plane anchored at the catalog, and forcing the centralized-vs-mesh decision that is Conway's law applied to data. Next: 13.11, cost management and FinOps for the data platform, the discipline that keeps scan-cost and storage from becoming a runaway bill.*

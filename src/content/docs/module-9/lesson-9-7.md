@@ -1,320 +1,165 @@
 ---
-title: "9.7 — Ad Click Aggregator"
-description: The streaming-analytics problem where every event is money, exactly-once counting at 100k+ events/sec forces a speed-vs-truth split, with an approximate stream for dashboards and a batch recompute as the billing source of truth, reasoned through RESHADED at Director altitude.
+title: "9.7 — Evaluation & LLMOps"
+description: Why evaluating a non-deterministic, open-ended system is the hardest and most-skipped part of shipping AI — offline eval sets, LLM-as-judge and its biases, online eval, regression gating in CI, and the tracing/observability stack for prompts, retrievals, tokens, and cost.
 sidebar:
   order: 7
 ---
 
-> **This is the most-cited "modern infra" question, #1 among Meta's most-asked, and frequent at Amazon and Google, because it's the cleanest test of whether you can reason about a *streaming data pipeline* where the numbers are money.** A weak answer builds one Kafka-to-database flow and calls it done. A Director-level answer opens with a single question, *is this for billing, or for analytics?*, and lets the answer flip the whole architecture, because **exactly-once counting at scale and approximate-but-fast counting are two different systems that happen to share a firehose.** The signal is recognizing that you cannot bill an advertiser from a number you computed approximately, and designing the two paths deliberately rather than pretending one path can be both.
-
 ### Learning objectives
-- Run the **RESHADED** spine on a **streaming-analytics** problem and surface its load-bearing tension out loud: **every click is revenue, so the speed-vs-truth split is forced**, a fast approximate stream for dashboards, a slow exact batch as the billing source of truth.
-- Open with the **billing-or-analytics** clarifying question and show how the answer **flips the architecture**, the opening Director move on this problem.
-- Decide where **exactly-once counting** is mandatory (billing) and where **at-least-once with eventual correction** is fine (live dashboards), and place **dedup, late-event handling, and idempotent reprocessing** accordingly.
-- Treat **raw-event retention** as a real budget line in estimation, the batch source of truth needs the raw events kept, and that storage is a number you defend.
-- Frame the **Lambda-vs-Kappa** design-evolution argument by reference rather than re-teaching it, and hand the same pipeline off to top-K.
+- Articulate **why LLM evaluation is uniquely hard** — non-deterministic output, open-ended tasks, no single ground truth, and a quality bar that is *multi-dimensional* (correct? grounded? safe? on-tone?) — and why that makes "it looked fine in the demo" a failure mode, not a sign-off.
+- Build an **offline eval harness**: a curated golden set, reference-based metrics where a right answer exists, and **LLM-as-judge** for open-ended quality — while naming the judge's biases (position, verbosity, self-preference) and the mitigations that make it trustworthy.
+- Pick **task-specific metrics**: RAG splits into *retrieval* and *generation* failures; classification uses P/R/F1; open generation uses *win-rate vs a baseline* — because a single "accuracy" number hides which half broke.
+- Treat **eval as a CI gate**, not a report — every prompt/model/RAG change must pass the golden set before it ships. This is the single highest-leverage LLMOps practice.
+- Own the **observability stack** — trace the full chain (prompt, retrieved chunks, tool calls, tokens in/out, latency, cost) — as both your debugger and the source of new eval data, and plan for **drift** (the base model changes under you).
 
 ### Intuition first
-Picture a **cash register at a stadium concession stand** wired to two displays. One is a **big scoreboard** the manager glances at all night, "we've sold about 40,000 drinks so far", updated live, roughly right, and nobody cares if it's off by a few hundred at any instant. The other is the **end-of-night till reconciliation** the accountant runs: every receipt counted, every refund applied, every duplicate swipe removed, and the number that actually settles the books. **Same stream of sales, two completely different machines**, one optimized for *now and roughly*, the other for *eventually and exactly*, because one drives a glance and the other drives money.
+You wouldn't ship code with no tests. An LLM feature with no eval is **exactly that** — except worse on two counts: the output is **non-deterministic** (the same prompt yields different text run to run), and there is often **no single right answer** to assert against. So the comfortable habit of "I tried five prompts in the playground, looked good, ship it" is the equivalent of merging to main because the happy-path demo worked once on your laptop.
 
-An ad click aggregator is exactly this. A hundred thousand ad events a second pour in. Advertisers' live dashboards want the scoreboard: "your campaign got ~12,400 clicks in the last 5 minutes", fast, approximate, good enough to make a budget decision. But the **invoice** at month's end is the till reconciliation: every billable click counted exactly once, every fraudulent or duplicate click removed, every late-arriving event from a phone that was offline for an hour folded in. The mistake almost everyone makes is trying to build one pipeline that serves both, **you cannot bill an advertiser from the scoreboard.** The whole design is two paths from one firehose: a **stream** that's fast and forgivably wrong, and a **batch** that's slow and the source of truth.
+Picture the difference between a **multiple-choice exam** and an **essay exam**. Traditional software is the multiple-choice exam — there's an answer key, the grader is a script, and `assertEqual` either passes or fails. An LLM feature is the **essay exam**: the same question has many good answers and many subtly-wrong ones, and grading requires *judgment* — is it correct, is it grounded in the source, is it the right tone, is it safe? You cannot grade an essay exam with `assertEqual`, so the entire discipline of LLMOps is about **building a credible grader, applying it to a fixed set of questions, and refusing to ship anything that scores worse than what's already live.** Keep that image — *essay exam, not multiple-choice* — because it explains why every technique below exists.
 
-That asymmetry, *speed for the dashboard, truth for the bill*, is the opposite of a single-source-of-truth instinct, and learning to hold two reconcilable numbers at once is what this question tests.
+### Deep explanation
 
----
+**Why eval is genuinely hard — name the four properties.** A designer who treats LLM eval like unit testing will build the wrong harness. Four properties make it different:
+- **Non-determinism.** Temperature > 0 means identical input → different output. A single pass tells you almost nothing; you need to run the eval set and reason about *distributions*, not assert a string.
+- **Open-endedness.** "Summarize this ticket" has no canonical answer — there are dozens of good summaries and dozens of bad ones, and the line between them is fuzzy.
+- **No single ground truth.** For most generative tasks there is no answer key to diff against. You either build one (expensive, human-labeled) or you grade by comparison/rubric.
+- **Multi-dimensional quality.** "Good" is not one axis. A support answer can be *factually correct* but *off-tone*, *grounded* but *unsafe*, *fluent* but *not actually answering the question*. Collapsing all of that into one number throws away the information you need to fix it.
 
-## R: Requirements
+The Director-altitude statement: *LLM quality is a distribution over a multi-dimensional, judgment-graded space — so eval is a measurement system you have to build and calibrate, not a pass/fail you get for free.*
 
-> Pin the scope, and lead with the one clarifying question that flips the architecture. **The spine is standard, but R does double work here: the billing-vs-analytics answer decides whether exactly-once is a hard invariant or a nice-to-have.**
+**Offline eval: the golden set is the asset.** The foundation is a **curated eval set** (the "golden set") — a fixed collection of representative inputs with, where possible, known-good outputs or graded references. It must look like production: real query distribution, edge cases, the hard 10% that breaks things, and known past failures (every production incident becomes a permanent eval case so it can never silently regress again). A few hundred well-chosen cases beats tens of thousands of generic ones. Three grading approaches, escalating in cost and fidelity:
 
-**The opening Director move, the question I ask first:** *"Is this number used to bill advertisers, or to power live analytics dashboards?"* The answer changes everything:
-- **Billing** → exactly-once counting is a hard correctness invariant; a batch recompute over retained raw events becomes the source of truth; the stream is a convenience, never the bill.
-- **Analytics only** → at-least-once with bounded error is fine; you can skip the batch path entirely and serve everything from the stream.
+- **Reference-based metrics** — use when a right answer exists. *Exact-match / F1* for extraction and classification; for free text, *string-overlap* metrics (BLEU, ROUGE) are cheap and deterministic but correlate weakly with human judgment because they reward surface n-gram overlap, not meaning. Use them where the task is constrained enough that overlap *is* correctness (a date extractor, a JSON field), reject them as your primary signal for open generation — they'll happily pass a fluent wrong answer that shares words with the reference.
+- **LLM-as-judge** — use a strong model to *grade* outputs against a rubric when there's no reference. This is the workhorse for open-ended quality: scalable, fast, and far better correlated with human judgment than n-gram overlap. It's also where the traps live (next paragraph).
+- **Human evaluation** — the gold standard for fidelity and the calibration anchor for everything else, but slow, expensive, and unscalable. You keep a **small** human-labeled set as ground truth and use it to validate that your automated judge agrees with humans.
 
-I'll design for the **harder, real case: both.** Advertisers see a near-real-time dashboard *and* get billed, so I build both paths and reconcile them.
+**LLM-as-judge — powerful, and biased in known ways.** Asking a model "is this answer good, 1–5?" works, but the judge is itself an LLM and carries systematic biases you must engineer around:
+- **Position bias** — in a pairwise A-vs-B comparison, judges favor whichever answer is presented *first* (or sometimes last) regardless of quality. *Mitigation:* run each comparison **both orders** and average, or randomize order across the set.
+- **Verbosity bias** — judges reward longer, more elaborate answers even when a terse answer is better. *Mitigation:* an explicit rubric that scores *correctness and concision*, and length-controlled comparisons.
+- **Self-preference bias** — a judge tends to prefer text generated by *itself* (or its own model family). *Mitigation:* use a judge from a **different** model family than the one under test where you can; cross-check with humans.
+- **Brittleness to the prompt** — a vague "rate this" gives noisy scores. *Mitigation:* a **detailed, explicit rubric** with concrete criteria and few-shot examples of each score; ask for a **reasoning-then-score** (the rationale both improves the score and makes the judge auditable).
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *Billing or analytics?* → **Both.** Dashboards from the stream, invoices from the batch. This is the whole design.
-- *Dashboard freshness bar?* → **~1 minute end-to-end** is plenty for a budget glance; not sub-second.
-- *Exactly-once where?* → **Billing only.** The dashboard tolerates small, self-correcting error.
-- *How late can events arrive?* → Mobile clients offline for minutes-to-hours; design for **late events up to ~24h**, dropped beyond that.
-- *Fraud/invalid-click filtering in scope?* → **Acknowledge it, delegate the model.** Billing must exclude invalid clicks; the detection logic is a trust-and-safety system.
+The two structural mitigations that matter most: **prefer pairwise comparison over absolute scoring** (models are far more reliable at "is A better than B?" than at "is this a 7 or an 8?" — and pairwise gives you a clean *win-rate vs baseline*), and **periodically calibrate the judge against your human-labeled set** — measure judge-vs-human agreement, and if it drifts below your bar, the judge is no longer trustworthy and the rubric or judge model needs work. **Rejected alternative:** a single absolute 1–10 score from a vague prompt, same model family as the system under test, run once — it's cheap and feels like eval, but it's noisy, biased toward your own model, and uncalibrated, so it gives false confidence.
 
-**Functional requirements:**
-1. **Ingest** ad click/impression events at high volume.
-2. **Aggregate** counts by `(ad_id, campaign_id, time_window)`, plus common dimensions (region, device).
-3. **Serve a near-real-time dashboard** (per-minute counts, ~1-min fresh).
-4. **Produce an exact billable count** per campaign per billing period, the source of truth.
-5. **Handle late events and reprocessing** without double-counting.
+**Task-specific metrics — measure the failure where it lives.**
+- **RAG** splits in two, and the fixes differ, so you *must* separate them: **retrieval quality** — *context recall* (was the answer-bearing chunk retrieved at all?) and *context precision* (how much of what we retrieved was relevant?); and **generation quality** — *faithfulness / groundedness* (does the answer stick to the retrieved context or hallucinate beyond it?) and *answer relevance* (does it actually address the question?). A confident, well-cited, wrong answer is a *retrieval* failure if the right chunk never came back, but a *faithfulness* failure if the right chunk was present and the model ignored it — one number can't tell you which.
+- **Classification / routing** — standard **precision, recall, F1** against a labeled set, with the confusion matrix so you see *which* classes confuse.
+- **Open-ended generation** (summaries, chat, drafting) — **win-rate vs a baseline** via pairwise LLM-as-judge: "does the new version beat the current production version on this golden set, and by how much?" This is the metric that gates a prompt or model change.
 
-**Explicitly CUT (scoping is the signal):** ad serving / auction (that's the ad-exchange problem), targeting, the fraud *model* itself (delegated), advertiser UI, budget pacing/throttling. I scope to **ingest → aggregate → two read paths (live + billable)**, and say so.
+**Online eval: production is the only fully realistic test set.** Offline eval gates the change; online eval tells you what's actually happening with real users on real traffic. The toolkit:
+- **A/B tests** — route a fraction of traffic to the new version and compare on *business* metrics (task completion, deflection rate, conversion), not just intrinsic quality. The truth that offline can't give you.
+- **Guardrail metrics** — alarms that catch a regression the A/B target missed: refusal rate, latency p95, **cost per request**, error/timeout rate, safety-filter trips. A change that lifts quality 3% but doubles cost or refusal rate is not a win.
+- **User feedback, explicit and implicit.** Explicit: thumbs up/down, star ratings — high signal, low volume (most users never click). Implicit is the rich vein: did the user **accept** the suggestion, **edit** it (and how much), **regenerate**, **copy** it, or immediately **rephrase and ask again** (a silent failure)? Implicit signals are abundant but noisy — instrument them deliberately.
+- **Shadow deployment** — run the new version *in parallel* on live traffic without showing users its output, log both, and compare. Catches real-world failures with **zero user risk** before you route a single real request to it. The cost is double inference on shadowed traffic — so shadow a sample, not 100%.
 
-**Non-functional requirements:**
-- **Exactly-once for billing**, each billable click counted once and only once; the cardinal correctness invariant.
-- **At-least-once + eventual correction for the dashboard**, fast, approximate, self-healing as the batch catches up.
-- **High write availability at ingest**, never drop a billable event; an event lost is revenue lost.
-- **Freshness:** dashboard ~1 min; billable numbers settle within the late-event window (~24h).
-- **Durability of raw events**, the batch source of truth depends on raw events being retained and replayable.
+**Regression gating: eval as a CI gate is the whole ballgame.** This is the single most important practice in LLMOps, and the one most teams skip. **Every change to a prompt, the model version, the RAG pipeline, or a tool definition must run against the golden set and must not regress below the bar before it ships** — exactly like a test suite blocks a merge. Without this gate, quality erodes invisibly: someone "improves" a prompt, it helps the three cases they eyeballed and quietly breaks thirty they didn't, and you find out from a customer. **"Looked fine in a demo" is how quality silently regresses.** The gate converts that from an inevitability into a blocked PR. **Rejected alternative:** manual spot-checking before each release — it doesn't scale, it's biased toward the cases the author already has in mind, and it has no memory of past failures, so the same regression recurs. The gate is also what lets you move *fast*: with a trustworthy eval suite, a junior engineer can change a prompt confidently because the gate catches what their eyeballs miss.
 
-**The skew, stated:** this is **write-heavy at ingest, read-light at query.** 100k+ events/sec in; a few thousand dashboard reads/sec out. That inverts the social-feed shape, the hard part is the **ingest firehose and the exactly-once accounting over it**, not fan-out reads.
+**Observability and tracing: your debugger and your eval-data mine.** An LLM call is not one request — it's a *chain* (retrieve → assemble prompt → call model → maybe call a tool → call again). When the output is wrong, you cannot debug from the final string; you need the **full trace**: the exact prompt sent, the retrieved chunks and their scores, every tool call and its result, tokens in/out, latency per step, and **cost per call**. Tools in the **LangSmith / Langfuse / Phoenix** class capture this. Tracing serves two jobs: it's how you **debug** a specific bad output (you can see the wrong chunk that poisoned the answer), and it's how you **grow the eval set** — you mine production traces for failures and interesting cases and fold them back into the golden set, so the harness tracks the real distribution and every new failure becomes a permanent regression test. This closes the loop: production teaches the eval set, the eval set gates production.
 
----
+**Drift and versioning — the ground moves under you.** Two kinds of drift: **model drift** — the provider updates the model behind a stable API endpoint, so behavior changes without you deploying anything (your carefully-tuned prompt now responds differently); and **data drift** — the input distribution shifts (new product, new user behavior) so yesterday's golden set no longer represents today's traffic. Defenses: **pin model versions** explicitly (use the dated/pinned endpoint, not the floating "latest" alias) so upgrades are a deliberate, eval-gated decision rather than a surprise; **continuously re-run eval** on a schedule, not just on PRs, to catch silent provider-side changes and data drift; and **version everything** — prompts, model IDs, RAG configs, and the eval set itself — so every production result is reproducible and you can bisect a regression to the change that caused it. Treat the prompt like code: it lives in version control, it has a changelog, and it ships through the gate.
 
-## E: Estimation
-
-> Enough math to make a defensible call, and on this problem, **raw-event retention is a real budget line**, because the batch source of truth can't exist without the raw events kept.
-
-**Assumptions:** **100k events/sec** sustained, peak ~3× → **300k/sec**; each raw event ~**200 bytes** (ad_id, campaign_id, user/device id, timestamp, geo, type); ~500k active campaigns.
-
-**Ingest throughput:** `100k/sec × 200 B ≈ 20 MB/s` sustained, **~60 MB/s peak.** Per day: `100k × 86,400 ≈ 8.6B events/day`. This is a partitioned-log problem (Kafka), not a single-database problem.
-
-**Raw-event retention (the line item people forget):**
-- `8.6B events/day × 200 B ≈ 1.7 TB/day raw.`
-- The batch source of truth needs raw events for the **whole billing + late-event window**. Keep **~30 days hot**: `1.7 TB × 30 ≈ ~50 TB`, on cheap object storage (S3); compressed ~3-5× → **~10-15 TB billed.**
-- **The decision this forces:** raw retention is the price of having a recomputable source of truth. *Trade-off named:* ~50 TB/month of S3 (a few hundred dollars) buys the ability to replay and re-bill correctly. *Rejected:* keep only aggregates → you can never recompute, audit, or fix a counting bug after the fact. For a system where the output is invoices, retaining raw is non-negotiable.
-
-**Aggregated output (tiny by comparison):** counts by `(campaign, minute, a few dimensions)`. `500k campaigns × 1,440 min/day × ~tens of dimension combos × ~30 B ≈ low tens of GB/day`, orders of magnitude smaller than raw. The aggregates fit comfortably in an OLAP store; the raw is what costs.
-
-**Read load:** dashboards, say 10k advertisers polling every ~30s → **~few hundred reads/sec**, trivially cached. Billing, a periodic batch job, not interactive.
-
-**Instance count:** the spend concentrates in **(1) the ingest log + stream-processing tier** (sized for 300k/sec peak, tens of partitions, a handful of stream-processor workers) and **(2) raw object storage.** The OLAP serving store and dashboard tier are small. The headline: **this is a throughput-and-retention problem, not a storage-volume-of-results problem.**
-
-**What estimation decided:** ingest is a partitioned-log firehose; raw retention (~50 TB/mo) is the defensible cost of a recomputable billing truth; aggregates are tiny; reads are trivial. The numbers point straight at a two-path (stream + batch) architecture.
-
----
-
-## S: Storage
-
-> Three data classes with different durability and consistency needs; pick stores by access pattern.
-
-**1. Raw event log (durable, replayable, append-only), the spine of the whole system.**
-- *Access pattern:* append at 100k+/sec, partitioned, retained, replayed by both the stream processor (live) and the batch job (truth).
-- *Choice:* **Kafka** (partitioned, durable, replayable log) as the ingest buffer, tee'd to **S3** (cheap long-term raw retention for the batch source of truth).
-- *Rejected, write events straight into a database:* no store absorbs 300k/sec of small writes cheaply, and you'd lose the *replay* property that makes idempotent reprocessing possible. The log decouples bursty ingest from downstream consumers and is the foundation of both exactly-once and reprocessing.
-
-**2. Aggregated counts for the dashboard (fast read, time-series, approximate-OK).**
-- *Choice:* an **OLAP / time-series store**, Druid, ClickHouse, or Pinot, fed by the stream processor, serving per-minute rollups. Tuned for fast group-by-time-window reads.
-- *Rejected, serve dashboards from a row store:* per-minute group-bys over high-cardinality dimensions are exactly what columnar OLAP does well and OLTP does badly.
-
-**3. Billable aggregates (exact, auditable, settled).**
-- *Choice:* a **transactional/warehouse table** written by the batch job, exact counts per campaign per period, with the raw events retained behind them for audit. This is the number that goes on the invoice.
-- *Rejected, bill from the OLAP store:* that store holds the *approximate* stream output; billing from it means billing from a number you computed at-least-once. **Never bill from the stream.**
-
-**Dedup state** (for exactly-once) lives in the stream processor's **keyed state store** (e.g. RocksDB-backed Flink state), recent event IDs, windowed so it doesn't grow unbounded.
-
----
-
-## H: High-level design
-
-> The shape to make visible: **one firehose, two paths**, a fast approximate stream for the dashboard and a slow exact batch for the bill, reconciling into the same campaign.
-
-```mermaid
-flowchart TB
-    CLIENT["Ad clients<br/>web and mobile"] --> ING["Ingest service<br/>validate and enrich"]
-    ING --> LOG["Kafka<br/>partitioned event log"]
-
-    LOG --> STREAM["Stream processor<br/>windowed aggregation"]
-    STREAM --> OLAP[("OLAP store<br/>per-minute counts approximate")]
-    OLAP --> DASH["Dashboard API<br/>near real time"]
-
-    LOG --> S3[("S3 raw events<br/>retained and replayable")]
-    S3 --> BATCH["Batch job<br/>exact recompute"]
-    BATCH --> BILL[("Billable table<br/>exact source of truth")]
-    BILL --> INVOICE["Billing service"]
-
-    BATCH -.->|correct| OLAP
-
-    style LOG fill:#e8a13a,color:#000
-    style STREAM fill:#2d6cb5,color:#fff
-    style BATCH fill:#7a1f1f,color:#fff
-    style BILL fill:#1f6f5c,color:#fff
-```
-
-**Happy path, compressed:** a click hits the **ingest service** (validate, enrich with geo/device, stamp event time), which appends to **Kafka**, partitioned by `campaign_id` (or `ad_id`) so a campaign's events land in order on one partition. From the log, **two consumers fan out**:
-- **The speed path:** a **stream processor** (Flink / Kafka Streams) does windowed aggregation, per-minute counts per campaign and dimension, and writes to the **OLAP store**, which the **dashboard** reads. This is at-least-once and fast; small over/under-counts are tolerated and self-correct.
-- **The truth path:** the same events land in **S3** as retained raw. A periodic **batch job** (hourly/daily) recomputes exact counts over the raw, applying full dedup, late-event inclusion, and fraud filtering, and writes the **billable table**, the source of truth the **billing service** invoices from. The batch also **back-corrects** the OLAP store so the dashboard converges to truth.
-
-**The shape to notice:** the load-bearing wall runs between the **approximate stream (dashboard, speed)** and the **exact batch (billing, truth)**. They share the ingest log but diverge on the correctness contract. This is the **Lambda-style two-path** structure, and whether to collapse it to one path is the central design-evolution argument.
-
----
-
-## A: API design
-
-> Two writes-in and two reads-out; the idempotency and the event-time field *are* the correctness story.
-
-```
-# --- Ingest (write path; at-least-once, never drop) ---
-POST /v1/events
-  body: {
-    eventId,            # client- or gateway-assigned UUID -> dedup key
-    adId, campaignId,
-    eventType,          # "click" | "impression"
-    eventTime,          # client event timestamp (drives windowing + late handling)
-    userId, geo, device
-  }
-  -> 202 Accepted       # appended to the log; processed async
-
-# --- Dashboard read (approximate, fast) ---
-GET /v1/campaigns/{campaignId}/stats?from=&to=&granularity=minute
-  -> 200 { series:[{window, clicks, impressions}], asOf: <ts>, source: "stream" }
-                        # source flags this as the APPROXIMATE number
-
-# --- Billable read (exact, settled) ---
-GET /v1/campaigns/{campaignId}/billable?period=2026-06
-  -> 200 { billableClicks, settledAt, source: "batch" }
-                        # the source of truth; only present after the batch settles
-```
-
-**Design notes (each with its rejected alternative):**
-- **Every event carries an `eventId`**, the dedup key that makes exactly-once possible downstream. *Rejected: dedup on (adId, userId, timestamp)*, collisions and clock skew make it unreliable; an explicit ID is unambiguous.
-- **`eventTime` is the client's event timestamp, not arrival time.** Windowing and late-event handling key off *event* time. *Rejected: processing-time windows*, they misattribute a late mobile event to the wrong minute and can't be corrected.
-- **The dashboard response is explicitly tagged `source: "stream"`** and the billable response `source: "batch"`. The API makes the speed-vs-truth split visible to the caller, you can never confuse the dashboard number for the bill.
-- **Ingest returns 202, not 200**, the event is durably logged, not yet processed. Honest about the async pipeline.
-
----
-
-## D: Data model
-
-> The aggregation key and the dedup key are the two consequential decisions.
-
-**Raw event**, keyed by `eventId` (dedup), partitioned in Kafka by `campaign_id`. Carries `ad_id`, `campaign_id`, `event_type`, **`event_time`** (the windowing key), `user_id`, `geo`, `device`. Retained raw in S3 for the batch.
-
-**Aggregate row**, keyed by **`(campaign_id, time_window, dimension_tuple)`** → `count`. The window is a fixed bucket (e.g. 1-minute). This is what both the stream (approximate) and batch (exact) produce; they write to different stores but share this shape, which is what lets them reconcile.
-
-**Billable row**, `(campaign_id, billing_period)` → `exact_count`, `settled_at`. Written only by the batch, after dedup + late-event + fraud filtering.
+**Cost and tokens are a first-class metric.** Quality is not the only axis you gate on. Tokens-in/tokens-out and **cost per request** belong in every trace and every guardrail (a quality win that triples cost may be a net loss), and in the regression report alongside the quality score. The full treatment — caching, model-tiering, batching, and the economics of the call — is the cost lesson's subject; here the point is narrow: **if your eval and observability don't account for cost, you're optimizing half the system.**
 
 <details>
-<summary>Go deeper, exactly-once mechanics: dedup, watermarks, idempotent reprocessing (IC depth, optional)</summary>
+<summary>Go deeper — judge calibration, RAG metric mechanics, and eval-set hygiene (IC depth, optional)</summary>
 
-**Exactly-once on the stream** is really *effectively-once* and rests on three legs:
-- **Dedup by `eventId`:** the stream processor keeps recent event IDs in keyed state (RocksDB-backed). A retried or duplicated event whose ID is already seen is dropped. State is windowed (e.g. last few hours) so it doesn't grow unbounded, older dups are caught by the batch instead.
-- **Transactional sink / offset commit:** Flink's checkpointing + Kafka transactions commit the aggregate write and the consumer offset atomically. On failure the processor rewinds to the last checkpoint and replays; because the sink write was transactional, no double-count results. This is what "exactly-once" means operationally, *replay is safe because the output commit is atomic with the input offset.*
-- **Watermarks for late events:** a **watermark** is the processor's estimate of "event time has progressed to T; I've probably seen everything up to T." Windows close when the watermark passes them, with a grace period (allowed lateness) for stragglers. Events later than the grace period are sent to a side output (or simply caught by the batch).
-
-**The batch is the safety net.** It owns *true* exactly-once because it sees the *complete* retained raw, including events that arrived after the stream's window closed, and recomputes from scratch. Its correctness is structural: idempotent recomputation over an immutable, deduped raw set always yields the same exact answer, no matter how many times you run it. That's why billing reads the batch, not the stream: the stream is exactly-once *within its window*; the batch is exactly-once *over all events, ever*.
-
-**Idempotent reprocessing:** because raw is retained and the recompute is a pure function of (raw events, dedup rule, fraud rule), you can re-run any historical period, to fix a counting bug, apply a new fraud rule, or fold in very-late events, and overwrite the billable row deterministically. This is the property aggregate-only systems can never have.
+- **Quantifying judge trust:** measure judge-vs-human agreement with **Cohen's κ** (or simple % agreement) on the human-labeled set. A κ below ~0.6 means the judge disagrees with humans too often to gate on; fix the rubric, add few-shot anchors, or change the judge model, then re-measure. Track κ over time — it drifts as the judge model is updated provider-side.
+- **Pairwise → ranking:** for comparing many variants, run pairwise judgments and aggregate into a ranking with an Elo/Bradley-Terry model (the LMSYS Chatbot Arena approach). More robust than absolute scores but O(variants²) comparisons — sample pairs rather than running the full matrix.
+- **RAG metric computation (RAGAS-style):** *faithfulness* = decompose the answer into atomic claims, then check each claim is entailed by the retrieved context (an LLM-judged NLI step); the score is the fraction of supported claims. *Context precision* rewards relevant chunks ranked high; *context recall* needs a reference answer to check whether all its facts were retrievable. These are themselves LLM-judged, so they inherit judge bias — calibrate them too.
+- **Eval-set hygiene:** keep a **held-out** slice you never tune against, or you'll overfit the prompt to the eval set (Goodhart's law — the metric stops measuring quality once it becomes the target). Refresh the set as the distribution drifts, and de-duplicate so a single over-represented case doesn't dominate the score.
+- **Synthetic eval data:** when you lack labeled cases, generate candidate Q&A pairs from your corpus with an LLM to bootstrap a golden set — but **human-review the synthetic set** before trusting it, or you bake the generator's blind spots into your gate.
 
 </details>
 
-**Partition key = `campaign_id`.** Co-locates a campaign's events on one Kafka partition (in-order, single-consumer aggregation) and matches the query shape (per-campaign dashboards and bills). *Rejected: partition by `user_id`*, scatters a campaign's events across all partitions, forcing a cross-partition shuffle to aggregate per campaign. *Hot-campaign caveat:* a viral campaign overloads one partition (the hot-key shape); sub-partition it by `(campaign_id, hash(ad_id) % k)` and sum on read, the sharded-counter pattern applied to the log.
+### Diagram: the LLMOps loop
 
----
+```mermaid
+flowchart LR
+    subgraph OFFLINE["Offline — the gate (CI)"]
+        GS[(Golden set<br/>+ human-labeled<br/>ground truth)] --> JUDGE["Eval run<br/>reference metrics +<br/>LLM-as-judge rubric"]
+        JUDGE --> GATE{Pass the bar?<br/>no regression vs<br/>production baseline}
+    end
 
-## E: Evaluation
+    GATE -->|fail| BLOCK[Block the change<br/>prompt / model / RAG]
+    GATE -->|pass| DEPLOY[Deploy<br/>pinned model version]
 
-> Re-check against the NFRs and hunt the bottlenecks, naming each trade-off.
+    subgraph ONLINE["Online — production"]
+        DEPLOY --> SHADOW[Shadow + A/B<br/>guardrails: cost, latency, refusal]
+        SHADOW --> TRACE["Trace every call<br/>prompt · chunks · tools<br/>tokens · latency · cost"]
+        TRACE --> FB[User feedback<br/>thumbs · edits · regen · accept]
+    end
 
-**Re-check vs NFRs:** exactly-once billing, the batch recompute over deduped raw; dashboard freshness, the ~1-min stream; never-drop ingest, the durable log; late events, watermarks (stream) + the full-raw recompute (batch). Now the bottlenecks.
+    FB --> MINE[Mine traces:<br/>failures + new cases]
+    TRACE --> MINE
+    MINE -->|fold back in| GS
 
-**Bottleneck 1, double-counting (the cardinal billing risk).**
-A client retries a click, or the stream replays after a crash, and the same click is counted twice, directly inflating the bill.
-*Fix:* **dedup by `eventId`** in the stream's keyed state for the live number, and, the real guarantee, the **batch recomputes exactly-once over the complete deduped raw set**, which is the number that bills. *Rejected:* relying on the stream alone for billing, its dedup state is windowed and finite, so a duplicate arriving days late slips through. The batch, seeing all raw, catches it. **The batch is why billing is correct; the stream is just fast.**
+    style GATE fill:#7a1f1f,color:#fff
+    style JUDGE fill:#e8a13a,color:#000
+    style TRACE fill:#1f6f5c,color:#fff
+    style MINE fill:#2d6cb5,color:#fff
+```
 
-**Bottleneck 2, late events (the offline-mobile problem).**
-A phone is offline for an hour, then floods in events stamped with old `event_time`s, after the stream's window already closed.
-*Fix:* **watermarks with a grace period** on the stream (so moderately-late events still land in the right minute), and, definitively, the **batch sees them in the raw and attributes them correctly** regardless of how late. The dashboard may briefly under-count; it converges when the batch back-corrects. *Trade-off:* event-time windowing plus a late window is more complex than processing-time, accepted because misattributing a billable click to the wrong period is a billing error, not a cosmetic one.
+The loop is the lesson: **offline eval gates the change → deploy a pinned version → online eval + tracing + feedback observe reality → mine traces into the golden set → re-eval.** Skip any arrow and quality leaks: skip the gate and regressions ship; skip tracing and you can't debug or grow the set; skip the fold-back and your eval set rots while production drifts.
 
-**Bottleneck 3, billing from the approximate stream (the architecture-defining mistake).**
-Someone wires the invoice to the OLAP store because it's already there.
-*Fix:* **never bill from the stream.** Billing reads the **batch billable table only.** The stream is structurally at-least-once and lossy on very-late events; the batch is the source of truth. This separation *is* the design. *Rejected:* a single path serving both, it forces you to either make the stream exactly-once over an unbounded late window (impractical) or accept approximate billing (unacceptable).
+### Worked example: a "small prompt tweak" that quietly drops groundedness 8%
 
-**Bottleneck 4, ingest firehose / hot campaigns.**
-300k/sec peak, with one viral campaign overloading a single partition.
-*Fix:* **partition the log** for parallelism; **sub-partition hot campaigns** by `(campaign_id, hash(ad_id) % k)` and sum on read (the sharded-counter pattern); buffer in Kafka so bursts don't backpressure ingest. *Trade-off:* sub-partitioning makes per-campaign reads fan across k partitions, cheap, and only for the rare hot campaign.
+A RAG support assistant is live: it answers customer questions from the docs corpus, faithfulness is the bar (a hallucinated answer is worse than a refusal). An engineer wants the answers warmer, so they edit the system prompt — adding "Be friendly and reassuring, and reassure the customer their issue is common and easily solved." In the playground it reads great on three sample tickets. Here's how the harness catches what the demo can't:
 
-**Bottleneck 5, fraud / invalid clicks inflating the bill.**
-Bots and duplicate-intent clicks must not be billed.
-*Fix:* **filter invalid clicks in the batch** before settling the billable number; flag them in the stream best-effort for the dashboard. *Delegate the model*, the detection logic is a trust-and-safety system; I own the *integration point* (the batch applies the fraud verdict before billing), with a stated prior: rules + behavioral scoring, re-runnable over retained raw so a new rule can re-settle a past period.
+1. **The gate runs on the PR.** The change triggers the eval suite against the **golden set of ~300 real tickets** with known-good grounded answers. The pairwise LLM-as-judge (different model family, both orders averaged, explicit faithfulness rubric) compares new vs production.
+2. **Quality looks mixed, then the metric split tells the story.** Overall "helpfulness" win-rate is slightly *up* (it does read warmer). But the report doesn't collapse to one number — **faithfulness drops 8%**: the "reassure them it's easily solved" instruction nudges the model to *invent* reassuring detail not in the retrieved docs ("this usually resolves within a few minutes") — confident, friendly, and **ungrounded**.
+3. **The gate blocks the merge.** Faithfulness is a hard gate (regression > 2% blocks), so the PR fails CI. No customer ever sees the regression. Contrast the no-harness world: it ships on the strength of three good demos and silently degrades grounding for weeks until a customer is told something false and complains.
+4. **Tracing localizes the cause in minutes.** The engineer opens the traces for the failing cases: the retrieved chunks are *correct* (retrieval recall is fine), but the generated answer adds claims absent from those chunks. That pinpoints it as a **generation/faithfulness** failure caused by the prompt, not a retrieval failure — so the fix is the prompt, not the index.
+5. **The fix and the permanent guard.** Reword to "be friendly *and* answer only from the provided docs; do not speculate about timelines." Re-run the gate: warmth retained, faithfulness back to baseline, merge passes. The worst failing cases are **added to the golden set** so this exact regression can never recur silently.
 
-**Closing re-check:** exactly-once billing holds (batch over deduped raw); dashboard is fast and self-correcting (stream + back-correction); ingest never drops (durable log); late events are attributed correctly (watermarks + full recompute); fraud is filtered before settlement. The two paths each do the one job they're good at.
+Every step traces to the discipline: the **golden set** caught what eyeballs missed, the **metric split** said *which* half broke, **tracing** said *why*, and the **gate** stopped it from shipping — and the eval set is now stronger than before the change.
 
----
+### Trade-offs table: offline eval methods
 
-## D: Design evolution
+| Dimension | **Reference-based metrics** (exact-match/F1, BLEU/ROUGE) | **LLM-as-judge** (rubric / pairwise) | **Human evaluation** |
+|---|---|---|---|
+| Cost per case | lowest (deterministic compute) | low–moderate (a model call per grade) | highest (human time) |
+| Scalability | very high (CI on every PR, free) | high (CI-friendly at scale) | low (sample only) |
+| Fidelity to "real quality" | low for open text (rewards surface overlap); high for constrained tasks | moderate–high *if calibrated*; carries position/verbosity/self-preference bias | highest — the ground truth |
+| Needs a reference answer | yes | no (pairwise/rubric works referenceless) | no |
+| Main risk | passes fluent-wrong answers that share words | uncalibrated judge gives false confidence | doesn't scale; rater inconsistency |
+| **Use when…** | extraction/classification/JSON where overlap *is* correctness | open-ended generation, RAG faithfulness, win-rate gating — the workhorse | the calibration anchor; a small labeled set to validate the judge and settle high-stakes calls |
 
-> Push the dimensions up and find what breaks, and on this problem, the central evolution argument is **Lambda vs Kappa** (referenced, not re-taught).
+The pattern in one line: **automated metrics gate every change; LLM-as-judge does the open-ended grading; humans are the small, expensive anchor that keeps the judge honest.**
 
-**The Lambda-vs-Kappa question (the headline trade-off).** The two-path design above is **Lambda**, a stream layer for speed and a batch layer for truth, reconciled. Its well-known cost is **maintaining two codebases** that must compute the *same* aggregation and agree. The **Kappa** alternative: one stream path, and to "recompute," you **replay the retained log** through the same stream code. Where each wins:
-- **Stay Lambda when** the batch's correctness contract genuinely differs from the stream's, here it does: billing needs exactly-once over an *unbounded* late-event window and re-runnable fraud filtering, which is naturally a batch recompute over retained raw. The two paths aren't redundant; they have different correctness guarantees.
-- **Move toward Kappa when** you can express the exact recompute as a *replay* of the same streaming job over the retained log (which we already keep in S3). Modern stream engines make this viable, collapsing two codebases into one. *Trade-off:* a full historical replay through the stream is operationally heavier than a batch scan, and the engine must guarantee exactly-once on replay.
-- **My prior:** keep the raw log retained (we already do, it's the enabler of *both*), start Lambda for the clear billing/dashboard correctness split, and migrate the recompute to log-replay (Kappa-style) once the streaming engine's exactly-once-on-replay is proven, to kill the dual-codebase tax. This is a *managed evolution*, not a day-one bet.
+### What interviewers probe here
+- **"How do you know a prompt change didn't regress quality?"** — *Strong signal:* eval as a **CI gate** on a versioned golden set, pairwise win-rate vs the production baseline, hard gates on safety/faithfulness, past incidents folded in as permanent cases. Names "looked fine in a demo" as the failure mode the gate exists to kill. *Red flag:* "we test it in the playground" / manual spot-checks / no fixed eval set — quality erodes invisibly.
+- **"LLM-as-judge — what's wrong with it, and how do you trust it?"** — *Strong:* names **position, verbosity, and self-preference** bias and the mitigations (pairwise, both orders averaged, explicit rubric, different judge family), and — the key move — **calibrates the judge against a human-labeled set** and tracks agreement. *Red flag:* "ask GPT to rate it 1–10" with no awareness of bias or calibration.
+- **"Measure RAG retrieval failures vs generation failures separately — why and how?"** — *Strong:* the two fail independently and the fixes differ; *retrieval* = context recall/precision (right chunk fetched and ranked?), *generation* = faithfulness/answer-relevance (did it stick to the chunk?). A confident-wrong answer is a retrieval failure if the chunk was missing, a faithfulness failure if it was present and ignored — one number can't tell you which. *Red flag:* one blended "accuracy" number with no idea which half to fix.
+- **"What do you trace, and why?"** — *Strong:* the full chain — prompt, retrieved chunks + scores, tool calls, tokens in/out, latency, **cost** — as both debugger and the mine that grows the eval set. *Red flag:* logs only the final answer.
 
-**At 10× (1M events/sec):** the ingest log and stream tier scale horizontally on partitions (the design's whole point); raw retention grows linearly (~500 TB/mo, a real cost to revisit with tiering and aggressive compression); the OLAP and billing stores barely move (aggregates stay tiny). The bottleneck shifts to **partition count and stream-processor parallelism**, both horizontal.
+The through-line at Director altitude: **you cannot responsibly ship or scale an LLM feature without an eval harness — it is simultaneously your regression suite and the gate that lets the team move fast safely.** Own the **quality bar and the gate** (what "good enough" means, what blocks a ship, that the judge is calibrated to humans); **delegate building the harness** with that bar stated: "I want every prompt/model/RAG change gated on a golden set with calibrated LLM-as-judge, faithfulness as a hard gate, cost in the guardrails — have the platform team stand up the harness on Langfuse; my prior is that the gate buys back more velocity than it costs within a quarter."
 
-**Hardest trade-offs to defend:**
-- **Two numbers for one thing.** The dashboard and the bill can briefly disagree; the dashboard converges to the batch. Defending *why that's correct* (speed vs truth, not a bug) is the senior tell.
-- **Raw retention cost vs recomputability.** Keeping ~50 TB/mo of raw is the price of audit, bug-fix, and re-billing. Drop it and you lose the source of truth forever.
-- **Lambda's dual codebase** vs Kappa's heavier replay, a live architectural choice, not a settled one.
+### Common mistakes / misconceptions
+- **No eval at all — "the demo looked fine."** The default failure. A non-deterministic, open-ended system with no harness regresses silently; you find out from customers.
+- **One blended "accuracy" number.** It hides whether retrieval or generation broke, and whether you traded faithfulness for warmth. Measure the dimensions separately.
+- **Trusting an uncalibrated judge.** LLM-as-judge has position/verbosity/self-preference bias; without pairwise comparison, an explicit rubric, and periodic human calibration, you're gating on a biased, noisy signal.
+- **Eval as a report, not a gate.** A dashboard nobody must pass before shipping changes nothing. The value is in *blocking the merge* on a regression.
+- **Pinning to "latest" and ignoring drift.** The provider updates the model under your stable endpoint; pin versions and re-run eval on a schedule, or your tuned prompt silently changes behavior.
 
-**Where I'd delegate (the explicit Director move):**
-- **Fraud/invalid-click model:** *"Trust-and-safety owns the detection model behind `isValid(event) -> verdict`; I own the integration, the batch applies the verdict before settling the billable number, and because raw is retained, a new rule can re-settle a past period. My prior is rules + behavioral scoring."*
-- **The stream engine bake-off:** *"Data-platform benchmarks Flink vs Kafka Streams vs Spark Structured Streaming on our 300k/sec exactly-once-with-late-events workload; my prior is Flink for mature event-time + exactly-once, escalating only if operational cost dominates."*
-- **The OLAP store choice:** *"Analytics benchmarks Druid vs ClickHouse vs Pinot on our per-minute group-by read shape; my prior is whichever the org already runs."* What I keep, the **two-path speed/truth split, never-bill-from-the-stream, and raw retention as the recompute enabler**, and what I delegate, with a stated prior, is the altitude.
+### Practice questions
 
-**Handoff:** the exact same ingest log + aggregation pipeline is the substrate for **top-K** ("the 100 highest-clicked ads right now"), same firehose, a different read shape (heavy-hitters over a window rather than per-campaign totals).
+**Q1.** Your team ships LLM prompt changes weekly and quality "feels" like it's slowly getting worse, but no one can point to a cause. What's the root problem and how do you fix it structurally?
+> *Model:* No **regression gate**. Each weekly change is eyeballed on a few cases; each quietly breaks cases nobody checked, and the damage compounds. Fix: build a **versioned golden set** (seed it from production traces and every past incident) and run it as a **CI gate** — pairwise win-rate vs the current production version via a calibrated LLM-as-judge, with hard gates on faithfulness/safety. No prompt/model/RAG change merges without passing. Now regressions are blocked at PR time instead of discovered in aggregate weeks later, and the gate *speeds up* shipping because changes are safe to make.
 
----
+**Q2.** You're using GPT-4-class as an LLM-judge to grade your GPT-4-based assistant. What's suspect, and what would you change?
+> *Model:* Several biases. **Self-preference** — a judge tends to favor text from its own family, so grading your own model's output with the same family inflates scores; use a **different judge family** where possible. **Position bias** — pairwise comparisons favor order; run **both orders and average**. **Verbosity bias** — reward length unless the rubric scores concision. And it's likely **uncalibrated** — validate it against a **small human-labeled set** (measure agreement) before trusting it to gate, and re-check periodically since the judge model drifts. Without that, you have a confident, biased grader giving false green lights.
 
-## Trade-offs table: the pivotal decisions
+**Q3.** A RAG answer is fluent, well-cited, and wrong. How do your metrics tell you whether to fix retrieval or generation?
+> *Model:* Split the metrics. Check **context recall** — was the answer-bearing chunk retrieved at all? If **no**, it's a *retrieval* failure: fix chunking/hybrid/reranking, the model never had a chance. If **yes** (the right chunk *was* in context) but the answer contradicts or invents beyond it, that's a **faithfulness** failure: the model ignored its grounding — tighten the grounding instruction, lower temperature, or check the chunk was buried mid-context. The trace settles it: read the retrieved chunks for that case. One blended accuracy number can't distinguish these, and the two fixes are completely different.
 
-| Decision | Option A | Option B | Option C | Use when... |
-|---|---|---|---|---|
-| **Counting paths** | **Two paths, stream + batch** (Lambda) | **Stream only** (Kappa / replay) | **Batch only** | **A** when billing needs exact + late-tolerant *and* dashboards need fast, the real case (our choice). **B** when the recompute can be a log-replay of the same job and exactly-once-on-replay is proven. **C** only for pure analytics with no freshness need. |
-| **Bill from which path** | **Batch billable table** | **Stream OLAP output** | Hybrid reconcile-then-bill | **A** always for billing, exact over complete deduped raw (our choice). **B never**, billing from an approximate at-least-once number. **C** is just A with extra steps. |
-| **Window / time basis** | **Event-time + watermarks** | **Processing-time windows** | **Ingest-time** | **A** when late events must be attributed correctly, billing does (our choice). **B** when late events are rare and approximate is fine. **C** as a cheap middle ground for analytics-only. |
-| **Log partition key** | **`campaign_id`** | **`user_id`** | **Round-robin** | **A** matches the per-campaign query + in-order aggregation (our choice); sub-shard hot campaigns. **B** scatters a campaign across partitions. **C** maximizes spread but forces a full shuffle to aggregate. |
-
----
-
-## What interviewers probe here (Director altitude)
-
-- **"Is this for billing or analytics?"**, *Strong:* asks it *first*, then designs two paths, fast approximate stream for dashboards, exact batch for the bill, and states that the answer flips the architecture. *Red flag:* builds one pipeline and never distinguishes the two contracts.
-- **"How do you count each click exactly once for billing?"**, *Strong:* dedup by explicit `eventId`; the **batch recompute over complete deduped raw is the real guarantee** (exactly-once over *all* events, not just a window); never bill from the stream. *Red flag:* "exactly-once on the stream" with no batch, ignoring late events outside the window.
-- **"A mobile event arrives 3 hours late. Where does it land on the bill?"**, *Strong:* watermarks give the stream a grace window; definitively, the **batch sees it in retained raw and attributes it to the correct period**; the dashboard converges via back-correction. *Red flag:* processing-time windows that silently misattribute it.
-- **"Why keep all the raw events, that's a lot of storage."**, *Strong:* raw retention (~50 TB/mo, a defended line item) is what makes the billing number **recomputable, auditable, and re-billable** when a fraud rule or counting bug changes; aggregate-only can never do that. *Red flag:* keeps only aggregates and can't audit or correct.
-- **"Lambda or Kappa here, and why?"**, *Strong:* names the dual-codebase cost of Lambda and the heavier-replay cost of Kappa; keeps Lambda while the billing/dashboard correctness contracts genuinely differ; migrates to log-replay once exactly-once-on-replay is proven (by reference, doesn't re-derive). *Red flag:* picks one by fashion with no trade-off.
-
----
-
-## Common mistakes
-
-- **Billing from the stream.** The OLAP/stream number is at-least-once and lossy on very-late events. Bill from the **batch** over complete deduped raw, full stop. This is the single most important rule on the problem.
-- **One pipeline for both jobs.** Speed (dashboard) and truth (billing) are different correctness contracts; forcing one path makes you either accept approximate bills or build impractical unbounded-window exactly-once.
-- **Processing-time windows.** They misattribute late mobile events to the wrong minute and can't be corrected. Use **event-time + watermarks**, with the batch as the authority.
-- **Dropping raw events to save storage.** Without retained raw you can never recompute, audit, or re-bill after a bug or a new fraud rule. Raw retention is the enabler of the whole truth path.
-- **No explicit `eventId`.** Dedup on derived fields (user+timestamp) is unreliable under clock skew and collisions; an assigned ID makes exactly-once tractable.
-
----
-
-## Interviewer follow-up questions (with model answers)
-
-**Q1. Walk me through counting a single click exactly once for the invoice.**
-> *Model:* The click arrives with an assigned `eventId` and durably lands on the Kafka log, partitioned by `campaign_id`, and is tee'd to S3 as retained raw. The **stream** dedups by `eventId` in keyed state and produces a fast approximate count for the dashboard, but that's not the bill. The **bill** comes from a **batch job that recomputes over the complete retained raw**: it dedups across *all* events (not just a window), folds in late arrivals, applies the fraud filter, and writes an exact count to the billable table. The invoice reads only that table. So exactly-once for billing is structural: idempotent recomputation over an immutable, deduped raw set yields the same exact number however many times it runs. The stream is fast; the batch is true.
-
-**Q2. The same firehose, but now show me top-10 ads by clicks in the last 5 minutes.**
-> *Model:* That's the **top-K / heavy-hitters** read shape over the *same* ingest log and stream layer. Same partitioned firehose, same windowing, but instead of per-campaign totals I maintain a bounded top-K structure (e.g. Count-Min Sketch for frequencies + a heap of candidates) per window, so I don't sort the full cardinality. Crucially, for a *dashboard* top-K, approximate is fine, so it stays purely on the stream, no batch needed unless top-K ever drives money. The reusable substrate is the log + stream aggregation; only the aggregation function and read shape change.
-
-**Q3. Your stream processor crashes mid-window. Did you lose or double-count clicks for the dashboard?**
-> *Model:* Neither, if exactly-once is configured: the processor checkpoints state and commits aggregate writes transactionally with the consumer offset (Flink + Kafka transactions). On restart it rewinds to the last checkpoint and replays from the log; because the output commit was atomic with the input offset, replay doesn't double-count, and nothing is lost because the log retained the events. The dashboard may stall for the restart window, then catch up. And even if the stream got it slightly wrong, the **batch back-corrects** the dashboard and *is* the bill, the stream never has to be perfect.
-
-**Q4. Why not just make the stream exactly-once and drop the batch entirely (Kappa)?**
-> *Model:* You can move toward Kappa, recompute by replaying the retained log through the same stream job, killing Lambda's dual-codebase cost. I keep the raw log precisely so that's possible. But I hold Lambda while two things are true: billing needs exactly-once over an *unbounded* late-event window (a stream's dedup state is finite, so a click arriving days late slips its window, the batch, seeing all raw, doesn't), and fraud rules must be re-runnable over history to re-settle past periods. Both are naturally batch recomputes. Once the engine's exactly-once-on-replay is proven for our late-event profile, I'd collapse to Kappa, a managed migration, not a day-one bet.
-
-**Q5. What does this cost, and what would you delegate?**
-> *Model:* The spend is the **ingest log + stream tier** (sized for 300k/sec peak) and **raw retention** (~50 TB/mo S3, a few hundred dollars, the price of a recomputable, auditable bill). The aggregates and dashboard tier are small; reads are trivially cached. I delegate the **fraud model** to trust-and-safety behind `isValid(event)`, owning only the integration point (batch applies the verdict before settling). I delegate the **stream-engine and OLAP-store bake-offs** with stated priors (Flink for event-time + exactly-once; whichever OLAP the org runs). What I keep is the two-path speed/truth split, never-bill-from-the-stream, and raw retention as the recompute enabler.
-
----
+**Q4.** The model provider pushes a silent update to the endpoint you call. How would you have known, and how do you prevent surprises?
+> *Model:* You'd know if you **re-run the eval set on a schedule** (not just on PRs) — a faithfulness/win-rate dip with no deploy of your own is the signature of provider-side drift. Prevention: **pin to a dated/versioned model endpoint** rather than the floating "latest" alias, so upgrades are a deliberate, eval-gated choice; **version everything** (prompt, model ID, RAG config) so results are reproducible and you can bisect; and treat a provider upgrade like any other change — run it through the gate before adopting it. Same harness, now defending against a change *you* didn't make.
 
 ### Key takeaways
-- **Every click is money, so the design splits speed from truth:** a fast **approximate stream** for live dashboards and a slow **exact batch** for the bill, two paths from one firehose (the Lambda shape). The opening Director move is asking **"billing or analytics?"**, it flips the architecture.
-- **Never bill from the stream.** The stream is at-least-once and lossy on very-late events; the **batch recompute over complete deduped raw is the source of truth**, exactly-once over *all* events, not just a window.
-- **Raw-event retention (~50 TB/mo) is a defended budget line, not waste:** it's what makes the billing number recomputable, auditable, and re-billable when a fraud rule or counting bug changes. Aggregate-only can never do that.
-- **Late events and dedup are correctness, not polish:** event-time windowing + watermarks on the stream, full-raw recompute in the batch, and explicit `eventId` dedup; the dashboard converges to truth via back-correction.
-- **It's a write-heavy, throughput-and-retention problem:** partition the durable log by `campaign_id`, sub-shard hot campaigns, scale stream parallelism horizontally; aggregates and reads are tiny. Delegate the fraud model and the engine/store bake-offs with stated priors.
+- **Eval is hard because the system is non-deterministic, open-ended, has no single ground truth, and quality is multi-dimensional** (correct? grounded? safe? on-tone?). It's an essay exam, not multiple-choice — you build and calibrate a *grader*, you don't get pass/fail for free.
+- **Offline eval = a versioned golden set + the right grader:** reference metrics where a right answer exists, **LLM-as-judge** for open-ended quality (calibrated against a small human-labeled set), with humans as the expensive anchor. Measure RAG **retrieval** (context recall/precision) and **generation** (faithfulness/relevance) *separately* — they fail independently.
+- **LLM-as-judge is biased** (position, verbosity, self-preference). Trust it only via **pairwise comparison, both orders averaged, an explicit rubric, a different judge family, and periodic human calibration.**
+- **Eval as a CI gate is the single most important LLMOps practice** — every prompt/model/RAG change must pass the golden set before shipping. "Looked fine in a demo" is how quality silently regresses; the gate also lets the team move fast safely.
+- **Trace the full chain** (prompt, chunks, tool calls, tokens, latency, **cost**) — it's your debugger *and* the mine that grows the eval set. Plan for **drift** (pin model versions, re-eval on a schedule), and treat **cost per request** as a first-class gated metric.
 
-> **Spaced-repetition recap:** Ad click aggregator = **streaming analytics where every event is money.** Ask **billing or analytics** first, it flips the design. Build **two paths from one Kafka firehose**: a fast **approximate stream** (Flink → OLAP → dashboard, at-least-once, self-correcting) and a slow **exact batch** (S3 raw → recompute → billable table, exactly-once over complete deduped raw). **Never bill from the stream.** Handle **late events** (event-time + watermarks; batch is the authority) and **dedup** (explicit `eventId`). **Raw retention (~50 TB/mo)** is the recompute enabler. **Lambda now, Kappa once exactly-once-on-replay is proven**. Same pipeline feeds **top-K**. Delegate the fraud model + engine/store bake-offs.
-
----
-
-*End of Lesson 9.7. The Ad Click Aggregator is the canonical streaming-analytics interview: the hard part isn't volume, it's that **the output is invoices**, forcing a deliberate speed-vs-truth split, an approximate stream for dashboards and an exact, recomputable batch as the billing source of truth, reusing batch-vs-stream and Lambda/Kappa reasoning and sharded counters.*
+> **Spaced-repetition recap:** LLM eval = essay exam, not multiple-choice — non-deterministic, open-ended, no answer key, multi-dimensional quality, so "looked fine in the demo" is the failure mode. **Offline:** versioned golden set + reference metrics where a right answer exists + **LLM-as-judge** (pairwise, both orders, explicit rubric, different family, **calibrated to a small human set**) for open-ended quality. Split RAG into **retrieval** (context recall/precision) vs **generation** (faithfulness/relevance) — they break independently. **The gate is everything:** every prompt/model/RAG change must pass the golden set in CI before it ships, and that gate is what lets you move fast. **Trace** the whole chain (prompt · chunks · tools · tokens · latency · **cost**) as debugger and eval-data mine; fold production failures back into the golden set. Defend against **drift** (pin versions, re-eval on a schedule). Own the bar + the gate, delegate the harness with the bar stated.

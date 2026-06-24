@@ -1,249 +1,180 @@
 ---
-title: "7.4 — LRU Cache with Pluggable Eviction"
-description: The classic LLD curveball reframed for Director altitude - design the Cache interface contract and a Strategy-pluggable eviction policy, state the HashMap+DLL result in one sentence, and pick lock granularity by arithmetic instead of reflex.
+title: "7.4 — Distributed Processing Engines: Spark & Flink"
+description: How Spark (DAG + the shuffle as the cost center) and Flink (event-time, watermarks, keyed state, checkpoint barriers) actually work as platform components, so you can reason about their bottlenecks, recovery, and cost.
 sidebar:
   order: 4
 ---
 
-> **"Design an LRU cache" is the best-evidenced problem still asked at manager and Director level** - it sits in the EM coding banks at Google, Amazon, Microsoft, Meta, and Netflix, often dressed as "a cache with rank-based eviction." The trap: it *looks* like algorithm recall, and a junior answer plays it that way - recite HashMap + doubly-linked list, code it, done. At Director the bar has moved. The interviewer scores whether you design the **interface contract** before the data structure, make eviction **pluggable** (LRU today, LFU or TTL next quarter) without callers noticing, and choose **lock granularity by measurement, not reflex**. The HashMap+DLL trick is one sentence of your answer; the rest is API design.
-
 ### Learning objectives
-- Reframe the LRU question from **algorithm recall to interface design**: a `Cache` contract whose eviction behavior is a **Strategy-pluggable policy** (LRU/LFU/TTL), swappable without touching callers.
-- State the **O(1) result** (hash map + doubly-linked recency list) in one sentence and move on - mechanics are delegable; contract decisions are not.
-- Choose **lock granularity** (global vs striped vs read-write) with arithmetic - including the honest admission that **a coarse lock is fine until a measurement says otherwise**.
-- Adapt the **RESHADED spine** to an LLD problem - the letters survive; narrating how each step adapts is itself interview signal.
-- Know **where the LLD answer ends**: two processes sharing the cache puts you in distributed-cache territory, and the distributed-cache deep-dive picks up that thread.
+- Explain **Apache Spark** as a batch/micro-batch engine, the DataFrame/RDD abstraction, **lazy evaluation** building a DAG, the scheduler splitting that DAG into **stages at shuffle boundaries**, and why **the shuffle, the all-to-all data exchange, is the dominant cost center** (wide vs narrow transformations).
+- Explain **Apache Flink** as a true per-event streaming engine, **event-time vs processing-time**, **watermarks** for out-of-order and late events, the **windowing** choices (tumbling/sliding/session), **RocksDB-backed keyed state**, and **Chandy-Lamport checkpoint barriers** that give it exactly-once recovery.
+- Reason about the **two design dials that dominate cost and recovery**, shuffle minimization (broadcast joins, pre-partitioning) and the checkpoint interval (recovery speed vs steady-state overhead), each in numbers.
+- Pick Spark vs Flink from the **freshness requirement set in the batch-vs-stream lesson** (you do *not* re-derive that choice here), then defend the pick by naming what the rejected engine costs you.
+- Locate these engines in the platform: they are the **processing layer** that ingestion feeds and orchestration runs; the exactly-once and watermark mechanics show up applied in the ad-click aggregator, and streaming ETL pipelines are built on them.
 
 ### Intuition first
-Think of a **coat check**. The numbered tags are the hash map: hand over tag 47, get coat 47 instantly, no searching. The recency rule is the attendant re-hanging every retrieved coat at the *front* of the rack - so when the room fills, the coat at the *back* (untouched longest) goes to overflow. That is LRU: tags for lookup, rack order for eviction.
+The batch-vs-stream lesson already told you *when* to batch and *when* to stream, the freshness ladder, the Lambda-vs-Kappa split. This lesson is the other half: *how the two engines that dominate that ladder actually work*, so when an interviewer asks "where's the bottleneck?" or "what does that cost?" you answer in mechanics, not adjectives. Two analogies, one per engine.
 
-Now the part that matters at this level: management changes the rule - evict the coat *worn least often* (LFU), or any coat *past its claim date* (TTL). What does **not** change: the customer window. Check a coat, retrieve a coat, same tags. Only the attendant's *private re-hanging habit* changes. **That separation - a stable public contract over a swappable internal ordering rule - is the actual design problem.** Welding the rack into the counter is the junior version of the answer.
+**Spark, the warehouse fulfillment center that periodically re-sorts the whole floor.** Picture a giant warehouse where workers pick and pack in parallel. Most steps are *local*, each worker filters and labels the boxes already on their own shelf, no coordination needed. But some steps force a **re-sort of the entire floor**: "group every box by destination zip code" means boxes from every shelf have to be physically carried across the warehouse to a new shelf keyed by zip. That floor-wide reshuffle is slow, it saturates the aisles (the network), spills boxes onto the loading dock when a shelf overflows (disk spill), and stalls every worker until the carrying is done. A Spark job is mostly cheap local work punctuated by a few of these expensive floor-wide re-sorts. **Knowing which operations force a re-sort, and minimizing them, is the entire performance game.** That re-sort is the *shuffle*.
 
----
+**Flink, the airport baggage system that never closes.** Bags (events) arrive continuously on belts, never in a tidy batch. Each bag is tagged and routed *the instant it lands*, to a carousel keyed by flight (that per-key memory is the *keyed state*). But bags arrive **out of order**, a bag checked in first can sit on a delayed belt and show up late, so the system can't declare "flight 88's carousel is complete" the moment the last *expected* bag scans; it waits until a marker says "we've now seen everything checked in up to 9:05" (that marker is the *watermark*). And because the belts never stop, you can't shut down to take inventory; instead a clipboard photo of every carousel's state is snapped on a rolling basis without halting the belts (that rolling snapshot is the *checkpoint*), so after a power blip the system resumes from the last photo instead of re-scanning every bag from this morning. **Out-of-order arrival, per-key memory, and snapshot-without-stopping are the three problems Flink exists to solve.**
 
-## R - Requirements
+### Deep explanation
 
-> In an LLD problem, R adapts from "scope a planet-scale product" to **"pin the contract"**: who calls this, with what concurrency, under what capacity definition. Skipping to code without these questions is the most common down-level signal.
+#### Spark: lazy DAG, stages, and the shuffle as the cost center
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *Single process or shared across services?* → **Single process, in-memory.** (Shared = the distributed-cache problem - a different question; I say that boundary out loud.)
-- *Thread-safe?* → **Yes**, multiple application threads.
-- *Capacity in entries or bytes?* → **Count for v1, but the interface must admit a byte-weigher** - ops teams budget heap in MB, not entries.
-- *Strict or approximate LRU?* → **Strict for v1**; approximate recency is the standard escape hatch if the lock ever becomes the bottleneck.
-- *Which policies, now and later?* → **LRU now; LFU and TTL must plug in later without changing callers.** This sentence *is* the problem statement.
+**Spark's core abstraction is a distributed, partitioned collection you transform with a functional API**, the low-level **RDD** (resilient distributed dataset) and the high-level **DataFrame/Dataset** that almost everyone writes against today. The collection is split into **partitions** (typically ~128 MB each, matching the columnar storage block size), and each partition is processed by one **task** on one core of one **executor**. A 1 TB input at 128 MB/partition is ~8,000 partitions, ~8,000 tasks scheduled across the cluster's cores; that partition count, not the row count, is what governs parallelism.
 
-**Functional requirements:** (1) `get`/`put`/`remove` in constant time; (2) **bounded capacity** - insert into a full cache evicts exactly one policy-chosen victim; (3) **pluggable eviction** selected at construction, invisible to callers; (4) optional **eviction listener** (callers may need to write back or log); (5) **stats** - hit rate, evictions: you cannot tune what you cannot see.
+**Transformations are lazy, actions trigger execution.** Calling `.filter()`, `.select()`, `.join()`, `.groupBy()` does *no work*, it appends a node to a **logical plan**. Nothing runs until an **action** (`.count()`, `.write()`, `.collect()`) forces materialization. At that point Spark hands the plan to the **Catalyst optimizer**, which rewrites it (predicate pushdown so filters run before joins, column pruning so only referenced columns are read off columnar storage, join reordering) and then to the scheduler. Laziness is what *lets* the optimizer see the whole pipeline at once and fuse cheap operations together, the Director-relevant consequence is that **Spark optimizes the plan globally, not statement by statement**, so the order you write transformations matters far less than which operations force a shuffle.
 
-**Explicitly CUT (saying so is the signal):** persistence, distribution, serialization, multi-tier composition, async `get-or-load`. Each is real in production caches; each doubles the design.
+**The DAG scheduler splits the plan into stages, and the boundary between stages is always a shuffle.** This is the single most important mechanical fact about Spark. Transformations come in two kinds:
 
-**Non-functional requirements:** **O(1)** operations including the eviction decision; **thread safety** with a quantified concurrency target (next section); **predictable memory** - the cache must never blow the heap budget; **open for extension, closed for modification** - a new policy is a new class, not an edit to the cache.
+- **Narrow transformations** (`map`, `filter`, `select`, `union`): each output partition depends on **one** input partition. No data crosses the network; the work is local to the partition, and Spark **pipelines** consecutive narrow ops into a single stage that runs in one pass. This is the cheap warehouse-local work.
+- **Wide transformations** (`groupByKey`, `reduceByKey`, `join`, `distinct`, `repartition`): each output partition depends on **many** input partitions, because rows must be **regrouped by key**. All rows sharing a key have to land on the same partition, which means writing every partition's data out, partitioned by a hash of the key, and reading it back, an **all-to-all exchange across the cluster**. That exchange is **the shuffle**, and it is the stage boundary.
 
----
+**The shuffle is the dominant cost center, and here is why, in numbers.** In a narrow stage, the data never leaves the executor, work proceeds at memory/CPU speed. A shuffle, by contrast:
 
-## E - Estimation
+- **Writes the entire stage's output to local disk** as shuffle files (the "shuffle write"), then **reads it back over the network** (the "shuffle read"). For a 1 TB stage, that's ~1 TB written to disk and ~1 TB pulled across the network, at maybe 1–10 GB/s of aggregate cluster bandwidth this is seconds-to-minutes of pure data movement doing *no useful computation*.
+- **Is an all-to-all pattern**: M map tasks × R reduce tasks = up to M×R connections; the network, not the CPU, becomes the bottleneck.
+- **Materializes a synchronization barrier**: the next stage cannot start until the shuffle write of the previous stage finishes, so a single slow ("straggler") task stalls the whole downstream stage.
+- **Spills to disk when a key's group exceeds executor memory.** If the data is **skewed**, one key (say `country = 'US'`) holds 60% of the rows, that one reduce task gets a partition far larger than memory, spills repeatedly to disk, and runs 10× longer than its peers while the rest of the cluster sits idle. **Data skew is the #1 cause of a Spark job that "mostly finishes fast then hangs on the last task."**
 
-> E adapts from planetary QPS to **the three numbers that decide this design**: the caller's ops rate, the entries' memory, and the throughput ceiling of one lock. Ten lines of arithmetic settles debates that otherwise run on vibes.
+So the performance discipline is **minimize the bytes shuffled**, and the two main levers each name a rejected alternative:
 
-**Assumptions:** the cache backs a service doing **5K RPS**, ~10 lookups per request; 1M entries max; keys ~50 B, values ~500 B.
+- **Broadcast join instead of a shuffle join, when one side is small.** A normal (sort-merge) join shuffles *both* tables by the join key, two full all-to-all exchanges. If one side fits in memory (Spark's default threshold is ~10 MB, commonly raised to ~100 MB–1 GB), Spark instead **broadcasts** the small table to every executor and joins locally, **zero shuffle of the large table**. A 1 TB fact table joined to a 50 MB dimension table goes from "shuffle 1 TB + 50 MB" to "ship 50 MB to N executors", often a 10–100× speedup. *Rejected alternative:* the shuffle (sort-merge) join, correct and the only option when *both* sides are large, but it pays the full all-to-all cost on both inputs; you reject it precisely when one side is small enough to broadcast.
+- **Pre-partition / bucket the data so the shuffle is already done.** If two large tables are repeatedly joined on the same key, **bucketing** both by that key at write time (or keeping them co-partitioned) means the join finds matching keys already co-located, no shuffle at query time. *Rejected alternative:* re-shuffling on every join, simpler to write and fine for a one-off, but if the join runs hourly you're paying the all-to-all tax every hour instead of once at write time.
 
-**Ops rate:** `5K × 10 ≈ 50K cache ops/s`, peak ~3× → **~150K ops/s**.
+**In-memory processing is Spark's other headline, but it's caching, not magic.** Spark pipelines narrow stages through executor memory and lets you `.cache()` a DataFrame you'll reuse (an iterative ML loop, a dimension reused across joins) so it isn't re-read from storage, the win over MapReduce, which wrote every intermediate to HDFS between steps, and the reason Spark is often 10×+ faster. But memory is finite: when cached data or a shuffle exceeds it, Spark **spills to disk** and degrades toward MapReduce-like disk-bound behavior. The Director framing: "in-memory" buys speed *until you exceed memory*, after which spill and shuffle dominate, which is why you size executors and minimize shuffle rather than assume RAM speed.
 
-**Memory:** `1M × (50 B key + 500 B value + ~100 B node/entry overhead) ≈ 650 MB`. The overhead line matters: pointers, headers, and the policy's bookkeeping node add **~15-20%** over payload - a cache sized by payload alone overruns its budget. Hence the **weigher** (capacity in bytes) in the contract.
+#### Flink: event-time, watermarks, keyed state, and checkpoint barriers
 
-**The lock ceiling (the number that decides Evaluation).** An uncontended mutex acquire ~25 ns; a map get ~100 ns; the recency splice ~50 ns - call it **~200 ns per locked op → one global lock sustains roughly 2-5M ops/s**. Against 150K ops/s peak: **15-30× headroom**.
+**Flink is a true streaming engine, it processes each event as it arrives, not in batches**, which is the architectural opposite of Spark's bounded-collection model and the source of both its sub-second latency and its harder problems. A Flink job is a **dataflow graph** of operators (source → transform → keyed aggregation → sink) through which records flow continuously. The four mechanics you must be able to discuss:
 
-**What estimation decided:** at this workload **a single coarse lock is nowhere near the bottleneck** - anyone reaching for striping in minute five is optimizing a problem the numbers say doesn't exist. If the host were a 2M-ops/s hot path, the same arithmetic flips the answer; the method is the point.
+**1. Event-time vs processing-time, the distinction every streaming question turns on.** *Processing time* is the wall-clock when the operator sees the event; *event time* is the timestamp embedded in the event, when it actually happened. They diverge because of network delay, queuing, and, above all, clients that go offline, a mobile click generated at 9:00 can arrive at the server at 9:05. If you bucket "clicks per minute" by *processing* time, that late click lands in the 9:05 minute and both minutes are wrong. **Correct streaming analytics is almost always computed in event time**, which immediately raises the question: if events arrive out of order, when is a given minute "complete" and safe to emit?
 
----
+**2. Watermarks, the engine's answer to "when is this window complete?"** A **watermark** is a marker the engine injects into the stream meaning *"event time has now advanced to T; I believe I've seen all events with timestamp ≤ T."* Windows fire when the watermark passes their end. The watermark is generated with a **bounded-out-of-orderness** heuristic, "emit a watermark for `T = max_event_time_seen − δ`", where δ (say 5 seconds, or hours for mobile) is how late you're willing to wait. This is the core trade: **a larger δ catches more late events but delays every result by δ; a smaller δ emits faster but drops more stragglers into the "late" path.** Events arriving after the watermark has passed their window are handled by **allowed lateness** (keep the window state around a bit longer and re-fire) or routed to a **side output** for separate handling, exactly the late-event machinery the ad-click aggregator leans on. *Director-altitude statement: the watermark delay is a freshness-vs-completeness dial you set from the requirement, not a constant.*
 
-## S - Storage
+**3. Keyed state, backed by RocksDB so it can outgrow memory.** Streaming aggregations are **stateful**, "running count per campaign," "session per user," "dedup set of seen event IDs", and that state must survive across events and across failures. Flink partitions the stream by key (`keyBy(campaignId)`) and gives each key its own state, accessed locally by the operator handling that key. The decision that matters at scale is **where that state lives**:
 
-> S adapts from "pick a database" to **"what state lives where, and what happens at the memory limit."** Nothing persists - this cache *is* ephemeral state - so the storage decision is a heap-budget decision.
+- **Heap (in-memory) state backend:** fastest access (nanoseconds), but the total state per task is capped by JVM heap, a few GB, and large state triggers GC pauses. Fine when keyed state is small (thousands of keys, small values).
+- **RocksDB state backend:** state lives in an embedded **LSM-tree on local SSD** (the same LSM structure behind write-optimized stores), so it can hold **tens to hundreds of GB per task, far beyond RAM**, spilling to disk transparently. The cost is per-access latency, microseconds (an SSD read + possible deserialize) instead of nanoseconds, and write amplification from LSM compaction. *Rejected alternative:* keeping all keyed state on the heap, lower latency but it caps total state at a few GB and risks long GC pauses; you reject it the moment your state, millions of active sessions, a 24-hour dedup window over 100k events/sec, exceeds memory, which at platform scale is the common case. This is the "large keyed state in-memory vs RocksDB spill" decision, and the answer is almost always RocksDB once state is large, you trade a few microseconds per access for not falling over.
 
-- **Everything on-heap, two state holders:** the **store** (hash map: key → entry) and the **policy's bookkeeping** (whatever ordering structure the policy maintains). Keeping them separately owned is the extensibility seam - see H.
-- **Capacity by count *and* by weight.** Constructor takes `maxEntries` or `weigher + maxWeight`. *Rejected: count-only* - 1M tiny entries vs 1M 50 KB entries differ by 50 GB.
-- **Rejected: soft/weak references ("let the GC evict").** Zero eviction code, but eviction timing becomes a GC detail: unpredictable hit rates, no policy control, undebuggable. Explicit bounded capacity costs the eviction machinery and buys deterministic behavior.
-- **Expired-but-unread TTL entries** are a slow leak. Handle with **lazy expiry on access plus a cheap periodic sweep** - the same lazy-reclaim instinct as Ticketmaster's holds: correctness never depends on the sweeper; it only reclaims memory.
+**4. Checkpointing via Chandy-Lamport barriers, how Flink recovers and delivers exactly-once.** Because a Flink job runs forever and holds large state, "restart from the beginning on failure" is a non-starter, replaying a month of events to rebuild a counter is an outage. Instead Flink periodically snapshots all operator state with the **Chandy-Lamport distributed snapshot algorithm**: the source injects a numbered **checkpoint barrier**; as it flows through, each operator snapshots its state the moment the barrier passes and forwards it downstream. Since the barrier separates "events before the checkpoint" from "events after," the snapshot is a **globally consistent cut** of the whole pipeline's state, *without stopping the stream* (the baggage-system clipboard photo). On failure, every operator restores from the last completed checkpoint and sources rewind their offsets to that barrier. Combined with **transactional sinks** (output and input offset committed atomically), this delivers **exactly-once** end-to-end, applied to billing-grade counting in the ad-click aggregator. Interview-grade phrasing: *exactly-once means replay after recovery is safe because the snapshot is consistent and the sink commit is atomic with the input offset*, not that every event is literally processed once.
 
----
+**The checkpoint interval is the cost/recovery dial.** Snapshotting isn't free, it serializes state to durable storage (S3/HDFS), and with large RocksDB state that's real I/O and a brief throughput dip. So:
 
-## H - High-level design
+- **Frequent checkpoints** (every few seconds): **fast recovery** (on failure you replay only since the last checkpoint, seconds of events) but **higher steady-state overhead** (constant snapshot I/O eating throughput).
+- **Sparse checkpoints** (every few minutes): **cheaper steady-state** (snapshot rarely) but **slower recovery and more replay** (a crash means reprocessing minutes of events, and downstream sees a longer stall).
 
-> H adapts from service boxes to a **composition diagram**: which object owns which responsibility, and where the extension seam runs - the line between the cache's *mechanism* and the policy's *decision*.
+A typical production setting is **10s–60s**, tuned so recovery time meets the SLO without the snapshot overhead crippling throughput; incremental checkpoints (RocksDB ships only changed SST files, not the whole state) make frequent checkpointing affordable even with hundreds of GB of state. *Rejected alternative on each end:* checkpoint every second, recovery is near-instant but you spend a large fraction of cluster I/O on snapshots; checkpoint every 10 minutes, almost no overhead but a failure replays 10 minutes and stalls the pipeline. You set the interval from the recovery-time requirement and the state size, and delegate the exact number to a benchmark.
+
+**Backpressure, the property that keeps a streaming job stable.** If a downstream operator (or the sink, say a slow database) can't keep up, Flink doesn't drop events or blow up memory, the slow operator's full buffers propagate **backpressure** upstream through the dataflow, eventually slowing the source's consumption from Kafka. The system self-throttles to the speed of its slowest stage, and the lag shows up as growing Kafka consumer lag (the metric you alert on), not as data loss. The Director point: a healthy Flink job under load **slows down gracefully and recovers**, the failure mode to watch is sustained backpressure with no recovery, which means the slowest stage is permanently under-provisioned and you scale it or fix the skew.
+
+#### The convergence: Spark Structured Streaming vs Flink
+
+The two engines have grown toward each other, and the distinction that survives is **latency floor and the cost of state**:
+
+- **Spark Structured Streaming** runs streaming as **micro-batches**: it executes the same Spark engine on tiny batches triggered every few hundred ms to seconds, so its latency floor is **~seconds** (a continuous-processing mode exists but is far less used). You get Spark's mature batch ecosystem and a unified API, and for "near-real-time" (seconds of lag) it's often the simpler choice because the team already runs Spark.
+- **Flink** processes **per-event**, so its latency floor is **sub-second to low-ms**, and its state and watermark handling are first-class rather than bolted onto a batch model, which is why heavy stateful streaming (large keyed state, complex event-time windows, exactly-once at high throughput) leans Flink.
+
+Both now offer **unified batch+stream APIs** (Flink treats batch as a bounded stream; Spark treats streaming as repeated batch), so the same logic can run in either mode, the Lambda-vs-Kappa code-duplication pain is partly what these unified APIs exist to reduce. But the choice between them stays a **freshness decision**: seconds of lag and batch-shop simplicity favor Spark Structured Streaming; sub-second latency and large stateful exactly-once favor Flink.
+
+<details>
+<summary>Go deeper, the shuffle write path and skew mitigation (IC depth, optional)</summary>
+
+- **Shuffle file mechanics.** Each map task partitions its output by `hash(key) % numReducePartitions`, sorts within each partition, and writes one shuffle file plus an index to local disk. Reduce tasks then fetch their partition from every map task's file over the network (the "shuffle read"). The default `spark.sql.shuffle.partitions = 200` is a frequent footgun, too few for a large job (giant partitions, spill) or too many for a small one (scheduling overhead per tiny task); **Adaptive Query Execution (AQE)** in Spark 3+ coalesces and splits shuffle partitions at runtime based on observed sizes.
+- **Skew mitigation, concretely.** When one key dominates: (1) **salting**, append a random suffix to the hot key so it spreads across N reduce tasks, then aggregate the partials, trading one extra small shuffle for an even load; (2) **AQE skew join**, Spark 3 detects an oversized partition and splits it automatically; (3) **broadcast** the other side if it's small enough, sidestepping the shuffle entirely. The tell on the Spark UI is one task with read/spill metrics 10–100× the median.
+- **Why narrow stages pipeline.** Because each output partition needs exactly one input partition, Spark fuses a chain of narrow ops (`filter → map → select`) into a single task that streams a partition through all of them in one pass with no materialization between, which is the in-memory speed win over MapReduce's write-between-steps model.
+
+</details>
+
+### Diagram: a Spark DAG with a shuffle boundary between stages
 
 ```mermaid
 flowchart LR
-    CALLER[Caller threads] --> API[Cache facade<br/>public contract]
-    API --> LOCK[Lock layer<br/>global mutex v1]
-    LOCK --> MAP[Hash map store<br/>key to entry]
-    LOCK --> POL[Eviction policy<br/>strategy interface]
-    POL --> BOOK[Policy bookkeeping<br/>DLL or freq buckets or timer wheel]
-    API -.-> LIS[Eviction listener<br/>fired outside lock]
-    API -.-> SWEEP[TTL sweeper<br/>hygiene only]
+    subgraph S1["Stage 1 (narrow · pipelined · local)"]
+      R[(Read 1 TB<br/>~8000 partitions)] --> F[filter]
+      F --> M[map / select]
+    end
+    M -.->|"SHUFFLE<br/>all-to-all exchange<br/>write ~1 TB to disk → read over network<br/>barrier · spills on skew · THE cost center"| G
+    subgraph S2["Stage 2 (after shuffle)"]
+      G[groupBy key] --> A[aggregate]
+      A --> W[(write result)]
+    end
+    style S1 fill:#1f6f5c,color:#fff
+    style S2 fill:#1f6f5c,color:#fff
+    style G fill:#e8a13a,color:#000
 ```
 
-**Division of labor:** the **facade** owns the public contract, the store, capacity accounting, and *when* eviction happens (insert past capacity). The **policy** owns *who* gets evicted - and **owns its own bookkeeping structure**: a recency list for LRU, frequency buckets for LFU, an expiry ordering for TTL. The facade calls it through four narrow hooks: *recorded an access, recorded an insert, removed a key, give me a victim.*
+The narrow operations (`filter`, `map`) pipeline locally inside Stage 1, no data moves. The **wide** `groupBy` forces the shuffle (dotted), the all-to-all exchange that ends Stage 1 and starts Stage 2, and that exchange is where the time and money go. A broadcast join would eliminate this boundary when one side is small.
 
-**Why this seam and not the alternatives:**
-- *Rejected: inheritance* (`LRUCache extends BaseCache`). Policies multiply (LRU×TTL? LFU with weight?) and inheritance forces a class per combination, with subclasses touching internals they shouldn't. Composition keeps the policy a sealed component - Strategy over template-method, and naming the pattern is cheap credibility.
-- *Rejected: one generic ordering structure owned by the cache* ("a priority queue; policies supply a comparator"). Seductively uniform - and it forces **O(log n)** per access or **O(n)** victim scans, destroying the O(1) NFR for LRU, which needs a *splice*, not a sort. **A policy interface that dictates the data structure is a leaky abstraction; the hooks must let each policy meet O(1) its own way.** Interviewers who know the problem probe exactly here.
+### Worked example: the same hourly job, Spark vs Flink, and where each bottlenecks
 
----
+A platform must produce **clicks-per-campaign-per-hour**, joined against a campaign dimension table, from a 2 TB/hour event firehose, the processing layer behind the DAU/ad-analytics paths and built out as streaming ETL. Run it two ways.
 
-## A - API design
+**Spark (the requirement is "hourly is fine").** An hourly batch job reads the 2 TB of event Parquet (~16,000 partitions), filters to billable clicks (narrow, local), and joins the campaign dimension. The dimension table is **8 MB**, so the planner picks a **broadcast join**, the 8 MB ships to every executor and the 2 TB never shuffles for the join, turning a potential 2 TB all-to-all into a tiny broadcast. Then `groupBy(campaignId, hour).count()`, *this* forces a shuffle, but it's a shuffle of the already-filtered, already-aggregated-per-partition data (Spark does a map-side `reduceByKey`-style partial aggregation first), so only partial counts move, kilobytes per campaign, not the raw 2 TB. **Where it bottlenecks:** if one campaign holds 70% of clicks, that key's reduce task spills and straggles while the cluster idles, the skew problem, mitigated by salting or AQE. **Cost shape:** cluster-hours for the run × the shuffle's disk+network time; the win came from the broadcast join (no shuffle of the fact table) and map-side pre-aggregation (tiny shuffle), not from more memory.
 
-> A adapts from REST endpoints to **the interface contract** - in an LLD round this is the centerpiece. Every signature is a decision with a rejected alternative.
+**Flink (the requirement is "advertisers need per-minute live counts," sub-second).** A Flink job consumes the Kafka firehose, `keyBy(campaignId)`, and maintains a **tumbling 1-minute event-time window** count per campaign in **RocksDB-backed keyed state** (millions of active campaigns × dedup IDs far exceed heap, so RocksDB, accepting ~µs access for not falling over). **Watermarks** with a δ of a few seconds decide when each minute is complete and safe to emit; late mobile events fall into allowed-lateness or a side output. **Checkpoint barriers every 30s** snapshot all that state to S3 so a crash replays only ~30s, with incremental checkpoints so snapshotting hundreds of GB doesn't cripple throughput. The campaign dimension is joined as **broadcast state** (the small table streamed to all operators and held in state), the streaming analog of Spark's broadcast join. **Where it bottlenecks:** if the sink (the OLAP store) slows, **backpressure** propagates upstream and Kafka consumer lag grows, the metric you alert on, and exactly-once holds because the checkpoint + transactional sink make replay safe. **Cost shape:** an always-on cluster sized to the firehose plus checkpoint I/O; you pay continuously for the seconds-fresh result the batch job can't give.
 
-```text
-interface Cache<K, V>
-    get(key)            -> V or absent     # records an access
-    put(key, value)     -> void            # may evict; counts as access
-    put(key, value, ttl)-> void            # per-entry TTL override
-    remove(key)         -> bool
-    size() / weight()   -> long
-    stats()             -> hits, misses, evictions
+The Director takeaway: **same logical computation, two engines, two completely different bottlenecks and cost shapes**, Spark's is the shuffle (a periodic all-to-all you minimize with broadcast joins and pre-aggregation), Flink's is steady-state state size + checkpoint overhead + backpressure (dials you set from recovery and freshness SLOs). You pick the engine from the freshness requirement and then reason about *its* bottleneck.
 
-builder: capacity(maxEntries) | maxWeight(w, weigher)
-         policy(LRU | LFU | TTL | custom)
-         evictionListener(fn)              # invoked OUTSIDE the lock
+### Trade-offs table: Spark vs Flink as platform components
+| | **Spark (batch)** | **Spark Structured Streaming (micro-batch)** | **Flink (true streaming)** |
+|---|---|---|---|
+| Processing model | bounded DAG, run to completion | repeated micro-batches | per-event continuous dataflow |
+| Latency floor | minutes–hours | **~seconds** | **sub-second–low-ms** |
+| Dominant cost center | **the shuffle** (all-to-all, disk+network, spills on skew) | shuffle per micro-batch | **keyed state size + checkpoint I/O + backpressure** |
+| State | none (bounded data, just re-run) | windowed, engine-managed | first-class keyed state, **RocksDB-backed**, can exceed RAM |
+| Recovery | re-run the job (idempotent) | re-run the micro-batch | **checkpoint (Chandy-Lamport barriers)** → replay since last snapshot |
+| Exactly-once | trivial (re-run) | engine-managed | checkpoint + transactional sink |
+| Late / out-of-order events | irrelevant (sees all data) | event-time windows + watermarks | **watermarks + allowed lateness + side outputs** |
+| Operational complexity | lowest | medium | highest (always-on, large state, tuning) |
+| **Use when…** | hourly/daily freshness fine; cost & simplicity win; big joins/rollups (billing, training, reports) | seconds of lag OK and you already run Spark; near-real-time without heavy per-event state | must act in sub-second; large stateful event-time aggregations; high-throughput exactly-once (live fraud, live counters) |
 
-interface EvictionPolicy<K>
-    onAccess(key)        # get or put-update touched the key
-    onInsert(key)        # new key entered
-    onRemove(key)        # explicit remove or eviction done
-    victim() -> K        # choose who dies; must be O(1)
-```
+The choice of *batch vs stream* is owned by the freshness requirement; this table picks the **engine** once that decision is made, and names what the rejected engine costs (Spark's shuffle/skew tax vs Flink's always-on state/checkpoint/ops tax).
 
-**Contract decisions (each with the rejected alternative):**
-- **`get` returns absent, never blocks to load.** *Rejected: read-through `get(key, loader)`* - couples the cache to I/O latency and raises cache-stampede questions; real, but it doubles the design. Scope is a decision too.
-- **`put` on an existing key counts as an access** - document it; LFU visibly diverges otherwise, and "unspecified" becomes a bug report.
-- **TTL `get` does *not* extend life by default** (expiry from write). *Rejected: touch-on-read* - a hot-but-stale entry lives forever, defeating why you wanted TTL. Offer touch as an explicit option.
-- **The listener fires *outside* the lock.** *Rejected: user code under the lock* - a 10 ms attendee serializes the cache; one that calls back in deadlocks. Queue under the lock, invoke after release. This line is one of the strongest senior signals in the problem.
-- **`victim()` is O(1) by documented contract** - otherwise someone's custom policy with an O(n) scan turns every insert into a latency cliff.
+### What interviewers probe here
+- **"Where does a Spark job actually spend its time, and how do you make a slow join fast?"**, *Strong signal:* identifies the **shuffle** as the all-to-all cost center (writes to disk + reads over network, a barrier, spills on skew), distinguishes narrow vs wide transformations, and reaches for a **broadcast join** when one side is small (no shuffle of the big table) and pre-partitioning/bucketing for repeated joins, naming the rejected sort-merge shuffle join and when it's still required. *Red flag:* "add more memory / more executors" with no mention of shuffle or skew, throwing resources at an all-to-all or a skewed key doesn't fix it.
+- **"How does Flink not lose its counters when a node dies, and what does 'exactly-once' really mean?"**, *Strong:* checkpoint barriers (Chandy-Lamport) snapshot consistent state without stopping the stream; on failure restore the snapshot and rewind offsets; exactly-once = replay is safe because the snapshot is consistent and the **sink commit is atomic with the input offset**, not "each event processed literally once." *Red flag:* thinks exactly-once means no event is ever reprocessed, or has no recovery story beyond "restart."
+- **"Why event time and watermarks, what breaks if you use processing time?"**, *Strong:* late/out-of-order events (mobile offline, network delay) land in the wrong window under processing time; watermarks let the engine decide when a window is complete, with δ as the explicit freshness-vs-completeness dial, and allowed-lateness/side-outputs for stragglers. *Red flag:* doesn't see the late-event problem, or treats the watermark delay as a fixed constant rather than a requirement-driven trade.
+- **"Your Flink job has huge state, 24h dedup over 100k events/sec, where does it live and what's the recovery trade?"**, *Strong:* **RocksDB** state backend (LSM on SSD, exceeds RAM, ~µs access vs heap's ns, rejected for not falling over), checkpoint interval tuned (frequent = fast recovery, more overhead; sparse = cheaper, more replay), incremental checkpoints to afford frequency. *Red flag:* assumes all state fits in memory, or doesn't connect checkpoint frequency to recovery time and overhead.
+- **"Spark Structured Streaming or Flink for this?"**, *Strong:* derives it from the **freshness requirement**, seconds and batch-shop simplicity → Spark; sub-second and large stateful exactly-once → Flink, and names the rejected engine's cost. *Red flag:* picks by familiarity with no latency requirement, or thinks the two are interchangeable at any freshness.
 
----
+The through-line at Director altitude: you reason about each engine's **bottleneck and cost shape** (Spark's shuffle, Flink's state+checkpoint+backpressure), set the dials from requirements (broadcast threshold, watermark δ, checkpoint interval, state backend), and **delegate the exact tuning with a stated prior** ("the data team benchmarks broadcast-threshold and shuffle-partition counts against our join profile, and the checkpoint interval against our recovery SLO; my prior is a broadcast join here and a 30s incremental checkpoint").
 
-## D - Data model
+### Common mistakes / misconceptions
+- **Ignoring the shuffle, and blaming memory for a slow Spark job.** The cost is the all-to-all exchange (disk write + network read + barrier), and a hung "last task" is almost always **skew**, not insufficient RAM. The fixes are broadcast joins, pre-partitioning, map-side aggregation, and salting/AQE for skew, not a bigger cluster.
+- **Believing "exactly-once" means each event is processed exactly one time.** It means *effectively-once output*: replay after recovery is safe because the checkpoint is a consistent snapshot and the sink commit is atomic with the input offset. Events are reprocessed on recovery; the *result* is as if once.
+- **Computing streaming aggregates in processing time.** Late and out-of-order events (mobile clients, network delay) land in the wrong window; correct analytics uses **event time + watermarks**, with the watermark delay set from the completeness-vs-freshness requirement.
+- **Assuming all Flink keyed state fits in memory.** At platform scale (millions of keys, long dedup windows) it doesn't, you use the **RocksDB backend** (LSM on SSD), accepting microsecond access for not capping state at a few GB and not blowing up on GC.
+- **Re-deriving the batch-vs-stream choice here.** That decision belongs to the freshness requirement; this lesson picks the *engine* and reasons about its mechanics. Defaulting to Flink "because real-time" when hourly Spark meets the need pays the always-on state/checkpoint/ops tax for freshness nobody asked for.
 
-> D adapts from schemas-and-shard-keys to **the entry record and who owns which pointer**.
+### Practice questions
 
-The **entry** carries key, value, weight, optional expiry, and **a handle to the policy's bookkeeping node** for that key - the back-pointer that makes everything O(1): when `get` hits the map, the policy splices its node without searching for it.
+**Q1.** A Spark job joins a 3 TB fact table to a 40 MB dimension table, then groups by a key. It's slow. Walk through what's happening and how you'd speed it up.
+> *Model:* Two potential shuffles: the join and the `groupBy`. The 40 MB dimension is small enough to **broadcast** (raise `autoBroadcastJoinThreshold` if needed), so the join becomes a local broadcast join, the 3 TB fact table is **not shuffled** for the join at all, replacing a 3 TB all-to-all with shipping 40 MB to every executor (often a 10–100× win). The `groupBy` still shuffles, but with **map-side partial aggregation** only per-partition partial counts move (kilobytes/key), not raw rows. If it still hangs on the last task, that's **skew**, one key dominates the reduce partition and spills; mitigate with salting or AQE skew-join. Rejected alternative: a sort-merge (shuffle) join, which would shuffle both 3 TB and 40 MB, correct but needlessly expensive when one side broadcasts. The lever throughout is **bytes shuffled**, not cluster size.
 
-**The O(1) result, in one sentence:** a hash map gives O(1) lookup, a doubly-linked recency list gives O(1) move-to-front and O(1) evict-from-tail, and the entry's node pointer ties them - **hash map for *finding*, linked list for *ordering*, neither doing the other's job.** State that, offer depth if wanted, and spend your minutes on the contract. Reciting the pointer surgery unprompted is the too-deep failure mode the altitude lesson warns of.
+**Q2.** Explain how Flink recovers from a worker crash without losing or double-counting, and what tuning knob governs the recovery-vs-overhead trade.
+> *Model:* Flink periodically injects **checkpoint barriers** into the stream; as each barrier flows through the dataflow, every operator snapshots its keyed state the moment the barrier passes (Chandy-Lamport distributed snapshot), producing a **globally consistent cut without stopping processing**, written to durable storage (S3). On a crash, all operators restore from the last completed checkpoint and sources **rewind their Kafka offsets** to that barrier's position; replay is safe because the snapshot is consistent and the **sink commit is atomic with the offset** (transactional sink), so no double-count, this is what "exactly-once" means operationally. The knob is the **checkpoint interval**: frequent (every few seconds) → fast recovery but high steady-state snapshot I/O; sparse (minutes) → cheap steady-state but more replay and a longer stall on failure. Tune from the recovery SLO and state size; incremental checkpoints make frequent intervals affordable on large RocksDB state.
 
-<details>
-<summary>Go deeper, HashMap + DLL mechanics and the LFU variant (IC depth, optional)</summary>
+**Q3.** Why does a streaming "count per minute" use event time and watermarks instead of processing time, and what is the trade-off baked into the watermark delay?
+> *Model:* **Processing time** buckets an event by when the operator sees it; a mobile click generated at 9:00 but delivered at 9:05 (offline, network delay) lands in the 9:05 minute, corrupting both minutes. **Event time** buckets by the embedded timestamp, the truth of when it happened, but then the engine needs to know when a minute is *complete* given out-of-order arrival. A **watermark** asserts "event time has reached T; all events ≤ T are probably in," generated as `max_seen − δ`. The trade is **δ**: larger δ waits longer, catching more late events but delaying every result by δ; smaller δ emits faster but pushes more stragglers into the late path (allowed-lateness or side output). You set δ from the completeness-vs-freshness requirement, it's a dial, not a constant, and the batch layer is the ultimate safety net for events later than any δ.
 
-**LRU structures:** `map: K → Node`, `Node {key, value, prev, next}` in a doubly-linked list with sentinel head/tail.
+**Q4.** Your Flink job runs fine for a week, then Kafka consumer lag starts climbing steadily and never recovers. What's happening and what do you check?
+> *Model:* Sustained, non-recovering lag is **backpressure**: some operator (often the sink, e.g. the OLAP store, or a skewed `keyBy` partition) can't keep up, its buffers fill, and the slowdown propagates upstream until the source consumes from Kafka slower than events arrive, so lag grows. Flink self-throttles to its slowest stage rather than dropping events or OOM-ing, so the lag is the symptom, not data loss. I'd check: (1) **which operator is backpressured** (Flink UI shows it), (2) whether it's the **sink** (slow downstream DB → scale it or batch writes), (3) **key skew** (one `keyBy` partition far hotter → re-key or salt), (4) **state growth** (RocksDB compaction or an unbounded-growing state → add TTL / windowing), (5) checkpoint duration creeping up (state too large → incremental checkpoints, more parallelism). The fix is to scale or de-skew the bottleneck stage; throwing parallelism at the *whole* job without finding the slow stage just moves the problem.
 
-- `get(k)`: map lookup → unlink node (`prev.next = next; next.prev = prev`), re-link at head - 6 pointer writes, O(1).
-- `put(k, v)` new key: create node, link at head, map insert; if over capacity, victim = `tail.prev`, unlink, map remove, fire listener. O(1).
-- `put` existing key: update value in place, same move-to-front splice.
-- `remove(k)`: map remove + unlink. O(1).
-
-A singly-linked list fails because unlinking needs the predecessor - O(n) to find. The `prev` pointer is the entire trick.
-
-**LFU in O(1)** (the standard follow-up): a map of `frequency → DLL of nodes at that frequency` plus `minFreq`; on access, move the node from list *f* to *f+1*; victim = LRU end of the `minFreq` list. All O(1). Naive LFU with a min-heap is O(log n) per access - exactly the leaky-abstraction trap from section H.
-
-**TTL bookkeeping:** a timer wheel (a scheduler uses the same structure) or an expiry-ordered list for uniform TTLs; the lazy check on access (`expiry < now → miss, reclaim inline`) keeps correctness independent of the sweeper.
-
-</details>
-
----
-
-## E - Evaluation
-
-> Evaluation adapts to its LLD twin: **stress the contract under concurrency.** The lock-granularity decision lives here - made with the Estimation numbers, defended with the honest admission.
-
-**Re-check vs NFRs:** O(1) - yes, the interface mandates it of policies. Extensibility - new policy = new class. Memory - bounded, TTL leak handled lazily. Now **thread safety.**
-
-**Option A - one global mutex.** Simple, obviously correct, and it trivially preserves the compound invariant - **map and policy bookkeeping mutate atomically together**, which is the whole concurrency difficulty. Estimation said **2-5M ops/s** capacity against **150K ops/s** peak. **This is the v1 choice, said confidently:** *"A coarse lock is correct and 20× over budget; I won't spend complexity on contention I can't measure. We profile under production load; striping is a contained refactor behind the same interface if p99 ever disagrees."* Premature striping is the LLD version of premature sharding.
-
-**Option B - read-write lock.** The reflex ("reads dominate, let them share") - and for strict LRU it is **wrong**: **every `get` mutates the recency list.** There are no read-only operations; the rwlock degenerates into an exclusive lock with ~2× acquire overhead. The exception - policies where reads truly don't write (pure TTL, no recency) - is exactly why lock choice belongs *behind* the facade, per policy. Spotting "LRU reads are writes" is a strong-signal moment; insisting on the rwlock after a hint is a red flag.
-
-**Option C - striped/segmented locking.** Shard the keyspace into N independently-locked segments (16 is classic - Guava's design). Throughput scales toward N× (~30-80M ops/s at 16); the costs are real: **LRU becomes per-segment approximate** (typically a point or two of hit rate - usually fine, but say it), `size()` and stats turn into racy aggregates, and a global weight budget needs cross-segment care. **Use when measurement demands it** - the escape hatch we pre-paid for by hiding locking behind the facade.
-
-<details>
-<summary>Go deeper, lock-free reads and the Caffeine design (IC depth, optional)</summary>
-
-The production state of the art (Caffeine, successor to Guava's cache) goes past striping: `get` reads a `ConcurrentHashMap` with **no lock**, and instead of splicing the recency list synchronously, appends the access to a **lossy ring buffer** per thread-stripe; a maintenance thread drains the buffers and replays them against the ordering structure (windowed **TinyLFU** admission over segmented LRU, not plain LRU). Recency becomes *eventually accurate* - buffers may drop entries under pressure, costing a sliver of hit rate and buying reads that scale with cores (~10-30× a synchronized LinkedHashMap at 8 threads). The through-line: **strict LRU is fundamentally hostile to concurrency because reads write; every scalable design relaxes recency precision** - striping relaxes it spatially, Caffeine temporally. Choose how to be approximately-LRU; you cannot scale while being exactly-LRU.
-
-</details>
-
-**Other stress points, fast:** listener under the lock - already banned in A. TTL leak - lazy expiry (correctness) + sweep (hygiene), sweeping in short locked batches, never a full scan. Weight drift on mutable values - weight is captured at `put` time; *rejected: re-weighing on read*, which puts user code under the lock on every get.
-
----
-
-## D - Design evolution
-
-> Design evolution adapts from "10× the traffic" to **"10× the requirements"** - then to the question that ends the LLD frame entirely.
-
-**Near-term, already paid for by the seams:** byte-weight capacity; LFU/TTL as new classes on the same four hooks; striping behind the facade if profiling demands; read-through loading as a *decorator* over the same `Cache` interface, not a contract change.
-
-**The production honesty (Directors say this; juniors don't):** *in real life I would not build this.* Caffeine (JVM), `lru-cache` (Node), or an `OrderedDict` wrapper beat anything written in 40 minutes - Caffeine's TinyLFU admission alone is worth several hit-rate points over textbook LRU. The exercise tests whether you can **design what those libraries are** - then designing it anyway with full command is the strongest frame.
-
-**The boundary question - "now two services need this cache."** Refuse the false continuity: a shared cache is **not a bigger LRU object**; it has different physics. In-process hit: ~100 ns. Cross-process: a network hop makes every hit **~0.5-1 ms - call it 5,000× slower** - and you inherit invalidation, staleness, hot keys, and cache-aside-vs-write-through topology: the **distributed caching** building block, with the caching strategies. The usual production answer is **both tiers**: this lesson's cache as a tiny hot L1 in each instance over Redis/Memcached as shared L2 - and L1 invalidation across replicas becomes the new hard problem. **The distributed-cache deep-dive picks up exactly there**; the deliverable of *this* lesson is knowing where its own answer stops.
-
-**Where I'd delegate (the explicit Director move):** *"The platform team benchmarks coarse-lock vs 16-way striping under our replayed production trace; my prior is the coarse lock survives - we're 20× under its ceiling - and if not, striping is contained behind the facade. I also want hit-rate telemetry from day one: an unmeasured cache is a rumor, and policy choice is an empirical question, not a taste question."*
-
----
-
-## Trade-offs table - the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
-|---|---|---|---|---|
-| **Extensibility mechanism** | **Strategy - policy behind 4 hooks, owns its own structure** | Inheritance - subclass overrides evict | Generic ordering structure + comparator | **A** default (our choice) - new policy = new class, O(1) preserved per policy. **B** breeds a class per combo. **C** leaks - forces O(log n)/O(n) on policies that need a splice. |
-| **Lock granularity** | **Global mutex** | Read-write lock | Striped 16-way | **A** until measured (our choice - 20× headroom). **B** wrong for strict LRU: every read writes. **C** when profiling shows contention; costs approximate LRU + racy stats. |
-| **Capacity definition** | **Entry count** | **Byte weight via weigher** | GC-driven soft refs | **A** for uniform small entries. **B** when values vary or ops owns an MB budget - offer both (our choice). **C** rejected - hit rate becomes weather. |
-| **TTL expiry** | **Lazy on access + periodic sweep** | Sweeper only | Timer per entry | **A** (our choice) - correctness sweeper-independent. **B** leaks between sweeps. **C** = 1M timers; scheduler overhead dwarfs the cache. |
-
----
-
-## What interviewers probe here (Director altitude)
-
-- **"Walk me through your design."** - *Strong:* contract and policy seam first; states the HashMap+DLL result in a sentence and offers depth. *Red flag:* opens with pointer surgery; eviction welded into the cache class.
-- **"How do you make it thread-safe?"** - *Strong:* "global mutex - the arithmetic shows 20× headroom; striping is a contained refactor if profiling disagrees," and names the compound map+policy invariant. *Red flag:* reflexive striping or lock-free talk with no number attached.
-- **"Why not a read-write lock?"** - *Strong:* "strict LRU has no read-only operations - every get splices the recency list; the rwlock degenerates to exclusive with extra overhead." *Red flag:* "reads can share" - never traced what `get` does.
-- **"Now make eviction LFU."** - *Strong:* new policy class, same four hooks, owns frequency-bucket bookkeeping to stay O(1); callers untouched. *Red flag:* edits the cache class, or shrugs at an O(log n) heap.
-- **"Now two services need it."** - *Strong:* names the 5,000× latency cliff, invalidation, and the L1-over-Redis two-tier shape; points at the distributed-caching block. *Red flag:* "wrap it in gRPC," as if the object just grew a port.
-
----
-
-## Common mistakes
-
-- **Playing it as algorithm recall.** Forty minutes of pointer surgery, zero interface decisions - the precise inversion of what an EM/Director round scores.
-- **The read-write-lock reflex.** Strict LRU mutates on every read; the rwlock buys overhead, not concurrency. Trace what `get` does before picking a lock.
-- **Striping on day one.** 150K ops/s against a ~2-5M ceiling makes striping complexity spent on an unmeasured problem - and it silently makes LRU approximate and stats racy.
-- **Firing the eviction listener under the lock.** User code with the lock held = serialized cache at best, re-entrant deadlock at worst. Queue inside, invoke outside.
-- **A policy interface that dictates the data structure.** A cache-owned priority queue with pluggable comparators forces O(log n) onto LRU's O(1) splice - the abstraction leaks exactly where the NFR lives.
-
----
-
-## Interviewer follow-up questions (with model answers)
-
-**Q1. Your teammate's design review proposes 16-way lock striping for v1. Respond.**
-> *Model:* I'd ask for the number. We run ~150K cache ops/s peak; a coarse-locked cache sustains ~2-5M ops/s - 15-30× headroom, so striping solves a problem we can't measure. And it isn't free: LRU goes per-segment approximate, stats turn racy, a global byte budget needs cross-segment coordination. Locking hides behind the facade, so striping later is a contained refactor, not an API change. Decision: coarse lock, lock-wait and hit-rate telemetry from day one - if the profile ever shows a convoy, the platform team benchmarks striped-16 against our replayed trace; my prior is we never need it.
-
-**Q2. Why does a read-write lock not help here, and when would it?**
-> *Model:* Strict LRU has no read-only operations - every `get` moves the entry to the front of the recency list, so "readers" are writers and the rwlock degenerates into an exclusive lock costing ~2× per acquire. It helps only when reads genuinely don't mutate: a pure TTL policy with no recency, or an approximate-LRU design where reads append to a lossy buffer instead of splicing (Caffeine's approach - relax recency precision to buy concurrency). Which is exactly why lock choice lives behind the facade, per policy, not in the public contract.
-
-**Q3. Add TTL as a policy. What breaks, and what do you decide?**
-> *Model:* TTL plugs into the same four hooks - its bookkeeping is an expiry ordering (a timer wheel, like a scheduler) instead of a recency list - but it surfaces two contract decisions. Does `get` refresh the TTL? Default no, expiry from write: touch-on-read lets a hot-but-stale entry live forever; offer touch as explicit opt-in. And expired-but-unread entries are a leak, so expiry is checked lazily on access - an expired hit is a miss, reclaimed inline, correctness never depending on a background job - with a periodic sweep purely for hygiene, the lazy-reclaim shape from Ticketmaster. TTL *plus* LRU composes as expiry-for-validity over LRU-for-victim-choice, not two competing victim pickers.
-
-**Q4. "Great. Now ten instances of the service need a coherent view of this cache."**
-> *Model:* Then we've left this problem. An in-process hit is ~100 ns; a shared cache puts a network hop in the path - ~0.5-1 ms, roughly 5,000× - so the answer is not my object behind gRPC, it's the distributed-caching block: Redis/Memcached as the shared tier, an explicit cache-aside or write-through strategy, and an invalidation story - the actual hard part. In practice: keep this cache as a small hot L1 in each instance over the shared L2, and the new design problem is L1 invalidation across ten replicas - pub/sub invalidation or short L1 TTLs bounding staleness. That's the distributed-cache deep-dive's problem; the Director move is recognizing the LLD answer ended at the process boundary.
-
----
+**Q5.** A team proposes building a new real-time fraud-scoring pipeline on Flink. The current need is "fraud-loss reports, accurate, by the next morning." Push back or proceed?
+> *Model:* The stated requirement, "accurate, by next morning", is a **batch** requirement: hourly/nightly Spark meets it at a fraction of Flink's cost and operational burden, no always-on cluster, no checkpoint tuning, no watermark/late-event machinery, no large RocksDB state to operate, and exactly-once is trivial (re-run an idempotent job). Flink would buy sub-second freshness **nobody asked for** while adding the always-on state/checkpoint/backpressure operating tax. I'd proceed with Flink **only** if there's a concrete real-time requirement, *block* fraud before settlement, alert *now*, in which case the sub-second per-event stateful scoring with exactly-once is exactly what Flink is for, and I'd likely run **both** (the Lambda shape): Flink for the live block, Spark for the accurate nightly ground truth. The engine choice follows the freshness requirement, not the team's enthusiasm for streaming.
 
 ### Key takeaways
-- **The question is interface design wearing an algorithm costume.** The contract and the policy seam are the answer; HashMap+DLL O(1) is one stated sentence with depth on offer.
-- **Strategy-pluggable eviction, policies owning their own bookkeeping.** Four hooks - access, insert, remove, victim - each O(1) by contract. A shared generic ordering structure is the leaky abstraction that breaks the NFR.
-- **Lock granularity is arithmetic, not reflex:** 150K ops/s vs a ~2-5M coarse-lock ceiling = global mutex for v1, striping as a measured, contained refactor. The rwlock is wrong because **strict LRU reads are writes**.
-- **Three contract details carry senior signal:** listener outside the lock; TTL without touch-on-read by default; a byte weigher, because ops budgets heap in MB.
-- **Know where the answer ends:** in production you'd adopt Caffeine and say so; across a process boundary it's the distributed problem, with a 5,000× latency cliff at the door.
+- **Spark is a lazy DAG over partitioned collections**, narrow transformations pipeline locally; **wide transformations force a shuffle**, the all-to-all exchange (write to disk → read over network → barrier, spills on skew) that is the dominant cost center. Minimize bytes shuffled with **broadcast joins** (small side, no shuffle of the big table) and **pre-partitioning/map-side aggregation**; the rejected sort-merge shuffle join is for when both sides are large.
+- **Flink is a true per-event streaming engine** that computes in **event time**; **watermarks** (`max_seen − δ`) decide when a window is complete, with δ the freshness-vs-completeness dial and allowed-lateness/side-outputs for stragglers.
+- **Flink's keyed state is RocksDB-backed (LSM on SSD)** so it exceeds RAM at the cost of ~µs vs ns access, you reject heap-only state once state is large; **checkpointing via Chandy-Lamport barriers** snapshots consistent state without stopping the stream, and the **checkpoint interval** trades fast recovery (frequent) against steady-state overhead (sparse).
+- **"Exactly-once" = effectively-once output**: replay after recovery is safe because the snapshot is consistent and the **sink commit is atomic with the input offset**, not "every event processed once." **Backpressure** makes a healthy job slow down gracefully; sustained non-recovering lag means a permanently under-provisioned slowest stage.
+- **Pick the engine from the freshness requirement, not familiarity**: hourly/cheap/big-joins → Spark; seconds + existing Spark shop → Spark Structured Streaming (micro-batch); sub-second + large stateful exactly-once → Flink. Then reason about *that* engine's bottleneck (Spark's shuffle/skew, Flink's state+checkpoint+backpressure) and name what the rejected engine costs.
 
-> **Spaced-repetition recap:** LRU cache at Director altitude = **contract + seam, not pointer surgery**. `Cache` facade owns map, capacity, and when-to-evict; **Strategy policy** owns who-dies via four O(1) hooks and its **own** structure (DLL / freq buckets / timer wheel). O(1) = map finds, list orders. Concurrency: **coarse lock, justified by arithmetic** (150K ops/s vs ~2-5M ceiling); rwlock wrong - LRU reads write; stripe only on measurement. Listener outside the lock; TTL lazy-expire, no touch-on-read; weigher for bytes. Cross-process = the distributed-caching block, not a bigger object.
+> **Spaced-repetition recap:** Spark = warehouse that periodically re-sorts the whole floor: lazy DAG, narrow ops pipeline locally, **wide ops force the shuffle** (all-to-all, disk+network, barrier, spills on skew), the cost center, killed by **broadcast joins** + pre-partitioning + map-side aggregation. Flink = baggage system that never closes: per-event, **event-time + watermarks** (δ = freshness vs completeness), **RocksDB keyed state** (exceeds RAM, µs vs ns), **Chandy-Lamport checkpoint barriers** (consistent snapshot without stopping → restore + rewind offsets), **checkpoint interval** = recovery vs overhead, **exactly-once** = atomic sink+offset commit, **backpressure** = graceful slowdown. Pick engine from the freshness requirement: hourly→Spark, seconds→Structured Streaming, sub-second stateful→Flink; name the rejected engine's cost. These are the processing layer orchestration runs and streaming ETL builds on.
 
 ---
 
-*End of Lesson 7.4. The LLD curveball inverts the HLD habits - no QPS planet to size - but keeps the discipline: requirements before structure, every choice with its rejected alternative, numbers before knobs. The lazy-reclaim and contention instincts came from Ticketmaster; the process-boundary handoff goes to the distributed cache and is taken up again in the distributed-cache deep-dive.*
+*End of Lesson 7.4. You now know how the two dominant engines work as platform components, Spark's shuffle and Flink's watermarks/state/checkpoints, and how to reason about their bottlenecks and cost rather than just naming them. Next: 13.5, real-time OLAP stores (Druid/Pinot/ClickHouse), where Flink's seconds-fresh output is served as sub-second user-facing aggregates.*

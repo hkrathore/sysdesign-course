@@ -1,151 +1,270 @@
 ---
-title: "11.5 — Adapting the Model: Prompt vs RAG vs Fine-Tune"
-description: The spectrum from prompt engineering through context engineering and RAG to fine-tuning and continued pretraining — when each is the right tool, the data/eval/ops cost of each, and why "fine-tuning to add facts" is the classic mistake.
+title: "11.5 — Cut Infrastructure Cost 30–50%"
+description: "Cutting a $10M cloud bill 30-50% as a sequenced 72-hour / 30-day / 6-month program, guardrails first, the savings ladder in order, and the one cut you refuse to make."
 sidebar:
   order: 5
 ---
 
+> **This question is a fixture of post-ZIRP Director loops because it is the job.** Boards stopped paying for growth-at-any-cost around 2023 and never went back; loops now ask it straight, "your bill is $X, cut 30-50% without breaking anything: 72 hours, 30 days, 6 months", with a behavioral twin behind it. A junior answer is a grab-bag of tips: spot, reserved instances, delete old stuff. A Director answer is a **sequenced program with guardrails**: a decomposition saying where the money actually is, a savings ladder whose *ordering* is load-bearing, quick wins funding the slow re-architecture, named SLO and velocity metrics that must hold throughout, and **one cut you refuse to make, defended to the CFO's face**. The refusal is the credibility moment: anyone can cut; leaders know what the cheap-looking line items are buying.
+
 ### Learning objectives
-- Lay out the **adaptation spectrum** cheapest/fastest → most expensive — prompt engineering → context engineering / RAG → fine-tuning (LoRA, then full) → continued pretraining — and know that you **climb it only when eval proves the rung below can't hit the bar.**
-- Apply the **one decision rule that scores**: fresh/private **facts → RAG**; new **behavior/format/style/skill → fine-tune**; both → RAG **on** a fine-tuned model; lower latency/cost at fixed quality → **distill** into a smaller fine-tune. State the misconception out loud: **fine-tuning teaches behavior, not facts.**
-- Price fine-tuning correctly — **LoRA/PEFT** (small swappable adapter, cheap) vs **full fine-tune** (expensive, one model) — and recognize that the real cost is **data curation + an eval harness + retraining as the base model moves**, not GPU hours.
-- Name the operational tax a Director owns: a fine-tune **locks you to a base-model version**, so every base upgrade is a re-curate-and-retrain project, not a config flip.
-- Default to **prompt + RAG**, and treat fine-tuning as **earning-the-right** — only after prompt/RAG demonstrably fail, and only with data, an eval, and an ops plan in hand.
+- Decompose a cloud bill into its **5-6 spend drivers** and attach a realistic savings percentage to each, reason in dollars, not vibes.
+- Run the **savings ladder in order**, delete idle → rightsize → commitment discounts → re-architect, and explain why the ordering is a correctness property.
+- Structure the answer as the **72-hour / 30-day / 6-month plan**, where ~30% lands in 30 days and buys the budget and credibility for the 6-month tail.
+- Define the **guardrails before the cuts**: the SLOs, RTO/RPO, and velocity metrics that must hold, on a dashboard from hour zero.
+- Name the **one cut you refuse to make**, capacity whose job is to look idle, and defend it as risk management, not empire defense.
 
 ### Intuition first
-Adapting a model is like getting a brilliant new hire productive in your company. The **cheapest move is a good briefing**: a clear job description and a few worked examples ("here's how we write a ticket; reply in this format"). That's **prompt engineering** — instant, free to change, the first thing you try.
+A turnaround consultant walks into a company bleeding cash. The amateur move is to cut 10% from every department by email, fast, fair-looking, and wrong: it starves the profitable lines and barely dents the bloated ones. The professional sequence is different. First, **read the books**, you cannot cut what you cannot see. Then **stop the obvious bleeding**: cancel unused licenses, sublet the empty floor, money nobody will miss, banked in days, buying the board's patience. Then **renegotiate the contracts** on what you're keeping, only *after* you know what you're keeping, because a three-year lease on an office you're about to vacate is waste with a signature on it. Only then the slow, structural work: change how the company operates so costs don't grow back. Throughout, two things stay sacrosanct: the **insurance policies**, pure waste right up until the fire, and the **pace of the business**, because a company that saves 30% and stops shipping has not been saved.
 
-When the job needs **facts the hire doesn't have and that keep changing** — this quarter's pricing, last week's policy, a customer's account history — you don't send them back to school to memorize it. You **hand them the right document at the moment they need it.** That's **context engineering / RAG**: the facts live in a binder the hire reads from on each task, and you can update the binder in five minutes without re-hiring anyone.
+That is this lesson. Cloud bill = the books. Idle resources = the empty floor. Commitments = the contracts. Re-architecture = the re-org. SLOs, RTO, deploy frequency = the insurance and the pace. The interview tests which way you cut.
 
-You only **send someone for real training** when the gap isn't knowledge but **ingrained skill or style** — they need to *think* like your senior staff, always produce output in your house format, speak in your brand voice. Training reshapes how they work; it does **not** reliably stuff in facts (and a half-remembered fact recited confidently is worse than a binder lookup). That's **fine-tuning**. And **rebuilding their schooling from scratch** — continued pretraining — is something almost no team does; you hire someone already schooled.
+---
 
-Keep the image: **briefing (prompt) → binder (RAG) → training (fine-tune) → re-schooling (pretrain).** It predicts which lever fixes which problem, and it tells you the single most common mistake — sending the hire to *training* to memorize *this week's prices*, which is slow, expensive, stale the moment it ends, and exactly what the binder was for.
+## R: Requirements
 
-### Deep explanation
+> Adaptation, stated out loud: in a cost program, R gathers the **guardrails**, not product features. The "functional requirements" are the invariants that must hold *while* you cut, a savings target with no guardrails is how you buy an outage with the savings.
 
-**The spectrum, rung by rung — cheapest/fastest to most expensive.** Each rung is a strictly bigger commitment of data, money, and ops than the one below. You move up only when the rung below provably can't clear the bar (and you prove it with eval).
+**Anchor scenario:** a **$10M/yr cloud bill** (~$833K/mo) at a 400-engineer company, one hyperscaler, traffic growing ~20%/yr. Mandate: **cut 30-50% of run-rate within two quarters** without hurting reliability or delivery.
 
-- **Prompt engineering** — shape behavior with words. A precise **system prompt** (role, rules, refusals), **few-shot examples** (3–8 demonstrations of the exact input→output you want), and **structured-output** constraints (force JSON via schema/grammar). Change cost: **seconds**, no training, no data pipeline. This is where 60–80% of "make the model do X" problems actually get solved. **Rejected as insufficient only when** the behavior is too nuanced to specify in examples, the few-shot examples eat too much of the context budget on every call, or the format/skill simply won't hold no matter how you phrase it.
-- **Context engineering / RAG** — change what the model *sees*, not what it *is*. Inject retrieved documents, tool results, and dynamically assembled context at query time. This is how you supply **fresh, private, citable facts** without touching weights. Change cost: **update the index, not the model** — minutes, and the model is untouched. **Rejected when** the gap isn't information but behavior/skill — no amount of context teaches a model to reliably emit your house format or reason in your domain if it fundamentally won't.
-- **Fine-tuning (SFT, then LoRA/PEFT or full)** — change the weights so the model *internalizes a behavior*. **Supervised fine-tuning (SFT)** trains on thousands of curated input→output pairs that demonstrate the target behavior. **LoRA/PEFT** freezes the base model and trains a small low-rank **adapter** (often <1% of the parameters) — cheap, fast, and **swappable** (one base model, many task adapters). A **full fine-tune** updates all weights — more capacity to shift behavior, but expensive and it produces **one bespoke model** you now own and maintain. Change cost: a **re-training run plus the data and eval work behind it** — days to weeks of human effort, not minutes.
-- **Continued pretraining** — keep training the base model on a large new corpus (billions of tokens) to shift its fundamental knowledge or adapt it to a new domain/language. This is a **platform-team / model-vendor activity**, measured in large GPU clusters and weeks. For an application team, this is **almost never the answer** — name it to show you know the ceiling exists, then reject it: the data scale, cost, and expertise dwarf any app-level problem, and RAG + a light fine-tune get you there far cheaper.
+**Clarifying questions I'd ask (with assumed answers):**
+- *Run-rate or absolute?* → **Run-rate, growth-normalized.** The honest metric is **unit cost** (per 1K requests / per DAU), not the headline bill, agree this with finance up front or argue about it forever.
+- *Reliability commitments?* → 99.9% SLO; **RTO 1 hour, RPO 5 minutes** on tier-1 data. Contractual; the program must not move them.
+- *Is engineering time a cost?* → Yes, saving $2M of cloud by burning $3M of payroll and a quarter of roadmap is a loss.
+- *Compliance floors?* → 7-year audit-log retention, 35-day backups. **Cuts below these are off the table regardless of how the line item looks.**
 
-The Director-altitude statement: *you climb the adaptation spectrum the way you'd escalate spend on any capability — start at the cheapest rung that could work, and only buy the next rung when eval proves the current one can't clear the bar.*
+**The guardrails (this design's functional requirements):**
+1. **SLOs hold:** error-budget burn stays at baseline; any cut producing sustained burn reverts, no debate.
+2. **RTO/RPO hold, and are re-proven.** Every cut touching redundancy, backups, or failover triggers a **DR drill** before the saving is banked. Untested DR is the classic silent casualty of cost programs.
+3. **Velocity holds:** deploy frequency and lead time flat; product teams spend **≤10% of the quarter** on cost work, the heavy lifting belongs to a central team of 3-4.
+4. **Compliance floors are invariants.**
 
-**The decision rule that scores — and the misconception it kills.** Almost every "how do we adapt the model" question reduces to one diagnosis: **is the gap facts, or behavior?**
+**Explicitly CUT from scope:** SaaS/vendor renegotiation (procurement's program), headcount, and cloud repatriation (returns in Design evolution as a deliberately rejected default). Scope: **the cloud bill, two quarters, guardrails as stated, one owner (me), weekly guardrail review.** Program NFRs: every cut **reversible or rehearsed** (commitments are the exception, why they come last among the quick wins); savings reported as **realized run-rate** against a baseline finance has signed.
 
-- **Need fresh/private FACTS** (our 2026 product catalog, this customer's tickets, today's policy) → **RAG.** Facts change; weights are expensive to change; you want citations and an audit trail. RAG gives all three.
-- **Need new BEHAVIOR / format / style / tone / domain skill** (always emit strict JSON, always answer in our terse support voice, reason like a tax specialist, classify into our 40-label taxonomy) → **fine-tune.** This is a *skill* baked into weights, not a *fact* fetched at query time.
-- **Need BOTH** (answer from changing docs *and* always in our voice/format) → **RAG on a fine-tuned model.** Fine-tune the behavior once; RAG the facts continuously. They compose cleanly because they fix different things.
-- **Need lower latency/cost at the same quality** → **distill**: use a big model to generate training data, then fine-tune a **smaller** model to match its behavior on your task. You're trading a general giant for a specialized small model.
+---
 
-State the misconception explicitly, because it's the single most common LLM-design error: **fine-tuning teaches behavior, not facts.** Fine-tuning on documents does **not** reliably make a model "know" them — it learns the *style and shape* of those documents, then **confidently hallucinates** facts it half-absorbed, with **no citation** and **no way to update** short of retraining. "Our model doesn't know our new product, so let's fine-tune the product docs in" is the textbook wrong answer. The right answer is **RAG**: put the docs in an index, retrieve them at query time, cite them, update them in minutes.
+## E: Estimation
 
-**Fine-tuning economics — the GPU bill is the cheap part.** Engineers fixate on training compute; the real cost lives elsewhere.
+> Adaptation: E is the **spend decomposition and the savings ladder**, where the $10M sits and what each rung realistically takes. Cutting without decomposing is hand-waving in dollars instead of requests.
 
-- **LoRA/PEFT vs full fine-tune.** LoRA trains a tiny adapter on a frozen base: cheaper compute, faster iteration, and **one base model can host many swappable adapters** (a support adapter, a summarization adapter, a classification adapter) — you don't multiply your serving footprint. A full fine-tune rewrites every weight: more behavioral capacity, but it's **expensive and yields a single dedicated model** you must serve and version on its own. For app teams, **LoRA is the default**; reach for a full fine-tune only when LoRA's capacity provably isn't enough to shift the behavior far enough — and prove that with eval, not vibes.
-- **The dominant costs are human, not hardware.** Three of them: **(1) data curation** — assembling and cleaning thousands of high-quality, correctly-labeled demonstration pairs is the slow, expensive, irreplaceable part, and garbage data produces a worse model than no fine-tune; **(2) an eval harness** — without an automated way to prove the fine-tune beats prompt+RAG *and doesn't regress*, you're shipping on faith; **(3) ongoing retraining** — the part teams forget. The base model **moves** (the vendor ships a better version, deprecates yours), and every move means **re-curating data and retraining your fine-tune to ride it**. A GPU run is hours; the data + eval + retraining loop is a standing commitment.
+**Decompose the $10M (typical product-company shape; round aggressively):**
 
-**The maintenance tax: a fine-tune locks you to a base-model version.** This is the operational consequence a Director must name. The moment you fine-tune, you **fork off the public model.** When the base vendor ships a model that's cheaper, faster, and smarter next quarter, a **prompt+RAG** system adopts it by changing one model name. A **fine-tuned** system can't — your weights are welded to the old base, so you must **re-curate the data and retrain** before you can ride the upgrade. In a market where base models improve every few months (mid-2026), that's a recurring tax that often **erases the quality edge** the fine-tune bought you, because the next base model — prompted well, RAG-grounded — may already match your fine-tune for free. **Reject fine-tuning** whenever prompt+RAG gets within striking distance, precisely to stay on the upgrade curve.
+| Driver | $/yr | % | What's in it |
+|---|---|---|---|
+| Compute (VMs / k8s nodes) | $4.0M | 40% | prod + non-prod fleets, CI |
+| Managed databases + caches | $2.0M | 20% | RDS/Aurora, Redis, search |
+| Storage + snapshots | $1.5M | 15% | S3/blob, EBS, snapshot sprawl |
+| Data transfer + networking | $0.8M | 8% | egress, cross-AZ, NAT |
+| Observability + logging | $0.7M | 7% | log ingest, metrics, APM |
+| Support plan + everything else | $1.0M | 10% | enterprise support ≈ 3-10% of bill |
 
-**Eval-driven escalation — the rule that keeps you honest.** The whole spectrum collapses into one discipline: **only escalate up a rung when eval proves the cheaper rung can't hit the bar.** Build the golden eval set *first*; measure prompt-only; if it misses the bar, add RAG and measure again; if a behavior gap remains, *then* fine-tune and prove the fine-tune both clears the bar and beats prompt+RAG by enough to justify the standing maintenance cost. Skipping eval is how teams spend a quarter fine-tuning to fix a problem a better prompt would have solved in an afternoon.
+Two insights fall out: **compute + databases are 60% of the bill**, the program lives there; and nobody reaches 30% by optimizing the 7% line, though observability is usually the most bloated *proportionally* (log-tiering fixes the log-ingest default).
+
+**The savings ladder, each rung with its number; the ordering is the design:**
+
+**Rung 1, Delete idle (72 hours → 2 weeks): ~8% ≈ $0.8M/yr.** Unattached volumes, orphaned snapshots, dead environments, over-retained logs, non-prod running nights and weekends (~65% of hours idle, scheduling it off is free money). Zero risk, instantly reversible, and the real product is **credibility**: $0.8M in two weeks is what makes the CFO fund the rest.
+
+**Rung 2, Rightsize (30 days): ~12% ≈ $1.2M/yr.** Typical prod fleets run **15-25% p95 utilization**; k8s requests sit 3-4× actual; gp2→gp3 and lifecycle tiering (70% of objects untouched in 90 days → infrequent-access at 45-80% off) are config changes, not projects. Reversible in minutes, which is what makes it safe to do fast.
+
+**Rung 3, Commitments (30 days, *after* rung 2): ~12% ≈ $1.2M/yr.** Savings Plans at ~30-35% off, ~75% coverage of the **post-rightsizing** baseline (~$5M compute + DB). **Ordering is load-bearing:** commit first and you've signed a 1-3 year contract to keep paying for the waste rung 2 was about to remove. The one rung that *reduces* reversibility, hence last among the quick wins.
+
+**30-day subtotal: ~32% (~$3.2M run-rate)**, the mandate's floor, met by configuration and procurement alone. Say that out loud.
+
+**Rung 4, Re-architect (6 months): another ~8-15%.** Spot for CI, batch, stateless workers (60-90% off that slice); ARM/Graviton (~15-20% price-perf); data-transfer surgery, CDN egress offload, cross-AZ chatter, NAT; log tiering and sampling (the $0.7M line typically halves); caching to shrink the DB tier. Lands at **~40-47%**, inside the band, honest about diminishing returns at the top.
+
+**What estimation decided:** the money is in compute + databases; 30 days delivers ~32% at near-zero risk via delete → rightsize → commit *in that order*; the last ~10-15% costs 6 months of real engineering; and the program reports unit cost, not the absolute bill.
 
 <details>
-<summary>Go deeper — preference tuning (RLHF / DPO), and what each fine-tune flavor is for (IC depth, optional)</summary>
+<summary>Go deeper, rightsizing and commitment mechanics (IC depth, optional)</summary>
 
-- **SFT (supervised fine-tuning)** teaches the model to *imitate* curated (input → ideal output) pairs. It's the workhorse — start here for any behavior/format/skill gap.
-- **Preference tuning** goes further: instead of one "right" answer, you supply **pairs ranked good-vs-bad** and train the model to *prefer* the better one. Two methods:
-  - **RLHF (Reinforcement Learning from Human Feedback):** train a separate **reward model** on human preference rankings, then RL-optimize the policy against it. Powerful (it's how the big chat models were aligned) but **complex, unstable, and expensive** — a reward model, an RL loop, careful tuning.
-  - **DPO (Direct Preference Optimization):** skips the separate reward model and optimizes directly on the preference pairs with a simple classification-style loss. **Much simpler and cheaper than RLHF**, comparable results for most app needs — the pragmatic default *if* you're doing preference tuning at all.
-- **When does an app team need preference tuning?** Rarely. It's for shaping subtle qualities SFT can't easily demonstrate (helpfulness, harmlessness, "good taste"). The Director move is **delegate with a prior**: "If we need preference tuning, start with **DPO** over RLHF — far less machinery for comparable results; I'd only justify RLHF if DPO provably can't shape the behavior. But first prove SFT + a sharp prompt can't get there." Most teams never get past SFT.
-- **Adapter mechanics (LoRA):** instead of updating a weight matrix W, train two small low-rank matrices A·B added to it; only A·B is trained and stored (megabytes, not gigabytes). Multiple adapters can be hot-swapped on one served base model, and merged into the base at inference time for zero added latency.
+**Rightsizing targets:** size to **p95 utilization + ~30% headroom**, never the mean (hides the daily peak), never p100 (one spike inflates the fleet forever). Kubernetes: set requests from observed p95 (VPA in recommendation mode), limits ~2× requests for burst; node utilization below ~50% usually means requests, not workloads, are wrong.
+
+**Commitment math:** coverage = committed $ / eligible $; utilization = used / committed. Target 70-80% coverage of the *post-rightsize* baseline so variance and later optimization don't strand the commitment, unused commitment is contractual loss, worse than on-demand waste. 1-year no-upfront (~28-35% off) is the default; 3-year (~45-55% off) only for the floor you'd bet the company keeps (core DB tier), because a 3-year commit also forecloses the Graviton/spot moves rung 4 wants.
+
+**Storage quick math:** gp2→gp3 ≈ 20% cheaper at equal baseline IOPS, no downtime; snapshot sprawl is typically 10-20% of the storage line; S3 lifecycle to IA at 30 days / archive at 90 for cold prefixes, but check retrieval pricing against access patterns first, or the savings reverse.
 
 </details>
 
-### Diagram: the adaptation decision tree
+---
+
+## S: Storage
+
+> Adaptation: S is **where the money sleeps**, the storage-shaped ~25% of the bill (storage, snapshots, logs, backups), plus the program's own storage problem: the cost-allocation data. You cannot run showback on an untagged bill.
+
+**The storage-shaped spend, three moves, each with its guardrail:**
+- **Lifecycle tiering** for blobs (hot → IA → archive by access age) and **log tiering** (7-14 day hot window, then cheap object storage, delete at the compliance floor, *not before it*). *Rejected: "shorten retention everywhere"*, retention is where cost programs commit compliance violations.
+- **Snapshot hygiene as policy, not cleanup:** automated expiry, or the sprawl regrows in two quarters.
+- **Untouched:** backup frequency and the cross-region replica that honor RPO 5 min / RTO 1 hr, the insurance; more in Evaluation.
+
+**The program's own data layer.** Untagged spend at this size is typically **30-50% of the bill**, per-team accountability is fiction until it's fixed. The 72-hour window turns on the resource-level billing export; the 30-day window adds a **tagging mandate enforced at provision time** in IaC. *Rejected: a manual tagging crusade*, it decays immediately; only enforcement at the gate sticks.
+
+---
+
+## H: High-level design
+
+> Adaptation: H is the **architecture of the program**, the 72-hour / 30-day / 6-month plan, with the guardrail dashboard wired in parallel to every phase. The boxes are phases and feedback loops, not services.
 
 ```mermaid
 flowchart TD
-    START[New capability needed] --> Q1{What is the gap?}
-
-    Q1 -->|Fresh / private<br/>FACTS| RAG["RAG<br/>retrieve + cite at query time<br/>update index in minutes"]
-    Q1 -->|New BEHAVIOR / format /<br/>style / domain skill| Q2{Prompt enough?}
-    Q1 -->|BOTH facts<br/>+ behavior| BOTH["RAG on a<br/>fine-tuned model<br/>fine-tune style, RAG facts"]
-
-    Q2 -->|Yes — system prompt<br/>+ few-shot| PROMPT["Prompt engineering<br/>cheapest, change in seconds"]
-    Q2 -->|No — eval proves<br/>prompt + RAG miss| FT{Need lower<br/>latency / cost?}
-
-    FT -->|No| LORA["Fine-tune<br/>LoRA adapter first,<br/>full FT only if needed"]
-    FT -->|Yes, at fixed quality| DISTILL["Distill<br/>big model → small<br/>fine-tuned model"]
-
-    PRETRAIN["Continued pretraining<br/>almost never for app teams<br/>platform / vendor scale"]
-
-    style PROMPT fill:#1f6f5c,color:#fff
-    style RAG fill:#1f6f5c,color:#fff
-    style BOTH fill:#e8a13a,color:#000
-    style LORA fill:#e8a13a,color:#000
-    style DISTILL fill:#e8a13a,color:#000
-    style PRETRAIN fill:#7a1f1f,color:#fff
+    V[72h Visibility<br/>billing export and tags] --> QW[72h to 2w<br/>delete idle spend]
+    QW --> RS[30d Rightsize<br/>compute storage k8s]
+    RS --> CM[30d Commit<br/>plans on new baseline]
+    CM --> RA[6mo Re-architect<br/>spot ARM egress logs]
+    RA --> GOV[Governance<br/>unit cost and showback]
+    GOV -. stops regrowth .-> V
+    G[Guardrail dashboard<br/>SLO RTO velocity] -.-> QW
+    G -.-> RS
+    G -.-> RA
+    style CM fill:#e8a13a,color:#000
+    style G fill:#7a1f1f,color:#fff
+    style GOV fill:#2d6cb5,color:#fff
 ```
 
-### Worked example: a customer-support assistant with two hard requirements
+**72 hours, see, stop, freeze.** Billing export on; top-20 line items (~20 items ≈ 80% of any cloud bill); delete only the provably orphaned; **freeze new commitments and large provisioning**; stand up the **guardrail dashboard**, SLO burn, RTO drill status, deploy frequency, *before* any risky cut, because a guardrail added after the cuts is an alibi, not a control. Output: a one-page decomposition for the CFO and ~$0.5-0.8M banked.
 
-A support assistant must do two things: **(a)** answer customers from **policy docs that change weekly** (refund windows, shipping rules, regional terms), and **(b)** **always** reply in **strict JSON** (so the UI can render structured cards) **and** in the **brand's terse, warm tone**. Treat them as two separate problems, because they sit on different rungs.
+**30 days, the quick-win engine.** Rung 2 then rung 3: rightsize off p95 data, schedule non-prod off-hours, then commit at ~75% coverage of the new baseline. Each rightsizing wave ships like a deploy, canary a tier, watch the dashboard 48h, proceed or revert. Output: **~32% down**, guardrails demonstrably flat, political capital secured.
 
-- **Requirement (a) — the changing facts → RAG.** Index the policy docs; retrieve and cite the relevant passages at query time. **Rejected: fine-tune the policies into the model.** That's the classic mistake — the policies change weekly, so a fine-tune is stale within days, can't cite its source (support answers must be auditable), and would have the model confidently invent a refund window it half-learned. RAG updates in minutes when legal edits a policy, and every answer points to the clause it used. **Also rejected: long-context stuffing** of all policies on every call — it scales poorly across regions and burns input tokens re-reading a static corpus on every request.
-- **Requirement (b) — the format and tone → prompt first, light fine-tune only if eval forces it.** Start with **prompt engineering**: a system prompt that mandates the JSON schema + tone, **structured-output / JSON-mode** to hard-enforce the schema, and a few **few-shot examples** of the exact voice. Measure on the golden set. If — and only if — eval shows the model still drifts off-format or off-voice under real traffic (e.g., it breaks JSON 3% of the time, or the tone wobbles on edge cases the prompt can't cover), **escalate to a light LoRA fine-tune** on a few thousand curated (query → ideal JSON-in-brand-voice) pairs to bake the behavior in. **Rejected: jump straight to fine-tuning the format.** It's slower, costs data + eval + a maintenance tax, and usually a sharp prompt + JSON-mode already clears the bar — you'd be paying for a rung you didn't need.
-- **Putting it together — RAG on a (possibly) fine-tuned model.** The facts come from retrieval; the behavior comes from prompt (and a thin adapter only if eval demands it). If we do fine-tune for tone/format, we **keep the fine-tune as small as possible** so a base-model upgrade next quarter is a cheap re-train, not a rebuild — and we re-evaluate each upgrade whether the new base, *prompted well*, makes the adapter unnecessary.
+**6 months, re-architecture, funded by the quick wins.** The central team of 3-4 runs the structural moves (spot, ARM, egress and cross-AZ surgery, log tiering); product teams contribute ≤10% capacity from a ranked backlog. The quick wins fund this phase twice over: the banked $3.2M makes the engineering spend obviously positive-ROI, and the early credibility is why the CFO tolerates a 6-month tail at all.
 
-Every choice traces to a requirement: weekly-changing + auditable policies (RAG), strict-format + brand-voice behavior (prompt, then a minimal fine-tune only if eval forces it), and the standing constraint of riding base-model upgrades cheaply (keep any fine-tune thin and eval-justified).
+**The shape to notice:** the guardrail dashboard runs parallel to *every* phase, the load-bearing wall of this design, as the waiting room was for a hot-shard queue. And the diagram is a **loop**: without the governance edge, the bill regrows to fill the budget in 4-6 quarters.
 
-### Trade-offs table
+---
 
-| Dimension | **Prompt** | **RAG** | **LoRA fine-tune** | **Full fine-tune** | **Continued pretrain** |
-|---|---|---|---|---|---|
-| **Up-front cost** | ~zero | moderate (index + pipeline) | meaningful (data + eval) | high (data + eval + compute) | very high (cluster + corpus) |
-| **Data needed** | a few examples | a corpus to index | thousands of curated pairs | thousands+ of curated pairs | billions of tokens |
-| **Freshness** | instant (edit prompt) | minutes (re-index) | stale until retrain | stale until retrain | stale until retrain |
-| **Adds facts?** | no | **yes (cited)** | no (and pretends to) | no (and pretends to) | yes, but uncitable |
-| **Adds behavior/skill?** | some | no | **yes** | **yes (most)** | yes |
-| **Latency at serve** | base | + retrieval hop | base (adapter merged) | base | base |
-| **Control / determinism** | low–med | med (grounded + cited) | high (baked in) | highest | high |
-| **Maintenance tax** | none | keep index fresh | **re-train on base upgrades** | **re-train + serve own model** | **own a model lineage** |
-| **Use when…** | first; behavior fits in words | facts are fresh/private/citable | behavior won't hold via prompt, eval proves it | LoRA's capacity isn't enough | almost never (platform/vendor) |
+## A: API design
 
-### What interviewers probe here
-- **"The model doesn't know about our 2026 product line — let's fine-tune it on the product docs, right?"** — *Strong signal:* **no — that's RAG, not fine-tune.** Names the misconception (fine-tuning teaches behavior, not facts), and that fine-tuning docs in yields confident, uncitable, un-updatable hallucination; products change, so put the docs in an index, retrieve and cite at query time. *Red flag:* "yes, fine-tune the docs in" — the single most common LLM-design error.
-- **"So when *is* fine-tuning actually the right call?"** — *Strong:* when the gap is **behavior/format/style/domain-skill**, not facts; and only after **prompt + RAG demonstrably fail on eval**; with curated data and an eval harness in hand. Adds: LoRA before full FT, and keep it thin to ride base upgrades. *Red flag:* reaches for fine-tuning as a first move, or to "improve quality" in general without naming a specific behavior gap eval proved.
-- **"What does fine-tuning cost you operationally?"** — *Strong:* the cost isn't GPU hours — it's **data curation + an eval harness + retraining as the base model moves**, and the **lock-in tax**: you're welded to a base version, so every vendor upgrade is a re-curate-and-retrain project, often erasing the edge a better base model gives prompt+RAG for free. *Red flag:* thinks the cost is the training run, or assumes a fine-tuned model is "done."
-- **"You need both fresh facts and a strict house format — how?"** — *Strong:* **RAG on a fine-tuned (or just well-prompted) model** — they compose because they fix different gaps; fine-tune/prompt the behavior, RAG the facts; try prompt before fine-tune for the format. *Red flag:* tries to do both with one lever (fine-tune everything, or prompt-stuff the whole corpus).
+> Adaptation: the "APIs" here are the program's **interfaces to teams and finance**, the contracts that make cost visible, attributable, and bounded. Vague interfaces are why most cost programs produce one good quarter and then decay.
 
-The through-line at Director altitude: **prompt and RAG are cheap, reversible, and ride every base-model upgrade for free; fine-tuning is a standing liability you earn the right to take on.** "Default is prompt + RAG. We fine-tune only if eval shows a behavior gap prompt+RAG can't close — and then I want a data-curation owner, an eval harness, and a retraining plan for the next base model before we start. My prior is we don't need it yet; if we do, LoRA first, and I'd have the ML team prove DPO over RLHF if preference tuning ever comes up."
+```
+# The four interfaces of the program (contract sketch)
 
-### Common mistakes / misconceptions
-- **Fine-tuning to add facts.** The headline error: facts go in an **index (RAG)**, not weights. Fine-tuning on documents teaches their *shape*, then hallucinates their *content* — confidently, uncitably, un-updatably.
-- **Fine-tuning before prompt + RAG.** Skipping the cheap rungs spends weeks on a problem a sharp prompt or a retrieval fix solves in a day. **Earn the right** with eval first.
-- **Pricing fine-tuning as GPU hours.** The real bill is data curation + an eval harness + retraining every time the base moves — a standing commitment, not a one-off run.
-- **Forgetting the lock-in tax.** A fine-tune welds you to a base version; the next free base upgrade may match your fine-tune for nothing, and you can't take it without re-training.
-- **Full fine-tune by reflex.** LoRA/PEFT (cheap, swappable adapters) covers most behavior gaps; reserve a full fine-tune for when eval proves LoRA's capacity isn't enough.
+showback(team)        -> { spend_by_service, unit_cost_trend, vs_budget }
+                         # monthly, automatic — visibility precedes accountability
+unit_cost(service)    -> dollars per 1K requests | per DAU | per job
+                         # THE program metric; growth-normalized; finance signs it
+budget_alert(team)    -> page the owning team, not a central cop
+                         # anomaly + forecast; a $40K NAT surprise found week 1
+provision_gate(res)   -> ALLOW | DENY untagged | ESCALATE above $X/mo
+                         # tags + size policy enforced in IaC, not by audit
+```
 
-### Practice questions
+**Design notes (each with the rejected alternative):**
+- **Showback before chargeback.** Showback changes behavior at low friction; chargeback (your P&L pays) adds real incentives *and* real gaming, reservation hoarding, shared-cost disputes. *Rejected as default: immediate chargeback*, it's the escalation for chronically unresponsive teams, not the opener.
+- **Unit cost, not absolute targets.** *Rejected: absolute spend caps*, at 20%/yr growth they force teams to "save" by blocking product growth, violating the velocity guardrail.
+- **Alerts page the owning team.** *Rejected: a central FinOps cop on every change*, it bottlenecks and teaches teams cost is someone else's job. The center owns leverage (commitments, platform moves); teams own their own curve.
 
-**Q1.** A PM says: "Our assistant doesn't know our new pricing — fine-tune it on the pricing page." What do you say?
-> *Model:* **No — that's a RAG problem, not a fine-tune problem.** Pricing is a **fact**, and it **changes**; fine-tuning bakes a stale snapshot into weights, can't cite the source, and will confidently invent prices it half-learned. Put the pricing docs in an **index**, retrieve and cite them at query time, and the answer updates the moment pricing changes — no retraining. Fine-tuning teaches **behavior, not facts**; the only thing I'd fine-tune here is *how* it presents pricing (format/tone), and only if a prompt can't get that.
+---
 
-**Q2.** When is fine-tuning genuinely the right tool, and how would you justify it to me?
-> *Model:* When the gap is **behavior, not knowledge** — a format/style/tone/domain-skill the model must reliably produce (strict JSON, our support voice, classify into our taxonomy, reason like a domain specialist) — **and** eval proves **prompt + RAG can't close it**. Justification has three parts: (1) an **eval** showing prompt+RAG misses the bar and the fine-tune clears it without regressing; (2) **curated training data** with an owner; (3) a **retraining/ops plan** for the next base model. I'd start with **LoRA** (cheap, swappable), escalate to full FT only if LoRA's capacity isn't enough, and keep the fine-tune thin so base upgrades stay cheap.
+## D: Data model
 
-**Q3.** What does a fine-tuned model cost you operationally, beyond the training run?
-> *Model:* Three standing costs. **Data curation** — assembling/cleaning thousands of high-quality pairs is the slow, expensive part, and bad data makes the model *worse*. **An eval harness** — without it you can't prove the fine-tune helps or catch regressions. **Retraining as the base moves** — the base vendor ships better models every few months; a prompt+RAG system adopts them by changing one name, but a fine-tune is **locked to its base version**, so each upgrade is a re-curate-and-retrain project. That lock-in often **erases the edge**: the next free base model, prompted well and RAG-grounded, may already match your fine-tune. That's why I reject fine-tuning whenever prompt+RAG gets close.
+> Adaptation: the schema of a cost program is the **allocation taxonomy**, the dimensions every dollar must be attributable to. Get this wrong and every later report is fiction.
 
-**Q4.** You need answers grounded in weekly-changing docs *and* always in strict JSON + brand voice. Lay out the adaptation plan and your rejected alternatives.
-> *Model:* **Split it by gap.** The changing docs are **facts → RAG**: index them, retrieve + cite at query time, fresh in minutes. The JSON + voice is **behavior → prompt first**: system prompt + **JSON-mode/structured output** + few-shot of the voice; measure on a golden set. **Only if** eval shows the format/voice still drifts, escalate to a **thin LoRA fine-tune** for the behavior. Net: **RAG on a fine-tuned (or just well-prompted) model** — they compose. *Rejected:* fine-tuning the policies in (stale, uncitable, hallucinated — they change weekly); long-context stuffing all policies every call (doesn't scale across regions, burns tokens); and jumping straight to fine-tuning the format before proving a prompt can't do it.
+Four mandatory dimensions on every resource: **`team`** (answers the budget alert), **`service`** (the unit-cost denominator), **`env`** (prod vs non-prod, entirely different cut policies), **`cost_center`** (finance's join key, COGS vs R&D decides whether a dollar hits gross margin). Shared-platform spend (k8s control plane, data platform, observability) is **allocated by a published formula**, by usage where measurable, by headcount where not. *Rejected: leaving shared costs unallocated*, they're 20-30% of the bill, and unallocated is unaccountable. Also rejected: a 15-tag taxonomy, beyond 4-5 enforced dimensions, compliance collapses.
+
+One derived table outranks the rest: **`unit_cost(service, month)`**, allocated spend ÷ demand driver. The growth-normalizer, and the only number that proves savings *stuck* rather than merely happened.
+
+---
+
+## E: Evaluation
+
+> Adaptation, the sharpest of the eight: Evaluation here is **proving the guardrails held**. A cost program is graded on two axes, dollars saved *and* damage avoided. Most candidates report only the first.
+
+**Savings realized:** run-rate −32% at day 30, −42% at month 6; **unit cost −48%** against the signed baseline. Reported from the billing export, not project-team self-grading. *Rejected: counting "projected" savings*, only the invoice trend counts.
+
+**Guardrail evidence (the half juniors skip):**
+- **SLO:** error-budget burn flat through every rightsizing wave, with **one revert on the record** (a DB downsize pushed p99 past the SLO; canary caught it in 48h, rolled back in minutes). State the revert proudly: a program with zero reverts wasn't measuring.
+- **RTO/RPO:** re-drilled *after* the storage and replica changes, RTO 41 min against the 1-hour budget. An untested DR path post-cuts is a cut you made without admitting it.
+- **Velocity:** deploy frequency and lead time flat; product-team cost work peaked at 8%. If velocity dips, the program, not the roadmap, yields.
+
+**Where these programs actually fail:**
+1. **Savings regrowth**, the #1 failure mode. Fix: the governance loop (next section).
+2. **Stranded commitments**, usage drops below coverage after later optimization; the discount becomes contractual loss. Fix: the 70-80% ceiling, quarterly review, the rung ordering.
+3. **The invisible reliability cut**, deleting capacity that was idle *by design*. Which is the refusal:
+
+**The one cut I refuse, say it unprompted.** The decomposition will surface a line that looks like pure waste: **standby DR capacity and N+1 failover headroom**, ~$400K/yr, utilization ~0%. I don't cut it, and the CFO gets one sentence: *"Its job is to be idle, an insurance premium; cutting it converts $400K of visible cost into an invisible RTO regression we'd discover during the worst hour of the company's year."* Same protected class: backup retention at the compliance floor, and incident-time observability (sample logs in steady state; never the telemetry you'd debug an outage with). **The refusal, with its dollar figure, proves you know what the spend buys, anyone can read a utilization graph.**
+
+<details>
+<summary>Go deeper, egress, NAT, and cross-AZ transfer surgery (IC depth, optional)</summary>
+
+Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cross-AZ ~$0.01-0.02/GB *each direction*, NAT gateways ~$0.045/GB *processing on top*, private-subnet traffic to S3 through a NAT pays triple for nothing (fix: VPC gateway endpoints, free for S3/DynamoDB). Cross-AZ microservice chatter is the silent one: topology-aware routing / zonal affinity in the mesh often cuts that line 50-70%, checked against the availability posture, since aggressive affinity concentrates failure domains. Internet egress is a CDN problem: every edge cache hit is a gigabyte that never bills as origin egress; media-heavy products find the CDN pays for itself in egress before counting latency. Order of attack: gateway endpoints (free, hours) → NAT consolidation → zonal affinity → CDN offload ratio.
+
+</details>
+
+---
+
+## D: Design evolution
+
+> Adaptation: evolution here is **governance, the machinery that makes savings stick**, plus absorbing the next constraint. A 30% cut that regrows in a year is a failed program with a good first quarter.
+
+**The governance loop (what survives the program team):**
+- **Unit-cost targets enter quarterly planning** beside latency and availability, cost becomes an NFR every design review states.
+- **Showback monthly and automatic; chargeback stays the escalation tool**, the friction trade argued in A holds in steady state.
+- **The provision gate stays on; commitment coverage reviewed quarterly**, a portfolio to manage, not a purchase to forget.
+- **A standing FinOps function of 2-3** owns leverage. *Rejected: "every team owns cost" with no center*, diffuse ownership means commitment management, the highest-ROI lever, belongs to nobody.
+
+**Under new constraints:**
+- **Growth resumes at 40%/yr:** nothing breaks, because the metric was unit cost all along, the bill grows while unit cost falls.
+- **LLM/GPU spend arrives:** a new top-3 line with inverted physics, GPU capacity is scarce, so the idle-capacity reflex flips (you hold reserved GPU you can't instantly rebuy), and the unit metric becomes cost per 1K tokens, driven by batching and serving efficiency, not rightsizing. The governance loop absorbs it; the rung-1 reflexes don't.
+- **Repatriation** ("would colo beat 50% cloud savings?"): a deliberate non-default. The math can work for stable workloads at this scale, but it trades elasticity and managed-service leverage for capex, a hardware-ops capability you'd have to build, and a 12-18 month migration (the live-migration playbook at maximum size). Exhaust the ladder first; revisit only for stable-floor workloads if the unit-cost curve flattens.
+
+**Where I'd delegate (the explicit Director move):** *"Platform benchmarks ARM on our top-10 services; my prior is 15-20% price-perf with two weeks of toolchain work, since the stack is JVM and Go with no native exotica. Data-platform owns log-tiering against the observability pipeline; my prior is a 7-day hot window covers 95% of queries, they verify against query-age telemetry. Finance owns commitment mechanics; I own the coverage ceiling and the rung ordering."* I keep the guardrails, the ordering, the refusal, and the unit-cost definition; everything benchmarkable is delegated with a stated prior.
+
+---
+
+## Trade-offs table: the pivotal decisions
+
+| Decision | Option A | Option B | Option C | Use when... |
+|---|---|---|---|---|
+| **Commitment depth** | **1-yr no-upfront plans** ~30% off, flexible | **3-yr commitments** ~50% off, locked | **On-demand** 0% off, fully liquid | **A** default on the post-rightsize baseline (our choice, preserves rung-4 moves). **B** only for the floor you'd bet the company keeps (core DB tier). **C** for volatile workloads and anything spot-eligible. |
+| **Accountability model** | **Showback** + provision gate | **Chargeback** to team P&L | **Central mandate** FinOps approves all | **A** default, 80% of behavior, 20% of friction (our choice). **B** targeted escalation for unresponsive teams. **C** never steady-state, acceptable only as the 72-hour freeze. |
+| **Deep-savings path** | **Re-architect in cloud** spot, ARM, egress, tiering | **Repatriate** stable workloads to colo | **Renegotiate** the enterprise agreement | **A** first, most of the gap, least risk, reversible (our choice). **B** after the ladder is exhausted, hardware-ops capability priced in. **C** in parallel always, $10M/yr is leverage; procurement work, not engineering risk. |
+
+---
+
+## What interviewers probe here (Director altitude)
+
+- **"You have 72 hours, what do you do?"**, *Strong:* visibility first (billing export, top-20 items), delete only the provably orphaned, freeze commitments, and stand up the guardrail dashboard *before* any risky cut. *Red flag:* cutting on day one with no decomposition, or spending the 72 hours forming a committee.
+- **"Why commitments after rightsizing?"**, *Strong:* a commitment is a contract on the baseline; commit first and you pay for the waste for 1-3 years, the ordering is a correctness property. *Red flag:* "buy reserved instances" as the opening move.
+- **"How do I know reliability didn't pay for this?"**, *Strong:* names evidence, flat error-budget burn, a *post-cut* DR drill with the RTO number, one revert on the record, and volunteers the refused cut. *Red flag:* "we were careful"; zero reverts (nothing was measured).
+- **"The bill is back up 18% a year later. What failed?"**, *Strong:* governance, not the cuts, names the loop, then checks whether regrowth is bad (unit cost up) or fine (growth with falling unit cost). *Red flag:* proposes another one-time purge, surgery for a chronic condition, twice.
+- **"What cut do you refuse?"**, *Strong:* a specific line with a dollar figure and a one-sentence CFO-language defense, insurance premium vs invisible RTO regression. *Red flag:* "nothing important" (content-free), or no refusal at all.
+
+---
+
+## Common mistakes
+
+- **Cutting before decomposing.** Peanut-butter cuts ("everyone trims 20%") starve efficient teams, miss the concentrated waste, and break guardrails, designing before requirements, in dollars.
+- **Committing before rightsizing.** Locks the waste into a 1-3 year contract; the most expensive ordering mistake and the easiest probe to fail.
+- **Reporting absolute spend instead of unit cost.** At 20% growth, absolute targets put the program at war with the business.
+- **Cutting the insurance:** idle DR, N+1 headroom, backup retention, incident telemetry. Savings visible this quarter; the RTO regression invisible until the worst day. Name the refusal before being asked.
+- **No governance loop.** A one-time purge regrows in 4-6 quarters; you've scheduled a rerun of the same program with less credibility.
+
+---
+
+## Interviewer follow-up questions (with model answers)
+
+**Q1. The CFO wants 40% in two quarters. Walk me through the first 30 days.**
+> *Model:* First 72 hours: visibility and freeze, billing export on, top-20 line items (~80% of a $10M bill), delete the provably orphaned (~$0.5-0.8M run-rate), freeze new commitments, stand up the guardrail dashboard before anything that could bite. Days 3-30, the ladder in order: rightsize compute, k8s requests, and storage off p95 utilization (~12%), shipped like deploys, canary, watch 48h, proceed or revert, *then* 1-year Savings Plans at ~75% coverage of the new baseline (~12%). That's ~32% at near-zero risk, the mandate's floor, and it funds the 6-month re-architecture that closes to ~40-45%. The ordering is the design: visibility before cuts, rightsize before commit, quick wins before structural work.
+
+**Q2. A team claims your rightsizing will blow their latency SLO. How do you adjudicate?**
+> *Model:* With the mechanism, not authority. The framework already defines the test: canary the downsize on a slice, watch p99 and error-budget burn 48 hours against baseline, and the data decides, sustained burn means automatic, pre-agreed revert in minutes; that reversibility is *why* rightsizing sits on rung 2. Either the team is padding out of habit (p95 utilization data settles it) or the cut is genuinely wrong, and the revert happening *visibly and cheaply* is what keeps every other team cooperating. A cost program that argues with its own guardrails once loses all of them.
+
+**Q3. Why not 3-year commitments everywhere? The discount is nearly double.**
+> *Model:* A commitment is a contract on a forecast, and the program is about to invalidate the forecast twice, rightsizing shrinks the baseline in month 1, and rung 4 (spot, ARM) restructures what's left. An early 3-year commit either strands (utilization below coverage, contractual loss, worse than on-demand waste) or forecloses the re-architecture by making the old fleet artificially cheap to keep. So: 1-year no-upfront at 70-80% coverage of the post-rightsize baseline as default, 3-year only on the floor I'd bet the company keeps, the core DB tier, with quarterly coverage review. I'll trade ~15 points of discount for not betting three years against my own roadmap.
+
+**Q4. Name a cut you'd refuse under direct CFO pressure, and defend it.**
+> *Model:* The standby DR capacity and N+1 headroom, ~$400K/yr at ~0% utilization, the worst-looking line on the report. Its job is to be idle: it's an insurance premium, and cutting it converts $400K of visible cost into an invisible RTO regression that materializes during the worst hour of the company's year. Same protected class: backup retention at the compliance floor, incident-time observability. What I offer instead: rungs 1-3 deliver 8× that amount in 30 days from spend that buys nothing, and I re-drill DR after every change touching redundancy so the premium provably still pays for coverage. If the CFO still wants the $400K, I want the revised RTO in writing, then it's a business decision made with open eyes, not a cost cut.
+
+---
 
 ### Key takeaways
-- **The spectrum is an escalating cost ladder:** prompt → RAG → LoRA → full fine-tune → continued pretraining. **Climb only when eval proves the rung below can't hit the bar.** Continued pretraining is almost never an app-team move.
-- **One decision rule:** fresh/private **facts → RAG**; new **behavior/format/style/skill → fine-tune**; **both → RAG on a fine-tuned model**; **latency/cost at fixed quality → distill** to a smaller fine-tune.
-- **Fine-tuning teaches behavior, not facts.** "Fine-tune the docs in" is the classic error — it yields confident, uncitable, un-updatable hallucination. Facts belong in a RAG index.
-- **The cost of fine-tuning isn't GPU hours** — it's **data curation + an eval harness + retraining as the base model moves**. LoRA/PEFT (cheap, swappable adapters) is the default; full fine-tune only when eval proves LoRA's capacity isn't enough.
-- **A fine-tune locks you to a base-model version** — the maintenance tax. Prompt + RAG ride every base upgrade for free; a fine-tune must be re-trained to. **Default to prompt + RAG; treat fine-tuning as earning-the-right**, with data, eval, and an ops plan.
+- **Decompose before you cut.** $10M ≈ 40% compute, 20% databases, 15% storage, 8% transfer, 7% observability, the program lives where the money is.
+- **The ladder's ordering is the design:** delete idle (~8%) → rightsize (~12%) → commit (~12%) → re-architect (~8-15%). Commit *after* rightsizing or you contract to keep the waste; ~32% lands in 30 days and funds the 6-month tail to ~40-47%.
+- **Guardrails precede cuts:** SLO burn, RTO/RPO re-drilled *after* changes, deploy frequency, on a dashboard from hour zero, reverts pre-agreed. Evaluation = dollars saved *and* damage provably avoided; one revert on the record is evidence, not embarrassment.
+- **The refusal is the credibility moment:** idle DR / N+1 headroom (~$400K) is an insurance premium, name it, with the dollar figure, unprompted, in CFO language.
+- **Savings stick only with governance:** growth-normalized unit cost as the signed metric, showback + provision gate as the interface, chargeback as escalation, commitments as a quarterly portfolio. Without the loop, the bill regrows in 4-6 quarters.
 
-> **Spaced-repetition recap:** Briefing → binder → training → re-schooling = prompt → RAG → fine-tune → pretrain, cheapest to most expensive; climb only when eval proves the rung below fails. The decision rule: **facts → RAG, behavior → fine-tune, both → RAG on a fine-tune, latency/cost → distill.** The headline misconception: **fine-tuning teaches behavior, not facts** — "fine-tune the docs in" is wrong; that's RAG (cited, updatable in minutes). Fine-tune's real cost = **data + eval + retraining as the base moves**, plus the **lock-in tax** (welded to a base version; prompt+RAG ride upgrades free). **LoRA before full FT; default prompt + RAG; earn the right to fine-tune.** Preference tuning (DPO over RLHF) — delegate with a prior, rarely needed.
+> **Spaced-repetition recap:** Cost-cutting = a **sequenced program with guardrails**, not a tip list. Decompose (compute+DB ≈ 60%); run the ladder **in order**, delete > rightsize > **then** commit > re-architect, as **72h (see/stop/freeze) → 30d (~32%) → 6mo (~40-47%)**. Guardrails from hour zero: SLO burn, post-cut DR drill, deploy frequency; report **unit cost**, not the bill. Refuse the insurance cut (idle DR ≈ $400K, "its job is to be idle"). Governance loop or it all regrows.
+
+---
+
+*End of Lesson 11.5. The cost question inverts the usual design problem: instead of spending money to buy reliability and scale, you remove money while proving reliability and velocity never moved, the guardrail dashboard plays the role the waiting room played for a hot-shard queue, the rung ordering is as load-bearing as the expand-migrate-contract ladder of a live migration, and the refused cut is where the interviewer learns whether you know what the spend was buying.*

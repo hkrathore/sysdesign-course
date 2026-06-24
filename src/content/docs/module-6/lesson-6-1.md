@@ -1,181 +1,283 @@
 ---
-title: "6.1 — Capstone: Drive Your Own Design"
-description: A fresh, meaty problem, a real-time collaborative document editor, that you design end-to-end yourself, then critique against a RESHADED-keyed strong-signal/red-flag rubric. The exercise is the lesson; the critique loop is the skill.
+title: "6.1 — Parking Lot"
+description: The #1 LLD curveball as a restraint test, lock scope to three entities, apply Strategy only where a requirement demands it, and volunteer the last-spot race with an atomic claim before the interviewer asks.
 sidebar:
   order: 1
 ---
 
-> This is the **capstone**, and it inverts every lesson before it. The walkthrough and the design problems watched *me* run RESHADED on sixteen problems, you read a finished design and absorbed the moves. That builds recognition, not production. The interview tests production: under pressure, *you* must scope, quantify, decide, and stress a design that doesn't exist yet, with no answer key on the wall. So this lesson hands you a **fresh problem and an empty whiteboard**, and then, and this is the part that actually moves the needle, a **critique framework** to turn on your own work, keyed step-by-step to RESHADED. The spine here is not a solution. It is the **drive-then-critique loop**: you produce a first-pass design, then interrogate it with the exact questions a Staff/Principal interviewer would ask, marking each answer **strong-signal** or **red-flag**. Run the loop, find your own gaps, close them. That self-critique reflex, *"where would a good interviewer push, and would my answer survive it?"*, is the single most transferable thing this course can give a Director. Drive it yourself. Paste your design into an AI and have it ask you the §C questions verbatim. The point is the loop, not my approval.
+> **This is the most-asked low-level design problem in the industry, Amazon, Google, Microsoft, Uber all use it, and every OOD course opens with it, precisely because it is small.** A junior candidate fills the whiteboard with an inheritance tree and four design patterns before asking a single question. A Director answer locks scope to 2-3 clean entities, builds the boring v1 the stated requirements paid for, **volunteers the one real correctness problem (two cars racing for the last spot) unprompted**, and shows where the design would flex, without building that flexibility on spec. The interviewer is not scoring UML vocabulary. They are scoring **restraint**, a question about how you'll run an org, asked through a parking lot.
 
 ### Learning objectives
-- **Drive** a complete RESHADED design end-to-end on a problem you have not seen worked, a real-time collaborative document editor, producing the named artifact at each of the eight steps yourself.
-- **Quantify** the load that actually defines this system: that **presence/cursor traffic dwarfs edit traffic**, that concurrent editors per doc is *tens, not thousands*, and that the durable write rate is far smaller than the connection count, and let those numbers pick your architecture.
-- **Critique** your own design with a RESHADED-keyed rubric, scoring each answer **strong-signal vs red-flag**, and recognize the capstone's signature altitude trap: convergence correctness (OT/CRDT) is IC-deep, so the Director move is to *name the pivotal call and delegate the proof*, not hand-roll a CRDT at the whiteboard.
-- **Run the loop**: first-pass answer → self-ask the probe → spot the red flag → revise, and feel why that loop, not the diagram, is what earns the offer.
+- Adapt the **RESHADED** spine to an LLD problem, say out loud which letters shrink (E becomes capacity math, not QPS) and which transform (A = class interfaces, H = class/state diagram, D = entity model).
+- Practice the Director meta-skill this problem exists to test: **lock scope first**, name what you're cutting, and resist anticipatory abstraction (gold-plating) until a requirement demands it.
+- Apply the **Strategy pattern exactly once, where a requirement varies** (pricing), and defend why nothing else in v1 deserves a pattern.
+- Handle the **multi-threaded variant**: make spot assignment atomic so two cars racing for the last spot cannot both win, the same `AVAILABLE → HELD → OCCUPIED` shape as Ticketmaster's seat claim, at micro scale.
+- Evolve the design under new constraints (multi-floor, dynamic pricing, gate hardware, a city-wide chain) and name the point where LLD turns back into system design.
 
-### Intuition first: why this one is genuinely harder than anything in the canonical design problems
-Every problem in the canonical design problems let you escape the hardest version of concurrency. TinyURL's mappings are immutable, so a stale cached read is harmless. Instagram and Twitter tolerate a feed that's a few seconds behind. WhatsApp orders messages *per conversation* but never has to merge two people typing into the **same word**. Even Dropbox, the closest cousin, ducks it: when two devices edit the same file, Dropbox keeps **both** as a "conflicted copy" and lets a human sort it out, that is a legitimate answer precisely because file sync can punt. A collaborative editor **cannot punt.** When Alice and Bob both type into the same sentence at the same instant, there is no "conflicted copy of paragraph 3", there is one document, on both screens, and it must **converge to a single state both users see, with no keystroke silently lost and no screen showing a different sentence than the other.** That is the crux, and it is a different *class* of problem: not "tolerate staleness" but "guarantee that independent, concurrent, intention-carrying edits merge deterministically into one shared truth." Hold that picture, *one document, many cursors, zero lost keystrokes, both screens identical*, because it is the requirement that makes or breaks the whole design, and it is the one you will be tempted to wave away.
+### Intuition first
+Picture the lot attendant who ran parking before software: a clipboard with one row per spot, a pad of numbered tickets, and a price card taped to the booth window. Park a car → cross off a spot, tear off a ticket, write the time. Car leaves → look up the ticket, check the price card, collect, un-cross the spot. That clipboard **is** the design: spots, tickets, a pricing rule. Three things.
 
----
-
-## §A: The capstone problem (your brief)
-
-You are designing a **real-time collaborative document editor**, think Google Docs, Notion, or Figma's text layer, where multiple authenticated users edit the same rich-text document simultaneously and see each other's changes within a fraction of a second.
-
-This section frames the problem. It deliberately does **not** solve it. The clarifying questions, the requirement cuts, the numbers, the store choice, the convergence strategy, all of that is **yours to produce** in §B. Treat the brief the way you'd treat an interviewer's opening sentence: the start of a negotiation about scope, not a spec to implement.
-
-**The product, in one paragraph.** A user opens a document in a browser and starts typing. Anyone else with access who has the document open sees those keystrokes appear in near-real-time, character by character, with the other person's **cursor and selection** visible and labelled. Multiple people edit the same paragraph at once and the document stays coherent, no lost edits, no diverged copies, no "your version / their version." A user can go **offline** (laptop lid closes, train enters a tunnel), keep editing locally, and on reconnect their changes **merge** cleanly with everything that happened while they were gone. The full document is **persistent**, **versioned** (you can see history and restore), and loads quickly even when it's large and has a long edit history.
-
-**Functional surface to consider (you decide what's core vs stretch, that cut is part of the exercise):**
-- Open / create / load a document; render its current state fast.
-- Apply local edits and **propagate** them to all other active editors with sub-second latency.
-- **Converge** concurrent edits from multiple users into one consistent document state.
-- **Presence**: show who is in the document, where their cursor is, what they have selected.
-- **Offline edit + reconnect merge.**
-- **Persistence + version history** (snapshots, restore, "see changes since…").
-- *(Likely stretch, name and park them):* comments/suggestions mode, access control / sharing model, rich media embeds, full-text search across a user's docs, export.
-
-**Non-functional pressure (this is where the design is won or lost):**
-- **Edit-propagation latency**, local echo must feel instant; remote edits should appear in **well under ~200 ms** for editors in the same region. A laggy collaborative editor is a broken product.
-- **Convergence correctness**, *the* hard requirement. All replicas of a document **must** reach the same final state given the same set of edits, regardless of arrival order or network delay. No lost keystrokes; no two screens showing different text. This is a **correctness invariant**, not a nice-to-have.
-- **Concurrency profile**, a document has **many viewers but few simultaneous editors**; you should *cap* concurrent editors per doc (Google Docs historically capped around the low hundreds) and design for the common case of **single-digit-to-tens** of active editors.
-- **Availability & durability**, never lose a committed edit; the document must survive node/region loss; aim high (≥ 99.9% on the editing path) but be honest that the *editing session* (the live socket) is more fragile than the *stored document*.
-- **Offline tolerance**, edits made while disconnected must survive and merge on reconnect, possibly **minutes or hours** later.
-- **Scale**, assume a large consumer product: on the order of **100M+ documents**, **tens of millions of DAU**, millions of documents open concurrently, with the editor count *per document* small but the *connection* count huge.
-
-**Constraints and assumptions to pin down yourself (don't proceed until you've stated them):** rich text or plain text for v1? hard cap on concurrent editors per doc? acceptable staleness for *presence* (cursors) vs for *content* (they are not the same)? is the document a single shared object or can it be sharded into sub-trees? what's the latency budget split between *local echo* (should be ~0, optimistic) and *remote apply*? These are the questions whose answers *make* the design, which is exactly why the brief leaves them open.
+Everything a weak answer adds, `AbstractVehicleFactory`, a `Car`/`Truck`/`Motorcycle` hierarchy with no differing behavior, an observer bus for a lot with no observers, is something the attendant never needed. The question is deliberately undersized so the interviewer can watch what you do with the empty space. **Filling it is the failure.** The strong move is to keep the clipboard, then point at the one place it genuinely breaks: two entry gates, one spot left, two attendants crossing off the same line at the same moment. *That*, atomic assignment under contention, is the real engineering here, and you raise it before they do.
 
 ---
 
-## §B: Self-driving guide: what to produce at each RESHADED step
+## R: Requirements
 
-This is your scaffold, not your solution. For each of the eight steps it tells you **what the step is for**, the **artifact to produce**, and the **specific numbers or decisions** that must appear in your answer. Produce all eight before you read §C. Resist the urge to look for "the right answer", the exercise is the act of deriving and defending one. Keep it at **Director altitude**: components and trade-offs, not algorithm pseudocode.
+> Identical to HLD: scope is the first signal. In LLD the cut list matters even more, because every uncut requirement becomes a class, and classes are where gold-plating hides.
 
-**R: Requirements.** *Produce:* a crisp split of **functional vs non-functional**, an explicit **scope cut** (what's v1, what's parked), and, the load-bearing move here, a clear statement of the **two distinct traffic classes** you've noticed: high-volume, loss-tolerant **presence/cursor** updates vs lower-volume, loss-**intolerant** **content edits**. State your **concurrent-editors-per-doc cap** and the **read(view):write(edit)** shape. *The number that must appear:* an order-of-magnitude DAU and document count, and the assertion that editors-per-doc is *tens*, viewers-per-doc can be *thousands*.
+**Clarifying questions I'd ask (with assumed answers):**
+- *One facility or a chain?* → **One lot, single facility.** (A chain changes S and E entirely, see Design evolution.)
+- *Vehicle types?* → **Motorcycle, car, truck**, mapping to spot sizes (small/regular/large); a car may take regular or large, a truck only large.
+- *Floors?* → Assume **4 floors**, but model a flat pool of spots first; add `Floor` only if a requirement (per-floor displays, nearest-to-elevator) demands it.
+- *Payment?* → **Pay at exit**, fee = f(duration, vehicle type). Hourly now; "pricing may change", noted, that phrase is what will justify a Strategy later.
+- *Multiple entry/exit gates?* → **Yes, 2 entry + 2 exit.** The question that smuggles in the concurrency requirement, ask it yourself.
 
-**E: Estimation.** *Produce:* back-of-envelope math that proves you understand where the load actually is. *Compute, with stated assumptions:* (1) **edit ops/sec per active document**, a fast typist is ~6-8 keystrokes/s; with batching/coalescing the *committed* op rate is lower; (2) **presence messages/sec per document**, cursor-move + selection events, which fire *far more often* than content edits and, multiplied by N editors fanned out to N editors, scale as **~N²** per doc; (3) **concurrent open documents** and total **live socket connections** (this is your big number, millions of mostly-idle WebSockets); (4) **op-log storage per document per year** and total, plus **snapshot** size/cadence; (5) a rough **edit-fan-out server count**. *The insight the math must surface:* presence traffic ≫ edit traffic, and idle-connection count ≫ active-edit rate, two different scaling problems, sized separately.
+**Functional requirements:**
+1. **Park:** assign a free, size-compatible spot at entry; issue a ticket.
+2. **Unpark:** accept the ticket at exit, compute the fee, free the spot.
+3. **Availability:** report free spots per spot type (for the entry display).
 
-**S: Storage.** *Produce:* a decision on what persists and in which store, justified by access pattern. *Must address:* the **op-log** (the ordered sequence of edits, append-heavy, replay-by-doc), periodic **snapshots** (so you don't replay millions of ops on load), and **document metadata** (owner, ACL, title, cursor of last snapshot). Name real stores and **reject at least one alternative on the access pattern** (e.g., why not store only the latest blob and lose history; why not a relational row per character). *Decision to make explicit:* op-log + snapshot vs last-state-only, and where each lives.
+**Explicitly CUT (say the list out loud):** reservations, valet, EV charging, monthly passes, loyalty, license-plate recognition, a mobile app, multi-lot administration. Each cut gets one sentence, *"Reservations turn spot assignment from a queue-pop into a time-indexed search, different problem; out of v1"*, so the interviewer hears you cut **knowingly**, not lazily.
 
-**H: High-level design.** *Produce:* a component/box diagram and the **two happy paths** (an edit round-trip; a presence round-trip), plus, unavoidable here, your stance on the **pivotal call**: how edits **converge**. Name the contenders (**central-server ordering / OT** vs **CRDT** vs naive last-write-wins) and pick one *with* a reason tied to a requirement. *Must show:* where the live edit session lives (a stateful **collaboration/session server** that owns a document's active editors), how a document is **routed** to exactly one such server (so there's a single ordering authority), and how presence is fanned out on a **separate, cheaper path** than content.
-
-**A: API design.** *Produce:* the contract. *Must include:* the **WebSocket message protocol** (this is mostly a streaming/bidirectional problem, not request/response), message types for `edit op`, `ack`, `presence/cursor`, `join/leave`, `sync-since(version)`; plus a small REST surface for `create/load document`, `fetch snapshot+ops since v`, `list versions/restore`. *Decisions to voice:* how an op is **acknowledged and versioned** (server-assigned sequence number?), and how a reconnecting client says "give me everything since version V."
-
-**D: Data model.** *Produce:* the schema and, critically, the **shard key**. *Must specify:* the op-log table keyed and **partitioned by `document_id`** (so all ops for one doc are co-located and ordered), the snapshot record, the metadata record, and how **version/sequence numbers** are assigned per document. *The load-bearing decision:* `document_id` as the partition key, and why a single document's traffic landing on one partition/one session server is a feature (single ordering authority) and also your hot-spot risk (a viral doc). State how you'd handle the hot document.
-
-**E: Evaluation.** *Produce:* you turn on your own design and hunt bottlenecks, **naming the trade-off of each fix.** *Must stress, at minimum:* (1) **convergence under concurrency and reordering**, does your chosen scheme actually guarantee identical final state? (2) the **stateful session server as a single point of failure** for an active doc, what happens when it dies mid-session; (3) the **hot document** (a company all-hands doc with hundreds in it) against your editor cap; (4) **offline-for-hours then reconnect**, does the merge still converge, and how big is the catch-up; (5) **presence storms** (N² fan-out) overwhelming the content path. *For each:* the fix **and** what it costs.
-
-**D: Design evolution.** *Produce:* how it holds at 10×, the hardest trade-offs named, and **where you'd delegate.** *Must include:* the explicit **OT-vs-CRDT** trade as the central hard call (latency/server-authority and a mature ecosystem vs offline-friendliness/decentralization and per-character metadata bloat), a stance on **using a proven library** (Yjs/Automerge/ShareDB) vs building, geographic scaling of a *stateful* edit session, and a credible **delegation** of the convergence-correctness proof with a *stated prior*. *The Director sentence to land:* what you own (the architecture and the pivotal call) vs what you hand to a specialist (the merge-algorithm correctness), and why.
-
-> **Before you read §C:** write all eight artifacts down. Even rough. The critique only works on a real first-pass design, and the gap between what you produced and what §C probes for is precisely the thing you came here to find.
-
----
-
-## §C: The critique framework (the spine of this lesson)
-
-This is the core of the capstone. For **each** RESHADED step, here are the questions to self-ask, or paste your design into an AI and have it ask you these *verbatim*, with the markers that separate a **strong signal** (Director altitude) from a **red flag**. Score yourself honestly at each step. Every strong-signal marker below carries either a **number** or a **named trade-off**; if your answer has neither, it is itself a red flag.
-
-A note on this problem's signature trap, because it governs half the markers below. The convergence machinery (OT transforms, CRDT tombstones) is **IC-deep**, and the rubric is two-sided on purpose: you can fail by going **too high** ("just use CRDTs, they merge", no awareness of metadata cost or the OT alternative) *or* **too deep** (whiteboarding tombstone garbage collection and transformation functions while the interviewer waits for an architecture). The Director answer lives between: *name the pivotal call, tie it to a requirement, state a prior, and delegate the proof.*
-
-### R: Requirements
-
-| Self-ask | Strong signal | Red flag |
-|---|---|---|
-| Did I separate the two traffic classes? | Explicitly names **presence/cursor (high-volume, loss-tolerant)** vs **content edits (lower-volume, loss-intolerant)** and says they get different paths and different consistency. | One undifferentiated "real-time updates" stream; treats a dropped cursor-move as seriously as a dropped keystroke. |
-| Did I cap concurrency and state the read shape? | Caps concurrent **editors/doc at tens-low-hundreds**, notes **viewers ≫ editors**, and uses the cap to bound fan-out cost. | "Unlimited simultaneous editors"; no cap, so fan-out and convergence cost are unbounded and unestimable. |
-| Did I cut scope deliberately? | v1 = open/edit/propagate/converge/persist + presence; **comments, ACL model, media, search explicitly parked** with a reason. | Tries to design comments, suggestions, sharing, and search in v1; drowns before the crux. |
-| Did I name convergence as *the* hard NFR? | Calls out **deterministic convergence / no lost keystrokes** as a correctness invariant up front. | Lists "low latency, high availability" generically; never names convergence as the defining requirement. |
-
-### E: Estimation
-
-| Self-ask | Strong signal | Red flag |
-|---|---|---|
-| Where is the load actually? | Shows **presence msgs/s ≫ edit ops/s** (cursor events fire constantly; N editors × N = ~N² fan-out per doc) and **idle-socket count ≫ commit rate**, sizes them separately. | One blended QPS number; never notices presence dwarfs edits or that the big number is *idle connections*, not writes. |
-| Did I quantify the edit rate sanely? | Typist ≈ 6-8 keys/s, **coalesced/batched** so committed ops/s is lower; multiplies by realistic concurrent editors, not viewers. | Assumes thousands of edits/s per doc (confuses viewers with editors); or no number at all, "it's real-time." |
-| Did I size the durable footprint? | Estimates **op-log bytes/doc/yr + snapshot size/cadence**, and notes ops are tiny but unbounded → **snapshots bound replay**. | Forgets the op-log grows forever; plans to replay millions of ops on every document open. |
-| Did the numbers pick the architecture? | Concludes: cheap fat-fan-out **presence path** + smaller **durable edit path** + **snapshotting**, each justified by a figure. | Numbers computed but ignored; architecture chosen by taste, not by the math. |
-
-### S: Storage
-
-| Self-ask | Strong signal | Red flag |
-|---|---|---|
-| What's the source of truth, state or log? | **Op-log (append-only, ordered per doc) + periodic snapshots** is the source of truth; current state is derived; reject "store only the latest blob" because it kills history/undo/merge. | Stores only the latest document blob; no op history → no version history, no clean offline merge, no audit. |
-| Did I match store to access pattern? | Op-log → append-friendly, replay-by-`document_id` (LSM/log-structured or an append store); metadata → KV/relational; **snapshots in blob store**. Names real systems, rejects "a relational row per character" on cost. | A row per character/keystroke in Postgres; or a single document store with no separation of log vs snapshot vs metadata. |
-| Did I bound load-time cost? | Load = **latest snapshot + ops since snapshot**, with snapshot cadence chosen so the tail of ops to replay is small (e.g., snapshot every N ops / minutes). | Reconstructs from the full op-log every open; load time grows unbounded with document age. |
-
-### H: High-level design
-
-| Self-ask | Strong signal | Red flag |
-|---|---|---|
-| How do concurrent edits converge? (the pivotal call) | Names **OT vs CRDT vs naive LWW**, picks one **tied to a requirement** (e.g., central-server **OT** for server-authoritative low-latency in-session ordering; **CRDT** if offline-first/decentralized dominates), and states convergence is **eventual**, a doc needs convergence, **not linearizability**. | "Last write wins on the paragraph" (silently loses keystrokes); *or* "just use CRDTs, they merge" with no awareness of the OT alternative or the cost; *or* whiteboards an OT transform function (too deep). |
-| Does each doc have a coherence point, and is its role correct for the chosen scheme? | **OT branch:** a doc routes to **one stateful session server** that assigns a **canonical order** to in-session ops, the ordering *is* the convergence mechanism. **CRDT branch:** the server is **not** an ordering authority (CRDTs merge regardless of order); it's a **relay for fan-out, persistence, and presence**, with at most a **display tie-break**. Either way, a doc has one coherence point. | Claims a "central ordering authority" while choosing CRDTs (contradicts the model, order-independence is *why* CRDTs converge); *or* no coherence point at all, so clients diverge or duplicate. |
-| Is presence on a separate, cheaper path? | Presence/cursors fan out via a **separate pub/sub channel**, ephemeral, **never persisted**, lossy-OK, explicitly cheaper than the content path. | Presence runs through the same durable, acked path as edits → pays correctness cost for data that doesn't need it. |
-| Is local echo optimistic? | Local keystrokes render **immediately** (optimistic), then reconcile with server order, so typing feels instant regardless of RTT. | Every keystroke round-trips to the server before rendering → typing feels laggy; product is broken. |
-
-### A: API design
-
-| Self-ask | Strong signal | Red flag |
-|---|---|---|
-| Right transport for the problem? | **WebSocket (bidirectional, persistent)** for the edit/presence stream; small REST surface for load/snapshot/version. Justifies why request/response is wrong for live edits. | Designs it as polling or per-keystroke REST POSTs; no persistent connection. |
-| Are ops versioned and acked? | Each op gets a **server-assigned sequence/version**; client tracks "last acked version"; protocol supports **`sync-since(V)`** for reconnect. | Fire-and-forget ops with no version/ack; reconnecting client can't tell what it missed. |
-| Is reconnect a first-class message? | Explicit **`join` → server returns snapshot + ops since the client's version**; clean catch-up path. | Reconnect re-downloads the whole doc, or has no defined catch-up → lost or duplicated ops. |
-
-### D: Data model
-
-| Self-ask | Strong signal | Red flag |
-|---|---|---|
-| What's the shard key? | **`document_id`** partitions the op-log and routes the session, all of a doc's ops are co-located and ordered; one doc = one ordering authority. | Shards by user, or by time → a single document's edits scatter across partitions and can't be ordered cheaply. |
-| Is the single-doc concentration acknowledged as both feature and risk? | Notes co-locating a doc on one partition/server **enables ordering** but creates a **hot-doc** risk; has a mitigation for the viral doc. | Treats `document_id` partitioning as free; never notices the all-hands doc is a hot partition + hot session server. |
-| How are version numbers assigned? | Monotonic **per-document sequence** assigned by the doc's session server / a per-doc counter, cheap because it's per-doc, not global. | Global monotonic sequence across all docs (needless coordination bottleneck), or no defined versioning. |
-
-### E: Evaluation
-
-| Self-ask | Strong signal | Red flag |
-|---|---|---|
-| Does convergence actually hold under reordering? | Argues *why* the chosen scheme converges (OT: server transforms ops against concurrent ones; CRDT: commutative merge) and **admits the limit** (e.g., OT's transform-correctness is hard → delegate/verify; CRDT carries per-element metadata that must be GC'd). | Asserts "it'll be consistent" with no mechanism; *or* dives into proving the transform at the whiteboard (wrong altitude). |
-| What happens when the session server dies mid-edit? | The op-log is **durable before ack** (or quorum-replicated), so a new session server **reloads snapshot + ops and resumes**; in-flight unacked ops replay from clients; bounded reconnection blip named. | "It's stateful so we lose the session" with no recovery; or assumes the live in-memory state was the only copy → data loss. |
-| Hot document / editor cap? | Enforces the **editor cap**, degrades extra users to **view-only/read replica**, and notes presence fan-out is the first thing to break (N²). | No cap; assumes one session server handles hundreds of editors + N² presence with no degradation plan. |
-| Offline-for-hours reconnect? | Client buffers ops locally; on reconnect, **merge converges** (the whole reason CRDT/OT was chosen) and catch-up is bounded by snapshot + delta; names the worst case (huge divergence). | Assumes short disconnects only; long-offline merge either silently drops edits or isn't addressed. |
-| Did every fix name its cost? | Each mitigation states the trade (e.g., "durable-before-ack adds write latency to the edit path, acceptable because we never lose a keystroke"). | Fixes listed with no trade-off; reads as a feature list, not engineering judgment. |
-
-### D: Design evolution
-
-| Self-ask | Strong signal | Red flag |
-|---|---|---|
-| Is OT-vs-CRDT named as the central hard trade? | States it crisply: **OT** = server-authoritative, lower per-op metadata, mature for text, but transform logic is intricate and needs the central order; **CRDT** = offline-/P2P-friendly, commutative merge, but **per-character metadata/tombstone bloat** and GC cost. Picks per requirement. | Picks one as "obviously better" with no trade; or can't articulate why both exist. |
-| Build vs buy? | Leans on **Yjs / Automerge / ShareDB** with a **stated prior** ("CRDT via Yjs for offline-first; I'd benchmark doc-size overhead") rather than hand-rolling convergence, and owns *that's a delegation, not a cop-out.* | Insists on hand-building the CRDT/OT engine from scratch at a Director level (wrong altitude, ignores mature ecosystem). |
-| Geographic scale of a *stateful* session? | Acknowledges the live session is **stateful and single-authority**, so you pin a doc's session to **one region** (the editors are usually co-located) and replicate the **durable log** cross-region for survivability, names the latency-vs-survivability trade. | "Put it behind a global load balancer", ignores that a single ordering authority can't be naively multi-region. |
-| Where do I delegate, with a prior? | Owns the **architecture + the OT/CRDT call**; **delegates the merge-correctness proof / library hardening** to a specialist with a stated prior, the explicit Director move. | Either personally tunes the transform function, or hand-waves the hardest correctness problem with no owner. |
+**Non-functional requirements:**
+- **Correctness under concurrency:** with multiple gates, the same spot must never be issued twice, even for the last spot. This is the invariant of the problem.
+- **Simplicity / evolvability:** smallest model that satisfies the above; documented seams where known-likely changes (pricing, floors) would attach.
+- **Auditability of money:** every ticket and payment durable, fee disputes are the operational reality of parking.
 
 ---
 
-## §D: One worked critique excerpt (the loop in action)
+## E: Estimation
 
-One pass through the loop, on the pivotal step (**H: High-level design**, the convergence call), to show the *shape* of the self-critique. Run this same first-pass → probe → red-flag → revise cycle at every step above.
+> Here is the first loud adaptation: **E nearly drops.** There is no QPS story, there is capacity sizing and an arrival rate, and the honest conclusion is that the numbers are tiny. Saying "the numbers are tiny, so the design is driven by correctness and maintainability, not throughput" *is* the Director estimation answer.
 
-**Your first-pass answer (H step):**
-> *"For convergence I'll use CRDTs, each client holds a CRDT replica of the document, edits are applied locally and broadcast to the others, and because CRDT operations are commutative they all merge to the same state automatically. No central coordination needed, which is great for offline too."*
+- **Capacity:** 4 floors × 250 spots = **1,000 spots** (say 100 small / 700 regular / 200 large).
+- **Arrival rate:** 2 entry gates × ~1 car per 15 s at rush ≈ **0.13 cars/s**, about *four orders of magnitude* below anything we'd call a throughput problem.
+- **State size:** 1,000 spots × ~100 B + ~1,000 active tickets × ~200 B ≈ **0.3 MB**. The whole live state fits in L2 cache, never mind memory.
+- **Persistence volume:** ~2,000 tickets/day × 365 × ~300 B ≈ **0.2 GB/year**. A single small relational instance yawns at this.
 
-**Self-ask (from the §C / H rubric, verbatim):** *"How do concurrent edits converge, and what does your chosen scheme cost? Name the alternative you rejected and why."*
-
-**The red flag, spotted:** This is the **"just use CRDTs, they merge" too-high** failure the rubric warns about. It's not *wrong*, CRDTs do converge, but as stated it shows no awareness of (a) the **alternative** (OT, which is what Google Docs actually used, and why a central server changes the calculus), (b) the **cost** (CRDTs carry per-character metadata, unique IDs and tombstones for deleted characters, that inflates document size and demands garbage collection), or (c) the **trade** that picks one over the other. An interviewer hears "I read that CRDTs are magic," not "I made an engineering decision." It would also quietly drop the **single-ordering-authority** benefit a central session server gives you for in-region, online editing, the common case.
-
-**The revised answer (Director altitude):**
-> *"The pivotal call is how concurrent edits converge, and there are two real contenders. **OT (operational transform)** routes every op through a **central session server** that transforms it against concurrent ops and assigns a canonical order, lower per-op metadata, battle-tested for text (Google Docs's lineage), and it gives me a single ordering authority for free, which suits the common case: a handful of editors, online, in one region. Its cost is that the transform logic is intricate and historically bug-prone, a correctness risk I'd **delegate to a specialist and verify against a proven implementation**, not hand-roll. **CRDTs** converge by commutative merge with no central authority, which is strictly better for **offline-first and P2P**, but they pay **per-character metadata and tombstones** that bloat the document and need GC. My prior: since my requirements demand robust **offline merge**, I'd lean **CRDT via a mature library like Yjs or Automerge**, and I'd benchmark the metadata overhead on large documents before committing, but I'd still front it with a **session/relay server** per document. To be precise about that server's job: it is **not** an ordering authority, a CRDT converges *regardless* of the order ops arrive in, which is the whole point, it's there for **fan-out, durability (persisting the op-log / snapshots), and presence**, with at most a display tie-break. That's exactly why the server is optional for *correctness* and required for *operability*. The guarantee I'm buying is **eventual convergence**, not linearizability, a document doesn't need linearizability, and paying for it would wreck latency. The one thing I will **not** do at this altitude is whiteboard the transform function or the tombstone-GC policy; that's the deep-dive I'd own the *decision* on and delegate the *implementation* of."*
-
-Notice what the revision added: the **rejected alternative** (OT) with its reason, the **cost** of the chosen path (metadata bloat), a **stated prior** with a benchmark gate, the correct **guarantee** (eventual convergence, not linearizability), and an explicit **delegation** of the IC-deep part. Same step, same problem, the difference between the two answers is the entire offer. That delta is what the loop exists to surface.
+**What estimation decided:** nothing scales here, so build nothing that scales, no sharding, no cache tier, no queue. The contention that matters is not rate but **occupancy**: at 99% full, every arriving car at every gate competes for the same handful of spots. Concurrency correctness is driven by *fullness*, not traffic, the bridge to the Evaluation step.
 
 ---
 
-## Key takeaways
-- **The capstone is the loop, not the answer.** Drive RESHADED end-to-end yourself, then turn the §C rubric on your own design, *"where would a Staff interviewer push, and would my answer survive it?"* That self-critique reflex is the most transferable thing here.
-- **This problem's crux is convergence**, and it's a harder *class* than anything in the canonical design problems: every prior problem tolerated staleness or a conflicted-copy; a collaborative editor must merge concurrent intention-carrying edits into **one state both screens show, zero lost keystrokes.** Name it as the defining requirement or you've already failed the R step.
-- **Let the numbers separate two systems**: presence/cursor traffic (high-volume, ~N² fan-out, loss-tolerant, *never persisted*) vs content edits (lower-volume, durable, acked, versioned), plus a huge **idle-connection** count that dwarfs the commit rate. Size them apart; route them apart.
-- **The signature altitude trap is two-sided.** Too high = "just use CRDTs, they merge" (no cost, no alternative). Too deep = whiteboarding the OT transform or tombstone GC. The Director answer: **op-log + snapshot**, a **single per-doc ordering authority**, OT-vs-CRDT named as the pivotal trade, **eventual convergence** (not linearizability) as the guarantee, and the merge-correctness proof **delegated with a stated prior** (lean on Yjs/Automerge/ShareDB).
-- **Every strong-signal marker carries a number or a named trade-off**, and so must yours. An answer with neither is a red flag in your own framework. That is the bar you're now able to hold yourself to without an answer key.
+## S: Storage
 
-> **Spaced-repetition recap:** Capstone = **you drive, you critique.** Problem: real-time collaborative editor, the one crux the canonical design problems never forced is **deterministic convergence of concurrent edits** (one doc, many cursors, zero lost keystrokes, both screens identical). Numbers split **presence (≫ volume, ~N², lossy, ephemeral)** from **edits (durable, acked, versioned)**, with **idle sockets ≫ commits**. Storage = **op-log + snapshots**, shard by **`document_id`** (one ordering authority, hot-doc risk). Pivotal call = **OT vs CRDT**, pick per requirement (offline → CRDT/Yjs; server-authoritative low-latency → OT), guarantee is **eventual convergence, not linearizability**, and you **delegate the merge proof with a prior**. Trap is two-sided: not "CRDTs just merge" (too high), not whiteboarding the transform (too deep). Run the §C rubric on your own design until the gaps close.
+> Adapted: "what persists" rather than "which distributed store." The LLD trap is dragging distributed machinery into a 0.3 MB problem.
+
+- **Live spot state: in-memory, inside the process.** It's 0.3 MB, mutated under the assignment claim, rebuildable. *Rejected: Redis or a DB as live truth*, a network hop and a failure mode on every gate operation, buying nothing at 0.13 arrivals/s.
+- **Tickets and payments: one small Postgres/MySQL instance.** Money needs durability and audit (NFR 3); a ticket row written at entry, finalized at exit, is the whole schema. *Rejected: in-memory only*, a restart that loses open tickets means free parking and fee disputes; *rejected: an event-sourced ledger*, gold-plating for 2,000 rows/day.
+- **Restart story (volunteer it):** on boot, rebuild spot occupancy from open tickets, one scan, sub-second at this size. This is why tickets, not spots, are the durable record; the spot map is derivable.
 
 ---
 
-*End of Module 6, the capstone. This capstone closes the course: the earlier modules built the vocabulary and the building blocks, the RESHADED walkthrough taught the RESHADED method, the canonical design problems ran it on sixteen problems, and the capstone hands the method back to you, to drive, and to critique. The rubric pattern here (strong-signal vs red-flag, keyed to RESHADED) is the same lens to apply to any problem you meet in the room.*
+## H: High-level design
+
+> Adapted: the "box diagram" becomes a **class-collaboration sketch plus the spot's state machine**, in LLD, the state diagram is the architecture.
+
+**The entities, locked to three, plus one value object:**
+- **`ParkingLot`**, the facade and sole mutator of spot state: owns the free-spot pools, assigns and releases spots, issues tickets.
+- **`ParkingSpot`**, id, size, status (lifecycle below).
+- **`Ticket`**, spot id, vehicle plate + type, entry time; finalized with exit time and fee.
+- **`Vehicle`**, a value object: plate + `VehicleType` enum. *Deliberately not a class hierarchy*, `Car`/`Truck`/`Motorcycle` subclasses would differ by zero methods; an enum mapping to allowed spot sizes carries all the behavior that exists. Inheritance with no behavioral variation is the canonical gold-plate.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Available
+    Available --> Held: gate assigns spot
+    Held --> Occupied: car parks and ticket issued
+    Held --> Available: assignment abandoned
+    Occupied --> Available: exit paid and spot freed
+    Available --> OutOfService: maintenance
+    OutOfService --> Available: restored
+```
+
+Two things to narrate on this diagram. First, **`Held` exists for the same reason Ticketmaster's `HELD` does**: assignment at the gate and the car physically occupying the spot are separate moments, and the spot must belong to exactly one car for that window, with a timeout so an abandoned assignment self-heals. Second, **`OutOfService`** is the cheap, real-world state juniors forget; one enum value now, or a display-board outage later.
+
+---
+
+## A: API design
+
+> Adapted: A = **class interfaces**, not REST endpoints. One short sketch, and the discipline is the same as HLD APIs: only the calls the requirements demand.
+
+```text
+interface ParkingLot
+    Ticket   park(Vehicle v)                 // assigns spot atomically
+                                             // throws LotFullForType
+    Receipt  unpark(TicketId id)             // fee = pricing.calculate(ticket)
+                                             // frees the spot
+    int      available(SpotType t)           // for the entry display
+
+interface PricingStrategy
+    Money    calculate(Ticket t)             // duration + vehicle type in,
+                                             // money out
+
+// v1 ships exactly one implementation: HourlyPricing.
+```
+
+**Design notes (each with its rejected alternative):**
+- **`PricingStrategy` is the only abstraction in v1, because R surfaced a requirement that varies** ("pricing may change"; weekend rates, lost-ticket flat fee are known-likely). The seam costs one interface. *Rejected: hardcoding the fee inside `unpark`*, the one change we're told is coming would then edit core flow logic.
+- **No `SpotAssignmentStrategy`.** No requirement says assignment policy varies, "first free compatible spot" is the spec. *Rejected: a pluggable assigner interface*, that's the same Strategy pattern, but applied to a requirement nobody stated. **Same pattern, opposite verdict, and the difference is the requirement.** That sentence is the lesson.
+- **`park` throws on full rather than returning a nullable spot**, a full lot is a normal business outcome the gate must handle explicitly, not a null to forget to check.
+- **`unpark` takes the ticket, not the spot**, the ticket is the durable record and the unit of payment audit; the spot is derivable from it.
+
+<details>
+<summary>Go deeper, fuller class listing with the concurrent free-list (IC depth, optional)</summary>
+
+```java
+enum SpotType { SMALL, REGULAR, LARGE }
+enum VehicleType {
+    MOTORCYCLE(EnumSet.of(SMALL, REGULAR, LARGE)),
+    CAR(EnumSet.of(REGULAR, LARGE)),
+    TRUCK(EnumSet.of(LARGE));
+    final EnumSet<SpotType> fits;
+}
+
+final class ParkingSpot {
+    final String id; final SpotType type;
+    final AtomicReference<SpotStatus> status =
+        new AtomicReference<>(AVAILABLE);     // CAS target
+}
+
+final class ParkingLotImpl implements ParkingLot {
+    // one lock-free pool per spot type; poll() is atomic
+    private final Map<SpotType, ConcurrentLinkedQueue<ParkingSpot>> free;
+    private final PricingStrategy pricing;
+    private final TicketStore tickets;        // backed by Postgres
+
+    public Ticket park(Vehicle v) {
+        for (SpotType t : v.type.fits) {      // smallest-fit first
+            ParkingSpot s = free.get(t).poll();   // atomic claim
+            if (s != null) {
+                s.status.set(HELD);
+                Ticket tk = tickets.open(v, s, now());
+                s.status.set(OCCUPIED);
+                return tk;
+            }
+        }
+        throw new LotFullForType(v.type);
+    }
+
+    public Receipt unpark(TicketId id) {
+        Ticket t = tickets.close(id, now());
+        Money fee = pricing.calculate(t);
+        ParkingSpot s = t.spot();
+        s.status.set(AVAILABLE);
+        free.get(s.type).offer(s);            // return to pool
+        return new Receipt(t, fee);
+    }
+}
+```
+
+The correctness hinges on one line: `poll()` on `ConcurrentLinkedQueue` is an atomic dequeue (Michael-Scott CAS loop internally), two gate threads polling the last element get one spot and one `null`; no spot is ever handed out twice. The `Held` window between `poll()` and ticket persistence is bounded by a timeout sweep that `offer`s abandoned spots back. Note what's *absent*: no `synchronized` on the happy path, no global lock, no per-spot mutex map.
+
+</details>
+
+---
+
+## D: Data model
+
+> Adapted: the **entity model**, fields, relationships, and which record is authoritative.
+
+- **`spots`**, `spot_id`, `floor`, `type`, `status`. In-memory live; persisted only as static layout (status rebuilt from open tickets on restart).
+- **`tickets`**, `ticket_id`, `plate`, `vehicle_type`, `spot_id`, `entry_time`, `exit_time?`, `fee?`, `paid?`. **The authoritative, durable record.** Open ticket ⇒ spot occupied; that single derivation rule is the whole consistency model.
+- **Relationships:** Ticket → Spot is many-to-one over time, one-to-one while open. A partial unique index on `spot_id WHERE exit_time IS NULL` makes "one open ticket per spot" database-enforced, the persistence-layer twin of the in-memory atomic claim. Say it out loud: **the invariant is enforced twice, in memory for speed and in the store for truth**, defense in depth for the only correctness rule the system has.
+
+---
+
+## E: Evaluation
+
+> Adapted, and this is where the Director answer is won: stress your own design **unprompted**. The bottleneck here isn't load, it's a race. Volunteering it is the single strongest signal in the interview.
+
+**The race, stated before they ask:** *"Two cars at two entry gates, one regular spot left. Both gate threads read 'one available,' both assign it, two tickets, one spot, an argument in lane 3. Two gates make this physically concurrent, so assignment must be atomic."*
+
+**Three viable fixes, name all three, pick one, defend it:**
+
+1. **Coarse lock:** one mutex around `park`/`unpark`. Trivially correct, fully serialized. *Quantify before sneering:* at 0.13 arrivals/s with a ~10 µs critical section, contention is ~0.0001%, a coarse lock is **not wrong here**, and saying so is itself a restraint signal.
+2. **Per-spot CAS:** `status.compareAndSet(AVAILABLE, HELD)`; loser retries the next spot. Maximal concurrency, but near-full, losers scan many spots retrying: O(n) under exactly the contention you built it for.
+3. **Concurrent free-list per spot type**, a lock-free queue of available spots; atomic `poll()` to claim, `offer()` to release. The claim **is** the dequeue: one winner by construction, losers get `null` in O(1) and fall through to the next size or "full."
+
+**Decision: the concurrent free-list (option 3).** It makes the invariant structural, a spot is claimable *because* it's in the pool, rather than guarded. *Rejected: the coarse lock*, not on throughput (the math says it survives) but because the free-list is the same line count with no shared bottleneck to reason about; *rejected: per-spot CAS*, because it degrades precisely at high occupancy, the only contention regime this system has. The `Held` window between claim and ticket persistence gets a timeout sweep, so a gate crash mid-assignment self-heals, lazy reclaim, exactly as Ticketmaster's holds.
+
+**Re-check the other NFRs:** money durable (tickets in Postgres, fee computed at close); restart rebuilds spot state from open tickets; the DB partial index backstops the in-memory claim. The design holds.
+
+<details>
+<summary>Go deeper, why the lock-free queue wins at high occupancy (IC depth, optional)</summary>
+
+The failure mode of per-spot CAS is the **retry storm at 99% full**: a gate thread scans the spot array CAS-ing each `AVAILABLE` it sees; with 5 free spots in 1,000 and 4 competing threads, most CAS attempts hit spots another thread just took, and each loser rescans. Expected work per park approaches O(n) exactly when the lot is nearly full, the regime the system lives in at rush hour.
+
+The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head pointer is the single CAS target, and a failed CAS means another thread *succeeded*, the loser's very next `poll()` attempt sees the new head. Claims are O(1) amortized regardless of occupancy, and "empty queue" is an immediate, definitive "no spots of this type" rather than the end of a scan. The structural point generalizes: **when contenders should fail fast and fall back (next size up, "lot full"), put the contended resource in a pool with an atomic take, rather than guarding each resource and making contenders hunt.** Compare Ticketmaster's seat CAS, where contenders *want* a specific seat and per-row CAS is right, the access pattern, not fashion, picks the primitive.
+
+</details>
+
+---
+
+## D: Design evolution
+
+> The gold-plating test, inverted: everything you correctly refused to build in v1, you now show you knew how to build. Restraint is only credible if the evolution is crisp.
+
+- **Multi-floor with per-floor displays and nearest-to-elevator assignment:** *now* `Floor` earns existence (it owns per-floor pools and a display), and *now* assignment policy varies by requirement, so `SpotAssignmentStrategy` appears, justified by the same rule that excluded it from v1. The seam was foreseen; the abstraction waited for its requirement.
+- **Pricing changes (weekend rates, lost ticket, EV surcharge):** new `PricingStrategy` implementations behind the existing interface, **zero core changes**, the payoff of the one abstraction v1 did buy.
+- **Gate/sensor hardware:** wrap it behind thin ports (`GateController`, `SpotSensor`) so vendor SDKs never leak into domain logic. *Delegate it:* "the embedded team owns gate firmware behind those two interfaces; my prior is dumb hardware + smart server, sensors report, the server decides, because pushing decisions into firmware makes every pricing change a fleet update."
+- **From one lot to a 50-lot city chain:** the moment **LLD turns back into HLD**, say so explicitly. S grows back (a multi-tenant store, lots as partitions), E grows back (consumer-app occupancy polling is a read-QPS story), availability gets a cache tier, cross-lot search is a new product. The free-list remains correct *per lot*, concurrency was always per-facility, but the system around it becomes a system-design-shaped problem.
+
+**Cost/ops dimension (own it even in LLD):** v1 is one service instance + one small Postgres, **tens of dollars a month; on-call is "is the process up."** The gold-plated version costs the same to *run* but more to *change*, carried forever in maintenance, onboarding, and test surface, and change-cost is the budget a Director actually protects.
+
+---
+
+## Trade-offs table: the pivotal decisions
+
+| Decision | Option A | Option B | Option C | Use when... |
+|---|---|---|---|---|
+| **Last-spot concurrency** | **Coarse lock on park/unpark** | **Per-spot CAS with scan-retry** | **Concurrent free-list per type, atomic poll** | **A** is defensible at gate-scale arrival rates (quantify it!). **B** when contenders want one *specific* resource (Ticketmaster seats). **C** (our choice) when any resource of a type will do and losers should fail fast in O(1). |
+| **Where patterns go** | **No abstractions, hardcode all policy** | **Strategy only where a requirement varies, pricing** | **Strategy/Factory/Observer everywhere "for flexibility"** | **A** for a true throwaway. **B** (our choice), each abstraction names the requirement that bought it. **C** is the over-engineering failure this interview exists to catch. |
+| **Vehicle modeling** | **Enum + size-compatibility map** | **Class hierarchy Car/Truck/Motorcycle** | **Full type registry with metadata config** | **A** (our choice) while types differ only by data. **B** only when behavior genuinely diverges per type. **C** only for a platform where operators define vehicle types at runtime. |
+
+---
+
+## What interviewers probe here (Director altitude)
+
+- **"Walk me through your classes."**, *Strong:* three entities + one value object, each justified by a requirement; cuts stated out loud. *Red flag:* ten classes in five minutes, `AbstractSpotFactory` before any clarifying question.
+- **"Two cars, one spot left, two gates, what happens?"**, *Strong:* already covered it unprompted; names the atomic claim, the `Held` window, timeout reclaim, the DB partial index backstop. *Red flag:* "I'd add synchronized everywhere," or surprise that concurrency exists in an OOD question.
+- **"Why is pricing an interface but spot assignment isn't?"**, *Strong:* "Pricing variation is a stated requirement; assignment variation isn't. Same pattern, opposite verdict, the requirement decides, not the pattern catalog." *Red flag:* can't articulate why one abstraction lives and the other doesn't; "Strategy is best practice."
+- **"Would a global lock be wrong?"**, *Strong:* quantifies, ~0.13 arrivals/s vs a microsecond critical section, contention ~zero, "not wrong, but the free-list is no more code and has no shared bottleneck; I'd take it." *Red flag:* reflexive "locks don't scale" with no numbers (the unquantified-scaling tell, in miniature).
+- **"What would you delegate?"**, *Strong:* hardware integration behind ports with a stated prior (dumb hardware, smart server); payments to the vendor; keeps the invariant and the seams. *Red flag:* wants to personally design the gate firmware protocol.
+
+---
+
+## Common mistakes
+
+- **Class explosion before scope lock**, modeling valet, EV charging, and reservations nobody asked for. Scope-cutting is the first scored behavior; skipping it loses the interview in minute two.
+- **Pattern-first design**, Singleton/Factory/Observer named before requirements are. Every abstraction must point at the requirement that bought it; pricing earns Strategy here, nothing else does.
+- **A `Vehicle` inheritance tree with no behavioral difference**, subclasses that differ only by data are an enum wearing a costume.
+- **Ignoring concurrency until prompted**, two gates make the race physical; the last-spot double-assignment is the problem's one real invariant, and volunteering it is the strongest signal available.
+- **No durable ticket record**, in-memory-only tickets mean a restart loses open sessions and every fee becomes a dispute; money always gets a durable, auditable row.
+
+---
+
+## Interviewer follow-up questions (with model answers)
+
+**Q1. Two cars hit two entry gates simultaneously; one compatible spot remains. Walk me through exactly why only one gets it.**
+> *Model:* Spot assignment is an atomic dequeue from a lock-free free-list per spot type, both gate threads call `poll()`; the queue's internal CAS guarantees one gets the spot and the other gets `null`, falling through to the next compatible size, then "lot full." There is no check-then-act window because the claim *is* the removal. The claimed spot sits `Held` until the ticket persists, with timeout reclaim if the gate crashes mid-assignment, the `AVAILABLE → HELD → OCCUPIED` shape of a Ticketmaster seat, shrunk to one process. Defense in depth: a partial unique index on open tickets per spot makes the database reject a double-issue even if the in-memory layer ever regressed.
+
+**Q2. Product adds weekend rates and a lost-ticket flat fee. How much of your design changes?**
+> *Model:* Two new `PricingStrategy` implementations and a selector, zero changes to `ParkingLot`, spots, or tickets. That's deliberate: R surfaced "pricing may change" as the one axis of stated variability, so v1 spent its single abstraction there. The contrast: had you asked me to change *assignment* policy, I'd be editing core code, because no requirement justified that seam, and I'd rather pay one small refactor later than carry speculative interfaces on every axis forever. Restraint plus one cheap refactor beats ten abstractions, nine never used.
+
+**Q3. We're now a 50-lot city-wide operator with a consumer app showing live availability. What breaks?**
+> *Model:* The moment the problem crosses the facility boundary it stops being LLD, and I'd say that out loud before redesigning. Per-lot concurrency is unchanged (the free-list was always per-facility). The letters that nearly dropped grow back: S becomes a multi-tenant store partitioned by lot; E becomes a read-QPS estimate, 50 lots, ~200K app users polling, ~100-500 reads/s, so availability gets a cache/push tier fed by occupancy events, eventual by design since a 5-second-stale count is harmless. Money and tickets stay strongly consistent per lot; cross-lot search is a new product surface I'd scope separately. The Director point: know which layer you're in, and rerun the spine when you change layers.
+
+**Q4. You used one design pattern. Defend not using more.**
+> *Model:* Patterns are amortized over requirement variation, and this problem states exactly one varying axis: pricing. Strategy there costs one interface and pays on the first rate change. A `SpotAssignmentStrategy`, vehicle factories, or an observer bus would each add a seam with no requirement behind it, pure carrying cost in tests, onboarding, and indirection. My rule, and what I hold design reviews to: **every abstraction names the requirement that bought it.** When floors and display boards arrive, assignment policy becomes a stated requirement and the strategy appears then, foreseen is not the same as built.
+
+---
+
+### Key takeaways
+- **Parking Lot is a restraint test wearing an OOD costume.** Lock scope to ~3 entities (Lot, Spot, Ticket + a Vehicle value object), state the cut list, and let the interviewer watch you *not* build the airport.
+- **Narrating the RESHADED adaptation is itself teaching:** E collapses to capacity math (1,000 spots, 0.13 arrivals/s, 0.3 MB state, nothing scales, so build nothing that scales); A = class interfaces; H = the spot state machine; D = the entity model with the ticket as durable truth.
+- **One pattern, one requirement:** pricing varies by stated requirement → `PricingStrategy`; assignment doesn't → no strategy. Same pattern, opposite verdicts; the requirement decides.
+- **Volunteer the last-spot race.** Atomic claim via a concurrent free-list (`poll()` is the claim), a `Held` window with timeout reclaim, a DB partial index as backstop, Ticketmaster's seat machine at micro scale. Quantify why even a coarse lock survives before rejecting it.
+- **Evolution proves the restraint was judgment, not ignorance:** floors bring `Floor` + assignment strategy *with* their requirements; hardware hides behind ports (delegate firmware; prior: dumb hardware, smart server); 50 lots turns the problem back into system design, say so and rerun the spine.
+
+> **Spaced-repetition recap:** Parking Lot = the #1 LLD curveball, scored on **restraint**. Three entities (Lot/Spot/Ticket), enum not vehicle hierarchy, cuts stated aloud. E drops to capacity math, nothing scales. One Strategy (pricing, requirement varies), no others. Volunteer the race: two gates, last spot → atomic free-list claim, `Held` + timeout, partial-index backstop. Evolution: floors → `Floor` + assignment strategy *then*; chain of lots → it's system design again.
+
+---
+
+*End of Lesson 6.1. The parking lot inverts the HLD instinct: there the danger was designing too small for the load; here, too big for the requirement. The atomic claim carries over from Ticketmaster at process scale, knowing which RESHADED letters grow and which collapse is the transferable skill.*

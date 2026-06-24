@@ -1,292 +1,175 @@
 ---
-title: "9.8 — Top-K / Trending / Leaderboard"
-description: The pure altitude test, top-K heavy hitters and real-time leaderboards are the same precision-vs-cost-vs-freshness problem, and a Director frames exact-Redis vs approximate-sketch vs batch in five minutes instead of drowning in sketch math.
+title: "9.8 — LLM Cost & Latency Optimization"
+description: The levers that decide whether an AI feature is economical — prompt and semantic caching, model routing and cascades, distillation, batching, streaming, and token-budget discipline — each with the quality or latency it trades away.
 sidebar:
   order: 8
 ---
 
-> **Why this gets asked at Director level:** Top-K and leaderboards look like two unrelated problems and are really one, *who are the heavy hitters, ranked, right now?*, under three knobs: precision, cost, freshness. The trap is that the math is seductive. An IC dives into Count-Min Sketch row/column tuning or sorted-set memory layout and never makes a decision; a Director interrogates whether **exact rank is even a requirement**, frames three options in five minutes, and picks one against the numbers. Meta asks the "top-10 songs in the last hour" variant; YouTube's "top-K most-viewed" is on Meta's most-asked list; gaming leaderboards show up at Riot, Blizzard, Strava, and Duolingo. The canonical failure is computing a sketch the question didn't need, or quoting "just use a Redis sorted set" without the memory bill.
-
 ### Learning objectives
-
-1. See **trending/top-K and the leaderboard as one problem**, *ranked heavy hitters over a window*, whose only real axes are **precision, cost, and freshness**, all set in the Requirements step.
-2. Interrogate whether **exact global rank is a requirement** at all; default to **exact top-N + percentile buckets** for the tail, and carry the memory math (~1 GB per 10M members in a sorted set).
-3. Pick between **exact (Redis sorted sets)**, **approximate (Count-Min Sketch + heap)**, and **batch (MapReduce/stream)** from window size, cardinality, and lag tolerance, not from taste.
-4. Apply **CMS** here as a building block (mechanics stay in the count-min-sketch building block); reuse sharded-counter reasoning for the write-hot score path.
-5. Operate at Director altitude: quantify the memory/compute bill, name where you'd delegate sketch tuning, and defend the freshness/cost dial.
+- Build the **cost model** from tokens — `cost ≈ (input × in_price) + (output × out_price)` — and explain why **output dominates**, why long prompts inflate the *input* bill on **every** call, and why an unprofitable-per-user feature scales into a *bigger* loss.
+- Build the **latency model** — `total ≈ TTFT + output_tokens × TPOT (+ retrieval/tool round-trips)` — and map each lever to the term it attacks.
+- Choose among the **caching levers** — prompt caching (shared-prefix, cuts input cost up to ~90%), exact response cache, and **semantic cache** (cheap but a correctness risk) — and gate the dangerous one.
+- Apply **model routing / cascades** (cheap default → escalate on low confidence) to cut cost **5–10×**, and bound the quality loss with eval; know when to reach instead for **distillation**, **quantization**, and **batching**.
+- Treat unit economics (`$/request`, `$/active-user`) and **per-tenant budgets** as a first-class design input, and name how you stop a runaway bill.
 
 ### Intuition first
+An LLM feature is a **taxi with the meter always running**. Every token in and every token out is a coin dropped in the meter, and the meter never stops to admire the scenery. Your job is two things at once: **spend the fewest coins for the quality the trip actually needs**, and **make the ride *feel* short** even when the route is long.
 
-Picture two scoreboards. The first is a **stadium leaderboard**: a few thousand named athletes, ranked exactly top to bottom, updating as scores come in. The second is the **trending board at a news kiosk**, "the 10 hottest stories right now?", out of *millions* of articles, almost all of which nobody is reading. Same shape: *rank the heavy hitters over a recent window.* But the second board has a tell most people miss: **you do not need to rank article #4,000,000.** Nobody asks for the exact rank of a story with three views. You need the **top 10 dead-on**, and for everything else a rough bucket ("popular / niche / cold") is plenty.
+That single image carries the whole lesson. You don't put every passenger in the luxury car — most trips are short and a cheap car is fine (**routing**: small model by default, big model only when the trip is genuinely hard). You don't re-explain the destination every time if you just took someone there (**caching**: don't re-pay to send the same prefix or re-answer the same question). You keep the conversation short and to the point so the meter ticks less (**token discipline**: shorter prompts, capped output, trimmed history). And you talk to the passenger as you drive so the wait doesn't feel dead (**streaming**: first token under a second changes the *felt* latency without changing the fare). Every one of these saves coins or time — and **every one trades away a little quality, freshness, or latency.** The Director skill is naming which.
 
-That is the entire lesson. When the population is small and bounded, a game's ranked players, keep an exact sorted structure and pay for it. When the population is huge and the tail is worthless, trending hashtags, hot URLs, top songs, keep an **exact small head and an approximate tail**: a tiny sketch counts frequencies cheaply, a small heap holds the current top-K. The IC mistake is treating "rank everything exactly" as the requirement, then heroically scaling a structure that costs ~1 GB per 10M members. The Director move is asking, *out loud, in the first two minutes:* "Exact rank for the whole population, or exact top-N and buckets for the rest?" The answer collapses the design.
+### Deep explanation
 
-Hold three ideas: **trending and leaderboard are the same ranked-heavy-hitters problem; the requirement is rarely "exact rank for everyone"; and precision, cost, and freshness are one coupled dial you set in R, not three.**
+**The cost model — and why output is the lever.** The bill for one call is roughly:
 
----
+```
+cost ≈ (input_tokens × input_price) + (output_tokens × output_price)
+```
 
-## R: Requirements
+Two facts decide everything downstream. First, **output tokens are typically priced 3–5× higher than input tokens** (the decode phase runs the full model once per emitted token; prefill batches the input). So a 200-token answer can cost more than a 2,000-token prompt. **Output is the lever you most directly control** — cap it, structure it, stop padding it. Second, **long prompts inflate the input cost on *every single call*.** Chat history and RAG context are re-sent each turn because the model is stateless; a 20k-token retrieved context isn't a one-time cost, it's a tax on every message in the session. The Director-altitude statement: *you are not optimizing a model, you are optimizing tokens — and the two biggest token sinks are output you didn't cap and context you re-send.*
 
-> Pin the scope, and, because this is an altitude test, spend R interrogating **how exact** and **how fresh** the ranking must be. That question, not any data structure, decides the architecture.
+The third fact bites at scale: **cost scales linearly with usage.** There's no flat fee that amortizes — 10× the traffic is 10× the bill. So a feature that loses **$0.30/user/month** isn't a rounding error you'll grow out of; growth makes the hole deeper. **You design unit economics — `$/request`, `$/active-user` — up front, the way you'd size QPS and storage**, because "we'll optimize later" means "we'll discover later that the feature can't be profitable."
 
-**The merge, stated up front (the framing that earns the level):** "Trending / top-K heavy hitters" and "real-time leaderboard" are the **same problem**, a ranked list of the highest-scoring entities over a window. They differ on exactly two requirement numbers, and I drive the whole design off them: **cardinality** (a game ranks ~10-50M players, bounded; trending spans ~billions of hashtags/URLs/songs, almost all cold) and **precision of rank** (exact total order, or exact top-N plus coarse buckets for the tail).
+**The latency model.** Felt slowness has its own decomposition:
 
-**Clarifying questions I'd ask (with assumed answers):**
+```
+total_latency ≈ TTFT + (output_tokens × TPOT) + retrieval/tool round-trips
+```
 
-- *Exact rank for every entity, or exact top-K and approximate tail?* → **Top-K exact; tail bucketed.** The load-bearing answer. "Player #4,000,001 vs #4,000,002" almost never matters; "top 100 / top 1%?" does.
-- *Window, all-time, or rolling?* → **Both exist.** Leaderboard is all-time or per-season; trending is a **rolling 1-hour / 24-hour window**, and the window is what makes trending hard, since old events must age out.
-- *How fresh?* → **Seconds of lag is fine** for trending; near-real-time for live ranked play. A dial, not a constant.
-- *Read:write shape?* → **Write-heavy ingest, read-heavy board.**
+`TTFT` (time to first token) is dominated by prefill — processing the prompt — so it scales with **prompt length**. `TPOT` (time per output token) is the decode cadence, so total decode time scales with **how much the model says**. Retrieval and tool calls add round-trips on top. Each lever below attacks one or both terms: prompt caching cuts TTFT; output caps cut the `output × TPOT` term; routing to a smaller model cuts TPOT; streaming attacks *perceived* TTFT without touching the real numbers. **Name which term a lever moves** — that's the difference between "make it faster" and an engineering plan.
 
-**Functional requirements:**
+**Caching levers — three kinds, three risk profiles.**
 
-1. **Ingest** score/score-delta or count events at high rate.
-2. **Top-K query:** return the K highest-ranked entities over the window.
-3. **Rank/score lookup:** "what's my rank and score?" (leaderboard case).
-4. **Window roll:** trending must reflect a *recent* window, aging out old events.
-5. **Around-me / percentile:** "the 10 players around me," or "you're in the top 2%."
+- **Prompt caching (shared-prefix cache).** The provider caches the *prefix* of your prompt — system prompt, few-shot examples, a long pasted document — so repeat calls that share that prefix skip re-processing it. On a cache hit, the cached input is billed at roughly **10% of the normal input price (up to ~90% off that portion)** and TTFT drops because prefill is skipped for the cached span. This is **near-free quality-wise** — the model sees identical tokens — so it's the first lever to reach for whenever a large, stable prefix repeats (a fixed system prompt across all users, a document re-queried many times, an agent loop re-sending the same tool definitions). The trade-off is mild: the cache has a short TTL (often ~5 min) and a small write cost on the miss, so it only pays when the prefix is **reused soon and often**; you also must keep the prefix **byte-stable** (put the variable part last) or you never hit. *Rejected alternative:* re-sending the full prompt uncached — simpler, but you pay full input price and full TTFT on a prefix that never changed.
+- **Exact response cache.** A plain key-value cache (Redis) keyed on the normalized request → store the response; identical requests are served for ~0 cost and ~0 latency. **No correctness risk** because the input is identical. The trade-off is **hit rate**: natural-language inputs rarely match exactly, so this only helps for constrained, repeated queries (a fixed FAQ, a canned classification). *Rejected alternative:* no cache — correct but pays for provably-identical work.
+- **Semantic cache.** Embed the incoming query; if it's **embedding-similar** to a previously answered query (cosine above a threshold), serve the *stored* answer instead of calling the model. Big savings — it catches paraphrases the exact cache misses — but it is the **one caching lever that can return a *wrong* answer**, because "similar enough" is a judgment call. Two different questions can sit close in embedding space ("how do I cancel" vs "how do I *un*cancel"). You **gate it hard**: a conservative **similarity threshold**, a **freshness/TTL** policy, and a hard rule — **never for personalized or changing answers** (account balances, "my orders", anything user- or time-specific), because a neighbor's cached answer is then not just stale, it's *someone else's*. *Rejected alternative:* exact cache only — safe but misses paraphrases; semantic cache trades a bounded correctness risk for a much higher hit rate, and you must say so out loud.
 
-**Explicitly CUT (scoping is the signal):** anti-cheat/score validation (delegated to trust-and-safety), social graph, notifications, historical replay of past leaderboards, cross-game federation. I scope to **ingest → rank → top-K + rank/percentile lookup → window roll.**
+**Model routing and cascades — usually the biggest single win.** Most traffic is easy; a minority is hard. A **router** sends each request to the cheapest model that can handle it: a small/cheap model by default, **escalating to a larger model only on low confidence or high complexity.** The escalation signal is either a cheap upfront **classifier** (length, topic, difficulty heuristic) or **self-eval** (the small model answers; a quick check — confidence score, a validator, a "can you answer this confidently?" gate — decides whether to retry on the big model). When the cheap model handles the majority of traffic, the blended cost drops **5–10×**, because the expensive model now runs on the 10–20% of requests that actually need it rather than 100%.
 
-**Non-functional requirements:**
+The trade-off is **quality on the routed-down traffic** plus the **router's own cost and its misroute rate** — every request the router sends to the small model that the small model botches is a quality regression you shipped. So **a cascade is only safe behind an eval harness**: you measure quality on each tier, set the escalation threshold to bound the regression, and re-check it when models change. *Rejected alternative:* one big model for everything — simpler, uniformly high quality, and 5–10× the bill; you reject it once volume makes that bill the constraint.
 
-- **Tunable precision**, exact top-K, with a requirement-driven choice of how exact the tail is. The single most important NFR here.
-- **Freshness within a stated budget**, seconds for trending; near-real-time for live ranked play.
-- **Write-throughput tolerance**, absorb a hot key (a viral hashtag, a streamed top song) without a single-row write wall.
-- **Bounded memory/cost**, must not silently grow to "~1 GB per 10M × every window × every shard."
-- **Availability**, the board is AP; a stale-by-seconds top-K is fine. *Not* a strong-consistency problem (contrast the strong-consistency problems).
+**Distillation and smaller fine-tuned models.** When a task is *narrow* (one classification, one extraction, one format), you don't need a generalist. **Distill** — use a large model to generate training data, then fine-tune a small model to match it on that task — and you get a model that's a fraction of the cost and latency *for that task*, often matching the big model's quality on it. The trade-off: it's **brittle outside its task** and carries a **training/maintenance cost** (you own a model now, with its own eval and refresh cycle). Use it for the high-volume narrow path; keep the generalist for the long tail.
 
-**The load-bearing tension, named:** **exact-and-expensive vs 99%-accurate-and-cheap.** Exact rank for a bounded population is a solved problem (a sorted set) at linear memory. Exact rank for a billion-key trending stream is *not* worth its cost, the requirement was never "rank the tail." The whole design hinges on refusing to over-specify precision.
+**Quantization and batching — serving-side levers.** **Quantization** (serving the model at lower numeric precision) cuts memory and speeds inference for a small, measured accuracy cost — relevant when you **self-host** (it doesn't apply to a provider API you don't control). **Batching** is the throughput lever: for any work that isn't real-time — overnight summarization, bulk classification, embedding a corpus — provider **async/batch APIs run ~50% cheaper** than synchronous calls, because the provider schedules them when it has spare capacity. On self-hosted serving, **larger batch sizes raise throughput-per-dollar** (more tokens per GPU-second), trading per-request latency for fleet efficiency. The trade-off is explicit in the name: **batch is not interactive** — you accept minutes-to-hours of latency in exchange for the discount, so it's for pipelines, never the user-facing path.
 
----
+**Token discipline — the unglamorous lever that compounds.** Every token you don't send or generate is saved on **every call, forever**:
 
-## E: Estimation
+- **Shorter system prompts.** A 1,500-token system prompt re-sent on every turn of a million-turn-a-day product is pure recurring cost; trim it to the essentials and pin the stable part behind prompt caching.
+- **Output caps + structured output.** Set `max_tokens` and ask for structured/JSON output so the model stops instead of rambling — this attacks the most expensive term (output × out_price) directly.
+- **Trim and compress context.** Don't re-send the entire chat history every turn; window it, or summarize older turns into a compact running summary. For RAG, **retrieve fewer, better chunks** — a reranker lets you send the top 3 instead of the top 20, cutting input tokens *and* improving quality (less "lost in the middle").
 
-> **RESHADED adaptation:** Estimation is the *decision driver* here, not background sizing. The three numbers from R, **window size, cardinality, lag tolerance**, pick the approach directly. I compute the memory cost of "exact everything" and let it disqualify itself.
+The trade-off for aggressive trimming is **dropped context** — cut too much history or too many chunks and the model loses the thread or the grounding facts. The discipline is to trim against an eval, not by feel.
 
-**Leaderboard (bounded cardinality), the sorted-set bill.** A Redis sorted set stores, per member, the ID + score + skiplist/hash overhead, ~100 B. So `10M × 100 B ≈ 1 GB` per leaderboard. **The number to carry: ~1 GB per 10M members.** At 50M, ~5 GB, one beefy node or a few shards. **Bounded and cheap; exact rank is affordable here.** Writes: 1M concurrent players posting every ~10 s ≈ **100K updates/s**, which exceeds one `ZADD` key's ceiling under a hot board, so writes shard (below), but the *data* fits trivially in memory.
+**Streaming — a latency *perception* lever, not a cost one.** Streaming tokens as they're generated **does not change the bill or the total generation time** — the same tokens are produced. What it changes is **perceived latency**: the user sees the first token in **under a second** and reads along as the rest arrives, instead of staring at a spinner for the full `output × TPOT` window. For any interactive surface (chat, copilots), streaming is the cheapest UX win available — it makes a 4-second answer feel instant. The "trade-off" is only that it complicates the client and that you can't post-process a complete response before showing it (e.g., a guardrail that needs the whole output); for those you buffer-then-stream or accept non-streaming.
 
-**Trending (huge cardinality), why exact disqualifies itself.** Keep an **exact** count per key over a 1-hour window across **1B distinct keys**: `1B × ~50 B ≈ 50 GB` *per window*, write-hot and rolling, times replicas. The kicker: **you discard ~99.9999% of it**, you only return the top ~100. Paying 50 GB to compute a list of 100 is the IC trap. A **Count-Min Sketch** holds frequency estimates in **fixed sub-linear space, tens of MB regardless of cardinality**, paired with a **min-heap of size K**. `~MBs + a 100-entry heap` replaces 50 GB, and the one-sided error (overestimates only) means a false-high on a *cold* key still can't crack the top-100.
+**FinOps — making the bill governable.** Because cost scales with usage and a single bad prompt-loop can melt a budget, you instrument unit economics as a first-class metric: **`$/request`, `$/active-user`, cost per feature and per tenant.** You set **per-tenant token budgets / quotas** so one customer (or a runaway agent loop) can't consume the whole bill, and you **alert** on cost-per-user drift the way you'd alert on latency. The mechanism that *stops* a runaway bill lives centrally: an **LLM gateway** that enforces budgets, rate-limits, caps, and kill-switches across every feature, so the control isn't reimplemented per service. The full FinOps/governance practice is the AI-governance lesson's subject.
 
-**Ingest rate.** A global trending firehose peaks at `~1M events/s`. The CMS update is O(d) hashes, the heap touch O(log K), both cheap, both shardable. A single hot key (one viral hashtag) is a **write-hot counter**, the exact sharded-counter problem; shard it or let per-shard sketches absorb it, then merge.
+<details>
+<summary>Go deeper — caching mechanics, router signals, and batch arithmetic (IC depth, optional)</summary>
 
-**What estimation decided:** bounded cardinality → **exact sorted set at ~1 GB/10M**. Huge cardinality, worthless tail → **exact is 50 GB discarded**, so **CMS + heap (MBs)**. Window and lag tolerance decide **live** vs **micro-batch**. The numbers, not preference, draw every line.
+- **Prompt-cache hit rules:** the cache matches a **prefix**, byte-for-byte, up to the first divergence — so a single changed token early in the prompt invalidates everything after it. Order prompts **stable → variable**: system prompt and few-shot first (cacheable), user turn last. Providers expose `cache_read_input_tokens` vs `cache_write_input_tokens` in usage; the write (miss) is slightly *more* expensive than a normal token, so the break-even is roughly **>1 reuse within the TTL**.
+- **Semantic-cache thresholds:** cosine similarity thresholds around **0.92–0.97** are common starting points, tuned on a labeled set of "should-have-hit / should-have-missed" pairs. Always store the *original* query alongside the answer so you can audit false hits, and key the cache by tenant/locale so you never serve across isolation boundaries.
+- **Router signals:** cheap classifiers can be a fine-tuned small model, a logistic-regression head on the query embedding, or pure heuristics (token count, presence of code, named-entity density). **Self-eval cascade** (answer-then-verify) costs an extra small-model call on the escalated fraction; budget for it. Power-of-two-style routing isn't relevant here — the decision is quality-gated, not load-gated.
+- **Batch economics:** the ~50% discount is for **non-interactive** completion windows (often up to 24h). For self-hosted, throughput rises with batch size until you hit memory or the KV-cache ceiling; continuous/in-flight batching (vLLM-style) packs new requests into the batch as others finish, keeping GPU utilization high without forcing a fixed window.
+- **Output-cap caveat:** an aggressive `max_tokens` can **truncate** a needed answer mid-structure; pair caps with structured output and validate completeness, or the "saving" is a broken response you retry (paying twice).
 
----
+</details>
 
-## S: Storage
-
-> Two regimes, picked by cardinality. Same query, different store, that *is* the lesson.
-
-
-**1. Bounded leaderboard → in-memory sorted set (exact).** A **Redis sorted set** (skiplist + hash), sharded for write throughput: `ZADD` on update, `ZREVRANGE 0 K` for top-K, `ZREVRANK` for "my rank," `ZRANGEBYSCORE` for "around me", all O(log N) or better, exact, ~1 GB/10M. The requirement (bounded population, exact rank) and the store match perfectly. *Rejected, relational `ORDER BY score LIMIT K`:* every write churns the index and top-K hammers the DB under read load; the sorted set is purpose-built and in-memory. *Rejected, Cassandra/wide-column:* no native ranked-range read.
-
-**2. Huge-cardinality trending → sketch + heap (approximate).** A **Count-Min Sketch** for frequency estimates + a **min-heap of size K** for the current leaders (both standard tools); per-shard sketches **merge** by cell-wise add at query time. *Rejected, an exact per-key counter map:* 50 GB/window for a discarded list of 100, the over-engineering this question screens for.
-
-**3. The durable event log (truth, for reconciliation).** **Kafka** holds the raw stream. The live board is a fast, loss-tolerant projection; a board that must be *exactly* reconciled (tournament payout) is recomputed from the log in **batch**, the same display-vs-billing split as the YouTube view count. Fast board for display; slow exact pipeline for money.
-
-**Window state** (rolling trending) lives as **bucketed sub-sketches**, one CMS per minute, summed over the window and dropped as they age (Data model, below).
-
----
-
-## H: High-level design
-
-> The shape to make visible: a **streaming ingest tier** fanning events into **per-shard rankers**, and a **query/merge tier** assembling the top-K, exact via sorted sets for bounded populations, approximate via sketch+heap for huge ones.
+### Diagram: the optimization stack on the request path
 
 ```mermaid
-flowchart TB
-    SRC["Event source<br/>scores or views"] --> ING["Ingest gateway"]
-    ING --> BUS["Kafka event log"]
+flowchart TD
+    REQ[Incoming request] --> EX{Exact / semantic<br/>cache hit?}
+    EX -->|hit| OUT[Return cached answer<br/>~$0, ~0 latency]
+    EX -->|miss| RT{Router:<br/>complexity / confidence}
+    RT -->|easy: majority| SM[Small / cheap model<br/>default tier]
+    RT -->|hard / low-confidence| LG[Large model<br/>escalation tier]
+    SM --> PC[Prompt-cache-aware call<br/>stable prefix cached ~90% off input]
+    LG --> PC
+    PC --> STR[Stream tokens out<br/>first token under 1s]
+    STR --> CACHE[Write to response /<br/>semantic cache]
 
-    BUS --> RANK["Per shard ranker"]
-    RANK --> EXACT[("Redis sorted set<br/>bounded leaderboard")]
-    RANK --> APPROX[("Sketch plus heap<br/>huge cardinality trending")]
+    REQ -.non-real-time work.-> BATCH[Async / batch lane<br/>~50% cheaper, minutes-hours]
+    BATCH --> PCB[Batched prompt-cache-aware calls]
 
-    QRY["Top K query"] --> MERGE["Query and merge tier"]
-    MERGE --> EXACT
-    MERGE --> APPROX
-
-    BUS -.->|"batch recompute"| BATCH["Batch exact recompute<br/>for reconciliation"]
-    BATCH -.-> EXACT
-
-    WIN["Window roller"] -.->|"age out old buckets"| APPROX
-
-    style EXACT fill:#1f6f5c,color:#fff
-    style APPROX fill:#e8a13a,color:#000
-    style MERGE fill:#2d6cb5,color:#fff
+    GW[LLM gateway 12.3:<br/>per-tenant budgets, caps, kill-switch] -.enforces.-> RT
+    style EX fill:#1f6f5c,color:#fff
+    style RT fill:#e8a13a,color:#000
+    style GW fill:#7a1f1f,color:#fff
+    style BATCH fill:#2b5b8a,color:#fff
 ```
 
-**Happy path, compressed.** Events land on the **ingest gateway**, append to **Kafka** (durable truth), and fan out to **per-shard rankers**. For a **bounded leaderboard**, each shard owns a slice of members in a **Redis sorted set**; a top-K query reads each shard's local top-K and the **merge tier** combines them (K from each of S shards → final K). For **huge-cardinality trending**, each shard keeps a **per-window CMS + local heap**; the merge tier sums the sketches and merges the heaps. The **window roller** drops expired buckets. When a board must be *exactly* right (payouts, audits), a **batch job** recomputes from the Kafka log, fast path approximate-and-fresh, slow path exact-and-reconciled.
+### Worked example: a chat feature at 1M requests/day
 
-**The shape to notice:** the same query routes to **one of two engines by cardinality**, both behind a merge tier combining per-shard partials. Sharding buys write throughput and memory; the merge step keeps the top-K correct across shards.
+A support-chat feature, **1,000,000 requests/day**. Naive v1 sends a big prompt to a frontier model every time. Assume per request: **3,000 input tokens** (a 1,500-token system prompt + retrieved context + history) and **500 output tokens**. Frontier pricing (order-of-magnitude, mid-2026): **input ≈ $3 / million tokens, output ≈ $15 / million tokens.**
 
-<details>
-<summary>Go deeper, why merging local top-K per shard is correct (IC depth, optional)</summary>
+**v1 — naive, one big model, no caching.**
+- Input: 3,000 × $3/1M = **$0.009/req**.
+- Output: 500 × $15/1M = **$0.0075/req**.
+- Per request ≈ **$0.0165**. At 1M/day → **~$16,500/day ≈ ~$500k/month.** (Note output is ~45% of the bill on only 14% of the tokens — the output-price multiplier at work.)
 
-For an **exact** sorted set sharded by member, a member lives on exactly one shard, so its score is complete on that shard. The global top-K is contained in the **union of each shard's local top-K**: any entity in the global top-K must be in its own shard's top-K (it can't be beaten by K others on its own shard without being beaten by K others globally). So reading top-K from each of S shards and merging yields an exact global top-K, at the cost of reading `S × K` candidates. This is a classic top-K merge and is exact for exact per-shard scores.
+Now apply three levers and recompute.
 
-For an **approximate** CMS, the sketch itself is what's approximate, not the merge: CMS is linear, so the cell-wise sum of per-shard sketches equals the sketch you'd get from the combined stream. The per-shard heaps are a candidate cache; the merge re-queries the merged sketch for final frequencies. Error stays one-sided (overestimate only), so a true heavy hitter is never *under*counted out of the top-K.
+**Lever 1 — prompt caching the stable prefix.** Of the 3,000 input tokens, ~1,800 (system prompt + few-shot + stable instructions) are identical across requests and reused within the TTL. Cached input bills at ~10%: 1,800 × $3/1M × 0.1 = $0.00054, plus the 1,200 variable input tokens at full price = $0.0036. New input cost ≈ **$0.0041** (down from $0.009).
 
-</details>
+**Lever 2 — small-model default with escalation.** Route ~80% of requests to a small model (input ≈ $0.30/1M, output ≈ $1.20/1M — ~10× cheaper); escalate the hard 20% to the frontier model. Blended model cost drops sharply because the expensive tier now runs on 1-in-5 requests.
 
----
+**Lever 3 — output cap.** Cap and structure output to **250 tokens** average (was 500) — most support answers don't need 500 tokens. Halves the most expensive term.
 
-## A: API design
+Rough recomputation per request:
+- *Small tier (80%):* input 1,200 variable × $0.30/1M + 1,800 cached × $0.03/1M ≈ $0.00041; output 250 × $1.20/1M = $0.0003 → ≈ **$0.00071**.
+- *Frontier tier (20%):* input ≈ $0.0041 (with caching); output 250 × $15/1M = $0.00375 → ≈ **$0.0079**.
+- Blended: 0.8 × $0.00071 + 0.2 × $0.0079 ≈ **$0.0021/req.**
 
-> A small surface; the meaningful choices are the **precision flag** and that score-write and board-read are separate paths.
+At 1M/day → **~$2,100/day ≈ ~$63k/month** — roughly an **8× reduction** from ~$500k, dominated by routing, then caching, then the output cap. The trade-offs you'd state alongside the number: the **80/20 split and the small model's quality on that 80% must hold against an eval** (raise the escalation rate if it doesn't — the bill rises but stays far under v1); the **output cap risks truncating** the occasional answer that needs more room (validate completeness); and **prompt caching only pays while traffic keeps the prefix warm** within the TTL (true at 1M/day, false for a sparse internal tool). Layer **streaming** on top and the felt latency drops to sub-second first token at no extra cost — separate from the dollar win.
 
-```
-# --- Ingest (write-heavy) ---
-POST /v1/boards/{boardId}/events
-  body: { entityId, delta }            # score delta or +1 count
-  -> 202 Accepted                       # async; logged, fanned to rankers
+### Trade-offs table: the levers, what they save, and what they cost
 
-# --- Top-K (read-heavy) ---
-GET  /v1/boards/{boardId}/top?k=100&window=1h
-  -> 200 { asOf, exact, entries:[{entityId, score, rank}] }
-                                        # exact=false for sketch-backed trending
+| Lever | Saves | Trades away (the risk) | Use when |
+|---|---|---|---|
+| **Prompt caching** (shared prefix) | up to ~90% of input cost on the prefix; lower TTFT | needs a stable, reused-soon prefix; TTL + write cost on miss | a large fixed prefix (system prompt, doc, tool defs) repeats often |
+| **Exact response cache** | ~100% on identical requests | low hit rate on free-text; staleness | constrained/repeated queries (FAQ, canned classification) |
+| **Semantic cache** | high hit rate on paraphrases | **correctness risk** — can serve a wrong/stale neighbor's answer | non-personalized, slow-changing answers; gated by threshold + TTL |
+| **Routing / cascade** | **5–10×** when the cheap tier carries the majority | quality on routed-down traffic; router cost + misroutes | mixed-difficulty traffic; **only behind an eval harness** |
+| **Distillation** (narrow fine-tune) | large cost/latency cut on one task | brittle off-task; own a model + its refresh | high-volume narrow task (one classify/extract/format) |
+| **Quantization** (self-host) | memory + faster inference | small measured accuracy loss; self-host only | you control serving and can tolerate the precision cost |
+| **Async / batch** | **~50%** vs synchronous; higher throughput/$ | **not interactive** — minutes-to-hours latency | non-real-time pipelines (bulk summarize, embed corpus) |
+| **Token discipline** (trim prompt/history/RAG, cap output) | recurring savings on every call | dropped context → lost thread/grounding | always; trim against an eval, not by feel |
+| **Streaming** | nothing on cost | none material (client complexity) | every interactive surface — perceived-latency win |
 
-# --- Rank / percentile lookup (leaderboard) ---
-GET  /v1/boards/{boardId}/rank/{entityId}
-  -> 200 { rank, score, percentileBucket }   # exact rank if bounded
-  -> 200 { score, percentileBucket }          # tail: no exact rank, by design
+### What interviewers probe here
+- **"This feature costs $X per user per month — make it economical."** *Strong signal:* starts from the **cost model** (output dominates, re-sent context is the input sink), names **routing + caching as the biggest wins**, gives an order-of-magnitude recompute, and states the trade-off of each lever. *Red flag:* "use a cheaper model" with no routing, no eval, no number — or worse, no awareness that cost scales linearly with usage.
+- **"When is a semantic cache dangerous?"** *Strong:* it can serve a **wrong or someone-else's** answer because "similar" isn't "same"; **never for personalized or changing data**; gate with a conservative threshold, freshness TTL, and tenant-keyed isolation. *Red flag:* treats it as a free, safe cache like Redis.
+- **"Cut cost without dropping quality."** *Strong:* **cascade (cheap default → escalate on low confidence) behind an eval harness** to bound the regression, plus prompt caching and output caps (lossless), plus reranking to send fewer/better chunks. *Red flag:* "smaller model everywhere" with no quality gate — that *is* dropping quality, just silently.
+- **"Real-time or batch for this workload?"** *Strong:* batch the non-interactive work (~50% cheaper, accept minutes-hours), keep the user-facing path synchronous + streamed; names the latency-for-cost trade explicitly. *Red flag:* one path for everything, paying interactive prices for overnight jobs.
 
-# --- Around-me (bounded leaderboard only) ---
-GET  /v1/boards/{boardId}/around/{entityId}?n=10
-  -> 200 { entries:[...] }
-```
+The through-line at Director altitude: **design the unit economics (`$/request`, `$/active-user`) up front, name the trade-off on every lever, and enforce budgets centrally.** Say "I'd have the platform team stand up the router and prompt-cache layer behind our gateway and A/B the cascade against our eval set before we trust it; my prior is small-model default carries ~80% of support chat at our quality bar" rather than hand-tuning a single prompt yourself.
 
-**Design notes (each with its rejected alternative):**
+### Common mistakes / misconceptions
+- **Ignoring that cost scales linearly with usage** — treating a per-user loss as something growth fixes; it deepens it. Design `$/user` before launch.
+- **Optimizing input while output runs free** — output is priced 3–5× higher and is the term you most control; cap and structure it first.
+- **Treating semantic cache like Redis** — it can return a *wrong* answer; never for personalized/changing data, and always gated by threshold + freshness.
+- **A cascade with no eval** — routing down without measuring quality on each tier ships silent regressions; the eval harness is the safety the saving depends on.
+- **Confusing streaming with a cost win** — it cuts *perceived* latency, not the bill or the total time; pair it with real cost levers, don't substitute it for them.
 
-- **The response carries `exact: bool` and `asOf`.** A trending board is honest that it's a sketch-backed estimate as of a timestamp. *Rejected: pretending every board is exact*, a precision contract the system can't keep at a billion keys.
-- **Rank lookup degrades to a `percentileBucket` for the tail.** "Top 2%" needs no exact rank, avoiding storing exact rank for the long tail. *Rejected: exact rank for everyone*, the ~1 GB/10M (or 50 GB trending) bill the requirement never asked for.
-- **Ingest is `202` async, decoupled from the board read.** *Rejected: synchronous score-then-read*, couples the write-hot ingest path to board-read latency and serializes on the hot key.
+### Practice questions
 
----
+**Q1.** A chat feature costs **$0.40/active-user/month** against an ARPU that can't absorb it. Walk me through making it economical, with numbers.
+> *Model:* Start from the cost model: output dominates and re-sent context is the input sink. **(1) Routing/cascade** — small model by default, escalate the hard fraction on low confidence; if the small model carries 80% at quality, blended cost falls ~5–10×, the single biggest lever. **(2) Prompt caching** the stable system-prompt/RAG prefix → up to ~90% off that input portion and lower TTFT. **(3) Output caps + structured output** → halve the most expensive term. **(4) Trim context** — window history, rerank RAG to top-3, shorter system prompt. Recompute `$/user` after each; expect order-of-magnitude. The non-negotiable: the cascade rides behind an **eval harness** so the routed-down quality is bounded, and **none of this touches personalized data through a semantic cache.**
 
-## D: Data model
+**Q2.** When is a semantic cache the right call, and when is it a liability?
+> *Model:* **Right** for high-volume, **non-personalized, slow-changing** answers where paraphrases are common — product FAQs, policy questions, doc Q&A — gated by a conservative similarity threshold, a freshness TTL, and tenant/locale keys. **Liability** for anything **user-specific or time-sensitive** (balances, "my orders", live status): "similar enough" can return a *stale or someone-else's* answer, a correctness *and* a privacy bug. The exact cache is safe but low-hit; the semantic cache trades a bounded correctness risk for a much higher hit rate — you must say so and gate it, not ship it blind.
 
-> The decisions that matter: the **shard key** (write throughput), and the **window representation** (so trending can age out cheaply). Exact column schemas are IC detail.
+**Q3.** You need to embed and summarize a 50M-document corpus, and also serve a live chat. Same infrastructure? Same models?
+> *Model:* **No — split by latency tolerance.** The corpus job is **non-interactive**, so run it through the **async/batch API (~50% cheaper)** or self-hosted with **large batch sizes** for throughput/$, accepting minutes-to-hours latency; use a small/distilled model for embedding and summarization since the task is narrow. The live chat is **interactive**: synchronous, **streamed** (sub-second first token), routed (small default → escalate), prompt-cached. Forcing the batch job through the real-time path pays interactive prices for work that doesn't need them; forcing chat through batch makes it unusable. The trade-off is explicit: batch buys ~50% by giving up interactivity.
 
-**Bounded leaderboard (exact).** Logical model `{entityId → score}` as a sorted set keyed by `boardId`, **sharded by `entityId`** so writes spread and each member's score is complete on one shard (making per-shard top-K merge exact). Hot single entities get the **sharded-counter treatment** if one entity's update rate exceeds a key's write ceiling.
-
-**Trending window (approximate).** A **ring of per-slice sub-sketches**, one CMS per time bucket (60 one-minute buckets for a 1-hour window). A query sums the in-window buckets; the **window roller** drops the oldest each tick, making "age out old events" an O(1) bucket drop, not a per-key expiry scan.
-
-<details>
-<summary>Go deeper, sliding-window sketches and the heap (IC depth, optional)</summary>
-
-**Bucketed (tumbling sub-windows):** maintain `W` sub-sketches, one per sub-interval. The window frequency of a key = sum of its estimate across the in-window buckets. To slide, drop the oldest bucket and start a fresh one. Trade-off: window granularity = bucket width (a 1-hour window in 1-minute buckets is accurate to ~1 minute at the edges). Memory = `W × sketch_size`, still tens of MB for W=60.
-
-**The top-K heap:** a min-heap of size K keyed by estimated frequency. On each event, update the sketch, read the key's new estimate, and if it exceeds the heap-min (or the key is already in the heap), update the heap. The heap is a *candidate cache*, it can drift, so the authoritative top-K is recomputed by re-querying the merged sketch for the heap's candidates at query time. CMS's one-sided error means a genuine heavy hitter is never undercounted below a cold key, so it won't be wrongly evicted.
-
-Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/width params) are legitimately IC-level and live with the implementing team; the Director-altitude decisions are: shard by entity for exact, bucket the window for approximate, and keep a size-K heap over the merged sketch.
-
-</details>
-
-**Shard key = `entityId` (exact case). The load-bearing write decision.** It spreads write-hot ingest across shards and keeps each member's score complete on one shard, so per-shard top-K merges to an exact global top-K. *Rejected, shard by score range:* a member's rank moves across shards as its score changes (a write becomes a cross-shard move), and the hot score band becomes a hot shard. Shard by identity, merge for rank.
-
----
-
-## E: Evaluation
-
-> Re-check against the NFRs (tunable precision, freshness, write tolerance, bounded cost, AP availability) and hunt the bottlenecks, naming each trade-off.
-
-**Re-check vs NFRs:** precision, exact sorted set for bounded, CMS+heap for huge, by cardinality. ✓ Freshness, live for low lag, micro-batch where seconds are fine. Write tolerance, sharded writes + sharded counters on hot keys. Cost, CMS bounds trending to MBs; sorted set bounded by cardinality. AP, eventually consistent by design. Now the bottlenecks.
-
-**Bottleneck 1, the write-hot key (a viral hashtag, a top streamed song).** One entity takes a disproportionate share of events; its counter is the hottest write in the system. *Fix:* the **sharded-counter pattern**, fan its increments across N sub-counters (or let per-shard sketches each absorb 1/S of the stream), merged on read. *Trade-off:* write ÷ N for read × N, hidden behind the periodic merge, the exact deal. *Rejected:* a single atomic counter, a hard throughput wall.
-
-**Bottleneck 2, exact rank for a huge population is the cost wall.** Exact rank over a billion trending keys is 50 GB/window discarded down to 100. *Fix:* **don't.** Exact **top-K** (heap) + **approximate frequencies** (CMS) + **percentile buckets** for the tail, giving up exact rank for a long tail the requirement never asked for, to cut memory ~1000×. This *is* the central decision, surfaced as a bottleneck on purpose.
-
-**Bottleneck 3, top-K merge across shards (read cost).** Reading `S × K` candidates on every query is wasteful on a read-heavy board. *Fix:* **cache the merged top-K** with a short TTL (the freshness budget); reads serve it O(1), the merge runs on the TTL cadence, the same **freshness-vs-cost knob** as the counter rollup interval and the search-index refresh. *Rejected:* merging on every read.
-
-**Bottleneck 4, window aging (trending must forget).** Old events must stop counting or yesterday's news trends forever. *Fix:* **bucketed sub-sketches** dropped as they age (O(1) per roll), not per-key TTLs (a billion-key scan). *Trade-off:* window edges accurate to one bucket width (±1 min), invisible for a trending board.
-
-**Bottleneck 5, when the board pays out (exactness for money).** A tournament prize or ad-payout ranking can't ride a sketch. *Fix:* a **batch exact recompute** from the Kafka log, validated, deduped, anti-cheat-filtered, separate from the display board, which lags minutes/hours for exactness. The Director move: **two boards, two consistency contracts**, never let the cheap display board be the source of truth for money (the display-vs-billing split, applied).
-
-**Closing re-check:** precision set by cardinality and requirement, not taste; freshness is a TTL dial; hot keys sharded; memory bounded (MBs trending, ~1 GB/10M leaderboard); money reconciled offline. The AP display path and the exact batch path stay apart.
-
----
-
-## D: Design evolution
-
-> Push each axis up an order of magnitude, find what breaks first, name what you'd hand to a specialist.
-
-**At 10× (global firehose, multi-region, ~10M events/s):**
-- **Ingest goes regional.** Per-region rankers maintain local boards; a global merge tier sums regional sketches / merges regional top-K. *Trade-off:* the global board lags regional ones by the merge interval, accepted for a horizontally scalable ingest tier.
-- **The exact sorted set sub-shards** further as the population grows (50M → 500M → many shards); "around-me" within a shard stays exact while deep global rank becomes a merged estimate. *Trade-off:* exact rank for the head, buckets for the deep tail, the same discipline, scaled.
-
-**Hardest trade-offs to defend:**
-- **The precision boundary.** Exact top-K + bucketed tail is the whole bet. Too exact (rank everything) → the cost wall; too coarse (sketch the head too) → a wrong #1, the one thing this product can't get wrong. Keep the **exact surface as small as the product demands, the top-K, and no larger.**
-- **The freshness/cost dial.** The merge/cache TTL trades staleness for compute (esports wants sub-second; "trending this week" tolerates minutes).
-- **Sketch error vs the head.** CMS overestimates, so a cold key never displaces a true heavy hitter, but two *close* hitters near rank K can swap. If exact ordering at the bottom of the top-K matters, widen the sketch or keep an exact counter for just the heap's candidates.
-
-**Where I'd delegate (the explicit Director move):**
-- **Sketch tuning:** *"Data-platform owns CMS width/depth and HLL precision to hit our error target; my prior is a CMS sized for <1% error on the top-K with per-minute buckets, they benchmark it against our key distribution."* (Mechanics in the count-min-sketch building block.)
-- **Anti-cheat / score validation:** *"Trust-and-safety owns score validation and bot filtering before events count; my prior is server-authoritative scoring with anomaly detection on ingest."*
-- **The exact reconciliation pipeline:** *"Data-eng owns the batch recompute from the event log for any board that pays out; my prior is a dedup-and-validate job, sketch board for display only."* What I keep, the exact-vs-approximate decision, the shard/merge shape, the freshness dial, and what I hand off with priors, is the altitude.
-
----
-
-## Trade-offs: the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when… |
-|---|---|---|---|---|
-| **Ranking engine** | **Exact, Redis sorted sets** | **Approximate, Count-Min Sketch + size-K heap** | **Batch, MapReduce / stream aggregation** | **A** for bounded, known cardinality needing exact rank (game leaderboard, ~1 GB/10M). **B** for huge cardinality where only top-K matters and the tail is worthless (trending), MBs, one-sided error. **C** for exact-and-reconciled boards that pay out, where minutes of lag are fine. |
-| **Tail precision** | **Exact rank for all** | **Exact top-K + percentile buckets** (our default) | **Top-K only, no per-entity rank** | **A** only when the population is small *and* exact rank of everyone is a real requirement. **B** the default, exact head, cheap buckets. **C** when nobody needs "my rank." |
-| **Freshness** | **Live board** (per event) | **Micro-batch / cached merge with TTL** (our default) | **Periodic batch** | **A** for sub-second live ranked play. **B** for seconds-tolerant boards, TTL is the freshness/cost dial. **C** for "trending this week," where minutes are fine. |
-
----
-
-## What interviewers probe here (Director altitude)
-
-- **"Is exact rank actually a requirement?"**, *Strong:* asks it in the first two minutes, splits into **exact top-K + bucketed tail**, notes "rank #4,000,001" is never asked, frames precision/cost/freshness as the three knobs set in R. *Red flag:* assumes "rank everyone exactly" and heroically scales to fit it.
-- **"Trending and a leaderboard, same or different?"**, *Strong:* "Same problem, ranked heavy hitters over a window, differing only on cardinality and tail precision; the engine (sorted set vs sketch+heap) falls out of those two numbers." *Red flag:* two unrelated systems, or a sketch on a 10M-player board that fits exactly in ~1 GB.
-- **"A billion distinct trending keys, what's the memory bill, and how do you cut it?"**, *Strong:* exact ≈ 50 GB/window *discarded down to 100*, replaced with **CMS (MBs) + a size-K heap**, one-sided error making a cold-key false-high harmless. *Red flag:* a giant exact counter map, or HLL (cardinality, wrong tool) for a frequency/top-K question.
-- **"How does the board forget old events for a rolling window?"**, *Strong:* **bucketed sub-sketches** dropped as they age (O(1)). *Red flag:* per-key TTL scan over a billion keys.
-- **"What does this cost, and what would you delegate?"**, *Strong:* trending is **MBs of sketch**, leaderboard **~1 GB/10M**; delegates sketch tuning and anti-cheat with priors; keeps a separate **exact batch board for payouts**. *Red flag:* hand-tunes CMS rows in the room, or lets the display board pay creators.
-
----
-
-## Common mistakes
-
-- **Assuming exact rank for the whole population is the requirement.** It rarely is, exact top-K + percentile buckets for the tail collapse the cost. Interrogate precision in R; it's the whole problem.
-- **Treating trending and leaderboard as different problems.** Same ranked-heavy-hitters query; only cardinality and tail precision differ. Pick the engine from those two numbers.
-- **Exact counting a billion-key stream.** ~50 GB/window to return a list of 100, use CMS + a size-K heap (MBs, one-sided error).
-- **Wrong sketch for the question.** HLL counts *distinct* (cardinality); CMS counts *frequency* (top-K). HLL for "top hashtags" is a category error.
-- **Letting the fast display board be the source of truth for money.** Payout/tournament rankings need an exact batch recompute from the event log; the sketch board is display-only.
-
----
-
-## Practice questions (with model answers)
-
-**Q1. Top-10 trending hashtags over the last hour, out of a billion distinct tags. Walk the design.**
-
-> *Model answer:* I don't keep exact counts for a billion keys, ~50 GB/window to return 10 items, almost all discarded. I use a **Count-Min Sketch** for per-key frequency in fixed sub-linear space (tens of MB) plus a **min-heap of size K** for the current top-10. The 1-hour window is a **ring of per-minute sub-sketches**; the roller drops the oldest each tick (O(1), not a per-key scan). Ingest shards by key region; per-shard sketches **merge** by cell-wise add at query time, and CMS's one-sided error means a true heavy hitter is never undercounted out of the top-10. The board is AP, `exact:false`, fresh to ≤ the merge TTL. If it ever pays out, recompute exactly in batch from the Kafka log, display approximate, payout reconciled.
-
-**Q2. A game leaderboard with 20M ranked players. Sorted set or sketch?**
-
-> *Model answer:* **Sorted set, exact.** Cardinality is bounded and known, so cost is bounded: ~100 B × 20M ≈ **~2 GB**, a couple of Redis nodes. I get exact rank, `ZREVRANGE`, `ZREVRANK`, `ZRANGEBYSCORE`, all O(log N). A sketch would *throw away* exactness I can cheaply afford and can't even answer "my exact rank." Shard by `playerId` for write throughput, merge per-shard top-K for the global head; hot single players get the sharded-counter treatment. The sketch is right only when cardinality is huge and the tail is worthless, not here.
-
-**Q3. The leaderboard write path is melting on a hot player during a streamed event. What's happening and what's the fix?**
-
-> *Model answer:* That player's score key is the hottest **write** in the system, every update serializes on one key (the hot-key write-contention wall). Replicas don't help; replication adds read capacity, not write throughput to one key. **Shard the counter:** fan the increments across N sub-counters, sum on read; size N from peak rate ÷ per-key ceiling. The sorted-set entry updates from the rolled-up total. Trade-off: write ÷ N for read × N behind the rollup, and the displayed score trails by ≤ the rollup interval, fine for a leaderboard.
-
-**Q4. Why is "exact rank for everyone" the wrong default, and when is it right?**
-
-> *Model answer:* It's wrong when the population is huge and the tail is worthless: nobody asks the exact rank of the four-millionth entity, so paying linear memory (50 GB/window for trending) to compute it is cost with no requirement behind it. The right default is **exact top-K + percentile buckets** ("top 2%") for the tail. It *is* right when the population is **bounded and small enough that exact is cheap**, a ~10-50M-player leaderboard at ~1 GB/10M, *and* the product genuinely needs "my exact rank." Keep the exact surface as small as the requirement demands.
-
----
+**Q4.** A teammate proposes "just use the small model everywhere to cut cost." What's your response?
+> *Model:* That's not cost optimization without a quality gate — it's **silently dropping quality** on the fraction of traffic the small model can't handle. The right shape is a **cascade**: small model default, **escalate on low confidence/complexity**, with an **eval harness** measuring quality per tier and the escalation threshold set to bound the regression. That captures most of the saving (the cheap tier still carries the majority) while keeping hard requests on a capable model — and it's defensible because you can show the quality number, not just the cost number. Reserve "small model everywhere" for a **narrow task** where a distilled model provably matches the big one on that task.
 
 ### Key takeaways
+- **Cost ≈ (input × in_price) + (output × out_price); output is priced 3–5× higher and is the term you most control; re-sent context (history + RAG) inflates the input bill on *every* call.** Cost scales linearly with usage, so design `$/request` and `$/active-user` up front.
+- **Latency ≈ TTFT + output × TPOT + round-trips.** Prompt caching cuts TTFT, output caps cut the decode term, routing cuts TPOT, and **streaming cuts only *perceived* latency** (sub-second first token) — a UX lever, not a cost one.
+- **Routing/cascades are usually the biggest single win (5–10×)** — cheap model default, escalate on low confidence — but they ship silent regressions without an **eval harness** to bound the routed-down quality.
+- **Three caches, three risk levels:** prompt caching (lossless, up to ~90% off the shared prefix), exact response cache (lossless, low hit), **semantic cache (high hit but a correctness risk — never for personalized/changing data, always gated)**.
+- **Batch the non-interactive work (~50% cheaper), distill the narrow tasks, trim every token, and enforce per-tenant budgets centrally at the gateway** — every lever trades quality, freshness, or latency, so name which.
 
-1. **Trending/top-K and the leaderboard are one problem**, ranked heavy hitters over a window, separated only by **cardinality** and **tail precision**. Pick the engine from those two numbers, not from taste.
-2. **Interrogate whether exact rank is even a requirement.** The default is **exact top-K + percentile buckets** for the tail; "rank #4,000,001" is never asked. Asked in R, this collapses the design.
-3. **Bounded cardinality → exact Redis sorted set at ~1 GB per 10M members.** **Huge cardinality → CMS + size-K heap** in MBs, since exact is ~50 GB/window discarded down to 100. **Batch recompute** for boards that pay out.
-4. **Apply the building-block tools:** CMS (frequency/top-K, one-sided error), sharded counters for hot keys, and the **display-vs-billing split**, fast approximate board for display, exact batch board for money. Mechanics live in the count-min-sketch building block.
-5. **Precision, cost, and freshness are one coupled dial.** Set precision in R; cap cost with sketches and bounded sorted sets; tune freshness with the merge/cache TTL. Window aging is an O(1) bucketed-sketch drop.
-
-> **Spaced-repetition recap:** Top-K / trending / leaderboard = **one problem, ranked heavy hitters over a window**, under three knobs (precision, cost, freshness) set in R. Ask first: *exact rank for everyone, or exact top-K + buckets?*, the answer collapses the design. **Bounded cardinality → exact Redis sorted set (~1 GB/10M); huge cardinality → CMS + size-K heap (MBs, one-sided error), since exact is ~50 GB/window thrown away; payouts → batch exact recompute.** Shard by entity, merge per-shard top-K or sum sketches; roll the window with O(1) bucketed sub-sketches. Reuse the building-block tools (CMS, sharded counters, display-vs-billing); board is AP, never the source of truth for money.
-
----
-
-*End of Lesson 9.8. Top-K / trending / leaderboard is the course's pure altitude test: the IC drowns in sketch math; the Director frames exact (sorted set) vs approximate (CMS + heap) vs batch in five minutes and decides against the numbers, applying the heavy-hitter and sharded-counter tools rather than re-deriving them, and inheriting its display-vs-billing split. Related: the ad-click aggregator and the count-min-sketch building block this lesson applies.*
+> **Spaced-repetition recap:** Taxi with the meter always running — spend the fewest coins for the quality the task needs, and make the wait *feel* short. Output dominates the bill (3–5× input) and re-sent context taxes every call. Biggest wins: routing/cascade (5–10×, behind an eval) and prompt caching (~90% off the shared prefix). Semantic cache is cheap but can return a *wrong* answer — never for personalized data. Batch non-real-time work (~50% off). Streaming cuts felt latency, not cost. Enforce budgets at the gateway; the full FinOps practice is the AI-governance lesson's subject.

@@ -1,273 +1,161 @@
 ---
-title: "7.8 — Movie Ticket Booking (Seat-Locking LLD)"
-description: The BookMyShow seat-locking problem at LLD altitude, entity model, hold-TTL state machine, and pessimistic vs optimistic vs hold-table argued by traffic shape, with the climb to Ticketmaster's distributed form.
+title: "7.8 — Analytical Data Modeling"
+description: Why analytical tables are modeled for scans and human questions, the opposite of OLTP normalization, dimensional modeling (facts, dimensions, grain, star vs snowflake, slowly-changing dimensions) and the medallion layering that produce a scan-cheap, denormalized, governed analytical store.
 sidebar:
   order: 8
 ---
 
-> **You already designed this system, at the other altitude.** Ticketmaster (Ticketmaster) solved seat reservation as HLD: sharded stores, waiting rooms, CDN tiers. This is the *same domain dropped to LLD*, the form Flipkart/Swiggy/Paytm loops actually ask: "design BookMyShow, two users book the same seat concurrently; exactly one succeeds." The rubric flips: **entity model, seat state machine, hold TTL, and the exact concurrency mechanism**, pressed until it holds or leaks a double-booking. A junior answer reaches for `synchronized`. A Director answer names three locking strategies, **picks one by traffic shape** (opening night ≠ Tuesday matinee), makes the payment-failure and expiry paths race-proof, and **narrates the climb to the distributed form** when one database stops being enough. Same problem, two altitudes, two rubrics, learn the climb.
-
 ### Learning objectives
-
-- Model the domain at LLD: `Show`, `ShowSeat`, `SeatHold`, `Booking`, and why seat status lives on **ShowSeat**, never the physical seat.
-- Design the seat **state machine**, `AVAILABLE → HELD(ttl) → BOOKED`, with lazy expiry and exactly-one-winner claims.
-- Argue **pessimistic vs optimistic vs hold-table** by contention shape, and defend a default.
-- Make the **payment-failure and TTL-expiry paths** correct: idempotent confirm, re-asserted holds, no lock across payment.
-- Map every LLD element to its **5.13 distributed counterpart**, climb altitudes on demand.
+- State the **inversion**: OLTP schemas are normalized for *correct, conflict-free writes on one entity*, analytical schemas are **denormalized and modeled for scans and human questions over all entities**, and the same data is laid out the opposite way for the opposite job.
+- Run **dimensional modeling** (Kimball) at architecture altitude: separate **facts** (the measurements/events you sum) from **dimensions** (the who/what/when/where you slice and filter by), and **declare the grain first**, one row of the fact means exactly one thing.
+- Decide **star vs snowflake** and **SCD type 1 vs type 2** on their actual trade-offs (join count, redundancy, history) and quantify the scan/storage cost each way.
+- Place dimensional modeling inside the **medallion architecture** (bronze→silver→gold), gold *is* the dimensional/aggregate layer, and know when the modern **One Big Table** wide-table pattern on columnar storage replaces the star.
+- Name the **semantic / metrics layer** as the single governed definition of a business metric, and why two dashboards disagreeing by 3% is a modeling-and-governance failure, not a query bug.
 
 ### Intuition first
+A normalized OLTP schema is a **filing cabinet built for the clerk who updates it.** Every fact lives in exactly one folder, the customer's address in the `customers` folder, the product's price in the `products` folder, so when an address changes, the clerk edits one card and nothing else can contradict it. That is normalization: store each fact once, so writes are cheap and can never disagree with themselves. It is the right design when a thousand clerks are updating a thousand entities a second, which is the OLTP world.
 
-Picture a cinema with a paper seating chart at the box office. Point at seat F14 and the clerk **pencils your name on the square and starts a 10-minute egg timer**. Pay in time, the pencil becomes pen, sold. Timer runs out, the eraser frees the square. The entire LLD is three questions about that clipboard: **(1)** what stops two clerks penciling the same square at the same instant; **(2)** what exactly is written, the entity model; **(3)** what guarantees the eraser always runs, expiry that doesn't depend on someone remembering. The answer to (1) is the whole interview: there is **one clipboard** (one transactional database), and the pencil-down moment is **atomic**, exactly one writer wins; the loser finds the square penciled and picks another seat. Everything else, payment, cancellation, the sweeper, is plumbing around that atomic instant. And the database **is** the arbiter: the moment someone proposes a `ConcurrentHashMap` of locked seats, ask what happens at the second app instance or a restart mid-checkout. In-process memory cannot hold a business invariant, that observation kills half the wrong answers.
+An analytical table is a **briefing pack built for the executive who reads it.** The executive never updates anything; she asks *"revenue by region by product category by month,"* and she does not want to chase the price out of one folder and the region out of another for every one of fifty million orders, that is fifty million folder-lookups (joins) to answer one question. So you build her a pack where **each line already carries its own context**: the order amount sits on the same row as the region, the category, the date, the customer segment, pre-stitched. She sweeps down the page and sums. The redundancy that would horrify the filing clerk, the same region name copied onto a million rows, is exactly what makes her question fast, and on a columnar store that repeated text compresses almost to nothing.
 
----
+Two organizing frameworks build that briefing pack, and they are not rivals. **Dimensional modeling** (Kimball) decides the *shape* of the human-facing tables: a central **fact** of measurements surrounded by **dimensions** of context, the star. The **medallion architecture** decides the *refinement path* the data travels to get there: raw **bronze** → cleaned **silver** → business-ready **gold**, and the gold layer is precisely where the dimensional stars and aggregates live. Shape and path. Get both pictures and the rest is detail.
 
-## R: Requirements
+### Deep explanation
 
-> LLD adaptation: R still scopes the build, but it *also* pins the **rubric**, say out loud that you'll deliver entities, the state machine, the concurrency mechanism, and the failure paths. Naming the deliverable is itself a senior signal.
+**The inversion is the foundational fact, and everything falls out of it.** OLTP normalization (3NF, the Codd rules) minimizes redundancy so that every fact is stored once and updates can't create contradictions, the cost is that reading a complete picture requires re-joining the pieces, which is fine for one entity but ruinous across millions. Analytical modeling makes the opposite bet: **storage is cheap and columnar-compressible, joins across huge row counts are expensive, and the data is write-once-read-many**, so you *denormalize*, duplicate context onto the rows that need it, to turn a many-way join into a single scan. The Director-altitude statement: *you normalize to make writes safe and you denormalize to make reads cheap, and an analytical store is read-cheap by design.* You **reject** the production 3NF schema for analytics because answering "revenue by region by category by month" against it means joining `orders → customers → regions → products → categories` for every row, five joins fanning across fifty million rows, which is slow, expensive, and contends with the OLTP traffic that owns those tables.
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *Reserved or general admission?* → **Reserved**; the flash-sale/GA variant gets one line in Design evolution.
-- *How long to pay?* → **Hold TTL ~10 minutes**, above worst-case gateway latency, short enough that abandoned seats recycle fast.
-- *Is double-booking ever tolerable?* → **No.** Exactly-one-winner per seat is the invariant the whole design serves.
-- *Distributed from day one?* → **Start single-DB** (the LLD frame); I'll name the climb when the numbers force it.
+**Dimensional modeling splits the world into facts and dimensions.** This is Ralph Kimball's framework and it maps cleanly onto how humans ask analytical questions: *"sum this measurement, sliced by these contexts."*
 
-**Functional requirements:** browse shows and view a show's **seat map**; **hold** a set of seats all-or-nothing with a TTL; **confirm** a hold into a booking after payment; **release** on cancel, payment failure, or expiry; concurrent claims on one seat → **exactly one succeeds**, the rest fail fast.
+- A **fact table** holds the **measurements/events**, the numbers you aggregate (order amount, quantity, click, watch-seconds). Facts are tall and thin: billions of rows, mostly numeric measures plus a handful of **foreign keys** pointing at dimensions. The fact is what you `SUM`, `COUNT`, `AVG`.
+- A **dimension table** holds the **context**, the *who* (customer), *what* (product), *when* (date), *where* (store/region) you filter and group by. Dimensions are short and wide: thousands to millions of rows, many descriptive text columns. Dimensions are what you put in the `WHERE` and `GROUP BY`.
 
-**Cut (and say so):** pricing/offers, recommendations, food & beverage, refunds UX, search ranking. Scope is **seat map → hold → pay → confirm/release**.
+The question *"revenue by region last quarter"* becomes: scan the `sales` fact, filter the `date` dimension to last quarter, group by the `region` attribute of the `store` dimension, sum the `amount` measure. **The grain comes first.** Before a single column, you declare what **one row of the fact represents**, "one row per order line item," or "one row per ad impression," or "one row per account per day." The grain is the contract: it fixes what you can and can't sum, prevents double-counting, and determines the row count. *Declaring the grain first is the single most important move in dimensional modeling*, and skipping it is the most common cause of silently-wrong numbers (a fact at "order" grain joined to a "line-item" dimension double-counts revenue).
 
-**Non-functional requirements:** correctness over availability on the claim path (a deliberate CP posture, the CAP/PACELC lesson, a 409 is fine, a double-booking is not); claim p99 < ~300 ms; hold expiry **guaranteed**, not best-effort; correct on **N app instances** from the first line of code.
+**Star vs snowflake is the first concrete decision.** A **star schema** keeps each dimension **denormalized into one flat table**, `dim_product` carries product name, category, sub-category, brand, supplier all in one row, redundancy and all. A **snowflake schema** **normalizes** the dimensions, `dim_product` points to `dim_category` points to `dim_department`, splitting the hierarchy across linked tables.
 
----
+- **Star**, the default. A query joins the fact to *one* dimension table per dimension (`fact → dim_product`), so a five-dimension query is five joins, all one hop deep. The cost is redundancy: "Electronics" is repeated on every product row. On a columnar store that repetition compresses to near-nothing (dictionary encoding stores "Electronics" once and a tiny code per row), so the redundancy is nearly free and the join count is minimized.
+- **Snowflake**, normalized dimensions. The same query becomes `fact → dim_product → dim_category → dim_department`, three hops deep *per dimension*, so the join count multiplies. You save a little storage (the category name is stored once) and gain referential tidiness, but you pay it back in joins on every read.
+- **Director-altitude statement:** *prefer the star; reject the snowflake for analytics because it trades a storage saving you don't need (columnar compression already eliminates it) for join cost you pay on every query.* Snowflake earns its place only for a genuinely huge, frequently-changing dimension where the normalization saves meaningful maintenance, a delegated, table-by-table call, not the default.
 
-## E: Estimation
+**Slowly-changing dimensions (SCDs) decide how you handle history, and this is where analytics diverges hardest from OLTP.** A customer moves from California to Texas. OLTP overwrites the address, it only cares about *now*. Analytics has to choose, because *"sales by state"* for last year must still attribute that customer's old orders to California. The three classic strategies:
 
-> LLD adaptation: estimation doesn't size a fleet, it quantifies the **contention shape**, because the lock strategy is chosen by that number, not by taste.
+- **SCD Type 1, overwrite.** Just update the attribute in place; history is lost. Simple, no row growth. *Use when* the attribute genuinely has no analytical history value (a typo correction, a cosmetic rename). The cost: every historical query silently re-attributes the past to the present, last year's California sales retroactively become Texas sales, and nobody notices.
+- **SCD Type 2, new row with validity.** Insert a *new* dimension row for the changed customer with `valid_from` / `valid_to` timestamps (and often an `is_current` flag), keeping the old row intact. The fact rows point at whichever version was current when the event happened, via a **surrogate key**. History is preserved exactly: old orders stay joined to the California version, new orders to the Texas version. This is **the analytics default**, because preserving point-in-time context is the whole reason the warehouse exists. The cost: the dimension grows by one row per change, and transforms must manage the validity windows.
+- **SCD Type 3, add a column.** Keep a `previous_state` column alongside `current_state`. Captures exactly *one* prior value, rare, used when you need "current vs the immediately-prior value" and nothing deeper.
 
-**Two traffic shapes, same code path:**
+**Director-altitude statement:** *default to SCD Type 2 for any dimension whose history matters to a metric; reject Type 1 for those because overwriting silently rewrites the past and corrupts every historical comparison.* The trade, Type 1 is trivially simple but loses history, Type 2 preserves history at the cost of row growth and validity-window logic, is the one interviewers probe, because it reveals whether you understand that *an analytical store's job is to remember what was true at a point in time*, which an OLTP store deliberately doesn't.
 
-- **Tuesday matinee:** a 250-seat screen, ~30 buyers over 3 hours → effectively **zero concurrent contention**. Anything works; simplicity wins.
-- **Opening night:** ~5,000 fans hit **one show of 250 seats** in the first minute → 20:1 demand:supply, ~80 claim attempts/s, and the center seats see **10-50 contenders in the same second**. This is the shape being tested.
+**Surrogate keys make Type 2 work.** A dimension uses a **surrogate key**, a meaningless integer the warehouse generates, as its primary key, *not* the source system's natural/business key (the `customer_id`). Why: under SCD Type 2 the same business customer has *multiple* dimension rows (one per version), so the business key is no longer unique; the surrogate key uniquely identifies *a version of a customer*, and the fact points at the exact version. Surrogate keys also insulate the warehouse from source-key changes and let you conform dimensions across systems. *Reject the natural key as the dimension PK* the moment you adopt Type 2, because it can't distinguish versions.
 
-**The decision number is contenders-per-seat at claim instant: ~1 at matinee, ~10-50 on opening night.** That asymmetry, most days boring, some days brutal, is what the lock-strategy argument turns on in §S and §Evaluation.
+**Conformed dimensions** are the shared `dim_date`, `dim_customer`, `dim_product` used identically across *every* fact (sales, support, web). When "customer" means the same table everywhere, you can compare and join across business processes, "did support tickets correlate with churn?" works because both facts hang off the same `dim_customer`. The alternative, each team building its own slightly-different customer dimension, is how two dashboards end up disagreeing.
 
-**Supporting math, rounded hard:** ~10M tickets/month ≈ `10M ÷ 2.6M s ≈ 4 bookings/s` average, **~100/s at peak** platform-wide, trivial for one Postgres. At ~25% hold abandonment that's **~25 expiries/s**, also trivial, but it must be *guaranteed*. Payment gateways run 2-30 s with multi-minute worst cases → **TTL 10 min ≫ worst case**, so the expiry-vs-payment race (§Evaluation) is rare by construction. Storage: tens of GB/year, irrelevant. **Verdict: volume is a non-problem; per-seat contention on hot shows is the entire problem**, the same inversion Ticketmaster taught at scale.
+**The medallion architecture is the refinement path, and gold is where the dimensional model lives.** The warehouse/lakehouse problem designs this in full; here is the relationship: **bronze** is raw, append-only, retained-as-replay-source; **silver** is cleaned, typed, deduped, conformed base tables; **gold** is the **business-ready layer, and gold is precisely where the dimensional stars, conformed dimensions, SCD-managed history, and pre-aggregates live.** Dimensional modeling answers *what shape the gold tables take*; medallion answers *how raw data is refined into them and why it's rebuildable* (re-run the silver→gold transforms from retained bronze). The two frameworks compose, Kimball for the shape, medallion for the path, and the modern stack builds gold with dbt (the orchestration lesson owns that tool; not repeated here).
 
----
+**Denormalization for scan, and the modern One Big Table trend.** The star already denormalizes dimensions; the wide-table or **One Big Table (OBT)** pattern goes further and **pre-joins the fact and all its dimensions into a single flat table**, every order row physically carries region, category, customer segment, date attributes, no joins at all. On a **columnar store** this is cheap: the duplicated context columns dictionary-compress to near-nothing, and the query touches only the columns it projects. *The trade:* OBT eliminates joins (fastest possible scan, simplest for BI tools and analysts) at the cost of flexibility, a dimension attribute change must be propagated across every row, the table is rigid, and you lose the clean reusability of conformed dimensions. **Director-altitude statement:** *use the star as the governed default for flexibility and reuse; reject OBT as the universal pattern, but reach for a wide gold table for a specific high-traffic dashboard where the join cost is real and the schema is stable*, it's a per-mart optimization, not a modeling philosophy. Columnar storage is what made OBT viable at all.
 
-## S: Storage
+**Normalization (Inmon) vs dimensional (Kimball), briefly.** Two historical schools for warehouse design. **Inmon** builds a normalized (3NF) enterprise warehouse first, then spins dimensional *marts* off it, more upfront modeling, strong consistency, slower to deliver. **Kimball** builds dimensional marts directly with conformed dimensions, faster to value, business-friendly, the dominant approach in the cloud era. The modern medallion stack is effectively Kimball-flavored (silver ≈ conformed base, gold ≈ dimensional marts). The distinction is worth naming at altitude, not relitigating.
 
-> LLD adaptation: "storage" here means **where does the arbiter live**, which component is allowed to decide who won the seat.
+**The semantic / metrics layer, one governed definition of a metric.** The recurring analytical failure is *"the revenue dashboard and the finance report disagree by 3%"*, two teams encoded "revenue" with slightly different logic (gross vs net, timezone of "day," whether late refunds are subtracted). The fix is a **semantic layer** (a.k.a. metrics layer): a single, governed, code-defined definition of each business metric that every consumer queries through, so "revenue" is computed *one way* in *one place*. It sits above gold and is the modeling-and-governance answer to definitional drift. The Director point: disagreeing dashboards are a **governance and modeling** problem (no single definition), not a query bug, which is why the semantic layer and metric ownership exist.
 
-**Decision: one transactional relational database (Postgres/MySQL) is the single source of truth for seat state.** Row-level atomic writes and multi-row transactions are exactly the primitives the invariant needs, and at ~100 writes/s peak a single primary with replicas is loafing.
+<details>
+<summary>Go deeper, fact-table types, degenerate dimensions, and the date dimension (IC depth, optional)</summary>
 
-- *Rejected, in-process locks (`synchronized`, `ConcurrentHashMap<SeatId, Lock>`):* correct only on **one** JVM that never restarts; the second app instance silently breaks the invariant. Fine as a *fast-fail filter*, never as truth.
-- *Rejected, a distributed lock service (Redis SETNX/ZooKeeper) as the arbiter:* a second stateful system whose lock lifetime must be reconciled with the DB transaction, two sources of truth plus a famous class of expiry-race bugs, bought to solve contention one database already handles. Wrong tool *at this scale*.
-- *Seat-map reads* come from a short-TTL cache, the map is a hint; the claim transaction is the truth, exactly as in 5.13.
+- **Fact table types.** *Transaction* facts (one row per event, the default, e.g. one row per sale). *Periodic snapshot* facts (one row per entity per time bucket, e.g. account balance per day, for "state over time" questions). *Accumulating snapshot* facts (one row per process instance, updated as it moves through milestones, e.g. an order's lifecycle with `ordered_at`, `shipped_at`, `delivered_at` columns). The grain differs in each; pick by the question.
+- **Additive / semi-additive / non-additive measures.** *Additive* measures sum across all dimensions (revenue). *Semi-additive* sum across some but not time (a bank balance, you don't sum balances across days, you take the end-of-period). *Non-additive* can't be summed at all (ratios, percentages, you must recompute from the additive components). Misclassifying a measure is a silent-wrong-number source.
+- **Degenerate dimensions.** A dimension attribute that lives *on the fact* with no separate table, e.g. an `order_number` you filter/group by but that has no other attributes. Storing it inline avoids a pointless one-column dimension.
+- **Junk dimensions.** Collapse a handful of low-cardinality flags (is_gift, is_promo, channel) into one small dimension rather than many tiny ones or many fact columns.
+- **The date dimension is always explicit.** Never derive date parts in the query; build a `dim_date` with columns for day, week, month, quarter, fiscal period, holiday flag, day-of-week. It's the most-reused conformed dimension and it makes "fiscal Q3" or "business days only" a simple filter rather than per-query date math.
+- **SCD Type 2 mechanics.** The transform compares incoming source rows to the current dimension version; on a change it closes the old row (`valid_to = now`, `is_current = false`) and inserts a new row (`valid_from = now`, `is_current = true`, fresh surrogate key). Fact loads look up the surrogate key valid at the event timestamp. Types 4 (history table), 6 (hybrid 1+2+3) exist for special cases.
 
----
+</details>
 
-## H: High-level design
-
-> LLD adaptation: H shrinks from a fleet diagram to **components inside one service** plus the state machine, which *is* the architecture at this altitude.
-
-Four components: **BookingService** (orchestrates hold → pay → confirm), **SeatLockProvider** behind an interface (the swappable concurrency strategy, where the pessimistic/optimistic/hold-table argument plugs in), **PaymentService** delegated behind `charge(idempotencyKey, amount, token)` (PCI stays someone else's audit), and an **ExpirySweeper** for hygiene (correctness comes from lazy reclaim, §Evaluation).
-
-The seat state machine carries the whole design:
+### Diagram: a star schema (central fact + surrounding dimensions)
 
 ```mermaid
-stateDiagram-v2
-    [*] --> AVAILABLE
-    AVAILABLE --> HELD: claim wins atomic write
-    HELD --> BOOKED: payment ok and hold still valid
-    HELD --> AVAILABLE: ttl expired
-    HELD --> AVAILABLE: payment failed or user cancelled
-    BOOKED --> [*]
+flowchart TB
+    DDATE["dim_date<br/>day · month · quarter<br/>fiscal_period · holiday"]
+    DCUST["dim_customer (SCD2)<br/>name · segment · region<br/>valid_from · valid_to · is_current"]
+    FACT[("fact_sales<br/>GRAIN: one row per order line<br/>measures: amount, qty, discount<br/>FKs: date, customer, product, store")]
+    DPROD["dim_product<br/>name · category · sub_category<br/>brand · supplier (denormalized)"]
+    DSTORE["dim_store<br/>store · city · region · country"]
+
+    DDATE --> FACT
+    DCUST --> FACT
+    DPROD --> FACT
+    DSTORE --> FACT
+
+    style FACT fill:#e8a13a,color:#000
+    style DDATE fill:#1f6f5c,color:#fff
+    style DCUST fill:#1f6f5c,color:#fff
+    style DPROD fill:#1f6f5c,color:#fff
+    style DSTORE fill:#1f6f5c,color:#fff
 ```
 
-**Happy path:** pick seats from a cached map → `hold()` atomically flips all requested seats `AVAILABLE → HELD` in **one transaction** (all-or-nothing; one winner per seat; losers get an instant conflict naming the seats they lost) → pay within the TTL → `confirm()` re-asserts the hold, flips `HELD → BOOKED`, inserts the booking **in one transaction**. Every `HELD` edge off the happy path lands back on `AVAILABLE`.
+The fact sits at the center holding the numbers and the foreign keys; each dimension is one flat hop away (the star). `dim_customer` is SCD Type 2, it carries validity columns so a customer's region change is remembered, not overwritten. A query joins the fact to only the dimensions it slices by, each a single hop. A snowflake would split `dim_product` into `product → category → department`, adding hops; One Big Table would fold every dimension's columns into `fact_sales` itself, removing the joins entirely.
 
-**The rule that makes the design senior:** the claim transaction is **milliseconds**; the *hold* is **minutes**. The hold is **data** (a status and an `expires_at` on rows), never a database lock held open across the payment call, row locks held for 10 minutes pin connections and deadlock the pool, the single worst implementation of this system and a probe interviewers run on purpose.
+### Worked example: modeling e-commerce sales for the analytics warehouse
+A retailer wants a sales analytics layer: revenue and units by region, category, customer segment, and time, with correct historical attribution as customers and product categorizations change.
 
----
+- **Declare the grain.** *One row per order line item.* This fixes everything: revenue is `SUM(amount)` at this grain (summing at "order" grain would lose per-line detail; a coarser grain couldn't answer "units by product"). Stated first, before any column.
+- **Facts.** `fact_sales`, measures `line_amount`, `quantity`, `discount`, `cost`; foreign keys to `dim_date`, `dim_customer`, `dim_product`, `dim_store`. Billions of rows, thin and numeric.
+- **Dimensions, star not snowflake.** `dim_product` is *flat*: name, category, sub-category, brand, supplier on one row, *rejected snowflake* (`product→category→department`) because on the columnar store the repeated "Electronics" dictionary-compresses to a byte, so normalizing only buys join cost. `dim_store`, `dim_date` (always explicit, conformed) likewise flat.
+- **History, SCD Type 2 on customer and product.** A customer relocating CA→TX gets a **new** `dim_customer` row with `valid_from`/`valid_to`; old orders keep pointing (via surrogate key) at the CA version, so *"2025 revenue by region"* still credits California. *Rejected SCD Type 1* (overwrite) because it would retroactively move last year's CA sales to TX, the silent corruption of every historical comparison. Same for product re-categorization: when a SKU moves from "Phones" to "Smart Devices," Type 2 keeps last quarter's sales under "Phones."
+- **Scan cost, quantify the win.** The naive path is the 3NF production schema: `orders → customers → regions → products → categories`, **five joins across ~50M order rows** per query. The dimensional star is at most **four single-hop joins**, and for the top dashboard we build a **gold pre-aggregate**, `agg_sales_by_region_category_day` at the rollup grain, so the dashboard scans **a few thousand pre-summed rows instead of 50M raw lines**, roughly a **10,000× scan reduction** (50M rows → ~5K rows), turning a multi-second multi-dollar scan into a sub-second sub-cent one (the cost model).
+- **Governance.** One `dim_customer`, `dim_date`, `dim_product` *conformed* across the sales, returns, and web facts, so cross-process questions join cleanly. "Revenue" gets **one definition in the semantic layer** (net of returns, settled, in store-local day) that BI, finance, and the board deck all read, so they can't disagree by 3%.
 
-## A: API design
+The number a Director brings out of this isn't "we built a star schema"; it's *"correct point-in-time history via SCD2, five joins collapsed to a single pre-aggregated scan, one governed definition of revenue, all rebuildable from raw."*
 
-> LLD adaptation: the API is the **interface contract**, method signatures and their failure semantics, not REST routes. The signatures encode the correctness story.
-
-```
-interface SeatLockProvider {
-  Hold acquire(showId, seatIds, userId, ttl)
-      // all-or-nothing; atomic; throws SeatsUnavailable(takenSeats)
-  boolean isValidAndOwned(holdId, userId)
-  void release(holdId)
-}
-
-class BookingService {
-  Hold hold(showId, seatIds, userId)
-      // -> lockProvider.acquire(..., TTL_10_MIN)
-
-  Booking confirm(holdId, userId, paymentRef, idempotencyKey)
-      // ONE transaction:
-      //   re-assert hold valid, owned, unexpired
-      //   flip seats HELD -> BOOKED
-      //   insert booking (idempotencyKey UNIQUE)
-      // hold expired -> HoldExpired (gone)
-      // duplicate key -> return existing booking
-
-  void cancel(holdId, userId)   // release; seats -> AVAILABLE
-}
-```
-
-**Design notes, each with the rejected alternative:**
-- **`hold` and `confirm` are separate calls.** *Rejected: a single `book()` spanning payment*, a human plus an external gateway sits between claim and money; fusing them either holds locks across I/O or gives up the claim. The TTL hold lets checkout be slow while the claim stays atomic.
-- **`confirm` carries an idempotency key, enforced by a unique index.** *Rejected: trusting clients not to retry*, double-clicks and gateway timeouts always retry; without the key they double-charge or double-book.
-- **`acquire` is all-or-nothing with the losing seats named**, partial holds strand users with two of four seats; naming conflicts lets the UI re-offer instantly.
-- **`SeatLockProvider` is an interface** so the locking strategy is configuration, not a rewrite, exactly how you'd run the bake-off in §Evaluation.
-
----
-
-## D: Data model
-
-> This is the step the LLD form weights heaviest, per the spec: the seat/hold/booking entity model with the hold TTL. The classic modeling bug lives here too.
-
-**`shows`**, a screening: `show_id`, `movie_id`, `screen_id`, `starts_at`, price tier. The physical **`seats`** table (layout) is static reference data.
-
-**`show_seats`**, **the load-bearing entity**: one row per *(show, seat)* carrying `status` (`AVAILABLE`/`HELD`/`BOOKED`), the current `hold_id`, and `expires_at`. **Seat status belongs to ShowSeat, never to Seat**, the same physical F14 sells independently for the 6 pm and 9 pm shows. Putting `status` on the physical seat is the most common modeling failure in this interview, and it's disqualifying.
-
-**`seat_holds`**, the hold as a **first-class row**: `hold_id`, `show_id`, `seat_ids`, `user_id`, `expires_at`, `status`. Making the hold an entity (not just flags on seats) gives you one thing to validate, release, audit, and sweep, the row `confirm()` re-asserts.
-
-**`bookings`**, `booking_id`, `hold_id`, `user_id`, `show_id`, `seat_ids`, `amount`, `payment_status`, and a **unique `idempotency_key`**, the index that makes confirm exactly-once.
-
-The TTL lives in **two places on purpose**: on `seat_holds.expires_at` (the entity you validate) and denormalized onto `show_seats.expires_at` (so the claim query lazily reclaims expired holds without a join, §Evaluation).
-
-<details>
-<summary>Go deeper, full entity schemas and the three claim implementations in SQL (IC depth, optional)</summary>
-
-**`show_seats`:** `(show_id, seat_id)` PK; `status` enum; `hold_id` uuid null; `expires_at` timestamp null; `version` bigint (for the optimistic variant); partial index on `status='AVAILABLE'` for map builds and sweeps.
-
-**`seat_holds`:** `hold_id` PK; `show_id`; `seat_ids[]`; `user_id`; `status` enum (`ACTIVE`/`CONFIRMED`/`RELEASED`/`EXPIRED`); `expires_at`; index on `(status, expires_at)` for the sweeper.
-
-**`bookings`:** `booking_id` PK; `idempotency_key` UNIQUE; `hold_id`; `payment_status` enum.
-
-**Claim, variant A, pessimistic:** `SELECT ... FROM show_seats WHERE show_id=? AND seat_id IN (...) FOR UPDATE` → check all `AVAILABLE` (or expired-`HELD`) → `UPDATE` to `HELD` → commit. Lock held only inside this short transaction.
-
-**Claim, variant B, optimistic conditional update:** one statement per seat inside a transaction: `UPDATE show_seats SET status='HELD', hold_id=?, expires_at=? WHERE show_id=? AND seat_id=? AND (status='AVAILABLE' OR (status='HELD' AND expires_at < now()))`, if any statement reports 0 rows updated, roll back the transaction and return the conflicting seats. No read-modify-write window; the DB serializes the row.
-
-**Claim, variant C, hold table / unique insert:** `INSERT INTO active_seat_locks(show_id, seat_id, hold_id, expires_at)` with a UNIQUE constraint on `(show_id, seat_id)`; a duplicate-key error *is* the lost race. Expired rows are deleted lazily (`DELETE ... WHERE expires_at < now()` before insert, or an upsert conditioned on expiry). Confirm moves the claim into `show_seats.status='BOOKED'` and deletes the lock rows.
-
-**Confirm (all variants):** one transaction: `UPDATE show_seats SET status='BOOKED' WHERE hold_id=? AND status='HELD' AND expires_at > now()` asserting rowcount = seat count; insert booking; unique `idempotency_key` absorbs retries.
-
-</details>
-
-<details>
-<summary>Go deeper, full class model for the OOD form of the question (IC depth, optional)</summary>
-
-`Movie`, `Cinema` ⟶ `Screen` ⟶ `Seat` (physical, static); `Show` (Movie × Screen × time) ⟶ `ShowSeat` (the stateful entity); `SeatHold` (showId, seatIds, userId, expiresAt, status); `Booking` (hold → paid outcome); `Payment` (delegated). Services: `SearchService` (read-only), `BookingService` (orchestration), `SeatLockProvider` (strategy interface with `PessimisticDbLockProvider`, `OptimisticCasProvider`, `HoldTableProvider` implementations), `PaymentService` (interface to the gateway, idempotent), `ExpirySweeper` (scheduled). Composition over inheritance throughout; the only polymorphism that earns its keep is the lock-provider strategy.
-
-</details>
-
----
-
-## E: Evaluation
-
-> LLD adaptation per spec: Evaluation = stress the two failure paths the interviewer will actually run, the **concurrent-booking race** and the **payment-failure/expiry path**, and argue the lock strategy by traffic shape.
-
-**Race 1, two users claim F14 in the same instant.** Three viable mechanisms; the argument is the contention number from §E:
-
-- **Pessimistic (`SELECT ... FOR UPDATE` in the claim transaction).** Simple, obviously correct. Ideal at **matinee shape (~1 contender)**. At **opening-night shape (10-50 contenders/seat)** losers *queue on the row lock*, a convoy: waiting in line to learn a seat is gone, pinning DB connections, when they should bounce instantly.
-- **Optimistic conditional update**, a single `UPDATE ... WHERE status='AVAILABLE'`; the DB serializes the row; **exactly one statement reports 1 row**, every loser sees 0 rows and fails in microseconds, no lock held. Under 20:1 demand the loser's correct behavior is *fail fast and re-pick*, optimistic makes failure cheap exactly where failure is the common case (convoy mechanics: the Go-deeper).
-- **Hold table, `INSERT` with a unique constraint on `(show_id, seat_id)`.** The unique index is the arbiter; duplicate-key *is* the lost race. Same fail-fast property, and the hold is born a sweepable row. Cost: a second table to keep consistent with `show_seats`, plus delete-churn on a hot index.
-
-**My call: optimistic conditional update on `show_seats`, hold modeled as a `seat_holds` row**, fail-fast under the shape that matters, no convoy, no second arbiter. Pessimistic is *fine for the matinee*, and the wrong default: design locks for the worst shape you must survive, not the average. I'd have the persistence team **benchmark optimistic vs hold-table on a simulated opening-night claim storm (p99 claim latency, pool occupancy)**; my prior is optimistic, one table holding both state and arbiter is one fewer consistency seam.
-
-**Race 2, payment fails, or the user walks away.** Explicit failure → `release(holdId)`: seats back to `AVAILABLE`, hold marked `RELEASED`. Silent abandonment → **TTL expiry**, and here is the design's quiet keystone: **lazy reclaim**. The claim predicate already treats an expired `HELD` as claimable (`status='AVAILABLE' OR (status='HELD' AND expires_at < now())`), the next claimant takes the seat *even if no background job ever ran*. The **ExpirySweeper** (every ~30 s) is hygiene only: flip long-expired rows so the seat map repaints. *Rejected: sweeper-only expiry*, correctness must not depend on a scheduler being up; a crashed sweeper would strand seats `HELD` during the one show that matters.
-
-**Race 3, payment succeeds at second 601 of a 600-second TTL.** The hold expired (the seat may already be re-held) while the gateway said yes. Defense in depth: (a) TTL ≫ gateway worst case makes this rare by construction; (b) `confirm()` **re-asserts the hold inside the booking transaction**, `WHERE hold_id=? AND status='HELD' AND expires_at > now()`, and a short rowcount fails the confirm and triggers an **automatic refund/reconcile** rather than a double-booking; (c) the idempotency key makes confirm retries harmless. The ordering is deliberate: **better to refund money than to seat two people in F14.**
-
-**Race 4, double-click / client retry on confirm.** The unique `idempotency_key` absorbs it: the second insert hits the index and returns the existing booking.
-
-**Re-check vs NFRs:** exactly-one-winner, the atomic claim; guaranteed expiry, lazy reclaim; N instances, truth lives only in DB rows, so instances are stateless; claim p99, milliseconds, since no lock spans I/O.
-
----
-
-## D: Design evolution
-
-> Per spec, evolution here means one thing: **the climb to Ticketmaster.** Push opening night up an order of magnitude and watch each LLD element grow its distributed counterpart.
-
-A single Postgres serves a cinema chain comfortably. Now make it a Coldplay on-sale, 2M users, one event, one instant:
-
-| This lesson (LLD, one DB) | Breaks when... | Ticketmaster (distributed) |
-|---|---|---|
-| One Postgres holds all `show_seats` | One show's claim storm exceeds a single primary's write budget | **Shard by `event_id`**, transaction locality preserved, hot-shard risk accepted |
-| Anyone may call `hold()` anytime | The unthrottled spike (~33K req/s in the numbers) would melt even the *right* shard | **Virtual waiting room** caps admission (~2K/s), the queue and the shard key are co-designed |
-| Optimistic conditional update | Never, it survives the climb intact | The **same CAS**, now on the event shard; the mechanism is altitude-invariant |
-| `seat_holds` row + TTL + lazy reclaim | Never, survives intact | Identical: TTL holds, lazy reclaim, sweeper for repaint |
-| Seat map read from the DB/short cache | Read volume swamps the core | Redis seat-map cache fed by a change stream, **map becomes a hint; claim stays the truth** |
-
-That table is the interview move: **the atomic claim and the TTL hold are the invariant core that never changes; everything that changes is protection around it.** When the interviewer says "now it's a Coldplay concert," you don't redesign, you climb: shard for locality, queue for rate, cache for reads, keep the CAS. (The full distributed argument lives in 5.13.)
-
-**The flash-sale / general-admission variant, in one line:** unreserved inventory collapses per-seat rows into a **bounded counter**, claim = a conditional decrement that can't go negative (`SET avail = avail - 1 WHERE avail > 0`), and at extreme contention you shard the counter trading an exact live count for N× write throughput.
-
-**Where I'd delegate (the explicit Director move):** payments/PCI behind `charge(idempotencyKey, amount, token)`, the payments team owns gateway SLAs and the compliance surface; the lock-strategy bake-off to the persistence team with my stated prior (optimistic CAS); bot throttling on hot on-sales to platform security, my prior being per-account claim caps enforced *inside the claim transaction*, the only place a cap can't be raced.
-
----
-
-## Trade-offs table: the pivotal decision
-
-| Decision | A, Pessimistic `SELECT FOR UPDATE` | B, Optimistic conditional update (CAS) | C, Hold table, unique-constraint insert | Use when... |
+### Trade-offs table: the analytical-modeling decisions
+| Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
-| **Seat-claim concurrency** | Lock rows, check, update, commit; losers queue on the lock | One conditional `UPDATE`; loser sees 0 rows, fails fast, no lock held | `INSERT` into lock table; duplicate-key error = lost race; hold is born a row | **A** at matinee shape or when contenders must serialize on one row. **B** (our default) when contention spikes, losers bounce, no convoy, one arbiter. **C** when holds must be independently sweepable/auditable rows, accepting a second table to reconcile. |
-| **Where truth lives** | DB rows | DB rows | DB rows + lock table | In-process locks: **never**, any second instance breaks the invariant. |
-| **Expiry mechanism** | Sweeper-only | **Lazy reclaim in the claim predicate + sweeper for hygiene** (our choice) | TTL'd rows, lazy delete-before-insert | Lazy reclaim whenever correctness must not depend on a scheduler, i.e., always. |
+| **Dimension shape** | **Star** (denormalized dims, fewer joins, some redundancy) | **Snowflake** (normalized dims, less redundancy, more joins) | **One Big Table** (pre-joined, no joins, rigid) | **A** the default, columnar compression makes redundancy free, minimizes joins. **B** only a huge, churny dimension where normalization saves real maintenance. **C** a high-traffic, stable-schema dashboard where join cost is real. |
+| **History (SCD)** | **Type 1** (overwrite, no history) | **Type 2** (new row + validity, full history) | **Type 3** (prior-value column) | **A** only attributes with no analytical history (typo fix). **B** the analytics default, any attribute whose history affects a metric. **C** when you need exactly one prior value. |
+| **Schema philosophy** | **Kimball** (dimensional marts, conformed dims) | **Inmon** (3NF enterprise warehouse → marts) |, | **A** the cloud-era default, fast to value, business-friendly, fits medallion gold. **B** heavy-governance enterprises wanting a normalized core first. |
+| **Key choice** | **Surrogate key** (warehouse integer) | **Natural/business key** (source id) |, | **A** mandatory once SCD2 is in play, uniquely IDs a *version*. **B** only an append-only fact with no versioned dimensions. |
 
----
+The Director move is defaulting to **star + SCD2 + surrogate keys + conformed dimensions**, and reaching for snowflake or OBT only as a justified per-table exception.
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here
+- **"Why not just run analytics on the normalized production schema?"**, *Strong signal:* the inversion, 3NF minimizes redundancy for safe writes but forces many-way joins to assemble a picture; analytics is read-cheap-by-design, so you denormalize into a star to collapse joins into scans, and you never contend with OLTP traffic. Quantifies the join reduction. *Red flag:* "add a read replica," which just moves the five-join full scan one box over.
+- **"A customer changes region, how does last year's revenue-by-region stay correct?"**, *Strong:* SCD Type 2, new dimension row with validity, old facts point at the old version via surrogate key, so history is preserved; names Type 1's silent corruption as the rejected alternative. *Red flag:* "update the customer's region," not seeing that overwrite retroactively rewrites the past.
+- **"Star or snowflake, and why?"**, *Strong:* star by default, fewer joins, and columnar dictionary-compression makes the dimension redundancy nearly free, so snowflake trades a non-existent storage win for real join cost; snowflake only for a specific huge/churny dimension. *Red flag:* "snowflake is more normalized so it's better," importing an OLTP value into an analytical context.
+- **"What's the first thing you do when modeling a fact table?"**, *Strong:* declare the **grain**, exactly what one row represents, before any column, because it fixes what you can sum and prevents double-counting. *Red flag:* starts listing columns with no grain, the root cause of silently-wrong aggregates.
+- **"Two dashboards report different revenue. What's wrong and how do you prevent it?"**, *Strong:* two ungoverned definitions of the metric; fix with a **semantic/metrics layer**, one definition every consumer reads, and conformed dimensions; it's a governance/modeling problem, not a query bug. *Red flag:* debugs the SQL, missing that the cause is the absence of a single definition.
 
-- **"Two requests for F14 arrive in the same millisecond, what exactly happens?"** *Strong:* the atomic conditional write, the DB serializes the row, exactly one statement updates 1 row, the loser gets 0 rows and an instant conflict; multi-seat is one all-or-nothing transaction. *Red flag:* "I'd synchronize the method" or any answer where truth lives in process memory.
-- **"Where is the lock while the user types their card number?"** *Strong:* nowhere, the hold is **data with a TTL**; the claim transaction is milliseconds, the hold is minutes. *Red flag:* row locks or leases held across the payment call.
-- **"Your sweeper crashes Friday night. What happens to expired holds?"** *Strong:* nothing, the claim predicate lazily reclaims at write time; the sweeper only repaints the map. *Red flag:* seats stuck until ops restarts a job.
-- **"Pessimistic or optimistic, and why?"** *Strong:* argues by **traffic shape with numbers** (1 contender at a matinee vs 10-50 on opening night), names the convoy, picks fail-fast, concedes where pessimistic is fine. *Red flag:* a memorized one-word answer with no shape behind it.
-- **"Now it's a stadium on-sale."** *Strong:* climbs to 5.13 in three moves, shard by event, cap admission, cache the map, stating the CAS and TTL hold survive unchanged. *Red flag:* starts redesigning the claim mechanism itself.
+The through-line at Director altitude: analytical modeling is **denormalize for scans, declare grain first, preserve history with SCD2, govern the metric definition**, and delegate the per-table snowflake/OBT and CoW/MoR tuning with a stated prior ("star + SCD2 as the standard; the platform team picks where a wide table earns its rigidity," 14.1).
 
----
+### Common mistakes / misconceptions
+- **Carrying OLTP normalization into the warehouse.** 3NF is correct for writes and wrong for analytical reads; it forces many-way joins across huge row counts. Denormalize into a star, the redundancy is free on columnar storage and the join collapse is the whole point.
+- **Not declaring the grain first.** Building a fact without fixing what one row means is the root cause of double-counted, silently-wrong metrics (a fact at the wrong grain joined to a dimension fans out).
+- **SCD Type 1 by default.** Overwriting a dimension loses history and retroactively rewrites every historical comparison; Type 2 (new row + validity) is the analytics default for any history-bearing attribute.
+- **Using the natural/business key as the dimension primary key.** Once SCD2 is in play the business key isn't unique (multiple versions per entity); you need a surrogate key to identify *a version*.
+- **No single metric definition.** Letting each team encode "revenue" their own way guarantees disagreeing dashboards; one governed definition in a semantic layer, queried by all, is the fix.
 
-## Common mistakes
+### Practice questions
 
-- **Status on the physical `Seat` instead of `ShowSeat`.** The same seat sells independently per show; this bug is usually fatal in the first ten minutes.
-- **In-memory locks as the arbiter.** Dies at the second app instance or first restart. Truth lives in the database.
-- **Holding a DB lock (or fused `book()` transaction) across payment.** Pins connections for minutes and deadlocks the pool, the claim is milliseconds; the hold is data.
-- **Sweeper-only expiry.** Correctness can't depend on a scheduler; lazy reclaim is the mechanism, the sweeper is hygiene.
-- **No idempotency on confirm.** Gateway timeouts and double-clicks retry; without a unique key you double-charge or double-book.
+**Q1.** An interviewer says "just point the BI tool at our production Postgres, it's already got all the data." Walk through your response.
+> *Model:* I'd reject querying production directly on two grounds. First, the **layout**: a normalized 3NF schema stores each fact once, so "revenue by region by category by month" means joining `orders → customers → regions → products → categories` across tens of millions of rows for every refresh, slow and expensive, and on a row store it reads every column to touch a few. Second, **contention**: those unselective aggregate scans starve the point-lookup traffic that serves customers. Instead I'd land the data in the warehouse (CDC into bronze) and model a **dimensional star** in gold: a `fact_sales` at declared line-item grain surrounded by flat `dim_customer`/`dim_product`/`dim_date`/`dim_store`. The five-join scan becomes at most four single-hop joins, and the dashboard reads a pre-aggregate of a few thousand rows instead of 50M. Net: correct, fast, cheap, and production is untouched.
 
----
+**Q2.** A customer moves from California to Texas. Show how SCD Type 1 vs Type 2 changes the answer to "2025 revenue by state," and which you'd choose.
+> *Model:* Under **Type 1** you overwrite `dim_customer.state` to Texas. Now *every* historical query joins that customer's 2025 orders to "Texas," so last year's California revenue silently migrates to Texas, the report is precise and wrong, and nobody notices. Under **Type 2** you insert a *new* `dim_customer` row (new surrogate key, `valid_from = move date`, the old row closed with `valid_to`); the 2025 fact rows still point at the *California* version via their surrogate key, so "2025 revenue by state" correctly credits California and 2026 credits Texas. I'd choose **Type 2**, preserving point-in-time attribution is exactly why the warehouse exists; Type 1 is only acceptable for attributes with no historical meaning (a misspelled name). The cost of Type 2 is one extra dimension row per change plus validity-window logic in the transform, cheap for correct history.
 
-## Interviewer follow-up questions (with model answers)
+**Q3.** Estimate the scan reduction from adding a gold pre-aggregate for a dashboard that currently scans a 50M-row `fact_sales` table to show revenue by region by day.
+> *Model:* The raw query scans all **50M line-item rows** every refresh, summing on the fly. A pre-aggregate `agg_revenue_by_region_day` at the (region × day) grain has, say, 50 regions × 365 days ≈ **~18K rows per year**, holding pre-summed revenue. The dashboard reads ~18K rows instead of 50M, roughly a **2,700× row reduction**, and since it's columnar and the dashboard projects ~3 columns, the bytes scanned drop further. A multi-second, multi-cent scan becomes sub-second and effectively free (the cost model). The trade: the aggregate must be refreshed by the transform and only answers questions at its grain, ad-hoc drill-downs below (region × day) still hit the fact. So I pre-aggregate the *known high-traffic* rollups and keep the detailed star for exploration. Layout and pre-aggregation are the lever, not a bigger cluster.
 
-**Q1. Walk me through the exact moment two users win and lose seat F14.**
-> *Model:* Both requests hit the claim as a conditional update: `UPDATE show_seats SET status='HELD', hold_id=?, expires_at=? WHERE show_id=? AND seat_id='F14' AND (status='AVAILABLE' OR (status='HELD' AND expires_at < now()))`. The DB serializes writes to the row: the first statement reports 1 row; the second matches nothing and reports 0. Zero rows = lost race, roll back the multi-seat transaction, return the conflicting seats, the UI re-offers. No lock outlives the transaction, no read-then-write window exists, and the invariant holds on any number of app instances because the row is the single arbiter.
+**Q4.** When would you deliberately choose a wide One Big Table over a star, and what do you give up?
+> *Model:* I'd reach for OBT for a **specific, high-traffic, stable-schema dashboard** where the join cost is measurable and the analysts/BI tool benefit from zero joins, every row already carries region, category, segment, date attributes, so the query is a pure columnar scan with no joins at all, the fastest possible. It's viable *because* columnar storage dictionary-compresses the duplicated context to near-nothing. What I give up is **flexibility and reuse**: a dimension attribute change must be propagated across every row of the wide table, I lose conformed dimensions shared across facts, and the table is rigid to schema change. So OBT is a **per-mart optimization**, not a modeling philosophy, I keep the governed star as the default for flexibility and reuse, and materialize a wide table only where a hot dashboard justifies the rigidity. *Rejected:* making OBT the universal pattern, which sacrifices the warehouse's reusability for a speed win most queries don't need.
 
-**Q2. Payment succeeds one second after the hold's TTL expired. What does the user experience?**
-> *Model:* Three layers make this rare, then safe. The 10-min TTL sits far above gateway worst case, so it almost never happens. When it does, `confirm()` re-asserts the hold inside the booking transaction, `WHERE hold_id=? AND status='HELD' AND expires_at > now()`, and a short rowcount fails the confirm despite the successful payment, triggering an automatic refund. Deliberate ordering: refunding money is recoverable, double-booking is not. If nobody re-claimed the seat in that second, a friendlier variant re-claims and proceeds, an optimization, not a correctness requirement.
-
-**Q3. The interviewer says: "Why not just `synchronized(seat)`, it's one service."**
-> *Model:* Because "one service" is a deployment accident, not an invariant. Run two instances behind a load balancer, any production booking flow does, for availability alone, and two JVMs each hold their own monitor for F14; both claims succeed. It also evaporates on restart mid-checkout. In-process locks are fine as a fast-fail filter to shed hopeless contention cheaply, but the arbiter must be the transactional store, the only component every instance shares and the only one whose state survives a crash.
-
-**Q4. Bookings open for the year's biggest release and one show's traffic goes 100×. What changes first?**
-> *Model:* Nothing in the claim mechanism, the conditional update and the TTL hold are altitude-invariant. What changes is the protection around them, in the order things break: seat-map reads move to a cache fed by change events (the map was always a hint); if one show's claim rate exceeds the primary's write budget, shard by show/event for transaction locality; if the spike is hostile, Ticketmaster shape, 2M users at one instant, add a waiting room that caps the claim rate to what the shard sustains. That's Ticketmaster exactly, and it *contains* this design as its core: the climb adds layers, never replaces the atomic claim. For a GA flash sale, per-seat rows collapse to a bounded counter, conditional decrement while `avail > 0`, sharded if the counter becomes the hotspot.
-
----
+**Q5.** Your finance report and your product dashboard both show "revenue" and disagree by 3%. What's the cause and the fix?
+> *Model:* Almost certainly **two different definitions** of revenue encoded in two places, gross vs net of returns, the timezone of "day," whether late-arriving refunds are subtracted, or one reads a fast approximate path and the other the settled batch (the speed-vs-truth split of 9.7). Neither is "wrong"; they answer subtly different questions. The fix is **not** to debug one query, it's a **semantic/metrics layer**: one governed, code-defined definition of "revenue" (net, settled, store-local day) that finance, product, and the board deck all query through, plus **conformed dimensions** so "customer"/"date" mean the same thing everywhere, and **lineage** so each number's source and logic are inspectable. The Director point: disagreeing dashboards are a **modeling and governance** failure (no single definition), not a SQL bug, which is precisely why semantic layers and metric ownership exist.
 
 ### Key takeaways
+- **Analytical modeling inverts OLTP:** you normalize (3NF) to make writes safe and conflict-free on one entity; you **denormalize** to make scans cheap across all entities. The redundancy that horrifies an OLTP designer is free on columnar storage (dictionary compression) and collapses many-way joins into single scans.
+- **Dimensional modeling = facts + dimensions, grain first.** Facts hold the measurements you `SUM` (tall, thin, FK-heavy); dimensions hold the who/what/when/where you slice by (short, wide, descriptive). **Declare the grain, what one fact row means, before any column**, or you get silently-wrong, double-counted metrics.
+- **Star over snowflake; SCD Type 2 over Type 1.** Star minimizes joins and columnar-compresses the redundancy away, reject snowflake (more joins for a storage win you don't need). SCD Type 2 (new row + validity + surrogate key) preserves point-in-time history, reject Type 1 (overwrite) for any history-bearing attribute, because it silently rewrites the past.
+- **Gold in the medallion model is the dimensional layer.** Kimball gives the *shape* (stars, conformed dimensions, aggregates); medallion gives the *path* (bronze→silver→gold, rebuildable from retained raw). One Big Table is a per-mart, columnar-enabled optimization that trades flexibility for zero joins, not the default.
+- **One governed metric definition.** Disagreeing dashboards are a governance/modeling failure, not a query bug; a **semantic/metrics layer** plus conformed dimensions gives every consumer one definition of "revenue," computed one way in one place.
 
-- The whole LLD orbits one atomic instant: **`AVAILABLE → HELD(ttl) → BOOKED`**, one winner per seat decided by an atomic conditional write in the one store every instance shares.
-- **The hold is data, never a held lock.** Claims are milliseconds; holds are minutes; nothing pins a DB connection across payment.
-- **Pick the lock strategy by traffic shape:** pessimistic fine at matinee contention; optimistic/insert-wins fails losers fast at opening-night contention (10-50 contenders/seat) and is the default. Argue the shape, not the dogma.
-- **Lazy reclaim is the expiry mechanism; the sweeper is hygiene.** Idempotent confirm + re-asserted holds make payment races safe, refund beats double-booking.
-- **Know the climb:** shard by event, cap admission, cache the map, 5.13 wraps this core without changing it. Same problem, two altitudes; carrying both is the Director signal.
-
-> **Spaced-repetition recap:** BookMyShow LLD = entities (`Show`, **`ShowSeat`**, status lives here, `SeatHold`, `Booking`) + `AVAILABLE → HELD(ttl) → BOOKED` + **atomic conditional claim** (one winner, losers fail fast, all-or-nothing multi-seat). Hold = a TTL'd row, never a held lock; **lazy reclaim** at claim time; idempotent `confirm` re-asserts the hold (refund > double-book). Strategy by shape: matinee → anything; opening night → optimistic/insert-wins. Climb to 5.13: shard by event + waiting room + cached map, the CAS core never changes.
+> **Spaced-repetition recap:** Analytical modeling is the **briefing pack, not the filing cabinet**, denormalize for scans because storage is cheap and columnar-compressible while many-way joins across millions of rows are not (the inversion of OLTP 3NF). **Dimensional modeling (Kimball):** central **fact** (measurements you SUM, FK-heavy) + surrounding **dimensions** (who/what/when/where you slice by) = the **star**; **declare the grain first** (what one fact row means). **Star vs snowflake:** star wins, fewer joins, redundancy is free on columnar (dictionary encoding), snowflake only for a huge churny dimension. **SCD:** Type 1 overwrites (loses history, silently rewrites the past), **Type 2** = new row + valid_from/valid_to + **surrogate key** = the analytics default (preserves point-in-time attribution); Type 3 = one prior column. **Conformed dimensions** shared across facts enable cross-process joins. **Gold in the medallion model is where the dimensional stars/aggregates live**, Kimball is the shape, medallion the path, both rebuildable from raw. **One Big Table** pre-joins everything (no joins, rigid), a per-mart columnar optimization, not the default. A **gold pre-aggregate** turns a 50M-row scan into a few-thousand-row read (~thousands× reduction). **Semantic/metrics layer** = one governed definition of a metric, the fix for disagreeing dashboards. Next: 13.9, data quality and testing, engineering the *trust* that this modeled data is actually right.
 
 ---
 
-*End of Lesson 7.8. This is 5.13 with the telescope turned around: the same invariant at entity altitude, state machines, claim predicates, TTL rows. Interviewers pick the altitude; the candidate who can climb between them owns the problem at both.*
+*End of Lesson 7.8. Analytical tables are modeled for scans and human questions, denormalized into dimensional stars (facts + dimensions, grain declared first), with SCD Type 2 preserving point-in-time history, conformed dimensions enabling cross-process analysis, and the medallion gold layer as their home. Next: 13.9, data quality, testing, and contracts, how you engineer the trust that the numbers this model produces are actually right.*

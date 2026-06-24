@@ -1,254 +1,263 @@
 ---
-title: "5.11 - Web Crawler"
-description: Crawl ~30B pages a month at ~12k pages/sec - a politeness-constrained BFS where the URL frontier reconciles throughput vs per-host rate-limiting, a RAM Bloom filter absorbs ~720k seen-checks/sec, and partition-by-host makes politeness need zero global coordination - argued through RESHADED at Director altitude.
+title: "5.11 — LeetCode / Online Judge"
+description: Run untrusted code at scale, the design lives or dies on the isolation choice (containers vs microVMs vs language sandboxes) traded against cold-start latency and contest-spike burst economics, where the Director probe lands on blast radius and cost per execution, not cgroup flags.
 sidebar:
   order: 11
 ---
 
+> **Why this gets asked at Director level:** Most system-design problems are about moving data fast. This one is about running *someone else's program*, code written specifically to break out of your box, and surviving a contest start where 100,000 submissions land in three minutes. The Director signal is not reciting cgroup flags; it is framing the isolation choice as a **blast-radius-vs-cost-vs-latency** trade, naming the viable answers (hardened containers, microVMs) with their failure modes, and seeing that the *same* shape generalizes to CI runners, FaaS, and AI-agent sandboxes. The canonical failure is "just spin up a Docker container per submission" without pricing the cold start or naming what a kernel exploit reaches. Asked rising-fast at Meta (Product Architecture, HARD tier), Coderpad, and HackerRank, and increasingly anywhere that runs agent-generated code.
+
 ### Learning objectives
-- Run the **RESHADED** spine on a large-scale web crawler and defend every call against requirements, cost, and risk.
-- Internalize the crux: **the URL frontier** must simultaneously **prioritize**, enforce **politeness (per-host rate-limiting)**, and never re-fetch the billions of URLs already **seen**, cheaply.
-- Quantify the system: **~30B pages over 30 days ≈ 12k pages/sec**, **~720k URL-seen checks/sec**, **~10 Gbps** ingest, **~3 PB** raw storage, **~120 GB Bloom filter**, and show why each number picks a component.
-- Explain why **partitioning the frontier by hostname** is the decision that makes politeness a *local* property requiring no cross-node coordination.
-- Identify where a Director goes deep (frontier design, Bloom false-positive direction) and where they delegate (SimHash tuning, the JS-render farm) with a stated prior.
+
+1. Run the **RESHADED** spine on a problem whose crux is **executing untrusted code safely under burst load**, not a read:write ratio, and state that adaptation out loud.
+2. Choose an **isolation strategy** (container vs microVM vs language sandbox) by trading **blast radius against cold-start latency and density/cost**, naming the rejected alternative.
+3. Size the **contest-spike burst** (100k submissions in minutes) and show why a **warm worker pool**, not reactive autoscaling, is the load-bearing decision.
+4. Design the **async judging pipeline**, submit returns instantly, a queue feeds an isolated worker fleet, results stream back, and place resource limits where they bind.
+5. Operate at **Director altitude:** own the cost-per-execution line, name the blast radius precisely, delegate the sandbox internals with a stated prior.
 
 ### Intuition first
-A web crawler is not a downloader, downloading is the easy 5%. It is a **politeness-constrained breadth-first search over a hostile graph**. Picture a very well-mannered librarian photocopying the entire web. The work itself (fetch, copy, write down the links, fetch those next) is trivial. Three things make it brutal at scale. **Manners**: fire 12,000 requests a second at one server and you've DDoSed it, so you cap yourself at roughly **one request per second per host** and obey `robots.txt`. **Memory**: the web is one giant loop, so before fetching anything you must ask "have I seen this URL?" about **120 billion** discovered links without a disk seek each time. **The web fights back**: infinite calendars, session-id URLs that look new forever, deliberate **spider traps**. So the heart of the system is one component, the **URL frontier**, a sharded, prioritized, politeness-aware to-do list, fronted by a **Bloom filter** that cheaply remembers what you've seen. Everything else is plumbing around that to-do list.
 
-Two framing notes. **One:** a crawler is almost **pure write**, it *produces* a corpus; the only "read" is the downstream indexer consuming it offline in batch. Size for **fetch rate and storage growth**, not query QPS. **Two:** the entire design hangs off one tension, maximize throughput while never violating per-host politeness, and the resolution is **partition the frontier by hostname**, so "1 req/s for this host" is a decision one worker makes alone, with **zero global coordination**.
+Imagine you run a testing lab where strangers mail you machines and ask you to press the power button. Some are ordinary; some are rigged to catch fire, drill through the wall into the next lab, or quietly phone home with what they find, and you can't inspect them all first. So you build **blast chambers**: each machine runs in its own sealed room with a fuse that cuts power after ten seconds, a meter that trips on overdraw, and walls rated for how bad the worst machine could be. The whole business is a trade-off between **how strong you build each chamber** (a bunker is safe but slow and expensive to prepare) and **how fast and cheaply you cycle strangers through** (a curtain is instant and dense but one bad machine torches the building).
+
+That is the online judge. A submission is an untrusted machine; the chamber is your **isolation boundary**; the fuse and meter are your CPU-time and memory limits; the wall rating is your **blast radius**, what a hostile submission reaches if it breaks out. And twice a week, at a contest start, ten thousand strangers show up *in the same minute*. There's no read:write skew here. The skew is **trusted control plane vs untrusted execution plane**, and the resource that runs out first is **safe, warm capacity to run code**.
 
 ---
 
 ## R: Requirements
 
-"Build a web crawler" hides several products (search-corpus builder, focused scraper, archiver, malware scanner). The Director signal is cutting to a defensible core and saying why.
+> Pin the scope, and state the load-bearing fact out loud: this is not a CRUD app with a code field. The entire architecture exists to **run adversarial code safely, fast, at burst.**
 
-**Clarifying questions (with assumed answers):**
-- *What's it for?* → **A fresh corpus for a search index.** Broad coverage, periodic re-crawl, store raw + extracted text. Rules out focused crawling and pure archiving.
-- *Scale and cadence?* → **~30 billion pages, re-crawled roughly monthly.** This pair drives the entire E step.
-- *HTML only, or render JavaScript?* → **HTML in scope; JS rendering delegated** to a separate render tier, rendering is 10-50× more expensive per page. Stating this cut is itself signal.
-- *Media?* → **Record media URLs, don't download bytes.** The crawler stores the ~100 KB page, not the ~2 MB of assets.
-- *Politeness?* → **Non-negotiable.** Violate it and you get IP-banned, legally threatened, and you take sites down. This is the defining non-functional requirement, not a nicety, the architecture is *built around* it.
-
-**CUT from scope (stated, with reason):** JS rendering (delegated tier), indexing/ranking/PageRank (the *search* problem, the crawler ends at "store page + links"), media bytes (blob pipeline), authenticated/paywalled crawling (policy out of scope), real-time crawling (this is batch ingest).
+**Clarifying questions I'd ask (with assumed answers):**
+- *Who writes the code we run?* → **Anonymous, untrusted, sometimes actively malicious** users. This is the whole problem, not "a feature."
+- *Steady drip, or contest spikes?* → **Contests are the design driver.** Steady submissions are trivial; a weekly contest start is **100k submissions in ~3 minutes.**
+- *What languages?* → **~15** (C++, Python, Java, Go, Rust, …); each needs a different runtime image, an operational fact, not a footnote.
+- *Verdict latency?* → **p95 < ~5 s** end-to-end; judging itself is bounded by the problem's time limit (often 1-2 s of CPU).
+- *Is a wrong verdict acceptable?* → **No.** The same code + tests must yield the same verdict (the determinism discipline of the stock-exchange engine), and one user's run must never affect another's.
 
 **Functional requirements:**
-1. **Fetch** a URL honoring `robots.txt` and per-host rate limits.
-2. **Parse** and **extract outbound links**.
-3. **Dedup**: never re-enqueue a seen URL; never store a duplicate page.
-4. **Store** raw page + extracted text/metadata durably.
-5. **Prioritize** (not pure FIFO) and **re-crawl** adaptively for freshness.
-6. **Avoid traps/loops**: per-host budgets, depth limits, near-dup detection.
+1. **Submit** code (language + source + problem id); get an instant acknowledgement.
+2. **Compile and run** against a hidden test suite, inside isolation, under CPU/memory/time limits.
+3. **Return a verdict** (Accepted / Wrong Answer / TLE / MLE / Runtime Error / Compile Error) with per-test detail, streamed as known.
+4. **Run contests**, leaderboards, rate limits, fair queueing under spike.
+5. **Resource-limit and sandbox** every execution; clean teardown, no residue.
+
+**Explicitly CUT (scoping *is* the signal):** the problem-authoring CMS, the editor frontend, forums, billing, plagiarism detection, recommendations. I scope to **submit → queue → isolated judge → verdict**, plus the contest burst path, and say so.
 
 **Non-functional requirements:**
-- **Politeness (the headline NFR):** ≤ ~1 req/s/host (tunable from `Crawl-delay`), obey `robots.txt`.
-- **Throughput:** sustain ~12k pages/s; scale to 10× by adding workers, no global bottleneck.
-- **Robustness:** survive malformed HTML, traps, and worker failures without losing the frontier.
-- **Freshness:** adaptive re-crawl, important pages often, stable pages rarely.
-- **Read:write skew:** **pure ingest**, ~12k page-writes/s, no external reads on the hot path.
+- **Isolation / security first**, untrusted code must not escape its sandbox, read other users' data, exhaust the host, or reach the network. This is the cardinal invariant; everything else bends to it.
+- **Burst tolerance**, absorb a 100k-in-3-min contest spike without melting or starving normal traffic.
+- **Low, predictable latency**, p95 verdict < ~5 s; cold-start of the sandbox must not dominate that budget.
+- **Cost-bounded**, judging is **compute-per-execution**; idle warm capacity and per-run overhead are the budget a Director owns.
+- **Fairness**, one user (or one infinite loop) can't monopolize the fleet; contest and practice traffic isolated.
 
-The decisive requirement is **politeness × throughput**: ≤1 req/s/host *and* 12k pages/s together force a design that spreads work across thousands of hosts at once and partitions the frontier by host. That tension is the architectural fork everything else hangs off.
+**The skew that matters, stated.** There's no database read:write skew worth designing around, the durable writes are tiny and off the hot path. The asymmetry is **trusted control plane (API, queue, results, ordinary web infra) vs untrusted execution plane (judge workers running adversarial code).** The control plane is a solved problem; the execution plane is the entire question. The scarce resource isn't QPS or storage, it's **warm, isolated capacity to safely execute code**, which is why isolation strategy and burst economics dominate.
 
 ---
 
 ## E: Estimation
 
-Enough math to make a defensible call; round hard, state assumptions. **One consistency rule: ~100 KB per page over the wire** (the HTML document, not its assets), bandwidth and storage both derive from it.
+> **Spine adaptation:** Estimation here is **burst-capacity math**, not steady QPS. The headline isn't an average, it's the contest spike and the **warm-pool size** that tames it.
 
-**Assumptions:** 30B pages/crawl over 30 days; ~60 outbound links/page; ~120B distinct URLs discovered (discovered ≈ 3-4× crawled); peak ≈ 2× average.
+**Assumptions:** ~200k submissions/day steady; one weekly contest with ~150k participants; ~30 test cases each; per-run CPU ~1-2 s; ~15 runtime images.
 
-**Fetch rate and host concurrency, the crux, stated once:**
-```
-30B ÷ (30 × 86,400 s) ≈ 12k pages/s sustained (peak ~25k)
-12k pages/s ÷ 1 req/s/host = 12,000 hosts crawled concurrently
-```
-Politeness ≤1 req/s/host means throughput is bought entirely with **host-breadth, never depth**, and it's why the frontier is **sharded by host so politeness is local**. This is the crux. (Little's Law cross-checks it: at ~1 s fetch latency, 12k/s × 1 s ≈ 12k in-flight fetches, the same constraint viewed two ways.)
+**Steady judging QPS:** `200k ÷ 86,400 ≈ 2.3/s`; peak ~5× → **~12/s.** A trivial fleet, *the trap.* "A few container hosts" feels fine, then dies at the contest start.
 
-**URL-seen checks/sec, the number that makes the Bloom filter non-optional:**
-```
-12k pages/s × 60 links = 720k seen-checks/s (peak ~1.5M/s)
-…but only ~12k/s are new and get enqueued.
-```
-You **check 720k/s but enqueue only 12k/s**, ~98% of links are already seen. A DB lookup at 720k/s is ~720k random IOPS; the seen-set **must be an in-RAM probabilistic filter**.
+**The contest spike (the real headline).** A huge fraction of ~150k contestants submit in the **first 3 minutes** → **~100k in 180 s ≈ ~550 submissions/s**, spiking to ~1,000/s at `t=0`. Each submission holds a worker for **compile + ~30 tests × ~1-2 s ≈ ~10 s.** By Little's Law, concurrency = arrival × hold: `550/s × 10 s ≈ ` **5,500 concurrent executions** at the sustained spike, higher instantaneously. *This is the number the fleet is sized against, not the 12/s steady rate.*
 
-**Seen-set sizing, Bloom vs the rejected exact stores:**
-```
-Bloom, 120B URLs @ 1% FP ≈ 9.6 bits/key → ~144 GB (call it ~120–150 GB, sharded)
-Exact 64-bit-hash set (reject): ~960 GB RAM    Full-URL set (reject): ~12 TB
-```
-The Bloom filter is an **8× RAM saving** over the exact set, bought with ~1% false positives (direction analyzed in Evaluation).
+**Why warm capacity is the lever.** A microVM cold-starts in ~125 ms; a fresh container with a cold runtime image takes 2-5 s, reactive scaling then *adds the cold start to every verdict during the spike*, blowing the 5 s p95. So you **pre-warm a pool for the spike**: ~5,500 slots at ~8 executions/host → **~700 warm hosts during contest windows**, scaled to a ~20-30 floor the other ~95% of the week. **The ~50× peak-vs-average gap is the cost conversation** (same shape as the GPU warm-pool).
 
-**Bandwidth:** 12k/s × 100 KB = **~10 Gbps sustained** (peak ~20), meaningful but not exotic, a handful of well-connected boxes. Rendering JS or fetching assets would be ~20× higher; another reason that tier is delegated.
+**Storage & cost (small bytes, real spend on capacity).** Submissions + verdicts are `200k/day × ~3 KB ≈ ~80 GB/yr`, a rounding error; test cases are tens of GB, cached on workers. A judged submission is ~$0.0001 of raw compute (~10 s at ~$0.04/vCPU-hour), so the **warm-pool idle cost dominates**, ~700 hosts for a ~3-hour weekly window plus the floor. Honest framing: **per-execution compute is nearly free; safe, warm, burst-ready capacity is what you pay for.**
 
-**Storage:** 30B × 100 KB = **~3 PB raw (~1 PB gzipped) per crawl**, plus ~30 TB metadata (~1 KB/page). With monthly re-crawls you either overwrite or retain history (×N). This is the number that says "blob store, not a database, for page bodies."
-
-**Worker fleet:** fetching is **I/O-bound** (async, ~2-3k concurrent fetches/box → ~5-8 fetcher boxes); parsing is **CPU-bound** (~3 ms/page → ~40-60 cores). Run ~30-50 mixed boxes for headroom. Naming the I/O-vs-CPU split picks the instance shapes.
-
-**One-line takeaway:** **720k seen-checks/s** ⇒ RAM Bloom filter; **3 PB** ⇒ blob store; **12k concurrent hosts** ⇒ host-partitioned frontier, the number that defines the architecture.
+**What estimation decided:** steady load is trivial; the contest spike (~5,500 concurrent) is everything; **warm-pool sizing for the spike** is the load-bearing call; the cost is idle warm capacity, not bytes. The numbers say *pre-warm, don't react.*
 
 ---
 
 ## S: Storage
 
-Four distinct data shapes; conflating them into one database is the classic mistake.
+> Three data classes; the interesting "store" is the **runtime image + test-case distribution to workers**, not a database.
 
-**1. Raw page bodies (~3 PB/crawl).** Enormous write volume, write-once, read-rarely-and-in-batch by the downstream indexer; large immutable blobs keyed by URL/content-hash.
-- **Choice: blob store, S3 (or HDFS/GCS).** Precisely what object storage is for, at $/TB an order of magnitude below a database.
-- **Rejected, any database (SQL or wide-column) for bodies:** databases are built for indexed point/range queries and updates, none of which we need on 100 KB blobs you only ever scan sequentially. *Trade-off:* no per-page query/update, we don't need it.
+**1. Submissions + verdicts (durable, small, control plane).** A **sharded relational store (Postgres/MySQL)**, sharded by `user_id`; verdicts are an append/update keyed by `submission_id`. *Rejected, a heavyweight distributed DB:* the data is ~80 GB/yr; reaching for Spanner/Cassandra solves a scale problem you don't have while ignoring the one you do (isolation).
 
-**2. URL/crawl metadata (~30 TB).** One row per URL (status, fingerprint, last-crawled, next-recrawl, priority); ~12k writes/s; point-lookups plus per-domain scans by the re-crawl scheduler.
-- **Choice: wide-column LSM, Bigtable/Cassandra/HBase** (LSM absorbs the write rate, the indexing lesson), partitioned by domain hash. The crawl's source-of-truth ledger of "what have we seen and when."
-- **Rejected, Postgres:** a single-leader B-tree store can't absorb 12k+ churning writes/s over tens of billions of rows; we need neither joins nor multi-row transactions. *Trade-off:* lose ad-hoc SQL for linear write scale and partition locality.
+**2. Runtime images + test cases (must be local to the worker before it runs).** **Pre-baked, pre-pulled runtime images** (one per language) cached on every warm worker, and **test cases in S3 with an aggressive local cache.** The image is *already on the host* when a submission arrives. *Rejected, pulling the image on demand:* turns a 125 ms cold start into seconds and re-introduces the exact tax warm pools exist to kill.
 
-**3. The seen-URL set.** ~720k membership checks/s, approximate-OK, must be RAM.
-- **Choice: in-memory Bloom filter** (~120 GB sharded), optionally backed by an exact ledger check on positives.
-- **Rejected, exact RAM hash-set (~960 GB) or DB lookup (720k IOPS).** *Trade-off:* ~1% false positives, we accept ~1% coverage loss for the 8× RAM saving, or layer an exact check where coverage matters.
+**3. The work queue (transient, the backpressure point).** A **durable queue, Kafka or SQS**, between submit and the judge fleet. Durable (unlike an in-memory queue) because a submission is a *contest entry*, losing it is unacceptable; replay on crash is required. *Rejected, synchronous judging:* couples the user's connection to a 10 s adversarial execution, and at 1,000/s the spike exhausts connection pools.
 
-**4. The URL frontier.** Billions of small items, enqueued/dequeued constantly, prioritized, grouped by host.
-- **Choice: durable sharded queue (Kafka) + per-host state in Redis/the ledger.**
-- **Rejected, a single in-memory queue:** not durable (a crash loses the crawl's progress), can't shard, can't express per-host rate-limiting. *Trade-off:* more moving parts, but losing the frontier means re-crawling petabytes.
-
-**Director framing: four data shapes, four stores**, S3, Bigtable/Cassandra, RAM Bloom, durable queue, each matched to its access pattern.
+**Results delivery:** verdict updates pushed to the client via **SSE or polling**, best-effort, off the durable path.
 
 ---
 
 ## H: High-level design
 
-The architecture is a **pipeline around the frontier**: frontier hands out a polite, prioritized URL; the page flows through dedup → parse → store; new links pass the Bloom filter and re-enter the frontier.
+> The shape to make visible: a **trusted control plane** (API, durable queue, results) feeding a **warm, isolated execution plane** running adversarial code behind a hardened boundary.
 
 ```mermaid
-flowchart TD
-    SEED[Seed URLs] --> FRONT[URL Frontier<br/>sharded by host<br/>priority + politeness]
-    FRONT -->|next eligible URL| FETCH[Fetcher workers<br/>async, I/O-bound]
+flowchart TB
+    USER["User browser or app"] --> API["API gateway<br/>auth and rate limit"]
+    API -->|"submit returns instantly"| DB[("Submissions and verdicts<br/>sharded Postgres")]
+    API -->|"enqueue"| Q["Durable judge queue<br/>Kafka or SQS"]
 
-    ROBO[(robots.txt cache<br/>Redis, per-host)] -->|allowed?| FETCH
-    DNS[(DNS resolver<br/>caching, async)] -->|host to IP| FETCH
+    Q --> DISP["Dispatcher<br/>fair queue and priority"]
+    DISP --> POOL["Warm worker pool<br/>pre warmed for contest spike"]
 
-    FETCH -->|raw HTML| CDEDUP{Content-seen?<br/>fingerprint check}
-    CDEDUP -->|duplicate| DROP[Drop]
-    CDEDUP -->|new| STORE[(Blob store S3<br/>raw page ~3 PB)]
-    CDEDUP -->|new| PARSE[Parser + link extractor]
+    subgraph EXEC["Execution plane untrusted"]
+      POOL --> W1["Judge worker<br/>microVM or container<br/>no network · CPU and mem limits"]
+      POOL --> W2["Judge worker<br/>isolated sandbox"]
+      POOL --> W3["Judge worker ..."]
+    end
 
-    PARSE --> META[(Metadata ledger<br/>Bigtable/Cassandra<br/>URL, status, fingerprint, ts)]
-    PARSE -->|extracted URLs| USEEN{URL-seen?<br/>Bloom filter ~120 GB}
-    USEEN -->|already seen ~98%| DROP
-    USEEN -->|new ~2%| FRONT
+    IMG[("Runtime images and test cases<br/>pre pulled and cached on workers")] -.-> W1
+    W1 -->|"verdict and per test results"| DB
+    DB -->|"stream verdict"| USER
+    AS["Autoscaler<br/>scale on queue depth · warm floor"] -.-> POOL
 
-    SCHED[Re-crawl scheduler<br/>adaptive freshness] -->|due URLs| FRONT
-    META --- SCHED
-
-    style FRONT fill:#1f6f5c,color:#fff
-    style USEEN fill:#e8a13a,color:#000
-    style STORE fill:#2b4c7e,color:#fff
+    style EXEC fill:#7a1f1f,color:#fff
+    style POOL fill:#e8a13a,color:#000
+    style W1 fill:#2d6cb5,color:#fff
+    style Q fill:#1f6f5c,color:#fff
 ```
 
-**Happy path, compressed:** the frontier's host-shard locally picks the next *eligible* URL (host out of its 1 s cool-down, highest priority), no global lock, because that shard owns the host. The fetcher checks the per-host `robots.txt` cache (Redis, TTL'd) and the caching async DNS resolver, neither blocks the worker, then GETs ~100 KB. The body is fingerprinted against the **content-seen** set (mirrors, syndication, session-id variants drop here without being stored or re-parsed); new pages go to S3 and the parser, which extracts links. Each link is normalized and run through the **Bloom filter**, ~98% drop as already-seen; the ~2% genuinely new URLs are added to the filter and enqueued into their host-shard and priority band. Separately, the **re-crawl scheduler** reads the ledger and re-injects URLs whose adaptive `next_crawl` time has arrived, that's what keeps the corpus fresh between full passes.
+**Happy path, compressed:** the API authenticates, rate-limits, writes the submission row, **enqueues** the job, and returns `202` instantly, the connection never blocks on execution. The **dispatcher** pulls from the durable queue with fair-share/priority (contest jobs don't starve practice) and hands the job to a **warm worker** that already holds the runtime image and test data locally. The worker spins up an **isolated sandbox** (microVM or container), **no network**, strict **CPU-time / memory / wall-clock limits**, read-only FS, compiles, runs the test cases, captures the verdict, **tears the sandbox down** (fresh per run, no residue), and writes per-test results back. The verdict streams to the user as tests complete.
 
-**The two design choices that define this diagram:** **(a)** the **frontier is sharded by host**, so politeness is a purely local decision, no global rate-limiter; **(b)** a **RAM Bloom filter sits in front of the frontier**, so the 720k-checks/s dedup never touches disk and only ~12k/s of new URLs hit the queue.
+**The shape to notice:** the load-bearing wall runs between the **trusted control plane** (ordinary, scalable, durable) and the **untrusted execution plane** (the red box, every isolation and resource-limit decision lives here). The queue + warm pool keep work crossing that wall at a rate the execution plane can safely serve.
 
 ---
 
 ## A: API design
 
-One honest caveat that is itself signal: **a crawler is not a user-facing service**. The "API" is an operator control plane plus the internal frontier↔worker contract; the *output* is the corpus in S3, consumed offline.
+> Small surface; the **async submit + streamed verdict** shape *is* the correctness story.
 
-**Operator / control plane (REST, not latency-critical):**
 ```
-POST /v1/seeds            { urls[], priority, crawl_id }
-POST /v1/crawls           { name, scope_rules, recrawl_policy }
-GET  /v1/crawls/{id}/status
-PUT  /v1/policy/host/{host} { crawl_delay_s, max_pages, enabled }
-POST /v1/recrawl          { url | domain }
+# Submit code (async — returns immediately)
+POST /v1/submissions
+  headers: { Authorization: Bearer <token> }
+  body: { problemId, language: "cpp", source: "...", contestId? }
+  -> 202 { submissionId, status: "queued" }
+  -> 429   if over rate limit (per user / per contest)
+
+# Poll or stream the verdict
+GET  /v1/submissions/{submissionId}
+  -> 200 { status: "running" | "accepted" | "wrong_answer" | "tle" | ...,
+           passedTests, totalTests, results: [{ test, verdict, timeMs, memKb }] }
+
+# Stream verdict as tests complete (SSE)
+GET  /v1/submissions/{submissionId}/stream   (text/event-stream)
+  data: { test: 1, verdict: "passed", timeMs: 42 }
+  data: { test: 2, verdict: "passed" }  ...
+  data: { status: "accepted", passedTests: 30, totalTests: 30 }
+
+# Contest leaderboard (cached, eventual)
+GET  /v1/contests/{contestId}/leaderboard  -> 200 { rankings: [...], asOf: <ts> }
 ```
 
-**Internal frontier ↔ worker contract (the hot path, queue/RPC, not REST):**
-```
-frontier.next(worker_id) -> { url, host, priority, attempt }
-frontier.add(url, source_url, priority)
-frontier.complete(url, status, fetched_at, fingerprint)
-frontier.retry(url, reason, backoff)
-```
-
-A durable queue gives **at-least-once delivery, back-pressure, and crash-safety** at 12k ops/s, which stateless REST would not. The `attempt`/`retry` fields make transient-vs-permanent failure explicit, a crawler that can't tell them apart loses pages or retries dead URLs forever. *Rejected, a public crawl-on-demand REST API:* turns batch ingest into a synchronous service it isn't.
+**Design notes (each with its rejected alternative):**
+- **Submit is async (`202`), never synchronous.** *Rejected: block the HTTP call until the verdict*, a 10 s adversarial execution on the request connection means the contest spike exhausts the connection pool before any judging happens. Decoupling submit from judging is the load-bearing API decision.
+- **Verdict streams per-test.** *Rejected: one final blob.* "Failed on test 7 of 30" lets the worker **fail fast** (stop on first failure) and the user see progress, a UX and a cost win.
+- **Rate limit per user *and* per contest.** *Rejected: trusting clients.* Without it one script floods the queue; the limit is the fairness NFR, enforced before the job reaches a worker.
+- **The leaderboard is explicitly eventual** (`asOf`), cached, never read from the hot judging path.
 
 ---
 
 ## D: Data model
 
-The partition keys are the decisions here; the frontier's host-bucketing is *the* pivotal one.
+> The schema is small and unremarkable, *which is the point.* The hardness is in the execution plane, not the data layer. The load-bearing field is the **resource-limit envelope** on each job.
 
-**The URL frontier, Mercator-style two-tier:** **front queues encode priority, back queues encode politeness** (one host per back-queue, drained no faster than its `crawl_delay`), **host-sharded; Kafka for durability + Redis for host state**. Priority and politeness cleanly separated into the two tiers, that separation is the design's elegance.
+**`submissions`**, PK `submission_id`, shard key `user_id`; carries `problem_id`, `language`, `source` (or a blob pointer), `contest_id` (nullable), `status`, `submitted_at`.
+
+**`verdicts`**, keyed by `submission_id` (colocated); carries the overall `status`, `passed_tests`/`total_tests`, and a per-test result list (`test_id`, `verdict`, `time_ms`, `mem_kb`), written incrementally as the worker streams results.
+
+Each queued job also carries its **execution envelope**, `time_limit_ms`, `memory_limit_kb`, `output_limit`, and the language's `runtime_image`, the limits the sandbox enforces. These are the fields that actually bind, and they live with the job, not in a config the worker fetches.
 
 <details>
-<summary>Go deeper, Mercator two-tier frontier mechanics (IC depth, optional)</summary>
+<summary>Go deeper, full column schemas and the result row (IC depth, optional)</summary>
 
-```
-FRONT QUEUES (priority):   F[1..k]   # k priority bands; a URL routes to a band by score
-BACK QUEUES (politeness):  B[1..n]   # each back-queue holds URLs for EXACTLY ONE host
-HOST TABLE:                host -> { back_queue_id, next_eligible_at }   # Redis
-HEAP:                      min-heap of (next_eligible_at, back_queue_id)
-```
+**`submissions`:**
 
-A worker pops the host whose `next_eligible_at` is soonest from the heap, fetches one URL from that host's back-queue, then re-inserts the host with `next_eligible_at = now + crawl_delay`. A single host is *physically* incapable of being fetched faster than its delay. When a back-queue drains, it's refilled with the next host's URLs from the front queues, preserving priority order.
+| Field | Type | Notes |
+|---|---|---|
+| `submission_id` | uuid | primary key |
+| `user_id` | int64 | **shard key** |
+| `problem_id` | int64 | |
+| `contest_id` | int64 (nullable) | set for contest entries (priority + leaderboard) |
+| `language` | enum | selects the runtime image |
+| `source` | text / blob ptr | the untrusted code |
+| `status` | enum | `queued` / `running` / `accepted` / `wrong_answer` / `tle` / `mle` / `rte` / `ce` |
+| `submitted_at` | timestamp | ordering for tie-breaks in contests |
+
+**`test_results`** (one row per test, keyed by `submission_id`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `submission_id` | uuid | shard key (colocated with submission) |
+| `test_id` | int | which hidden test |
+| `verdict` | enum | `passed` / `wrong_answer` / `tle` / `mle` / `rte` |
+| `time_ms` | int | wall/CPU time consumed |
+| `mem_kb` | int | peak memory |
+
+The per-test granularity is what enables **fail-fast** (stop after the first non-pass) and the streamed UX. The `contest_id` + `submitted_at` pair is the input to the leaderboard's scoring/tie-break, computed off the hot path.
 
 </details>
 
-**Frontier partitioning, the pivotal decision: shard by HOST.**
-```
-shard = hash(host) % num_frontier_nodes
-```
-All URLs for `example.com` live on one node, so that node alone enforces its rate limit, **politeness becomes a local invariant with zero cross-node coordination.** *Rejected, partition by URL-hash:* perfect load-balance, but a host's URLs scatter across every node, forcing a **distributed rate-limiter at 12k/s** on the hottest path. We accept slightly worse balance (mega-host hot-spots, fixed in Evaluation) to make politeness free. This is the strongest trade-off in the design.
-
-**URL metadata ledger, Bigtable/Cassandra:** partition key `domain_hash` (scheduler and budget logic scan per domain), clustering key `url_hash`; columns: url, status, content fingerprint, `last_crawled`, `next_crawl`, priority.
-
-**Seen-URL set, Bloom filter:** ~120 GB bit-array, sharded by `hash(url)` so 720k checks/s spread across the fleet. A miss is a *certain* "never seen."
-
-**Content-seen set:** keyed by **SimHash content fingerprint** → first_url, first_seen, catches exact and near-duplicates whose URLs differ. Threshold tuning delegated (Design evolution).
-
-**Summary:** frontier = durable queue + Redis (by host); ledger = Cassandra (by domain); seen-set = RAM Bloom (by url-hash); bodies = S3. Four partition keys, each chosen for its access pattern.
+**No exotic sharding.** `user_id` co-locates a user's submission history; `submission_id` co-locates a submission with its results. There's no hot-shard problem because the durable data is tiny and the *contention* lives in the execution fleet, not the database, which is exactly why this problem's difficulty is misjudged by candidates who spend it on schema design.
 
 ---
 
 ## E: Evaluation
 
-Stress the design against the NFRs; fix each bottleneck, naming the trade-off the fix makes.
+> **Spine adaptation:** Evaluation here is an **isolation / blast-radius audit**, not a generic bottleneck hunt. Re-check the NFRs, then break the design on the security and burst dimensions, the two that actually fail. Five failure modes, each fixed with a *named* trade-off.
 
-**Bottleneck 1, a giant host hot-spots one frontier node (the cost of partition-by-host).**
-We chose host-partitioning for free politeness, but a mega-site (a domain with billions of URLs, a wiki, a forum, a marketplace) lands its entire frontier on one node, which falls behind while peers idle.
-- **Fix:** **per-host page budget + depth limit**, bounds any host's frontier footprint; for legitimately huge sites, sub-shard by URL-path prefix while keeping the politeness delay coordinated per host. *Trade-off:* we may not fully crawl the largest sites in one pass, we take the top *X* pages by priority, a deliberate coverage-for-balance trade. The budget **also doubles as trap defense** (Bottleneck 4).
+**Bottleneck 1, sandbox escape (the cardinal security risk).**
+A submission isn't buggy code; it's an exploit aimed at your host kernel. If it escapes, the **blast radius** is everything that worker reaches, other submissions, host credentials, the internal network. The boundary is chosen *by* that radius (three options in the trade-offs table): a **bare process/container** shares the host kernel → radius = the whole host; **gVisor** filters syscalls in userspace to shrink that surface; a **microVM (Firecracker)** gives each run its own guest kernel behind a hardware boundary → radius = one VM, at ~125 ms and lower density.
+*Decision:* **microVMs for public adversarial code** (smallest radius); **gVisor containers** where density/cost dominate and the threat is softer. *Trade:* microVMs cost density and ~125 ms for a dramatically smaller blast radius; bare containers are cheaper but one kernel CVE is catastrophic. The Director answer names each radius and picks against the threat model, it doesn't recite cgroup flags. (Internals delegated, see below.)
 
-**Bottleneck 2, DNS stalls workers (a latency/blocking problem, not a QPS one).**
-A cold resolve is 50-200 ms of synchronous wait; a worker blocked 100 ms does ~10 fetches/s, not 1,000.
-- **Fix:** a **dedicated caching, asynchronous resolver**, hosts repeat constantly so most resolves hit cache; misses are issued async so workers never block. *Trade-off:* a cached IP can go stale → rare failed fetch, retried after re-resolve. Framing this as *blocking, not QPS* is the Director-grade insight.
+<details>
+<summary>Go deeper, microVM vs gVisor mechanics (IC depth, optional)</summary>
 
-**Bottleneck 3, Bloom false positives (state the direction).**
-A false positive says "seen" for a never-crawled URL: **FPs drop new pages, coverage loss, never a double-crawl** (Bloom filters have no false negatives). At 120B URLs and 1% FP, that's up to ~1.2B pages wrongly skipped. If coverage is critical, **layer an exact ledger check behind positives**, only ~1% of 720k ≈ 7.2k extra lookups/s, affordable, or raise the bit budget (12 bits/key → ~0.3% FP at ~180 GB). *Trade-off:* exact-behind-positive costs DB load on hits; more bits costs RAM. Tune FP rate against how much coverage loss the product tolerates, fine for a search corpus, not for an archival crawl.
+**Firecracker (microVM):** a minimal VMM (no BIOS, no PCI, a handful of emulated devices) that boots a stripped Linux guest in ~125 ms with ~5 MB overhead, using KVM. Each execution runs in its **own kernel** inside a hardware-virtualized boundary; a guest kernel compromise is contained by the hypervisor. This is what AWS Lambda and Fargate use to run untrusted tenant code. Density is lower (each microVM carries its own kernel + memory floor) and the boundary is hardware-enforced.
 
-**Bottleneck 4, spider traps and near-duplicate floods.**
-Infinite calendars, session-id URLs, link mazes.
-- **Fix (layered):** per-host **budget + depth limit** caps blast radius; **URL normalization** (strip session ids, sort params) collapses trivial variants pre-Bloom; **SimHash content dedup** stops near-identical bodies even when URLs differ; a **trap heuristic** quarantines hosts emitting huge fan-out of near-identical content. *Trade-off:* aggressive dedup risks collapsing genuinely different pages, we tune toward bounded loss, because an unbounded trap can consume the fleet while an incomplete crawl is merely suboptimal.
+**gVisor:** a userspace kernel, it implements the Linux syscall surface in a sandboxed process (Sentry) so the *real* host kernel sees only a tiny, filtered set of syscalls. The host kernel attack surface shrinks ~10× versus a raw container, with container-like density and no hardware-virt requirement, at a per-syscall performance cost (some workloads slow 10-30%). The boundary is software, not hardware, strictly weaker than a microVM, much stronger than a bare container.
 
-**Bottleneck 5, losing the frontier (durability).**
-The frontier *is* the crawl's progress; losing it means re-crawling petabytes. A worker dying mid-fetch must not lose its in-flight URLs.
-- **Fix:** durable replicated queue; workers are **at-least-once**, acking `complete` only after the page is in S3 + ledger, so a crash redelivers the URL and content-dedup makes the re-fetch harmless and idempotent. Checkpoint the Bloom filter periodically (rebuildable from the ledger, but a snapshot avoids the full rebuild). *Trade-off:* occasional duplicate fetch on crash, far cheaper than at-most-once losing URLs.
+**Per-run hygiene regardless of boundary:** no network namespace (or an explicit deny-all), read-only root FS + a small tmpfs scratch, `seccomp` allow-list, dropped capabilities, CPU-time *and* wall-clock limits (catch both busy loops and sleeps), an output-size cap (catch fork bombs / disk floods), and a **fresh sandbox per submission**, never reuse, so no residue leaks between users.
 
-**Re-check vs NFRs:** politeness ✓ (host-sharded back-queues, no coordinator); throughput ✓ (12k concurrent hosts, scales by adding shards); robustness ✓ (budgets + normalization + SimHash + durable queue); freshness ✓ (adaptive scheduler); storage ✓ (S3 + LSM ledger). Residual costs, mega-site under-coverage, DNS staleness, ~1% false-skips, bounded trap-loss, are **named and priced**.
+</details>
+
+**Bottleneck 2, the contest-start thundering herd.**
+1,000/s at `t=0`; reactive autoscaling lags by the cold-start of *new hosts* (minutes), so the spike queues for minutes or melts the fleet.
+*Fix:* **pre-warm the pool** ahead of the (scheduled) contest start, scale on **queue depth** (a leading indicator, not CPU), and let the **durable queue absorb** the instantaneous peak with backpressure (429), honoring p95 across the 3-minute window rather than the literal first second. *Trade:* ~700 warm hosts for a 3-hour window is idle-cost paid for burst readiness. *Rejected:* purely reactive autoscaling, host cold start guarantees a multi-minute verdict lag at the worst moment.
+
+**Bottleneck 3, the runaway submission (infinite loop, fork bomb, memory hog).**
+Untrusted code *will* try to consume the host; without hard limits one submission starves the worker.
+*Fix:* **CPU-time *and* wall-clock limits** (a `sleep` burns no CPU but must still be killed → need both), a **memory ceiling** (cgroup → OOM → MLE), an **output-size cap** (kill a stdout flood), and a **PID limit** (defeat fork bombs). Limits live in the job envelope; a violation is a *verdict* (TLE/MLE), not a crash. *Trade:* aggressive limits can false-positive a slow-but-correct solution, tuned per problem, owned by authors. *Rejected:* wall-clock-only timeouts, they miss a busy loop under the wall limit and are fooled by `sleep`.
+
+**Bottleneck 4, test-case distribution to 700 workers.**
+A scaled-up worker needs the (tens of GB) test data *before* it can judge; pulling it at first-job time stalls the spike.
+*Fix:* **pre-stage test data on warm workers** (bake into the image or pre-pull on warm-up) with a local cache; only cold-added hosts pay the pull. *Trade:* test data is duplicated across the fleet (storage + a propagation lag when tests change), accepted to keep judging local and fast.
+
+**Bottleneck 5, noisy tenant / queue fairness.**
+One user firing thousands of submissions could monopolize the fleet and starve everyone else.
+*Fix:* **per-user and per-contest rate limits** at the API, **fair-share dispatch**, and **separate priority lanes** (contest vs practice) so a practice flood can't delay a live contest. *Trade:* fairness machinery adds dispatcher complexity and can delay a legitimate burst, accepted to protect aggregate fleet health.
+
+**Closing re-check:** escape contained (microVM/gVisor + per-run hygiene); spike survivable (pre-warm + durable queue + queue-depth scaling); runaways become verdicts not outages (hard limits); fairness held (rate limits + priority lanes); cost owned (warm-pool sizing). The untrusted plane stays sealed; everything that *can* be ordinary web infra *is*.
 
 ---
 
 ## D: Design evolution
 
-**Scaling to 10× (~300B pages, ~120k pages/s):** the fetch/parse fleet is shared-nothing and scales linearly, add host-shards and workers. Pressure moves to two places. **(a) The Bloom filter** (~120 GB → ~1.2 TB for ~1.2T discovered URLs): keep it sharded by url-hash; consider a two-level filter (small hot per-worker filter + larger shared one) to cut cross-node check traffic, accepting a rare, harmless double-enqueue during the staleness window. **(b) Geo-distribution**, run regional fetcher fleets crawling network-near sites (lower fetch latency, friendlier to regional sites), pinning each host to one home region so a single politeness budget per host stays local, the same partition-by-host principle, applied geographically.
+> **Spine adaptation:** the evolution step is the **generalization**, the same untrusted-execution shape reappears across the industry. Push the dimensions, then name where I'd delegate.
 
-**The hardest trade-offs:**
-1. **Politeness vs throughput vs coverage**, the central tension. The resolution, partition by host, buy throughput with breadth, is the core bet. The rejected global rate-limiter over a URL-hash frontier load-balances perfectly but puts coordination on the 12k/s hot path; I'd revisit only if host-skew made the imbalance worse than the coordination cost.
-2. **Uniform vs adaptive re-crawl.** Uniform wastes most fetches on pages that never change and misses fast-changers between passes. Adaptive (estimate each page's change rate from fingerprint history, schedule `next_crawl` accordingly, news hourly, an archived PDF yearly) maximizes freshness-per-fetch at the cost of change-history state and a prediction model. Start uniform; evolve to adaptive once the ledger has history.
-3. **Render JavaScript or not.** HTML-only misses client-rendered content; a headless-Chrome farm sees it but costs 10-50× per page, at 12k/s, an enormous separate fleet. Don't render by default, classify SPA-like pages and route only that slice to a bounded render tier, accepting some missed JS content to keep the main crawler cheap.
+**At 10× (a global platform: concurrent mega-contests, ~10k concurrent executions/region):**
+- **Regional worker fleets**, warm-pooled per region; the durable queue and control plane stay global, the execution plane goes regional to keep latency and warm-pool cost local. **Tiered warm pools by language popularity**, C++/Python deep, the long tail thinner. *Trade:* a Rust submission may wait a beat longer at peak, accepted, since the warm budget should track the language mix.
+- **Spot capacity for the steady floor**, on-demand for the spike, judging is idempotent on `submission_id`, so a preempted worker just re-queues. *Trade:* spot reclaim adds re-run latency for a real cost cut on the 95% off-contest time.
 
-**Where I'd delegate (with a stated prior):**
-- *"Data team: benchmark **SimHash near-dup thresholds** on our corpus, my prior is a Hamming-distance-3 band, but I want the precision/recall curve, because over-aggressive dedup silently drops real pages."*
-- *"Infra: benchmark the **frontier queue**, Kafka vs purpose-built, at 12k ops/s with billions of items; my prior is Kafka for durability + partitioning."*
-- *"A dedicated team owns the **JS-render farm** and the SPA classifier; my job is routing the JS slice to it and keeping the HTML majority cheap."*
+**The generalization (the real payoff).** This is *one instance* of **"run untrusted code at scale"**: **CI/CD runners** (GitHub Actions) run arbitrary user pipelines; **FaaS** (Lambda, Cloudflare Workers) runs untrusted tenant code, Firecracker and V8-isolate sandboxes are this problem at hyperscale; and **AI-agent / code-interpreter sandboxes** run *LLM-generated* code, the fastest-growing instance and the reason this question is rising. The blast-radius reasoning transfers wholesale. *Naming this generalization is the strongest Director signal in the problem.*
+
+**Hardest trade-offs to defend:**
+- **Isolation strength vs density/cost vs cold start**, the genuine trilemma; resolved by **threat model** (adversarial public code → microVMs; softer internal → gVisor).
+- **Warm-pool size**, every warm host is idle money; too few and the spike blows p95. A direct $/latency dial set from the *scheduled* contest calendar (a luxury that unpredictable traffic doesn't have).
+- **Hard limits vs false positives**, aggressive CPU/memory caps protect the fleet but can fail a slow-correct solution; tuned per problem, owned by authors.
+
+**Where I'd delegate (the explicit Director move):**
+- **The sandbox internals:** *"Platform-security owns the execution sandbox behind `judge(submission, limits) → verdict`, my prior is Firecracker microVMs for the public adversarial threat model, with seccomp/no-network/read-only-FS hardening and a fresh VM per run; they own the CVE-response SLA. I'm not specifying syscall filters on the whiteboard."*
+- **Capacity / spot strategy** is a finance+infra partnership, the warm-pool floor and contest pre-warm schedule are the biggest cost levers. **Per-problem limit tuning** belongs to the content/problem-author team. What I keep, the trusted/untrusted boundary, the blast-radius framing, warm-pool-for-the-spike, async judging, and what I hand off with a stated prior, is the altitude.
 
 ---
 
@@ -256,59 +265,60 @@ The frontier *is* the crawl's progress; losing it means re-crawling petabytes. A
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
-| **Frontier partitioning** | **Shard by host** (politeness is local, zero coordination) ✅ | Shard by URL-hash (perfect load-balance) | Single global queue + global rate-limiter | **Shard by host** for coordination-free politeness; accept mega-host hot-spots (fix with budgets). **URL-hash** only if politeness weren't required. **Single queue** never at this scale. |
-| **Seen-URL dedup** | **In-RAM Bloom filter** (~120 GB, ~1% FP) ✅ | Exact hash-set in RAM (~960 GB) | DB lookup per URL | **Bloom** at 720k checks/s; accept ~1% false-skip (layer exact check if coverage critical). **Exact set** only if memory is free. **DB-per-URL** never, 720k random IOPS. |
-| **Page-body storage** | **Blob store (S3/HDFS)** ✅ | Wide-column DB | Relational DB | **Blob store** for ~3 PB of write-once immutable HTML. **Wide-column** is for the *ledger*, not bodies. **Relational**, wrong tool, wrong cost. |
-| **Freshness re-crawl** | **Adaptive (per-page change rate)** ✅ | Uniform fixed cycle | Crawl-once | **Adaptive** maximizes freshness-per-fetch; needs change history. **Uniform** to start. **Crawl-once** only for a one-shot archive. |
+| **Isolation boundary** | **Process + seccomp/cgroups**, densest, shared host kernel | **Container + gVisor**, good density, userspace-filtered kernel surface | **microVM (Firecracker)**, own guest kernel, hardware boundary, ~125 ms | **A:** never alone for adversarial code (radius = host). **B:** density/cost dominate, softer threat. **C: default for public untrusted code (right call)**, smallest radius for ~125 ms + density cost. |
+| **Burst handling** | **Reactive autoscaling**, add hosts on load | **Pre-warmed pool sized for the spike** | **Over-provision 24/7 at peak** | **A:** never alone, host cold start lags the spike by minutes. **B: right call**, contests are *scheduled*: pre-warm + queue-depth scaling + queue absorption. **C:** wastes ~50× the budget off-contest. |
+| **Judging model** | **Synchronous**, request blocks until verdict | **Async via durable queue + worker pool** | **Async via in-memory queue** | **A:** never, exhausts connections, couples user to a 10 s run. **B: right call**, durable so a contest entry survives a crash. **C:** loses submissions on crash. |
 
 ---
 
-## What interviewers probe here
+## What interviewers probe here (Director altitude)
 
-At Director altitude the probes are about trade-off articulation, cost ownership, and delegation, not whether you can recite an HTTP GET.
-
-- **"How do you crawl 12k pages/sec without DDoSing any single website?"**, *Strong:* derives ≤1 req/s/host ⇒ ≥12k concurrent hosts (throughput = breadth), **partitions the frontier by host** so politeness is local, names the per-host back-queue. *Red flag:* "just add more workers" (hammers the same hosts harder), or a global rate-limiter without acknowledging the coordination cost.
-- **"You discover ~720k links/sec. How do you dedup that?"**, *Strong:* names the **check-720k/enqueue-12k asymmetry**, puts a RAM Bloom filter in front, states the **false-positive direction** (drops new pages, never double-crawls). *Red flag:* "look it up in the database," or claiming Bloom causes double-crawls.
-- **"DNS, a real problem at this scale?"**, *Strong:* frames it as **latency/blocking** (a synchronous resolve stalls the worker), fixed by a caching async resolver. *Red flag:* "scale up DNS query capacity", blocking, not query rate, is the enemy.
-- **"How does your crawler not fall into traps?"**, *Strong:* layered budgets + depth limits + URL normalization + SimHash dedup + quarantine heuristic; names the false-dedup-vs-trap-damage trade. *Red flag:* "blocklist bad sites", doesn't scale, misses generated traps.
-- **"What would you *not* build yourself?"**, *Strong:* delegates SimHash tuning, the queue benchmark, and the render farm with a stated prior and a number to settle each. *Red flag:* tuning Hamming distances on the whiteboard, or "it scales horizontally."
+- **"What actually stops a submission from taking over the host?"**, *Strong:* names the **boundary and its blast radius**, microVM (own kernel; escape must beat the hypervisor → radius one VM) or gVisor (userspace-filtered syscalls), plus per-run hygiene (no network, read-only FS, seccomp, fresh sandbox, hard CPU/mem/PID limits). *Red flag:* "run it in a Docker container," unaware a shared kernel means a CVE owns the host.
+- **"What's the real load, and how do you size for it?"**, *Strong:* steady is trivial (~12/s); the design exists for the **contest spike (~5,500 concurrent via Little's Law)**, sized with a **pre-warmed pool** because contests are scheduled and reactive scaling lags by host cold start. *Red flag:* sizes for the average, or reactive-autoscales a 3-minute spike.
+- **"Cold start during a contest, what happens to p95?"**, *Strong:* keeps cold start *out* of the per-verdict budget via warm pools + pre-pulled images; distinguishes sandbox cold start (~125 ms) from host cold start (minutes, pre-scheduled). *Red flag:* unaware that pulling a 1 GB image at judge time blows the budget.
+- **"What's the blast radius if isolation fails, and the cost trade?"**, *Strong:* states radius per boundary, picks against the **adversarial-public threat model** (microVMs), names the density/cost it pays. *Red flag:* treats isolation as binary ("it's sandboxed") with no radius or cost reasoning.
+- **"Where else does this pattern show up, and where would you delegate?"**, *Strong:* generalizes to **CI runners, FaaS, AI-agent sandboxes**; delegates sandbox internals behind `judge()` with a Firecracker prior, capacity to finance+infra. *Red flag:* treats it as a one-off toy, or hand-tunes syscall filters on the whiteboard.
 
 ---
 
 ## Common mistakes
 
-- **Treating it as a download loop.** The hard part is the **frontier** (priority + politeness + dedup), not the HTTP GET.
-- **Partitioning the frontier by URL-hash.** It scatters each host across nodes, forcing a global rate-limiter on the hot path. Partition by **host** so politeness is local.
-- **Putting the seen-set in a database.** 720k checks/s is ~720k random IOPS. It must be an in-RAM Bloom filter.
-- **Getting the Bloom false-positive direction backwards.** A FP **silently drops a new page** (coverage loss); it can never cause a double-crawl.
-- **Inconsistent page-size math.** Pick one number (~100 KB) and derive both bandwidth (~10 Gbps) and storage (~3 PB) from it.
+- **Treating it as a CRUD app with a code field.** Durable data is ~80 GB/yr and trivial; the difficulty is the **untrusted execution plane** and the contest burst. Spending the interview on schema design misses the problem.
+- **"Just use a Docker container."** A bare container shares the host kernel, one CVE and the blast radius is the whole host. Adversarial code needs a *smaller* boundary (gVisor) or a *harder* one (microVM); name the radius.
+- **Sizing for the average, not the spike.** Steady is ~12/s; the contest is ~5,500 concurrent. Reactive autoscaling lags by host cold-start, pre-warm for the *scheduled* contest.
+- **Wall-clock-only limits.** A busy loop pins a CPU under the wall limit; a `sleep` burns no CPU but must still be killed. Need **both CPU-time and wall-clock**, plus memory/output/PID caps, and a violation is a *verdict*, not a crash.
+- **Reusing sandboxes between submissions.** Residue leaks one user's run into another's. Fresh sandbox per execution, full teardown, non-negotiable.
 
 ---
 
 ## Interviewer follow-up questions (with model answers)
 
-**Q1. How does the frontier enforce "≤1 req/s per host" while hitting 12k pages/sec, and why does partitioning matter?**
-> *Model:* Two ideas. The **two-tier frontier**: front queues encode priority, back queues encode politeness, each back-queue serves exactly one host, drained no faster than its `crawl_delay`, scheduled by a min-heap of next-eligible times. A host *physically can't* be fetched faster than its delay. And **partition by host**: all of `example.com` lives on one node, which enforces its limit locally, no global coordinator. Throughput comes from breadth: 12k/s ÷ 1 req/s/host = ~12k hosts drained concurrently. Sharding by URL-hash instead would scatter each host across nodes and demand a distributed rate-limiter at 12k/s; I traded perfect balance for coordination-free politeness, handling mega-host hot-spots with budgets.
+**Q1. A submission is a deliberate exploit aimed at your kernel. How do you contain it, and what's the blast radius?**
+> *Model:* I pick the boundary by blast radius. A bare container shares the host kernel, radius is the whole host, unacceptable for adversarial code. My default is **Firecracker microVMs**: each run gets its own guest kernel behind a hardware boundary, so an escape must beat the hypervisor, not just the kernel, radius is one microVM, ~125 ms cold start, lower density. Where density/cost dominate and the threat is softer, **gVisor** filters syscalls in userspace to shrink the host kernel surface with container-like density. Either way: no network, read-only FS, seccomp, dropped capabilities, hard CPU/memory/PID/output limits, **fresh sandbox per run**. Internals delegated to platform-security behind `judge(submission, limits)`; prior is microVMs for the public threat model.
 
-**Q2. The Bloom filter says "seen" for a URL you've never crawled. What happened and how do you bound it?**
-> *Model:* A **false positive**, and the direction matters: Bloom has no false negatives, so a FP means I **silently skip a real page**, lost coverage, never a double-crawl. At 120B URLs and 1% FP that's up to ~1.2B wrongly dropped. Three levers: accept it (often fine for a search corpus); **layer an exact ledger check behind positives**, only ~1% of 720k ≈ 7.2k extra lookups/s, eliminating false-skips; or raise the bit budget (12 bits/key → ~0.3% FP, ~180 GB). Archival crawl → exact check; search corpus → live with ~1%.
+**Q2. A weekly contest starts and 100k people submit in three minutes. Walk me through what happens.**
+> *Model:* By Little's Law, `~550/s × ~10 s ≈ ~5,500 concurrent executions`, higher at `t=0`, I size for *that*, not the ~12/s steady rate. Contests are **scheduled**, so I **pre-warm** the pool ahead of the start rather than rely on reactive autoscaling, which lags by host cold start. The durable queue absorbs the `t=0` peak (429 if truly saturated), and I judge p95 across the 3-minute window, not the literal first second. Workers already hold pre-pulled images and test data, so per-verdict cold start is the sandbox's ~125 ms. Cost is ~700 warm hosts for a ~3-hour window, idle capacity paid for burst readiness.
 
-**Q3. One site has 5 billion URLs. What breaks?**
-> *Model:* Load balance, all 5B URLs hash to one frontier node while peers idle. And at 1 req/s, that host could never drain anyway (30 days ≈ 2.6M fetches, not 5B). Fixes: a **per-host budget + depth limit**, crawl the top *X* pages by priority, accepting incomplete coverage of mega-sites; the budget also caps any trap there. For genuinely important huge sites, **sub-shard by URL-path prefix** to parallelize fan-out, but keep the politeness delay coordinated so the host still sees ≤1 req/s in aggregate. Politeness stays a per-host property; I'm just bounding how much of one host I take.
+**Q3. A submission runs an infinite loop. Another allocates 100 GB. Another fork-bombs. How does each get caught?**
+> *Model:* Each is a **verdict, not an outage**, limits live in the job envelope and the sandbox enforces them. The loop trips the **CPU-time limit** → TLE (a wall-clock limit also catches a `sleep` stall that burns no CPU, I need both). The 100 GB hits the **cgroup memory ceiling** → OOM → MLE. The fork bomb hits the **PID limit** → RTE; an output flood hits the **output cap**. Untrusted code *will* try all of these, so limits aren't a safety net, they're the normal control path, producing a clean verdict, never a crashed worker.
 
-**Q4. How do you keep 30B pages fresh without wasting the fetch budget?**
-> *Model:* Uniform monthly re-crawl wastes most fetches on pages that never change and misses fast-changers between passes. **Adaptive re-crawl**: the ledger records whether each page's fingerprint changed since last crawl; estimate per-page change rate and set `next_crawl` accordingly, news hourly, an archived PDF yearly. The scheduler re-injects due URLs into the frontier. That maximizes freshness-per-fetch, the metric that matters, at the cost of change-history state and a prediction model, so start uniform, evolve to adaptive once history accumulates, and delegate the change-rate model to the data team (prior: a simple exponential estimator).
+**Q4. Why async with a durable queue instead of judging synchronously in the request?**
+> *Model:* Synchronous ties the user's connection to a 10 s adversarial execution; at ~1,000/s the spike exhausts the connection pool before any judging happens. So submit returns `202`, writes the submission, enqueues; a worker pool drains the queue and streams the verdict. The queue is **durable** (Kafka/SQS), not in-memory, because a submission is a *contest entry*, losing it on a crash is unacceptable, and durability gives free replay (judging is idempotent on `submission_id`). Only the acknowledgement stays synchronous.
 
-**Q5. The crawler keeps fetching near-identical content under thousands of URLs (an infinite calendar). How do you stop it?**
-> *Model:* A **spider trap**, URL dedup fails because every URL is genuinely new. Defend in layers: **URL normalization** (strip session ids, sort params) before the Bloom check; **SimHash content fingerprinting**, the calendar's pages are near-identical, so they hit the content-seen set even with distinct URLs; **per-host budget + depth limit** caps the blast radius to one host's allowance; and a **quarantine heuristic** for hosts emitting huge fan-out of near-identical content. The trade: aggressive near-dup detection risks false-deduping genuinely different pages, tune conservatively and delegate the threshold to the data team, because an unbounded trap is catastrophic while a slightly-incomplete crawl is merely suboptimal.
+**Q5. This is "LeetCode," but where else does this exact problem show up?**
+> *Model:* It's one instance of **running untrusted code at scale**. **CI/CD runners** (GitHub Actions) run arbitrary user pipelines; **FaaS** (Lambda, Cloudflare Workers) runs untrusted tenant code, Lambda literally uses Firecracker for this reason; and the fastest-growing instance, **AI-agent / code-interpreter sandboxes**, runs LLM-generated code, the blast-radius reasoning transfers wholesale. The architecture isn't "a judge," it's "a hardened execution plane behind a trusted control plane", and that pattern is everywhere code I didn't write runs on infrastructure I own.
 
 ---
 
-## Key takeaways
-- **A crawler is a politeness-constrained BFS, not a downloader.** ≤1 req/s/host + 12k pages/s ⇒ **≥12k concurrent hosts**, throughput is bought with host-breadth, not depth.
-- **Partition the frontier by host** so politeness is a local invariant with zero coordination, the pivotal decision; rejected URL-hash partitioning forces a global rate-limiter on the hot path.
-- **The seen-set is a RAM Bloom filter (~120 GB), not a database**, 720k checks/s vs 12k enqueues/s; a false positive drops a new page (coverage loss), never double-crawls; the filter is an 8× RAM saving over an exact set.
-- **Four data shapes, four stores:** S3 for ~3 PB bodies, Cassandra ledger by domain, RAM Bloom, durable queue frontier. DNS is a **latency/blocking** problem, not QPS.
-- **Director altitude:** go deep on the frontier/politeness/Bloom-direction arguments and trap defenses; delegate SimHash tuning, the queue benchmark, and the render farm with stated priors; keep the math internally consistent (one ~100 KB page size driving both ~10 Gbps and ~3 PB).
+### Key takeaways
+- The crux is **running untrusted, adversarial code safely at burst**, not a read:write ratio. The skew is **trusted control plane vs untrusted execution plane**; the scarce resource is **warm, isolated capacity to execute code.**
+- **Isolation is a blast-radius trade:** process+seccomp (radius = host, insufficient) < gVisor container (userspace-filtered syscalls) < **microVM/Firecracker (own kernel, radius = one VM, ~125 ms)**. Pick against the threat model; for public adversarial code, microVMs. Internals delegated.
+- **Contests drive the design:** ~5,500 concurrent (Little's Law) in a 3-minute spike. Contests are **scheduled**, so **pre-warm the pool** and scale on queue depth, reactive autoscaling lags by host cold start. The **~50× peak-vs-average gap is the cost conversation**.
+- **Submit is async over a durable queue; verdicts stream per-test.** Runaways become **verdicts not outages** via hard CPU-time *and* wall-clock, memory, PID, and output limits; a **fresh sandbox per run** prevents residue.
+- **Director moves:** own the cost (per-execution compute ≈ free; **warm idle capacity is the spend**), name the blast radius precisely, delegate sandbox internals behind `judge()` with a Firecracker prior, and **name the generalization** (CI runners, FaaS, AI-agent sandboxes).
 
-> **Spaced-repetition recap:** Politeness-constrained BFS, not a downloader. **≤1 req/s/host + 12k pages/s ⇒ 12k concurrent hosts** (throughput = breadth). **Partition the frontier by host** → politeness is local, no global coordinator. **Bloom filter in RAM** absorbs **720k seen-checks/s**; false positive = silently skip a page, never double-crawl. Stores: S3 bodies, Cassandra ledger, durable queue frontier. DNS = latency/blocking. Traps → budgets + normalization + SimHash. Go deep on the frontier; delegate SimHash + render farm.
+> **Spaced-repetition recap:** LeetCode / online judge = **run untrusted code safely, fast, at burst.** No read:write skew, the skew is **trusted control plane vs untrusted execution plane.** Pick isolation by **blast radius**: microVM/Firecracker (own kernel, ~125 ms, radius = one VM) for adversarial public code; gVisor where density/cost win. Size for the **contest spike** (~5,500 concurrent via Little's Law) with a **pre-warmed pool** (contests are scheduled) + durable queue, not reactive autoscaling. **Async submit + streamed per-test verdict;** hard CPU/wall/memory/PID/output limits turn runaways into verdicts; **fresh sandbox per run.** Per-execution compute ≈ free; **warm idle capacity is the budget.** Same shape as **CI runners, FaaS, AI-agent sandboxes.**
+
+---
+
+*End of Lesson 5.11. The online judge inverts the data-centric reflex of the social-feed problems: the durable data is trivial, and the architecture exists to **run adversarial code safely under a scheduled burst**, a tiny trusted control plane (async submit + durable queue) feeding a hardened, warm-pooled execution plane (microVM isolation + hard resource limits), reusing warm-pool economics and the determinism discipline of the matching engine. The pattern generalizes to every place code you didn't write runs on infrastructure you own.*

@@ -1,151 +1,261 @@
 ---
-title: "11.3 — Retrieval-Augmented Generation (RAG)"
-description: The default architecture for grounding an LLM in private, fresh, citable facts — the ingest/chunk/embed/index and retrieve/rerank/assemble/generate pipeline, why retrieval (not the model) is the quality bottleneck, and how eval gates it.
+title: "11.3 — Zero-Downtime Data Migration"
+description: "Migrating live production data, re-shard, engine swap, vendor exit, without loss or downtime: CDC + backfill vs dual-write, dark-read verification, and the expand-migrate-contract ladder with a rehearsed rollback at every rung."
 sidebar:
   order: 3
 ---
 
+> **This question has no textbook answer and no hiding place.** It shows up as the *only* technical question in real Director loops, and as the standard follow-up inside every other problem ("your shortener outgrew Postgres, migrate it live"). A junior answer describes a copy job. A Director answer describes a **risk-management program**: two systems provably in sync while traffic runs, a cutover ladder with a rehearsed way back at every rung, abort criteria written *before* the migration starts, a dual-run budget with an owner and an end date. The plumbing is the easy 30%; verification, sequencing, and go/no-go discipline are the 70%.
+
 ### Learning objectives
-- Explain **why RAG exists** — grounding a stateless, knowledge-frozen model in private, fresh, citable data — and when it beats the two alternatives (long-context stuffing, fine-tuning), each rejected for a stated reason.
-- Draw the **two pipelines** that every RAG system is: an **ingest** path (connect → parse → chunk → embed → index) and a **query** path (embed → retrieve → rerank → assemble → generate-with-citations), and name the decision that lives at each stage.
-- Locate the **quality bottleneck** correctly: in production RAG, the model is rarely the problem — **retrieval is** — so chunking, hybrid retrieval, and reranking carry more of the score than model choice.
-- Treat **evaluation as the gate**, separating *retrieval* metrics (did we fetch the right context?) from *generation* metrics (did the answer stay faithful to it?), because the two fail independently and the fix differs.
-- Name the operational failure modes a Director owns: **stale indexes, permission leakage, and confidently-wrong-but-well-cited answers.**
+- Frame any live migration, re-shard, engine swap, vendor exit, as one problem: **keep two systems provably in sync under traffic, then move trust one increment at a time.**
+- Choose between **CDC + backfill** and **application dual-write**, defending the choice on ordering, failure-atomicity, and blast radius.
+- Prove the data matches with **dark reads and partition checksums** against a quantified mismatch budget.
+- Run the **expand → migrate → contract** ladder: reads ramp before writes flip, reverse replication keeps the old system warm, every phase has abort criteria and one go/no-go owner.
+- Size the **risk window and dual-run cost**, two fleets plus a pipeline ≈ 2× infra spend; the cutover schedule is a budget line you own.
 
 ### Intuition first
-A RAG system is a **closed-book exam turned into an open-book one.** A frozen LLM walking into your domain is a brilliant generalist sitting a closed-book exam on a subject it last studied months ago and never on *your* private material — so it bluffs fluently, which is the dangerous part. RAG hands it the **open book, turned to the right page**, just before it answers.
+You're moving a busy restaurant across the street, and it **never closes**. So you build the new kitchen fully (**expand**), then run *both* for weeks: every order cooked in the old kitchen and shadow-cooked in the new, a tester comparing the plates (**parallel-run with verification**). When the plates match for days, you serve a few tables from the new kitchen, then half, then all (**shift, incrementally**). The old kitchen stays staffed and warm, if the new stove fails on a Saturday night, you walk every table back in minutes (**rollback, rehearsed**). Only after weeks of flawless service do you sell the old building (**contract**). Paying two kitchens at once isn't waste, **it's the price of zero downtime, and deciding how long you pay it is the actual leadership decision.** The anti-pattern this kills: the big-bang weekend cutover, close, move, pray.
 
-The whole game is therefore not "how smart is the student" but **"how good is the librarian."** A librarian who fetches the wrong three pages turns a brilliant student into a brilliant, confident, wrong one — and because the student now cites the (wrong) pages, the error looks *more* authoritative, not less. So the work that decides RAG quality is the unglamorous half: how you cut the books into pages (chunking), how you find the right pages fast (retrieval), and how you double-check the shortlist before handing it over (reranking). The model is the last and usually least decisive link.
+---
 
-Keep that image — *brilliant student, fallible librarian* — because it predicts where every RAG system actually breaks.
+## R: Requirements
 
-### Deep explanation
+> Adaptation, said out loud: R scopes the **migration scenario and its invariants**, not product features. The functional requirements are the things you refuse to break.
 
-**Why RAG at all — and why not just a bigger prompt or a fine-tune.** An LLM has three hard limits a designer must respect: its knowledge is **frozen at a training cutoff**, it has **never seen your private data**, and it **cannot tell you where an answer came from**. RAG attacks all three by retrieving relevant text at query time and putting it *in the prompt* as grounding, so the model answers *from* supplied evidence and can **cite** it. The benefits are concrete: answers reflect data changed five minutes ago (freshness), they cover documents the model was never trained on (private knowledge), they carry citations (auditability), and — critically — grounding **reduces hallucination** because the model is summarizing supplied text rather than recalling from parameters. Note *reduces*, not *eliminates*: a model can still ignore or contradict its context.
+**Anchor scenario (concrete numbers beat abstractions):** the TinyURL system outgrew its single Postgres, **10 TB, 5K writes/s, 100K reads/s**, and must move live to a sharded store (the partitioning choice is its own problem; here we migrate *to* it). The same spine covers an engine swap or vendor exit; only the translation layer changes.
 
-The two alternatives, and why RAG is usually the default:
-- **Long-context stuffing** — paste the whole corpus into a 200K–1M-token window. Fine when the corpus is *small and bounded* (one contract, one codebase module). It fails on scale (you cannot fit 10M documents in any window), on **cost** (you pay for every input token on every call), and on the **"lost in the middle"** degradation where models attend poorly to the center of a long context. **Rejected as the general answer** because it doesn't scale and burns tokens re-reading the same corpus on every request.
-- **Fine-tuning** — bake knowledge into weights. Fine-tuning teaches **behavior, format, and tone**, not reliable facts; it's slow to update (retrain to add a document), it has **no citations**, and it can *increase* confident hallucination on facts it half-learned. **Rejected for fact-grounding** (covered fully in the adapt-the-model lesson); the two compose — fine-tune the *style*, RAG the *facts*.
+**Clarifying questions I'd ask (with assumed answers):**
+- *What's forcing the move, and by when?* → Write/storage headroom; **~6 months of runway**, which must include the parallel-run, not just the build.
+- *What does "zero downtime" mean?* → No write outage beyond the SLO error budget; latency blips during cutover are negotiable, **data loss and silent corruption are not**.
+- *Mutation rate?* → Mostly append, some updates (counters, expiry). Mutation rate decides how hard verification is.
+- *Brief read-only window allowed?* → Assume **no**; if the business later grants 10 minutes, that's a bonus, never the plan.
 
-The Director-altitude statement: *RAG is how you give a frozen, private-data-blind model fresh, auditable knowledge without retraining it.* Reach for it whenever the answer depends on data that is large, private, frequently changing, or must be cited.
+**Functional requirements (the invariants):** (1) **no data loss**, every existing row and in-flight write lands in the new store exactly once; (2) **no correctness regression**, both stores return the same answers within a stated staleness bound; (3) **zero (budgeted) downtime**; (4) **reversibility**, until decommission, a tested path back.
 
-**RAG is two pipelines, not one — make both visible.** Candidates who draw only the query path miss half the system (and half the cost and most of the freshness problem).
+**Explicitly CUT:** the new store's own design, feature work during the window (**freeze schema changes** on migrating tables, a moving target makes verification unprovable), org-wide replatforms (same playbook, per system).
 
-- **Ingest (offline, write path):** *connect* to sources (wikis, tickets, PDFs, databases, code) → *parse and clean* (extract text, strip boilerplate, preserve structure/tables) → **chunk** into retrievable units → **embed** each chunk → **index** into a vector store with metadata. This runs continuously and **incrementally** — when a source doc changes, you re-chunk, re-embed, and upsert just that doc, and tombstone deletes. The freshness of your answers is exactly the freshness of this pipeline.
-- **Query (online, read path):** *embed* the user query → **retrieve** candidate chunks (vector + keyword + metadata filter) → **rerank** to a precise shortlist → **assemble** the prompt (instructions + ordered chunks + question) → **generate** an answer **with citations** back to the source chunks.
+**Non-functional:** verification is **quantitative**, a mismatch rate with a threshold, not vibes; the dual-run window is bounded and budgeted; rollback at each phase completes in **minutes**; a pipeline crash mid-flight corrupts neither side.
 
-**Chunking is where RAG quality is won or lost.** A chunk is the atomic unit you retrieve; get it wrong and no downstream cleverness recovers. Too **large** (a whole 20-page doc) and a single chunk dilutes the embedding across many topics, so retrieval is fuzzy and you waste context budget; too **small** (one sentence) and you shatter the context a passage needs to be meaningful. The practical band is **~256–1024 tokens** with **~10–20% overlap** so a fact straddling a boundary survives in at least one chunk. Strategies, escalating in cost and quality:
-- **Fixed-size** (N tokens, sliding window): trivial, fast, ignores structure — it will cut a table or a paragraph mid-thought. Fine as a baseline.
-- **Recursive / structure-aware**: split on natural boundaries (headings → paragraphs → sentences) so chunks align with document structure. The pragmatic default for most corpora.
-- **Semantic**: split where the topic shifts (embedding-distance breakpoints). Best coherence, highest preprocessing cost. Reserve it for high-value corpora where retrieval precision pays for the extra work.
+---
 
-Always attach **metadata** to each chunk (source ID, title, section, timestamp, and — load-bearing — **access-control tags**); you will filter and cite on it. **Rejected default:** one-size fixed chunking applied blindly to mixed content (prose + tables + code) — it's the most common cause of "the data is in there but it never retrieves."
+## E: Estimation
 
-**Retrieval: dense alone is not enough — go hybrid.** Vector (dense) retrieval finds *semantically* similar text and is the backbone, but it is weak on **exact tokens** — error codes, SKUs, names, acronyms — where a keyword index shines. **Hybrid search** runs both **dense** (ANN over embeddings) and **sparse** (BM25/keyword) and fuses the rankings (e.g., Reciprocal Rank Fusion), recovering the precise-token matches dense retrieval drops while keeping semantic recall. Layer a **metadata filter** on top (date ranges, document type, and the ACL tags) so you only ever retrieve what this user is allowed to see. The standard shape is **retrieve wide, then narrow**: pull a generous candidate set (**top-k ≈ 20–50**) cheaply, because recall here caps everything downstream — a chunk not retrieved can never be cited.
+> Adaptation: E sizes the **risk window** (how long are we exposed?) and the **dual-run cost** (what does safety cost per week?), this problem's QPS-and-storage.
 
-**Reranking: cheap recall, then expensive precision.** Vector top-k optimizes for speed over precision; the top 20 will contain the right chunks *and* near-miss noise. A **cross-encoder reranker** (e.g., Cohere Rerank, `bge-reranker`) scores each (query, chunk) pair *jointly* — far more accurate than the bi-encoder cosine that produced the candidates — and reorders them so you can keep only the **top ~3–8** for the prompt. This two-stage **retrieve-then-rerank** pattern is the single highest-leverage precision win in RAG: it routinely turns a mediocre top-k into a clean shortlist. The cost is **latency** (a rerank pass adds tens-to-hundreds of ms and a model call) and money, so you rerank a *candidate set of dozens*, never the whole corpus. **Rejected alternative:** feeding all 20 raw vector hits straight into the prompt — you pay for the tokens, you trigger lost-in-the-middle, and you dilute the answer with near-misses.
+**Backfill, the floor of the risk window.** 10 TB at an effective **200 MB/s** (throttled, the source is serving 100K reads/s) is `10 TB ÷ 200 MB/s ≈ 14 hours`. Call it **a day**; plan two with retries.
 
-**Context assembly: the prompt is a curated exhibit, not a dump.** You now have ~3–8 high-precision chunks; how you arrange them matters. Models exhibit **"lost in the middle"** — strong attention to the **start and end** of the context, weaker in the center — so put the most relevant chunks at the edges, not buried. Keep within a deliberate **token budget** (more context is not free and not always better). And instruct the model to **answer only from the supplied context and cite chunk IDs**, refusing when the context doesn't contain the answer — this is what converts retrieval into an *auditable, grounded* answer instead of a vibe. The citation isn't decoration; it's how a user (and your eval) verifies the answer is real.
+**Change rate vs copy rate, the feasibility check.** 5K writes/s × ~1 KB ≈ **5 MB/s** of change traffic, 2.5% of backfill bandwidth, trivially absorbed by CDC; post-snapshot catch-up is minutes. Inverted ratio = backfill never converges, check it first.
 
-**The bottleneck is retrieval, not the model — internalize this.** The defining failure of production RAG is **"good model, bad retrieval"**: the LLM is handed the wrong chunks and produces a fluent, well-cited, *wrong* answer — worse than a refusal, because the citation makes it look trustworthy. Swapping to a bigger/better model barely moves this; fixing chunking, going hybrid, and adding a reranker moves it a lot. So when an interviewer says "answers are wrong," the Director instinct is to **inspect retrieval first** (is the right chunk even in the index? is it retrieved? is it ranked into the shortlist?) before touching the model.
+**Verification volume.** Row-by-row over 10 TB at 50K compares/s ≈ 2.5 days/pass, too slow to iterate. So: **partition checksums** (thousands of comparisons) for coverage, plus **dark reads** for the hot path, sampling **1%** of 100K reads/s = 1K compares/s ≈ **86M/day** on exactly the rows users touch.
+
+**Dual-run cost, the Director's number.** Old fleet ~$50K/mo + new fleet ~$50K/mo + pipeline and verification ~$10K/mo → **~$110K/mo, call it 2.2×** steady state. A 6-week parallel run is a **~$80K premium** plus 3-4 engineers. That's why "dual-run until we feel good" is not a plan: **the exit criteria define the end date, and the budget forces you to write them.**
+
+**What estimation decided:** copying takes a day, so the calendar is **verification and trust-ramping**; the pipeline absorbs the change rate (feasible); verification = checksums + sampled dark reads; at ~$13K/week, every week of parallel-run must buy a named reduction in risk.
+
+---
+
+## S: Storage
+
+> Adaptation: S characterizes the **delta between the guarantees** of source and target. The store *choice* was made by whatever forced the move; the work here is the gap analysis.
+
+**The danger is never the data, it's what the application silently leans on.** Moving Postgres → a sharded/NoSQL target, audit for: **transactions** (multi-row atomic updates don't exist the same way, restructure the write or document the non-atomicity); **read-after-write** (free on single-primary Postgres, absent on an eventually-consistent target; unfound write-then-read paths surface in dark reads as "mismatches" that are really staleness); **auto-increment IDs** (they don't shard, the shortener already uses a sequencer; a system that doesn't needs that swap as a *prerequisite* migration); **sort order, collation, triggers**, each a behavior diff that surfaces at 2 a.m.
+
+**One new piece of infrastructure: the CDC log.** The source's write-ahead log (Postgres WAL via logical decoding, MySQL binlog) exposed as an ordered change stream, typically **Debezium into Kafka**, partitioned by primary key so per-key ordering holds. Replication machinery, pointed *across* engines.
+
+*Rejected, snapshot-and-diff without a change stream:* at 5K writes/s the diff never converges. The change stream is what makes "two systems, one truth" possible.
+
+---
+
+## H: High-level design
+
+> Adaptation: the "architecture" is a **process with machinery**, the sync pipeline plus the phase ladder it enables. The diagram that matters is the ladder; every rung has a rollback arrow.
+
+**The sync mechanism, the load-bearing decision.**
+
+**Option A, CDC + backfill (my default).** Mark the log position, snapshot-copy the 10 TB, replay the captured stream until the target is seconds behind. The application **doesn't change until cutover**. *Pros:* source of truth untouched, zero new risk on the live write path; per-key ordering inherited from the log; failure-atomic, a pipeline crash resumes from its offset. *Cons:* real infrastructure to operate; lag to monitor; the apply path must be idempotent (the stream redelivers on recovery).
+
+**Option B, application dual-write.** The app writes old-then-new on every request. *Pros:* conceptually simple, near-zero lag. *Cons, disqualifying as the primary mechanism:* **not atomic**, old succeeds, new fails, and the stores silently diverge with no record to repair from; concurrent writers can land in **different orders** on the two stores; and it still needs backfill *plus* a reconciliation job, CDC's hard parts anyway, with new failure modes injected into every production write path. *Where B is right:* no usable change log (a closed vendor API you're exiting), one write choke point, continuous reconciliation mandatory.
+
+**Decision:** CDC + backfill; dual-write only where no log exists. *(Option C, managed tools like DMS or pglogical: Option A, operated by someone else.)*
+
+**The phase ladder, expand → migrate → contract:**
+
+```mermaid
+stateDiagram-v2
+    direction TB
+    Baseline --> Backfill : start CDC then snapshot
+    Backfill --> Shadow : copy done and lag near zero
+    Shadow --> DarkReads : checksums pass
+    DarkReads --> ReadRamp : mismatch under budget
+    ReadRamp --> WriteCutover : SLOs hold at full reads
+    WriteCutover --> BurnIn : reverse CDC running
+    BurnIn --> Contract : weeks clean
+    Shadow --> Backfill : checksum fail so recopy
+    DarkReads --> Shadow : mismatches found
+    ReadRamp --> DarkReads : SLO breach so flip back
+    WriteCutover --> ReadRamp : abort writes to old
+    BurnIn --> WriteCutover : regression found
+```
+
+**Reading the ladder:** every forward edge has a backward edge, and each backward edge is **cheap until write cutover**, flipping reads back is a config change measured in minutes. Reads ramp first (1% → 10% → 50% → 100%) because a bad read is detectable and recoverable; a lost write is forever. Writes flip last, in one switch at the data-access layer, **with reverse CDC (new → old) started at the same moment**, write-rollback stays possible through weeks of burn-in. Contract happens only when rollback has provably not been needed for weeks: **the only irreversible rung.**
 
 <details>
-<summary>Go deeper — advanced retrieval techniques (IC depth, optional)</summary>
+<summary>Go deeper, CDC pipeline mechanics and the snapshot-consistency problem (IC depth, optional)</summary>
 
-- **Query rewriting / expansion:** the user's literal question is often a poor query. Rewrite it (resolve pronouns from chat history, expand acronyms, generate sub-queries) before embedding. Multi-query then fuses results.
-- **HyDE (Hypothetical Document Embeddings):** ask the LLM to *draft* a hypothetical answer, embed *that*, and retrieve against it — the draft is closer in embedding space to real answer-bearing chunks than the terse question is.
-- **Contextual retrieval:** prepend a short LLM-generated summary of the *whole document* to each chunk before embedding, so an out-of-context chunk ("it increased 3%") retains the subject ("Q3 EU revenue increased 3%"). Cuts retrieval-miss rate materially at modest ingest cost.
-- **Multi-hop / agentic RAG:** for questions needing several lookups ("compare the 2024 and 2025 policies"), let an agent issue retrieval as a *tool* iteratively rather than one shot. More capable, far more tokens and latency.
-- **GraphRAG:** build a knowledge graph from the corpus and retrieve over entities/relations for global "summarize across everything" questions that flat chunk retrieval can't answer. Heavy to build; reserve for corpora where relationship questions dominate.
+The classic race: rows changed *during* the snapshot are captured by both the copy and the change stream, in either order. The standard fix: record the log position (LSN/GTID) *before* the snapshot, replay from that position after, and make the apply path idempotent last-writer-wins, UPSERTs keyed on primary key, optionally guarded by a per-row version/timestamp so an older event never clobbers a newer row. Debezium's snapshot modes implement exactly this dance.
 
-These are escalations: add them only when eval shows flat retrieve-rerank is the ceiling, not by default.
+Apply-worker requirements: idempotent UPSERTs (the stream is at-least-once, not exactly-once), per-key ordering (partition the Kafka topic by primary key, never round-robin), schema translation in one place, and dead-letter queues for rows that fail translation rather than stalling the stream. Monitor lag end-to-end (source write timestamp vs target apply timestamp), not just consumer offsets.
+
+Throughput sanity: 5K writes/s × 1 KB = 5 MB/s, one Kafka partition handles 10× that; the bottleneck is usually target write amplification, not the stream.
 
 </details>
 
-### Diagram: the two RAG pipelines
+---
 
-```mermaid
-flowchart LR
-    subgraph INGEST["Ingest pipeline — offline, continuous, incremental"]
-        SRC[Sources<br/>wiki / tickets / PDFs / DB / code] --> PARSE[Parse + clean<br/>extract text, keep structure]
-        PARSE --> CHUNK[Chunk<br/>~256-1024 tok, 10-20% overlap<br/>+ metadata + ACL tags]
-        CHUNK --> EMB1[Embed each chunk]
-        EMB1 --> IDX[(Vector + keyword index)]
-    end
+## A: API design
 
-    subgraph QUERY["Query pipeline — online"]
-        Q[User question] --> EMB2[Embed query]
-        EMB2 --> RET["Retrieve top-k ≈ 20-50<br/>dense + BM25 + metadata/ACL filter"]
-        IDX -.-> RET
-        RET --> RERANK["Rerank cross-encoder<br/>→ top 3-8"]
-        RERANK --> ASM["Assemble prompt<br/>instructions + ordered chunks + Q"]
-        ASM --> LLM[LLM generate]
-        LLM --> ANS["Answer + citations<br/>answer only from context, else refuse"]
-    end
+> Adaptation: the "API" is the **seam inside your own application**, the choke point all reads and writes pass through, carrying the migration switches. If it doesn't exist, building it is phase zero, often the longest phase.
 
-    style CHUNK fill:#e8a13a,color:#000
-    style RET fill:#e8a13a,color:#000
-    style RERANK fill:#1f6f5c,color:#fff
-    style ANS fill:#2d6cb5,color:#fff
+```
+interface LinkStore {
+  put(link)            // routed by write-flag: OLD | NEW
+  get(shortCode)       // routed by read-flag: 0-100% to NEW, per-tenant override
+  delete(shortCode)
+}
+
+migrationControl:
+  setReadPercent(pct, tenantFilter)   // ramp dial — changes in seconds, no deploy
+  setWriteTarget(OLD | NEW)           // the one-way-ish door; flips with reverse CDC on
+  darkReadMode(on)                    // read both, serve OLD, log diffs
 ```
 
-### Worked example: an enterprise knowledge assistant
+**Design notes (each with the rejected alternative):**
+- **Flags flip at runtime, not deploy time.** *Rejected: routing via deployment*, rollback becomes a 30-minute deploy during an incident; a flag flip is seconds.
+- **One choke point, not N call sites.** *Rejected: `if (migrated)` sprinkled through the codebase*, you can't atomically flip a switch that lives in forty places. If services bypass the layer with raw SQL, **funneling them is the real first milestone**, scope it honestly.
+- **Dark-read mode is part of the interface,** not a bolted-on script, comparison happens where reads happen, tenant and key on every logged mismatch.
 
-Take a 50,000-person company: "answer any employee's question from our wikis, HR policies, engineering docs, and support tickets, **with citations**, and **never** show someone a document they can't access."
+---
 
-- **Corpus & ingest:** ~10M documents across five connectors. **Recursive/structure-aware chunking** at ~512 tokens, 15% overlap — rejected fixed-size because HR policy PDFs and engineering Markdown have structure (headings, tables) that fixed windows shred. Ingest is **incremental**: a webhook on each source upserts only changed docs, so a policy edited at 9am is answerable by 9:05. Rejected nightly full re-index: too stale for HR/policy questions and wasteful at 10M docs.
-- **Critical metadata:** every chunk carries the **ACL** of its source doc. This is non-negotiable and seeds the scariest failure mode.
-- **Retrieve:** **hybrid** (dense + BM25) — rejected pure-vector because employees search exact strings (error codes, policy numbers, system names) that dense retrieval fumbles. Filter by the requesting user's **access tags at query time** so retrieval can only return permitted chunks. Pull top-30 candidates.
-- **Rerank:** a cross-encoder narrows 30 → top-5. Rejected "feed all 30": it'd cost ~6× the context tokens, trigger lost-in-the-middle, and lower answer precision.
-- **Generate:** instruct "answer only from the five chunks, cite each claim's source, say 'I don't have that' if unsupported." Rejected free-form generation: without the grounding instruction the model fills gaps from parametric memory and hallucinates a plausible-but-fake policy.
-- **Eval gates ship:** a golden set of ~300 real Q&A pairs measures **retrieval recall** (is the right chunk in the top-30?) and **faithfulness** (does the answer stick to retrieved text?) on every prompt/chunking/model change. Rejected "ship and watch": you can't eyeball faithfulness at scale, and a chunking regression silently tanks recall.
+## D: Data model
 
-Every decision traces to a requirement: citations and "no leakage" (the ACL filter), freshness (incremental ingest), exact-string questions (hybrid), and precision under a token budget (rerank).
+> Adaptation: D is the **translation map** between old and new shapes, plus the data the migration itself owns.
 
-### Trade-offs table
+**The translation map.** Re-shard, same engine: near-identity, the work is the partition key and verifying no query relies on single-node features. Engine swap: an explicit per-table mapping, types, nullability, collation, denormalization for the target's access patterns. **Rule: do not redesign the schema mid-migration.** *Rejected: "while we're at it" remodeling*, differences might now be *intended*, and the diff signal drowns. Redesign is a second migration after this one is stable.
 
-| Decision | Option A | Option B | Option C | Use when… |
+**Keys must survive the crossing.** The short code stays the primary key on both sides, dark reads compare by key, rollback needs no ID remapping. If the target forces a different key shape, maintain an explicit mapping table; never let the two sides hold different identities for the same row.
+
+**Migration-owned data:** the CDC checkpoint (the recovery story), the **verification ledger** (per-partition checksums, dark-read mismatch log), and flag state with an audit trail. Tiny in bytes; it's the evidence the go/no-go decision reads.
+
+---
+
+## E: Evaluation
+
+> Adaptation, said plainly: **here Evaluation isn't a final re-check, it's the product.** "How do you *know* the data matches while both systems run?" is the question actually being asked.
+
+**Layer 1, completeness: partition checksums.** Carve the keyspace into ~10K ranges; compute a per-range digest on both sides (count + hash, bucketed by last-modified time so hot ranges re-check cheaply); compare continuously; a mismatched range → re-copy just that range. This audits **all 10 TB**, including cold data nobody reads. *Rejected: row counts alone*, counts match while contents diverge; a smoke alarm, not an audit.
+
+**Layer 2, correctness under traffic: dark reads.** For a 1% sample of live reads, query both stores, **serve the old**, log diffs. This catches what checksums can't: hot-path translation bugs, CDC-lag staleness, the read-after-write gaps from S. At ~86M comparisons/day, a 0.01% defect rate is visible within minutes.
+
+**Layer 3, the mismatch budget and abort criteria, written before phase one.** Numbers decided in advance, owned by one person: enter read-ramp only after a clean full-checksum pass and dark-read mismatch **< 0.01% sustained 7 days**, every mismatch class root-caused, an *understood* lag artifact can be waived; an *unexplained* mismatch stops the program by definition. Abort read-ramp on a 15-minute p99 SLO breach → flip back, diagnose, re-enter. Enter write cutover only after **2+ weeks at 100% reads**, reverse CDC tested end-to-end, and write-rollback **rehearsed in staging with a measured time-to-restore**. Pre-written matters because at 2 a.m. sunk-cost pressure says "push through", pre-committed thresholds plus a named owner are the only known defense.
+
+**The residual hard window: the write flip itself.** In-flight writes straddle the switch. Fix: a **2-5 second write-pause drain** at the data-access layer, quiesce, let CDC lag hit zero, flip, resume; a latency blip well inside the error budget. *Rejected: dual-writing through the flip*, it reintroduces every ordering problem CDC was chosen to avoid, at the most dangerous moment.
+
+**Pipeline failure:** CDC crash → resume from checkpoint; lag spikes and recovers. Lag is therefore a first-class dashboard with an alert tied to the rollback SLO: lag beyond what reverse replication can absorb takes cutover off the table that day.
+
+<details>
+<summary>Go deeper, checksum design for live, mutating data (IC depth, optional)</summary>
+
+Naive table checksums never match on a live system, the sides are read at different instants. Three workable patterns: (1) **time-bucketed digests**, hash rows with `last_modified < T` for T safely older than max replication lag; recent buckets re-verify next pass; (2) **Merkle trees over key ranges** (the Cassandra/DynamoDB anti-entropy approach, cousin of read repair), log-depth drill-down to the exact divergent range; (3) **snapshot-pinned comparison** where both engines support point-in-time reads. In practice: (1) for bulk, (2) to localize failures, (3) where available. Use order-independent digests (sum of per-row hashes) to dodge cross-engine sort-order traps, and normalize types, timestamps, float precision, collation, *before* hashing, or you'll chase phantom mismatches for a week.
+
+</details>
+
+---
+
+## D: Design evolution
+
+> Adaptation: evolution is the **cutover sequencing itself**, trust moving in increments, plus the 10× variant and the ownership shape. This step and Evaluation *are* the question.
+
+**The trust ramp as a timeline (anchor scenario):**
+- **Weeks 0-2, expand:** stand up the target, build the seam, start CDC, backfill (~1 day), converge. Nothing user-visible; rollback = turn the pipeline off.
+- **Weeks 2-4, prove:** checksums to clean, dark reads 1% → 10%, burn down mismatch classes. The calendar lives or dies here, *this* is what the $13K/week buys.
+- **Weeks 4-5, shift reads:** ramp to 100%, internal tenants first, marquee customer last; each step holds for days against SLOs; rollback is a flag.
+- **Week 6, shift writes:** drain-and-flip, reverse CDC on; the *old* store is now the replica.
+- **Weeks 6-8, burn-in:** new store is system of record; the escape hatch stays warm.
+- **Week 8+, contract:** stop reverse CDC, snapshot to S3 (~$230/mo for 10 TB; keep a quarter, the rollback of last resort), decommission, **delete the migration scaffolding**, a half-dead seam is how the *next* migration becomes unreasonable.
+
+**At 10× (100 TB, 50K writes/s):** backfill is ~a week even at 1 GB/s, so **migrate shard-by-shard**, the ladder runs per shard, blast radius shrinks to 1/N, shard 1 teaches the org what shards 2-N reuse. Change-rate-vs-copy-rate now has teeth, and dual-run at ~$500K/mo of overlap makes the schedule a CFO conversation, precisely why a Director, not a tech lead, owns the end date.
+
+**Ownership and staffing (the question behind the question):** one accountable go/no-go owner at every rung, me or a named delegate, never "the team"; 2-3 engineers on pipeline + seam; one on verification tooling (the under-staffed role on every failed migration); cutovers in low-traffic hours, both stores' owners on the bridge. **Delegation with priors:** *"Data-infra owns the Debezium/Kafka pipeline and benchmarks apply throughput against our change rate; my prior is one key-partitioned topic is ample at 5 MB/s. The DBA team owns the backfill throttle; my prior is 200 MB/s off a replica, not the primary. I keep the ladder, the abort criteria, the budget, the flip decisions."*
+
+**The generic playbook, the reusable template.** Strip the scenario away and six phases govern *any* migration, vendor exit, regionalization, 10× replatform, monolith-to-services data split:
+
+1. **Assess**, inventory data, dependencies, silent guarantees (S); run the feasibility math, copy rate vs change rate, dual-run cost, rollback SLO (E).
+2. **Stabilize**, freeze schema churn; build the seam (A); verification tooling working *before* moving data.
+3. **Parallel-run**, backfill + CDC, both systems live; checksums + dark reads burn mismatches below budget (H, Eval).
+4. **Shift**, trust moves in increments: reads ramp, writes flip last, reverse-sync keeps the old side warm; every increment's abort path cheaper than continuing.
+5. **Verify**, burn-in as system of record, the old system now the shadow; exit criteria written, one owner says "go."
+6. **Decommission**, archive, kill reverse sync, delete scaffolding, retro. The only irreversible step, last, deliberately.
+
+Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliation, per H's exception); regionalization runs the ladder per region; re-shard per shard. **The phases never change; only the machinery inside phase 3 does**, and that invariance is your answer to "how would you migrate X?" for any X.
+
+---
+
+## Trade-offs table: the pivotal decisions
+
+| Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
-| **Chunking strategy** | **Fixed-size window** | **Recursive / structure-aware** | **Semantic (topic-shift) split** | **A** as a quick baseline / uniform prose. **B** is the default for mixed structured docs (the right call most of the time). **C** for high-value corpora where retrieval precision justifies the preprocessing cost. |
-| **Retrieval** | **Dense (vector) only** | **Hybrid (dense + BM25 + filter)** | Keyword (BM25) only | **B** as the default — recovers exact-token matches dense drops. **A** when queries are purely semantic/paraphrase. **C** only for legacy exact-match search; loses semantic recall. |
-| **Rerank** | **None (use raw top-k)** | **Cross-encoder rerank top-N → 3-8** | LLM-as-reranker | **B** is the high-leverage default for precision. **A** only when latency budget is brutal and recall is already clean. **C** when you need nuanced relevance and can pay the latency. |
-| **Grounding strategy** | **RAG (retrieve at query time)** | **Long-context stuffing** | **Fine-tune the facts in** | **A** for large/private/fresh/citable knowledge (most cases). **B** for a small, bounded, static doc set. **C** never for facts — fine-tune *behavior/format*, RAG the facts; they compose. |
+| **Sync mechanism** | **CDC + backfill**, log-ordered, app untouched, resumable | **App dual-write**, simple, near-zero lag, but non-atomic + needs reconciliation anyway | **Managed tool** (DMS, pglogical) | **A** default (our choice). **B** only when no change log exists (vendor exit) and writes have one choke point. **C** when homogeneous and it fits. |
+| **Cutover style** | **Incremental ramp**, reads by %, writes last, burn-in | **Big-bang window**, one flip, maintenance downtime | **Per-shard / per-tenant waves** | **A** default (our choice). **B** only with real granted downtime *and* a dataset verifiable offline, rare. **C** at 10× or multi-tenant scale, to shrink blast radius. |
+| **Verification** | **Checksums + dark reads**, full coverage + hot-path truth, quantified budget | **Row counts + spot checks**, cheap, blind to content divergence | **Full row-by-row diff**, airtight, days per pass, stale on arrival | **A** default (our choice). **B** never sufficient alone. **C** for small/frozen datasets, or the one-time final audit before contract. |
 
-### What interviewers probe here
-- **"The model is great, but the answers are wrong. Where do you look first?"** — *Strong signal:* goes to **retrieval/eval before the model** — is the right chunk indexed, retrieved, and ranked into the shortlist? Names "good model, bad retrieval" as the dominant failure and separates retrieval recall from generation faithfulness. *Red flag:* "swap to a bigger model" — treats a retrieval problem as a model problem.
-- **"How do you keep the index fresh?"** — *Strong:* incremental, event-driven upserts on source change with delete tombstones; states the freshness SLA as the ingest-pipeline latency. *Red flag:* "re-index nightly" with no awareness of the staleness window or the re-embed cost at scale.
-- **"How do you stop it surfacing a document the user isn't allowed to see?"** — *Strong:* ACL tags on every chunk, **filtered at retrieval time**, so forbidden chunks never enter the context. Notes that post-hoc output filtering is too late (the model already saw it). *Red flag:* "filter the answer afterward" or no notion of permissions in retrieval — a data-leak waiting to happen.
-- **"Why not just fine-tune the docs into the model / paste them all in the prompt?"** — *Strong:* fine-tuning teaches behavior not citable facts and can't update cheaply; long-context doesn't scale past a bounded set and is expensive per call. *Red flag:* treats fine-tuning as the way to add knowledge.
-- **"Do you even need a reranker?"** — *Strong:* yes when raw top-k carries near-miss noise; quantifies the precision lift vs the latency cost and reranks only a candidate set. *Red flag:* unaware of the retrieve-then-rerank pattern.
+---
 
-The through-line at Director altitude: **the model is the cheap, swappable part; the retrieval pipeline and its eval are the asset.** "I'd have the team benchmark hybrid + a cross-encoder reranker against our golden set; my prior is that fixes most of our wrong answers before we touch the model."
+## What interviewers probe here (Director altitude)
 
-### Common mistakes / misconceptions
-- **Blaming the model for a retrieval failure.** The fluent wrong answer almost always traces to chunking/retrieval, not the LLM. Fix the librarian, not the student.
-- **One blind chunking strategy for everything.** Fixed-size windows applied to tables, code, and prose alike is the #1 reason "the data is in there but won't retrieve." Match chunking to structure.
-- **Pure vector retrieval.** Dense embeddings miss exact tokens (codes, names, SKUs). Go hybrid; fuse dense + keyword.
-- **Permissions as an afterthought.** Filtering the *output* is too late — the model already consumed forbidden text and may paraphrase it. Filter at **retrieval** with per-chunk ACLs.
-- **No separation of eval.** Tracking one "accuracy" number hides whether retrieval or generation broke. Measure retrieval recall/precision and generation faithfulness/relevance **separately** — the fixes are different.
+- **"How do you know the two systems match?"**, *Strong:* layered proof, checksums for all data, dark reads for live truth, a numeric budget with a sustained-clean window; unexplained mismatches block. *Red flag:* "compare row counts," "run both and watch for errors."
+- **"Dual-write or CDC? Defend it."**, *Strong:* CDC, dual-write is non-atomic (partial failure = silent divergence, no record), unordered, and needs backfill + reconciliation anyway; names the vendor-exit exception. *Red flag:* dual-write "for simplicity" without naming divergence.
+- **"Walk me through rollback after write cutover."**, *Strong:* reverse CDC from the flip keeps the old store current; rollback is a rehearsed flip-back with a measured time-to-restore; contract deferred because it's the only irreversible step. *Red flag:* "we wouldn't need to by then," or rollback = restore a stale backup.
+- **"How long do you run both, and who decides?"**, *Strong:* quantifies the premium (~2.2×, ~$13K/week), ties the window to pre-written exit criteria, names one owner, treats schedule pressure as a risk input, never a verification override. *Red flag:* open-ended "until we're confident"; no cost awareness; decision diffused to "the team."
+- **"What breaks this plan in practice?"**, *Strong:* schema churn, raw-SQL paths bypassing the seam, read-after-write gaps masquerading as mismatch noise, under-staffed verification, sunk-cost pressure at the thresholds. *Red flag:* only technical failures, the people and process failures are the common ones.
 
-### Practice questions
+---
 
-**Q1.** Your RAG assistant gives a confident, well-cited answer that is flatly wrong. Walk me through how you diagnose it.
-> *Model:* Separate the two stages. **Retrieval:** is the correct chunk even in the index (ingest/chunking gap)? If indexed, is it in the top-k (recall — try hybrid, raise k, query rewriting)? If retrieved, is it ranked into the shortlist (add/tune the reranker)? **Generation:** if the right chunk *was* in context but the answer contradicts it, that's a **faithfulness** failure — tighten the grounding instruction, lower temperature, or the chunk was buried mid-context (lost-in-the-middle — reorder). The citation being wrong is the tell: it cited what it retrieved, and what it retrieved was wrong. Bigger model is the *last* lever, not the first.
+## Common mistakes
 
-**Q2.** Freshness requirement: a policy edited at 9:00am must be answerable by 9:05. How do you design ingest?
-> *Model:* **Event-driven incremental ingest** — a change webhook on the source enqueues just that document; a worker re-parses, re-chunks, re-embeds, and **upserts** the affected chunks (and tombstones deleted ones) into the index. The freshness SLA *is* this pipeline's end-to-end latency, so size the queue/workers for it. Rejected: nightly full re-index (up to 24h stale, and re-embedding 10M docs daily is pure waste). Keep a periodic full reconcile as a backstop for missed events, not as the primary path.
+- **Big-bang cutover**, converting a reversible program into one bet. The ladder exists so no single moment carries the whole risk.
+- **Dual-write as the primary sync**, non-atomic, unordered, silently divergent; you build CDC's hard parts anyway, after the divergence is in production.
+- **Verification as an afterthought**, counts and vibes instead of checksums + dark reads against a numeric budget. If you can't *prove* match, you have a hope, not a migration.
+- **No rehearsed rollback past write cutover**, without reverse replication, "rollback" means restoring a stale backup and losing writes. Rehearsed = run in staging with a stopwatch, not described in a doc.
+- **Migrating a moving target**, schema churn and "while we're at it" remodeling make the diff signal meaningless. Freeze, migrate, then evolve.
 
-**Q3.** When would you *not* use RAG, and use long context or fine-tuning instead?
-> *Model:* **Long-context** when the corpus is small and bounded and fits a window (one contract, one runbook) and you'll accept the per-call token cost — no retrieval infra to maintain. **Fine-tuning** when the need is *behavior/format/tone* (always answer as JSON, adopt our support voice, classify into our taxonomy), not facts. **RAG** whenever knowledge is large, private, frequently changing, or must be cited — which is most enterprise cases. They compose: fine-tune the style, RAG the facts.
+---
 
-**Q4.** Your corpus is 10M docs and pure vector search keeps missing questions that contain exact error codes. What changes?
-> *Model:* Go **hybrid**: add a BM25/keyword index and fuse it with dense results (RRF), so exact-token queries hit the keyword path while paraphrase queries hit the dense path. Also check **chunking** — if codes live in tables being shredded by fixed-size windows, switch to structure-aware chunking and consider **contextual retrieval** (prepend a doc summary to each chunk) so a lone code keeps its subject. Verify with retrieval-recall on a golden set containing those code queries before/after.
+## Interviewer follow-up questions (with model answers)
+
+**Q1. Your TinyURL Postgres is at 80% capacity, 5K writes/s. Sketch the live migration to a sharded store.**
+> *Model:* Six phases. **Assess:** backfill ≈ a day at a throttled 200 MB/s; the 5 MB/s change rate is trivial for CDC, the calendar is verification, not copying. **Stabilize:** freeze schema; funnel all access through one seam with runtime flags. **Parallel-run:** Debezium off the WAL into Kafka keyed by short code; mark the log position, snapshot, replay to convergence; verify with partition checksums plus 1% dark reads against a < 0.01% budget sustained a week. **Shift:** reads ramp 1→10→50→100% behind flags; writes flip last via a 2-5 s drain with reverse CDC started at the flip. **Verify:** 2+ weeks of burn-in, old store as warm replica, flip-back rehearsed. **Decommission:** archive to S3, kill reverse sync, delete scaffolding. Dual-run ≈ $13K/week, why the exit criteria are written before phase one and I own go/no-go.
+
+**Q2. A teammate proposes dual-writing from the application "because it's simpler than a CDC pipeline." Your response?**
+> *Model:* Three failure modes it buys. **Non-atomicity:** old write succeeds, new fails or the process dies between, silent divergence with no record to repair from; a log-based pipeline resumes from its checkpoint. **Ordering:** concurrent writers can land in opposite orders on the two stores; CDC inherits the source's per-key commit order. **It isn't simpler:** you still need backfill *plus* a reconciliation job to catch the divergence dual-write creates, CDC's hard parts, with new failure modes injected into every production write path. My prior: CDC + backfill whenever a change log exists; dual-write only on a log-less vendor exit, through one choke point, with continuous reconciliation mandatory.
+
+**Q3. Mid-ramp at 50% reads, dark reads show 0.4% mismatches. The deadline is in two weeks. What do you do?**
+> *Model:* 0.4% is 40× budget, so the pre-written criteria answer for me: **reads flip back**, a flag, minutes, invisible to users, and we diagnose. That's exactly why abort criteria predate sunk-cost pressure. Then bucket the mismatch ledger by pattern. CDC-lag staleness clustered on recently-written keys is an *understood* artifact, likely a read-after-write path missed in the guarantee audit; fix or route those reads old-side and re-enter quickly. *Unexplained* mismatches, scattered keys, content diffs, are potential corruption; nothing moves until root-caused. On the deadline: two more weeks of dual-run is ~$26K; silent corruption at 100% of reads is unbounded. That trade defends itself.
+
+**Q4. When is the old system actually safe to turn off?**
+> *Model:* Three gates. (1) The new store has been **sole system of record through real events**, a traffic peak, an on-call incident, for weeks, with zero rollback invocations. (2) A **final full checksum audit** passes immediately before severing reverse CDC, the last cheap moment to catch anything. (3) **No residual readers:** the old store's access logs show zero queries for a defined window, there's always a forgotten cron job, and logs find it before deletion does. Then "off" is staged: stop reverse CDC, snapshot to cold storage, decommission compute, delete the scaffolding. Decommission is the only irreversible rung, which is why it's last, and deliberately boring.
+
+---
 
 ### Key takeaways
-- **RAG grounds a frozen, private-data-blind model in fresh, citable knowledge** without retraining — the default for any feature whose answer depends on large/private/changing data. It *reduces* hallucination; it doesn't eliminate it.
-- **RAG is two pipelines:** an incremental **ingest** path (connect → parse → chunk → embed → index) whose latency *is* your freshness, and a **query** path (embed → retrieve → rerank → assemble → generate-with-citations).
-- **Retrieval, not the model, is the bottleneck.** Chunking (structure-aware, ~512 tokens, overlap), **hybrid** retrieval (dense + BM25 + metadata filter), and a **cross-encoder reranker** (retrieve wide ~20–50, rerank to ~3–8) carry the quality. "Good model, bad retrieval → confident, well-cited, wrong" is the signature failure.
-- **Permissions belong in retrieval, not output.** Tag every chunk with ACLs and filter at query time so forbidden text never enters the context.
-- **Eval is the gate, and it's two metrics.** Retrieval recall/precision (right context fetched?) and generation faithfulness/relevance (answer stuck to it?) fail independently — measure them separately and gate every change on a golden set.
+- Every live migration is one problem: **two systems provably in sync under traffic, then trust moved one increment at a time**, expand → migrate → contract, a rollback arrow at every rung, the irreversible step last.
+- **CDC + backfill beats dual-write** as the default sync: log-ordered, failure-atomic, resumable, production write path untouched. Dual-write diverges silently on partial failure and still needs backfill + reconciliation, reserve it for log-less vendor exits.
+- **Verification is the product:** partition checksums over all the data, dark reads on ~1% of traffic, a numeric budget (< 0.01% sustained), and *unexplained* mismatches block by definition.
+- **Reads ramp first, writes flip last**, through one runtime-flagged seam, and reverse CDC at the write flip keeps rollback a rehearsed, minutes-long flag flip through burn-in.
+- **The dual-run window is a budget line with an owner:** ~2.2× infra (~$13K/week here), exit criteria written before phase one, one named go/no-go decider, abort thresholds pre-committed against 2 a.m. sunk-cost pressure.
 
-> **Spaced-repetition recap:** RAG = brilliant student, fallible librarian — give the frozen model the open book turned to the right page. Two pipelines: **ingest** (chunk → embed → index, incrementally — this is your freshness) and **query** (embed → retrieve hybrid + ACL filter → **rerank** → assemble → generate **with citations**). The bottleneck is **retrieval, not the model** (fix chunking/hybrid/rerank before swapping models); the signature failure is *confident, well-cited, wrong*. Permissions filter at **retrieval**, never on output. Gate every change on **separate** retrieval and faithfulness eval. RAG for facts, fine-tune for behavior, long-context for small bounded sets — they compose. Cross-ref: vector search, the adapt-the-model decision, eval, and the enterprise-RAG walkthrough.
+> **Spaced-repetition recap:** Zero-downtime migration = **assess → stabilize → parallel-run → shift → verify → decommission**, for any variant. Sync via **CDC + backfill** (dual-write only when no log exists); prove match with **checksums + dark reads against a numeric mismatch budget**; ramp **reads first, writes last** through one flag-controlled seam; **reverse CDC** keeps rollback alive through burn-in; dual-run ≈ **2× cost**, so exit criteria are pre-written and one person owns go/no-go.
+
+---
+
+*End of Lesson 11.3. Where a strongly-consistent core is protected with a queue, this lesson protects a* **transition** *with a ladder, replication, partitioning, and pub-sub machinery repurposed so two stores can be one system of record, briefly and provably, while trust moves. The playbook is the takeaway: six phases that survive any migration an interviewer can invent.*

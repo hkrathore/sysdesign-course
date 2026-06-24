@@ -52,24 +52,35 @@ export default defineConfig({
 				{ tag: 'script', attrs: { src: `${base}/mermaid-zoom.js`, defer: true } },
 			],
 			customCss: ['./src/styles/global.css'],
-			// Sidebar = Modules 0–12. Module 0 is the syllabus home (index.mdx);
-			// Modules 1–12 autogenerate from their directories by frontmatter sidebar.order.
+			// Sidebar = 13 modules grouped into 5 Parts (the learning sequence), plus the
+			// course-overview home (index.md) and the Cheat Sheets. Lessons autogenerate from
+			// each module directory by frontmatter sidebar.order. Module numbers are presentation
+			// only — cross-references were removed so the order can change without breaking links.
 			sidebar: [
-				{ label: 'Module 0 · Course Overview', link: '/' },
-				{ label: 'Module 1 · Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-1' } }] },
-				{ label: 'Module 2 · Core Concepts & Trade-offs', collapsed: true, items: [{ autogenerate: { directory: 'module-2' } }] },
-				{ label: 'Module 3 · System Building Blocks', collapsed: true, items: [{ autogenerate: { directory: 'module-3' } }] },
-				{ label: 'Module 4 · RESHADED Walkthrough', collapsed: true, items: [{ autogenerate: { directory: 'module-4' } }] },
-				{ label: 'Module 5 · System Design Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-5' } }] },
-				{ label: 'Module 6 · Capstone & Rubric', collapsed: true, items: [{ autogenerate: { directory: 'module-6' } }] },
-				{ label: 'Module 7 · LLD & OOD Curveballs', collapsed: true, items: [{ autogenerate: { directory: 'module-7' } }] },
-				{ label: 'Module 8 · Architecture & Org Strategy', collapsed: true, items: [{ autogenerate: { directory: 'module-8' } }] },
-				{ label: 'Module 9 · Business-Domain Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-9' } }] },
-				{ label: 'Module 10 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-10' } }] },
-				{ label: 'Module 11 · Gen AI & Agentic Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-11' } }] },
-				{ label: 'Module 12 · Gen AI & Agentic Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-12' } }] },
-				{ label: 'Module 13 · Data Platform Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-13' } }] },
-				{ label: 'Module 14 · Data Platform Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-14' } }] },
+				{ label: 'Course Overview', link: '/' },
+				{ label: 'Part I · Method & Fundamentals', collapsed: false, items: [
+					{ label: 'Module 1 · Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-1' } }] },
+					{ label: 'Module 2 · Core Concepts & Trade-offs', collapsed: true, items: [{ autogenerate: { directory: 'module-2' } }] },
+					{ label: 'Module 3 · System Building Blocks', collapsed: true, items: [{ autogenerate: { directory: 'module-3' } }] },
+				] },
+				{ label: 'Part II · Design Problems', collapsed: false, items: [
+					{ label: 'Module 4 · System-Design Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-4' } }] },
+					{ label: 'Module 5 · Business-Domain Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-5' } }] },
+				] },
+				{ label: 'Part III · Specialized Design Tracks', collapsed: false, items: [
+					{ label: 'Module 6 · LLD & OOD Curveballs', collapsed: true, items: [{ autogenerate: { directory: 'module-6' } }] },
+					{ label: 'Module 7 · Data Platform Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-7' } }] },
+					{ label: 'Module 8 · Data Platform Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-8' } }] },
+					{ label: 'Module 9 · Gen AI & Agentic Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-9' } }] },
+					{ label: 'Module 10 · Gen AI & Agentic Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-10' } }] },
+				] },
+				{ label: 'Part IV · Strategy & Leadership', collapsed: false, items: [
+					{ label: 'Module 11 · Architecture & Org Strategy', collapsed: true, items: [{ autogenerate: { directory: 'module-11' } }] },
+					{ label: 'Module 12 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-12' } }] },
+				] },
+				{ label: 'Part V · Capstone', collapsed: false, items: [
+					{ label: 'Module 13 · Capstone & Rubric', collapsed: true, items: [{ autogenerate: { directory: 'module-13' } }] },
+				] },
 				{ label: 'Cheat Sheets', collapsed: true, items: [{ autogenerate: { directory: 'cheatsheets' } }] },
 			],
 		}),

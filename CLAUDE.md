@@ -139,6 +139,16 @@ Visual style for widgets: **theme-aware — must match the selected Starlight li
 
 ## 9. Course status & remaining work
 
+> **June 2026 reorder & de-numbering pass (current — this is the live structure):** the course was regrouped into **5 Parts / 13 modules** in learning order, and **all plain-text inter-lesson cross-references were removed** (a deterministic script stripped `Module N` / `Lesson N.M` / `(N.M)` / possessives / forward-nav tails / mermaid-label refs; inline subject-position refs were rephrased to topic names). Lessons are now self-contained, so renumbering is cheap and link-safe. Build green: 158 pages, node@22.
+>
+> **Old → new module map:** 1–3 unchanged · **old 4 (TinyURL) merged into new Module 4 as lesson 4.1** · old 5 (design problems) → new 4 (lessons 4.2–4.16) · old 9 (business-domain) → 5 · old 7 (LLD) → 6 · old 13 (data foundations) → 7 · old 14 (data problems) → 8 · old 11 (GenAI foundations) → 9 · old 12 (GenAI problems) → 10 · old 8 (architecture/strategy) → 11 · old 10 (leadership) → 12 · old 6 (capstone) → 13. Cheat sheets renumbered to match; old module-4 cheat became `reshaded-method.md`.
+>
+> **Parts:** I · Method & Fundamentals (1–3) · II · Design Problems (4–5) · III · Specialized Design Tracks (6 LLD, 7–8 Data, 9–10 GenAI) · IV · Strategy & Leadership (11–12) · V · Capstone (13).
+>
+> **Planned next (not built):** an **Engineering Excellence & Operations** track — **Security/Privacy & Trust, Testing & Quality, Production Troubleshooting** — to slot in as a new Part IV; authoring it will bump Strategy & Leadership → 14–15 and Capstone → 16 (cheap now that cross-refs are gone). The deferred **ML Systems** pair (recsys/ranking/feature-stores) remains optional.
+>
+> The entries below describe modules by their **original** numbers (historical); apply the map above.
+
 **Done:** All modules built — Module 0 (syllabus + Director's Fast Path), Modules 1–3 (all lessons), Module 4 (TinyURL walkthrough), Module 5 (15 RESHADED walkthroughs, 5.1–5.15), Module 6 (capstone + rubric), all cheat sheets (Modules 1–10) + Master RESHADED.
 
 **June 2026 Director-altitude pass (complete):** all lessons trimmed from Staff-IC depth to Director altitude (~251k → ~205k visible words); IC depth preserved in "Go deeper" collapsibles (see §7); cheat sheets 2–3 rewritten as decision references; "Director's Fast Path" navigation added to the course home.

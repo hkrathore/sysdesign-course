@@ -1,175 +1,301 @@
 ---
-title: "11.8 — LLM Cost & Latency Optimization"
-description: The levers that decide whether an AI feature is economical — prompt and semantic caching, model routing and cascades, distillation, batching, streaming, and token-budget discipline — each with the quality or latency it trades away.
+title: "11.8 — Org + Architecture Co-Design (Conway)"
+description: "Draw the org chart and the architecture diagram as one artifact, shape teams to induce the services you want (inverse Conway), keep every boundary owned by one team, budget cognitive load like QPS, and sequence the reorg against migration milestones because attrition risk is part of the architecture decision."
 sidebar:
   order: 8
 ---
 
+> **This is the most Director-distinctive question in the loop, no IC can fake it.** The documented prompt is blunt: *"You have 40 engineers and this architecture, draw the org,"* or its growth twin, *"the team is going from 15 to 50, reorganize ownership."* It is asked as an org-design case precisely because it tests something no coding round can: whether you know that **the org chart is an architectural input, not an HR artifact**. Conway's law says your system will copy your communication structure whether you like it or not; the junior answer draws the services first and staffs them afterward, then watches the seams land wherever the existing teams already talk. The Director answer draws **both diagrams as one artifact**, and treats the human cost as a first-class constraint: a reorg that loses three senior engineers has destroyed more architecture than it created. Shaping teams to induce the target system (**inverse Conway**) while managing that cost is the entire question.
+
 ### Learning objectives
-- Build the **cost model** from tokens — `cost ≈ (input × in_price) + (output × out_price)` — and explain why **output dominates**, why long prompts inflate the *input* bill on **every** call, and why an unprofitable-per-user feature scales into a *bigger* loss.
-- Build the **latency model** — `total ≈ TTFT + output_tokens × TPOT (+ retrieval/tool round-trips)` — and map each lever to the term it attacks.
-- Choose among the **caching levers** — prompt caching (shared-prefix, cuts input cost up to ~90%), exact response cache, and **semantic cache** (cheap but a correctness risk) — and gate the dangerous one.
-- Apply **model routing / cascades** (cheap default → escalate on low confidence) to cut cost **5–10×**, and bound the quality loss with eval; know when to reach instead for **distillation**, **quantization**, and **batching**.
-- Treat unit economics (`$/request`, `$/active-user`) and **per-tenant budgets** as a first-class design input, and name how you stop a runaway bill.
+- Run an **adapted RESHADED** spine where the system is the *organization*: H becomes the **service diagram and team topology drawn together**, E becomes **cognitive-load and headcount math**, D becomes the **ownership map**.
+- Apply the 2024-26 expected vocabulary, **Team Topologies'** four team types and three interaction modes, in one tight table, and use it instead of inventing terms.
+- Draw ownership boundaries **on system seams, with at most one owning team per boundary** (two only during an explicit, dated handover), and predict where boundaries will leak.
+- Quantify the **human cost**: communication paths, reorg productivity dips, and **attrition risk as part of the architecture decision**, with dollar figures, not vibes.
+- Sequence a reorg **against migration milestones** (the strangler-fig timeline), not against a calendar, and defend the sequencing against the big-bang alternative.
 
 ### Intuition first
-An LLM feature is a **taxi with the meter always running**. Every token in and every token out is a coin dropped in the meter, and the meter never stops to admire the scenery. Your job is two things at once: **spend the fewest coins for the quality the trip actually needs**, and **make the ride *feel* short** even when the route is long.
+Four families share one big farmhouse kitchen and you ask them to cook four separate dinners. Whatever the recipe cards say, dinner will come out the way the *kitchen* is laid out: whoever stands next to the stove ends up stirring everyone's pots, the family nearest the fridge becomes the de-facto ingredients service, and every dish converges on the same spice profile because everyone reaches into the same rack. That is **Conway's law**: a system's structure copies the communication structure of the people building it, not because anyone decides this, but because designing across a chatty boundary is easy and designing across a silent one is hard. Now invert it. If you *want* four genuinely independent dinners, you don't write stricter recipes, **you build four kitchen stations**, each with its own stove, fridge shelf, and spice rack. The food follows the floor plan. That is the **inverse Conway maneuver**: choose the architecture you want, then shape the teams so that the easy communication paths are exactly the seams you intend, and the system grows into them.
 
-That single image carries the whole lesson. You don't put every passenger in the luxury car — most trips are short and a cheap car is fine (**routing**: small model by default, big model only when the trip is genuinely hard). You don't re-explain the destination every time if you just took someone there (**caching**: don't re-pay to send the same prefix or re-answer the same question). You keep the conversation short and to the point so the meter ticks less (**token discipline**: shorter prompts, capped output, trimmed history). And you talk to the passenger as you drive so the wait doesn't feel dead (**streaming**: first token under a second changes the *felt* latency without changing the fare). Every one of these saves coins or time — and **every one trades away a little quality, freshness, or latency.** The Director skill is naming which.
+The catch the analogy must also carry: families are people. Reassign the grandmother who has cooked at that stove for a decade to a station she didn't choose, and she may leave, taking the only working knowledge of half the recipes with her. **An org design that induces the right architecture but bleeds the people who hold the system in their heads has failed both tests.** Attrition risk is not an HR footnote to the design; it is a term in the design's cost function, and we will price it.
 
-### Deep explanation
+---
 
-**The cost model — and why output is the lever.** The bill for one call is roughly:
+## R: Requirements
 
+> **Adaptation, said out loud:** in a product design, R scopes features. Here R scopes the *organization*: what must this org be able to deliver, at what change rate, with what failure modes? The clarifying questions are about business flows, growth, and constraints on people, and they are exactly the questions a junior candidate forgets to ask before drawing boxes around names.
+
+**Anchor scenario (used throughout):** a **40-engineer e-commerce company**, ~$150M GMV, a modular monolith mid-decomposition into domain services, currently organized **by layer**: a frontend team (10), a backend team (16), a data/search team (6), an ops/DBA team (8). Classic Conway: a 3-tier org has produced a 3-tier system, and every feature, "add gift wrapping", crosses three team backlogs and two sprint boundaries.
+
+**Clarifying questions I'd ask (with assumed answers):**
+- *What does the business need the org to do faster?* → **Ship vertical features end-to-end.** Today a one-week feature takes 6-8 weeks of cross-team queuing. Flow, not raw output, is the complaint.
+- *What's the target architecture?* → The decomposition end-state: domain services around **browse/search, cart/checkout, payments, orders/fulfilment, customer accounts**, on shared platform rails. Roughly **15-20 services**.
+- *Growth plan?* → Headcount roughly flat this year; the 15→50 variant is treated in Design evolution.
+- *On-call model?* → You-build-it-you-run-it is the goal; today ops pages for everything (a Conway symptom: a separate ops team produces a system only ops can run).
+- *People constraints?* → Two irreplaceable domain experts (payments, search relevance); the frontend team has strong identity and a beloved manager. **These are design inputs**, the same way a legacy protocol you can't change is.
+
+**Functional requirements (of the org):**
+1. Each major business flow (browse → cart → pay → fulfil) has a team that can change it **end-to-end without a ticket to another team**.
+2. Every service in the target architecture has **exactly one owning team**, build, run, page.
+3. Shared infrastructure (deploy, observability, data platform) is consumed **self-service**, not by request queue.
+4. The org supports the migration itself: someone must own the monolith *while it shrinks*.
+
+**Non-functional requirements (the load-bearing ones):**
+- **Team cognitive load stays within budget**, no team owns more domains than it can hold; this is the org's equivalent of a latency SLO, and we quantify it in E.
+- **≤ 1 owning team per system boundary.** Two teams per boundary only during an explicit, end-dated handover; three or more is a design error, not a compromise.
+- **Regrettable attrition through the reorg < ~5%** (2 of 40). Above that, the reorg is destroying the asset it's reorganizing.
+- **No feature freeze.** The business doesn't stop; the reorg sequences around delivery, the way a zero-downtime migration sequences around live traffic.
+
+**Explicitly CUT (scoping is the signal):** compensation bands, performance management, hiring pipeline mechanics, and the manager-selection question, real, owned with the HR partner, but not this design. I scope to **team boundaries, ownership, interaction modes, and sequencing**, and say so.
+
+---
+
+## E: Estimation
+
+> **Adaptation, said out loud:** no QPS. Estimation here is **communication-path math, cognitive-load budgets, headcount arithmetic, and the dollar cost of the reorg itself**, the same estimation discipline (round aggressively, state assumptions) applied to people.
+
+**Communication paths, why team boundaries exist at all.** 40 people fully meshed is `40 × 39 ÷ 2 = 780` potential pairwise channels. Six teams of ~7 cuts that to ~21 high-bandwidth channels *inside* each team plus **15 inter-team channels**, and the entire design question is *which 15*. Conway's law says the system's seams will land on whichever channels stay chatty; inverse Conway means choosing them deliberately.
+
+**Team size:** 5-8 engineers (the two-pizza band, small enough to mesh internally, large enough to carry on-call). `40 ÷ 7 ≈ 6 teams`.
+
+**Team-type mix (Team Topologies heuristic, most of the org should sit in stream-aligned teams):** at 40 engineers that yields **4 stream-aligned teams (~28), 1 platform team (~6), and ~2 engineers of enabling capacity** (fractional, senior ICs who rotate, not a standing department). A complicated-subsystem team only if a genuine deep specialism exists; here, **search relevance** is the one candidate.
+
+**Cognitive-load budget, the org's capacity number.** A rough, defensible heuristic: a stream-aligned team can own **2-3 bounded domains, ~5-8 services** before quality of ownership degrades (on-call depth, roadmap attention, willingness to refactor). Target architecture: ~15-20 services ÷ 4 stream teams ≈ **4-5 services each**, inside budget, with the platform team carrying the rails. If the service count were 40, the same math would say *don't build 40 services with 40 engineers*, **the architecture must fit the org's load budget, which is exactly the co-design point.**
+
+**What the reorg costs.** Payroll is `40 × $200K loaded = $8M/yr`, so engineering time prices at ~$150K/week. A well-sequenced reorg costs each affected team ~20-30% productivity for ~4-6 weeks (new domains, new rituals, ownership handovers): roughly **$400-700K of slowed delivery**. A big-bang reorg roughly doubles the dip and adds the tail risk: each regrettable senior departure costs **~$300-500K** (backfill recruiting + 6-9 months of ramp + the unwritten system knowledge), three departures ≈ **$1-1.5M**, comparable to the entire sequenced-reorg cost. **This asymmetry is the quantitative case for sequencing**, and it's the number to say out loud in the interview.
+
+**What estimation decided:** 6 teams (4 stream + 1 platform + fractional enabling); 4-5 services per stream team fits the load budget; the reorg itself is a ~$0.5M project whose dominant risk term is attrition, which is why sequencing, not speed, is optimized.
+
+---
+
+## S: Storage
+
+> **Adaptation, said out loud:** "what persists, and who owns it" is the sharpest boundary-drawing tool in the problem. In Team Topologies language you choose **fracture planes**; the most reliable plane is **data ownership**, a team boundary that splits a database is a boundary that will leak.
+
+The rule, stated once: **each stream-aligned team owns its domain's data outright**, schema, store choice, migrations, and the only write path. Other teams get an API or an event stream, never a JDBC connection. This is the org-level restatement of the database-decomposition step, and it's where Conway bites hardest in reverse: if checkout and fulfilment share a table, the two teams *must* coordinate every schema change, the chatty channel persists, and the services never actually separate, the shared database silently reassembles the monolith regardless of what the service diagram claims.
+
+Applied to the anchor: the orders tables go to the fulfilment team, cart/session state to checkout, the catalog to shopper experience, payment instruments (PCI-scoped) to whichever team owns payments, and the migration is **not done** until each store has exactly one writing team. *Rejected, a central data team owning all schemas:* it recreates the layer org inside the data tier; every product change queues on one team, which is the 6-8-week feature lead time we were hired to kill. The data *platform* (warehouse, pipelines, tooling) is platform-team property; the domain *data* is not.
+
+---
+
+## H: High-level design
+
+> **Adaptation, said out loud, and this is the lesson's core artifact:** H is not a service diagram with an org chart stapled behind it. It is **one drawing**: services *inside* team boundaries, so every box visibly has an owner and every arrow visibly crosses (or doesn't cross) a team seam. In the interview, draw this; it is the single highest-signal artifact the question admits.
+
+First, the expected vocabulary, the **four Team Topologies team types**, in one table, because interviewers in 2024-26 assume this frame:
+
+| Type | Owns | Default interaction | In our 40-eng org |
+|---|---|---|---|
+| **Stream-aligned** | A slice of business flow, end to end, build, run, page | Consumes platform as a service | 4 teams, ~28 eng (~70-85% of the org, the load-bearing heuristic) |
+| **Platform** | Self-service internal services: deploy, observability, data rails | **X-as-a-service** to stream teams | 1 team, ~6 eng |
+| **Enabling** | Capability uplift (testing, perf, migration patterns), visits, teaches, **leaves** | **Facilitating**, time-boxed | ~2 fractional senior ICs, not a department |
+| **Complicated-subsystem** | A deep-specialism component the stream teams shouldn't carry | X-as-a-service behind a narrow API | 0-1; search relevance is the only candidate here |
+
+And the three **interaction modes**, one line each: **collaboration** (two teams working jointly, high bandwidth, deliberately temporary), **X-as-a-service** (one consumes the other's product through an interface, the cheap steady state), **facilitating** (one uplifts the other, then exits). The Director move is treating modes as *designed and dated*, not emergent: collaboration that never ends is a boundary that never formed.
+
+**The co-designed diagram for the 40-engineer e-commerce org:**
+
+```mermaid
+flowchart LR
+    subgraph SHOP[Shopper team 7]
+        BR[Browse]
+        CAT[Catalog]
+    end
+    subgraph CHK[Checkout team 7]
+        CART[Cart]
+        PAY[Payments]
+    end
+    subgraph FUL[Fulfilment team 7]
+        ORD[Orders]
+        INV[Inventory]
+        SHIP[Shipping]
+    end
+    subgraph ACC[Accounts team 7]
+        USR[Identity]
+        PROF[Profiles]
+    end
+    subgraph PLAT[Platform team 6]
+        DEP[Deploy rails]
+        OBS[Observability]
+    end
+    subgraph SRCH[Search subsystem 4]
+        REL[Relevance engine]
+    end
+    BR --> CART
+    CART --> ORD
+    BR --> REL
+    USR --> CART
+    SHOP -.-> PLAT
+    CHK -.-> PLAT
+    FUL -.-> PLAT
+    ACC -.-> PLAT
 ```
-cost ≈ (input_tokens × input_price) + (output_tokens × output_price)
+
+**Reading the artifact:** every service sits inside exactly one team boundary, the **≤ 1-owner rule made visible**. Solid arrows are runtime dependencies that cross team seams: each one is a **contract** (next section) and a predicted communication channel; if the diagram showed a service needing arrows from three teams to change, the boundary is wrong *on this drawing*, before any code moves. Dotted arrows are X-as-a-service consumption of the platform. The search relevance engine is carved out as a **complicated-subsystem team** (4 engineers including the irreplaceable expert) because ranking depth would blow the shopper team's cognitive-load budget, and it hides behind one narrow query API, so the specialism doesn't leak.
+
+**The three viable org shapes, name them, then choose:**
+- **A. Component/layer teams (the status quo):** teams own technical layers. *Pro:* deep technical specialism, no reorg cost. *Con:* every feature crosses every team; Conway delivers a layered monolith forever. Rejected, it is the failure we were asked to fix.
+- **B. Pure feature/matrix teams:** transient squads assembled per project from a pool. *Pro:* maximal staffing flexibility. *Con:* **nobody owns anything**, services have no long-term steward, on-call decays, and Conway, given no stable communication structure, produces a big ball of mud. Rejected for ownership.
+- **C. Stream-aligned domain teams on the target seams (chosen):** stable teams owning business flows, platform underneath. *Pro:* flow, ownership, and inverse-Conway pressure toward the target architecture. *Con:* a real reorg with real human cost, and seams chosen now are expensive to redraw. **Chosen because the requirement is end-to-end flow and the migration needs owners**, and the cost is managed by sequencing (Design evolution), not denied.
+
+**Who owns the shrinking monolith?** No standing "monolith team", that creates a team whose mission is to disappear and whose attrition risk is total (nobody stays to steward a melting iceberg). Instead each stream team owns *its domain's code inside the monolith* from day one, and extraction is part of their roadmap. *Trade-off:* fuzzier short-term ownership of shared monolith plumbing, accepted, with the platform team holding the build/deploy spine of the monolith itself.
+
+---
+
+## A: API design
+
+> **Adaptation, said out loud:** the interfaces here are **team APIs**, the contract each team publishes to the rest of the org. A team's API is its services' endpoints *plus* how to engage the humans: what's self-service, what needs a conversation, what the support SLA is. Inter-team arrows on the H diagram are exactly the things this step specifies.
+
+```yaml
+# Team API — Fulfilment team (the org-design analogue of an interface)
+owns:
+  services: [orders, inventory, shipping]
+  data: [orders_db, inventory_db]        # sole write path
+  oncall: 24x7 for owned services
+provides:
+  - api: POST /v1/orders                  # versioned, consumer-driven contract tests
+  - events: order.created, order.shipped  # via the platform event bus
+engage:
+  self_service: API + event docs, sandbox
+  consult: schema or contract changes — 1 week notice via RFC
+  collaboration: by agreement, time-boxed, with an end date
 ```
 
-Two facts decide everything downstream. First, **output tokens are typically priced 3–5× higher than input tokens** (the decode phase runs the full model once per emitted token; prefill batches the input). So a 200-token answer can cost more than a 2,000-token prompt. **Output is the lever you most directly control** — cap it, structure it, stop padding it. Second, **long prompts inflate the input cost on *every single call*.** Chat history and RAG context are re-sent each turn because the model is stateless; a 20k-token retrieved context isn't a one-time cost, it's a tax on every message in the session. The Director-altitude statement: *you are not optimizing a model, you are optimizing tokens — and the two biggest token sinks are output you didn't cap and context you re-send.*
+**Design notes (each with the rejected alternative):**
+- **Inter-team dependencies are versioned APIs and events, not shared code or shared tables.** *Rejected: a shared domain library all teams co-edit*, it couples release cadences and quietly re-merges the teams; Conway will reassemble the monolith through the library.
+- **Contract changes carry notice and consumer-driven tests**, the org-level idempotency key: it makes cross-team change safe to retry. *Rejected: "we'll coordinate on Slack"*, that is the chatty channel inverse Conway exists to eliminate.
+- **Collaboration mode requires an end date.** Checkout and fulfilment may pair for a quarter while the order-flow seam settles; the date forces the boundary to actually form. *Rejected: open-ended "virtual teams"*, permanent collaboration is a missing boundary wearing a costume.
 
-The third fact bites at scale: **cost scales linearly with usage.** There's no flat fee that amortizes — 10× the traffic is 10× the bill. So a feature that loses **$0.30/user/month** isn't a rounding error you'll grow out of; growth makes the hole deeper. **You design unit economics — `$/request`, `$/active-user` — up front, the way you'd size QPS and storage**, because "we'll optimize later" means "we'll discover later that the feature can't be profitable."
+---
 
-**The latency model.** Felt slowness has its own decomposition:
+## D: Data model
 
-```
-total_latency ≈ TTFT + (output_tokens × TPOT) + retrieval/tool round-trips
-```
+> **Adaptation, said out loud:** the data model is the **ownership map**, the org's authoritative table of *service → owning team → on-call → data owned*. It lives in the service catalog, not a wiki, and the invariant it enforces is the one NFR worth a uniqueness constraint: **one owner per boundary.**
 
-`TTFT` (time to first token) is dominated by prefill — processing the prompt — so it scales with **prompt length**. `TPOT` (time per output token) is the decode cadence, so total decode time scales with **how much the model says**. Retrieval and tool calls add round-trips on top. Each lever below attacks one or both terms: prompt caching cuts TTFT; output caps cut the `output × TPOT` term; routing to a smaller model cuts TPOT; streaming attacks *perceived* TTFT without touching the real numbers. **Name which term a lever moves** — that's the difference between "make it faster" and an engineering plan.
+| Boundary | Owner | Data owned | Consumers | Mode |
+|---|---|---|---|---|
+| Browse / catalog | Shopper (7) | catalog_db | Checkout, Search | X-as-a-service |
+| Search relevance | Search subsystem (4) | ranking models | Shopper | X-as-a-service |
+| Cart / payments | Checkout (7) | cart_db, payments (PCI) | Fulfilment | X-as-a-service |
+| Orders / inventory / shipping | Fulfilment (7) | orders_db, inventory_db | Checkout, Accounts | X-as-a-service |
+| Identity / profiles | Accounts (7) | users_db | All | X-as-a-service |
+| Deploy / observability / data rails | Platform (6) | the rails | All teams | X-as-a-service |
+| Test + migration capability | Enabling (2, fractional) | none | rotating | Facilitating, time-boxed |
 
-**Caching levers — three kinds, three risk profiles.**
-
-- **Prompt caching (shared-prefix cache).** The provider caches the *prefix* of your prompt — system prompt, few-shot examples, a long pasted document — so repeat calls that share that prefix skip re-processing it. On a cache hit, the cached input is billed at roughly **10% of the normal input price (up to ~90% off that portion)** and TTFT drops because prefill is skipped for the cached span. This is **near-free quality-wise** — the model sees identical tokens — so it's the first lever to reach for whenever a large, stable prefix repeats (a fixed system prompt across all users, a document re-queried many times, an agent loop re-sending the same tool definitions). The trade-off is mild: the cache has a short TTL (often ~5 min) and a small write cost on the miss, so it only pays when the prefix is **reused soon and often**; you also must keep the prefix **byte-stable** (put the variable part last) or you never hit. *Rejected alternative:* re-sending the full prompt uncached — simpler, but you pay full input price and full TTFT on a prefix that never changed.
-- **Exact response cache.** A plain key-value cache (Redis) keyed on the normalized request → store the response; identical requests are served for ~0 cost and ~0 latency. **No correctness risk** because the input is identical. The trade-off is **hit rate**: natural-language inputs rarely match exactly, so this only helps for constrained, repeated queries (a fixed FAQ, a canned classification). *Rejected alternative:* no cache — correct but pays for provably-identical work.
-- **Semantic cache.** Embed the incoming query; if it's **embedding-similar** to a previously answered query (cosine above a threshold), serve the *stored* answer instead of calling the model. Big savings — it catches paraphrases the exact cache misses — but it is the **one caching lever that can return a *wrong* answer**, because "similar enough" is a judgment call. Two different questions can sit close in embedding space ("how do I cancel" vs "how do I *un*cancel"). You **gate it hard**: a conservative **similarity threshold**, a **freshness/TTL** policy, and a hard rule — **never for personalized or changing answers** (account balances, "my orders", anything user- or time-specific), because a neighbor's cached answer is then not just stale, it's *someone else's*. *Rejected alternative:* exact cache only — safe but misses paraphrases; semantic cache trades a bounded correctness risk for a much higher hit rate, and you must say so out loud.
-
-**Model routing and cascades — usually the biggest single win.** Most traffic is easy; a minority is hard. A **router** sends each request to the cheapest model that can handle it: a small/cheap model by default, **escalating to a larger model only on low confidence or high complexity.** The escalation signal is either a cheap upfront **classifier** (length, topic, difficulty heuristic) or **self-eval** (the small model answers; a quick check — confidence score, a validator, a "can you answer this confidently?" gate — decides whether to retry on the big model). When the cheap model handles the majority of traffic, the blended cost drops **5–10×**, because the expensive model now runs on the 10–20% of requests that actually need it rather than 100%.
-
-The trade-off is **quality on the routed-down traffic** plus the **router's own cost and its misroute rate** — every request the router sends to the small model that the small model botches is a quality regression you shipped. So **a cascade is only safe behind an eval harness**: you measure quality on each tier, set the escalation threshold to bound the regression, and re-check it when models change. *Rejected alternative:* one big model for everything — simpler, uniformly high quality, and 5–10× the bill; you reject it once volume makes that bill the constraint.
-
-**Distillation and smaller fine-tuned models.** When a task is *narrow* (one classification, one extraction, one format), you don't need a generalist. **Distill** — use a large model to generate training data, then fine-tune a small model to match it on that task — and you get a model that's a fraction of the cost and latency *for that task*, often matching the big model's quality on it. The trade-off: it's **brittle outside its task** and carries a **training/maintenance cost** (you own a model now, with its own eval and refresh cycle). Use it for the high-volume narrow path; keep the generalist for the long tail.
-
-**Quantization and batching — serving-side levers.** **Quantization** (serving the model at lower numeric precision) cuts memory and speeds inference for a small, measured accuracy cost — relevant when you **self-host** (it doesn't apply to a provider API you don't control). **Batching** is the throughput lever: for any work that isn't real-time — overnight summarization, bulk classification, embedding a corpus — provider **async/batch APIs run ~50% cheaper** than synchronous calls, because the provider schedules them when it has spare capacity. On self-hosted serving, **larger batch sizes raise throughput-per-dollar** (more tokens per GPU-second), trading per-request latency for fleet efficiency. The trade-off is explicit in the name: **batch is not interactive** — you accept minutes-to-hours of latency in exchange for the discount, so it's for pipelines, never the user-facing path.
-
-**Token discipline — the unglamorous lever that compounds.** Every token you don't send or generate is saved on **every call, forever**:
-
-- **Shorter system prompts.** A 1,500-token system prompt re-sent on every turn of a million-turn-a-day product is pure recurring cost; trim it to the essentials and pin the stable part behind prompt caching.
-- **Output caps + structured output.** Set `max_tokens` and ask for structured/JSON output so the model stops instead of rambling — this attacks the most expensive term (output × out_price) directly.
-- **Trim and compress context.** Don't re-send the entire chat history every turn; window it, or summarize older turns into a compact running summary. For RAG, **retrieve fewer, better chunks** — a reranker lets you send the top 3 instead of the top 20, cutting input tokens *and* improving quality (less "lost in the middle").
-
-The trade-off for aggressive trimming is **dropped context** — cut too much history or too many chunks and the model loses the thread or the grounding facts. The discipline is to trim against an eval, not by feel.
-
-**Streaming — a latency *perception* lever, not a cost one.** Streaming tokens as they're generated **does not change the bill or the total generation time** — the same tokens are produced. What it changes is **perceived latency**: the user sees the first token in **under a second** and reads along as the rest arrives, instead of staring at a spinner for the full `output × TPOT` window. For any interactive surface (chat, copilots), streaming is the cheapest UX win available — it makes a 4-second answer feel instant. The "trade-off" is only that it complicates the client and that you can't post-process a complete response before showing it (e.g., a guardrail that needs the whole output); for those you buffer-then-stream or accept non-streaming.
-
-**FinOps — making the bill governable.** Because cost scales with usage and a single bad prompt-loop can melt a budget, you instrument unit economics as a first-class metric: **`$/request`, `$/active-user`, cost per feature and per tenant.** You set **per-tenant token budgets / quotas** so one customer (or a runaway agent loop) can't consume the whole bill, and you **alert** on cost-per-user drift the way you'd alert on latency. The mechanism that *stops* a runaway bill lives centrally: an **LLM gateway** that enforces budgets, rate-limits, caps, and kill-switches across every feature, so the control isn't reimplemented per service. The full FinOps/governance practice is the AI-governance lesson's subject.
+Two structural notes. **Payments stays inside Checkout** rather than getting its own team: 40 engineers won't sustain a 7th team, the PSP integration is mostly bought, and the PCI scope is contained behind a tokenization boundary, *revisit at 60+ engineers or if in-house risk/fraud is built.* **The 4-person search subsystem is deliberately under two-pizza size**, the price of carving out a specialism; mitigated by pairing it with the shopper team for on-call backup, an explicit, named exception rather than an accident.
 
 <details>
-<summary>Go deeper — caching mechanics, router signals, and batch arithmetic (IC depth, optional)</summary>
+<summary>Go deeper, fracture planes: where to cut when the seam isn't obvious (IC depth, optional)</summary>
 
-- **Prompt-cache hit rules:** the cache matches a **prefix**, byte-for-byte, up to the first divergence — so a single changed token early in the prompt invalidates everything after it. Order prompts **stable → variable**: system prompt and few-shot first (cacheable), user turn last. Providers expose `cache_read_input_tokens` vs `cache_write_input_tokens` in usage; the write (miss) is slightly *more* expensive than a normal token, so the break-even is roughly **>1 reuse within the TTL**.
-- **Semantic-cache thresholds:** cosine similarity thresholds around **0.92–0.97** are common starting points, tuned on a labeled set of "should-have-hit / should-have-missed" pairs. Always store the *original* query alongside the answer so you can audit false hits, and key the cache by tenant/locale so you never serve across isolation boundaries.
-- **Router signals:** cheap classifiers can be a fine-tuned small model, a logistic-regression head on the query embedding, or pure heuristics (token count, presence of code, named-entity density). **Self-eval cascade** (answer-then-verify) costs an extra small-model call on the escalated fraction; budget for it. Power-of-two-style routing isn't relevant here — the decision is quality-gated, not load-gated.
-- **Batch economics:** the ~50% discount is for **non-interactive** completion windows (often up to 24h). For self-hosted, throughput rises with batch size until you hit memory or the KV-cache ceiling; continuous/in-flight batching (vLLM-style) packs new requests into the batch as others finish, keeping GPU utilization high without forcing a fixed window.
-- **Output-cap caveat:** an aggressive `max_tokens` can **truncate** a needed answer mid-structure; pair caps with structured output and validate completeness, or the "saving" is a broken response you retry (paying twice).
+Team Topologies' checklist of viable fracture planes, in rough order of preference for product orgs: **business domain / bounded context** (the default, align with DDD contexts); **regulatory or compliance scope** (PCI, HIPAA, isolate the audited surface, as we did with payments tokenization); **change cadence** (split fast-moving experimentation from slow-moving core); **risk profile** (the part that can never go down vs the part that A/B tests daily); **performance isolation** (a hot path with its own scaling law); **technology** (last resort, mobile/embedded toolchains justify it; "frontend vs backend" does not, which is exactly the layer-org anti-pattern); **geography/time zones** (only when overlap is < ~4 hours, a seam forced by physics). A boundary that doesn't sit on *any* of these planes will leak no matter how clean the diagram looks.
 
 </details>
 
-### Diagram: the optimization stack on the request path
+---
 
-```mermaid
-flowchart TD
-    REQ[Incoming request] --> EX{Exact / semantic<br/>cache hit?}
-    EX -->|hit| OUT[Return cached answer<br/>~$0, ~0 latency]
-    EX -->|miss| RT{Router:<br/>complexity / confidence}
-    RT -->|easy: majority| SM[Small / cheap model<br/>default tier]
-    RT -->|hard / low-confidence| LG[Large model<br/>escalation tier]
-    SM --> PC[Prompt-cache-aware call<br/>stable prefix cached ~90% off input]
-    LG --> PC
-    PC --> STR[Stream tokens out<br/>first token under 1s]
-    STR --> CACHE[Write to response /<br/>semantic cache]
+## E: Evaluation
 
-    REQ -.non-real-time work.-> BATCH[Async / batch lane<br/>~50% cheaper, minutes-hours]
-    BATCH --> PCB[Batched prompt-cache-aware calls]
+> **Adaptation, said out loud:** stress-test the org the way you'd stress-test a design: re-check against the NFRs, then hunt for **where the boundaries will leak**, because they will, and predicting the leak sites is the strongest signal in the question.
 
-    GW[LLM gateway 12.3:<br/>per-tenant budgets, caps, kill-switch] -.enforces.-> RT
-    style EX fill:#1f6f5c,color:#fff
-    style RT fill:#e8a13a,color:#000
-    style GW fill:#7a1f1f,color:#fff
-    style BATCH fill:#2b5b8a,color:#fff
-```
+**Re-check vs NFRs:** end-to-end flow, each business stream has one team (gift wrapping is now one backlog); one owner per boundary, by the ownership map; cognitive load, 2-3 services per stream team now, 4-5 at end-state, inside budget; self-service rails, the platform team owns them. Now the leaks.
 
-### Worked example: a chat feature at 1M requests/day
+**Leak 1, the cross-cutting feature that spans three teams.** "Buy online, return in store" touches shopper, checkout, and fulfilment. *The wrong fix is a standing cross-team committee* (a permanent chatty channel, the boundary dissolves). *Fix:* one team **leads** with the others consuming via their published APIs; if a feature class keeps recurring across the same three teams, that recurrence is **data telling you the seams are wrong**, redraw rather than coordinate harder. The Director instinct: treat repeated cross-team coordination as an architecture smell, not a process gap to be meeting'd away.
 
-A support-chat feature, **1,000,000 requests/day**. Naive v1 sends a big prompt to a frontier model every time. Assume per request: **3,000 input tokens** (a 1,500-token system prompt + retrieved context + history) and **500 output tokens**. Frontier pricing (order-of-magnitude, mid-2026): **input ≈ $3 / million tokens, output ≈ $15 / million tokens.**
+**Leak 2, the platform team drifts into a gatekeeping ops team.** Symptom: ticket queues, "platform approval" steps, stream teams routing around it (shadow infra). *Fix:* hold platform to product metrics, adoption and time-to-first-deploy, and keep its interaction mode X-as-a-service. *Trade-off:* self-service rails cost more to build than a ticket queue costs to staff; accepted, because the queue re-serializes every team's delivery through one team's sprint.
 
-**v1 — naive, one big model, no caching.**
-- Input: 3,000 × $3/1M = **$0.009/req**.
-- Output: 500 × $15/1M = **$0.0075/req**.
-- Per request ≈ **$0.0165**. At 1M/day → **~$16,500/day ≈ ~$500k/month.** (Note output is ~45% of the bill on only 14% of the tokens — the output-price multiplier at work.)
+**Leak 3, the shared-table remnant.** Mid-migration, checkout and fulfilment still share `orders_db` for a quarter. This is a **two-owner boundary, legal only because it's end-dated**: named in the migration plan, with the dual-write/backfill pattern retiring it. The leak becomes a failure only if the end date silently slips, so it's tracked like an SLO breach, not a TODO.
 
-Now apply three levers and recompute.
+**Leak 4, the hero dependency.** The payments expert is a one-person bus factor inside Checkout; the relevance expert *is* the search subsystem. *Fix:* enabling-mode pairing with an explicit knowledge-transfer goal, and the search team's on-call pairing with Shopper. *Rejected: promoting each hero into a one-person team*, it formalizes the bus factor and maximizes their attrition blast radius.
 
-**Lever 1 — prompt caching the stable prefix.** Of the 3,000 input tokens, ~1,800 (system prompt + few-shot + stable instructions) are identical across requests and reused within the TTL. Cached input bills at ~10%: 1,800 × $3/1M × 0.1 = $0.00054, plus the 1,200 variable input tokens at full price = $0.0036. New input cost ≈ **$0.0041** (down from $0.009).
+**Leak 5, identity and morale through the reorg (the attrition NFR).** The frontend team dissolves into four stream teams; its members lose a beloved manager and a shared identity. This is where the < 5% attrition budget is spent or blown. *Fixes:* **choice within structure** (engineers rank preferred streams; most get their first pick), the manager moves *with* a team rather than out of line management, and the change is narrated as scope *growth* (own a business stream end-to-end), because for most engineers it genuinely is. *Trade-off:* preference-based allocation means imperfect skill distribution for a quarter; accepted, skills transfer faster than trust rebuilds.
 
-**Lever 2 — small-model default with escalation.** Route ~80% of requests to a small model (input ≈ $0.30/1M, output ≈ $1.20/1M — ~10× cheaper); escalate the hard 20% to the frontier model. Blended model cost drops sharply because the expensive tier now runs on 1-in-5 requests.
+<details>
+<summary>Go deeper, why Conway's law actually holds (IC depth, optional)</summary>
 
-**Lever 3 — output cap.** Cap and structure output to **250 tokens** average (was 500) — most support answers don't need 500 tokens. Halves the most expensive term.
+Conway's 1968 argument is structural, not sociological: for two modules to interface correctly, their designers must communicate; therefore the set of feasible system designs is constrained to those whose interfaces map onto existing communication channels, a homomorphism from org graph to system graph. The empirical anchor most interviewers know is the Harvard Business School study (MacCormack, Rusnak & Baldwin, "Exploring the Duality between Product and Organizational Architectures"), which compared matched-pair software products and found distributed/loosely-coupled orgs produced significantly more modular codebases than co-located/integrated orgs building equivalent products. The practical corollary for this lesson: the law is an *optimization pressure*, not destiny, it operates through thousands of small "who do I ask?" decisions, which is why inverse Conway works through team boundaries and fails through memos.
 
-Rough recomputation per request:
-- *Small tier (80%):* input 1,200 variable × $0.30/1M + 1,800 cached × $0.03/1M ≈ $0.00041; output 250 × $1.20/1M = $0.0003 → ≈ **$0.00071**.
-- *Frontier tier (20%):* input ≈ $0.0041 (with caching); output 250 × $15/1M = $0.00375 → ≈ **$0.0079**.
-- Blended: 0.8 × $0.00071 + 0.2 × $0.0079 ≈ **$0.0021/req.**
+</details>
 
-At 1M/day → **~$2,100/day ≈ ~$63k/month** — roughly an **8× reduction** from ~$500k, dominated by routing, then caching, then the output cap. The trade-offs you'd state alongside the number: the **80/20 split and the small model's quality on that 80% must hold against an eval** (raise the escalation rate if it doesn't — the bill rises but stays far under v1); the **output cap risks truncating** the occasional answer that needs more room (validate completeness); and **prompt caching only pays while traffic keeps the prefix warm** within the TTL (true at 1M/day, false for a sparse internal tool). Layer **streaming** on top and the felt latency drops to sub-second first token at no extra cost — separate from the dollar win.
+---
 
-### Trade-offs table: the levers, what they save, and what they cost
+## D: Design evolution
 
-| Lever | Saves | Trades away (the risk) | Use when |
-|---|---|---|---|
-| **Prompt caching** (shared prefix) | up to ~90% of input cost on the prefix; lower TTFT | needs a stable, reused-soon prefix; TTL + write cost on miss | a large fixed prefix (system prompt, doc, tool defs) repeats often |
-| **Exact response cache** | ~100% on identical requests | low hit rate on free-text; staleness | constrained/repeated queries (FAQ, canned classification) |
-| **Semantic cache** | high hit rate on paraphrases | **correctness risk** — can serve a wrong/stale neighbor's answer | non-personalized, slow-changing answers; gated by threshold + TTL |
-| **Routing / cascade** | **5–10×** when the cheap tier carries the majority | quality on routed-down traffic; router cost + misroutes | mixed-difficulty traffic; **only behind an eval harness** |
-| **Distillation** (narrow fine-tune) | large cost/latency cut on one task | brittle off-task; own a model + its refresh | high-volume narrow task (one classify/extract/format) |
-| **Quantization** (self-host) | memory + faster inference | small measured accuracy loss; self-host only | you control serving and can tolerate the precision cost |
-| **Async / batch** | **~50%** vs synchronous; higher throughput/$ | **not interactive** — minutes-to-hours latency | non-real-time pipelines (bulk summarize, embed corpus) |
-| **Token discipline** (trim prompt/history/RAG, cap output) | recurring savings on every call | dropped context → lost thread/grounding | always; trim against an eval, not by feel |
-| **Streaming** | nothing on cost | none material (client complexity) | every interactive surface — perceived-latency win |
+> **Adaptation, said out loud:** evolution here is **sequencing**, the reorg is delivered in waves keyed to migration milestones, not announced on a Monday, plus the growth case (15→50) the question's other variant asks for.
 
-### What interviewers probe here
-- **"This feature costs $X per user per month — make it economical."** *Strong signal:* starts from the **cost model** (output dominates, re-sent context is the input sink), names **routing + caching as the biggest wins**, gives an order-of-magnitude recompute, and states the trade-off of each lever. *Red flag:* "use a cheaper model" with no routing, no eval, no number — or worse, no awareness that cost scales linearly with usage.
-- **"When is a semantic cache dangerous?"** *Strong:* it can serve a **wrong or someone-else's** answer because "similar" isn't "same"; **never for personalized or changing data**; gate with a conservative threshold, freshness TTL, and tenant-keyed isolation. *Red flag:* treats it as a free, safe cache like Redis.
-- **"Cut cost without dropping quality."** *Strong:* **cascade (cheap default → escalate on low confidence) behind an eval harness** to bound the regression, plus prompt caching and output caps (lossless), plus reranking to send fewer/better chunks. *Red flag:* "smaller model everywhere" with no quality gate — that *is* dropping quality, just silently.
-- **"Real-time or batch for this workload?"** *Strong:* batch the non-interactive work (~50% cheaper, accept minutes-hours), keep the user-facing path synchronous + streamed; names the latency-for-cost trade explicitly. *Red flag:* one path for everything, paying interactive prices for overnight jobs.
+**Why sequenced, not big-bang (decide and defend):** a big-bang reorg moves all 40 people while the architecture is still the old one, so for months, teams own target domains that don't exist yet as services, every boundary is a two-owner boundary, and the productivity dip and attrition risk peak together (~$1-2M downside per the E math). *Rejected.* The alternative, reorganize *nothing* until the migration finishes, leaves layer teams running a domain migration they're shaped wrong for; Conway pressure actively fights the decomposition. *Also rejected.* **Chosen: wave the org with the architecture**, each wave forming a team as its seam becomes real:
 
-The through-line at Director altitude: **design the unit economics (`$/request`, `$/active-user`) up front, name the trade-off on every lever, and enforce budgets centrally.** Say "I'd have the platform team stand up the router and prompt-cache layer behind our gateway and A/B the cascade against our eval set before we trust it; my prior is small-model default carries ~80% of support chat at our quality bar" rather than hand-tuning a single prompt yourself.
+- **Wave 0 (month 0-1):** stand up the **platform team** first, rails before tenants (same logic as building the platform before its tenants). Publish the target diagram and the preference survey. *No ownership changes yet.*
+- **Wave 1 (month 1-3):** form **Fulfilment** around the first extracted seam (orders, typically the cleanest bounded context). It takes its monolith code, its data, its pager. One team learns the playbook; the org watches it work.
+- **Wave 2 (month 3-6):** form **Checkout** and **Shopper** as the cart and catalog seams extract; the search subsystem carves out behind its query API.
+- **Wave 3 (month 6-9):** **Accounts** forms; the layer teams are now empty by *graduation*, not decree; remaining shared monolith plumbing is platform-owned until retired.
 
-### Common mistakes / misconceptions
-- **Ignoring that cost scales linearly with usage** — treating a per-user loss as something growth fixes; it deepens it. Design `$/user` before launch.
-- **Optimizing input while output runs free** — output is priced 3–5× higher and is the term you most control; cap and structure it first.
-- **Treating semantic cache like Redis** — it can return a *wrong* answer; never for personalized/changing data, and always gated by threshold + freshness.
-- **A cascade with no eval** — routing down without measuring quality on each tier ships silent regressions; the eval harness is the safety the saving depends on.
-- **Confusing streaming with a cost win** — it cuts *perceived* latency, not the bill or the total time; pair it with real cost levers, don't substitute it for them.
+Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-leak symptoms reviewed before the next wave fires. **The reorg ships incrementally for the same reason the migration does**, reversibility and bounded blast radius.
 
-### Practice questions
+**The 15→50 growth variant (the other interview prompt).** Same principles, opposite direction: at 15 engineers you are 2 stream teams + a fractional platform *person*, **do not build the 6-team structure early**; cognitive-load budgets at 15 can't fund a platform team, and premature boundaries are as costly as late ones. The sequencing rule: **split a team when its cognitive load breaches budget** (services owned, on-call depth, roadmap sprawl), not when a headcount plan says so; **hire into the seams you intend** (inverse Conway via the hiring plan, staffing the future fulfilment team before formally creating it); and stand up the real platform team around **25-30 engineers**, when 3+ stream teams duplicating rails makes it pay (the platform ROI math). From 15→50 expect to redraw boundaries **twice**, not once, and say so up front, so the second redraw is a plan, not a betrayal.
 
-**Q1.** A chat feature costs **$0.40/active-user/month** against an ARPU that can't absorb it. Walk me through making it economical, with numbers.
-> *Model:* Start from the cost model: output dominates and re-sent context is the input sink. **(1) Routing/cascade** — small model by default, escalate the hard fraction on low confidence; if the small model carries 80% at quality, blended cost falls ~5–10×, the single biggest lever. **(2) Prompt caching** the stable system-prompt/RAG prefix → up to ~90% off that input portion and lower TTFT. **(3) Output caps + structured output** → halve the most expensive term. **(4) Trim context** — window history, rerank RAG to top-3, shorter system prompt. Recompute `$/user` after each; expect order-of-magnitude. The non-negotiable: the cascade rides behind an **eval harness** so the routed-down quality is bounded, and **none of this touches personalized data through a semantic cache.**
+**Where I'd delegate (the explicit Director move):**
+- **Domain seam validation:** *"I'd have the principal engineers run an event-storming pass over the order and catalog flows before Wave 1; my prior is the five domains above, and I'd change the team map if the bounded contexts genuinely disagree, the org follows the seams, not vice versa."*
+- **People risk:** *"The HR partner and the line managers own retention conversations with the flight-risk seniors before anything is announced; my prior is preference-based allocation plus keeping managers attached to teams, and I want a named retention plan for the two domain experts."*
+- **Platform scope:** *"The platform lead owns the golden-path scope; my prior is deploy + observability + one database rail in v1, and adoption rate decides what's next."*
 
-**Q2.** When is a semantic cache the right call, and when is it a liability?
-> *Model:* **Right** for high-volume, **non-personalized, slow-changing** answers where paraphrases are common — product FAQs, policy questions, doc Q&A — gated by a conservative similarity threshold, a freshness TTL, and tenant/locale keys. **Liability** for anything **user-specific or time-sensitive** (balances, "my orders", live status): "similar enough" can return a *stale or someone-else's* answer, a correctness *and* a privacy bug. The exact cache is safe but low-hit; the semantic cache trades a bounded correctness risk for a much higher hit rate — you must say so and gate it, not ship it blind.
+---
 
-**Q3.** You need to embed and summarize a 50M-document corpus, and also serve a live chat. Same infrastructure? Same models?
-> *Model:* **No — split by latency tolerance.** The corpus job is **non-interactive**, so run it through the **async/batch API (~50% cheaper)** or self-hosted with **large batch sizes** for throughput/$, accepting minutes-to-hours latency; use a small/distilled model for embedding and summarization since the task is narrow. The live chat is **interactive**: synchronous, **streamed** (sub-second first token), routed (small default → escalate), prompt-cached. Forcing the batch job through the real-time path pays interactive prices for work that doesn't need them; forcing chat through batch makes it unusable. The trade-off is explicit: batch buys ~50% by giving up interactivity.
+## Trade-offs table: the pivotal decisions
 
-**Q4.** A teammate proposes "just use the small model everywhere to cut cost." What's your response?
-> *Model:* That's not cost optimization without a quality gate — it's **silently dropping quality** on the fraction of traffic the small model can't handle. The right shape is a **cascade**: small model default, **escalate on low confidence/complexity**, with an **eval harness** measuring quality per tier and the escalation threshold set to bound the regression. That captures most of the saving (the cheap tier still carries the majority) while keeping hard requests on a capable model — and it's defensible because you can show the quality number, not just the cost number. Reserve "small model everywhere" for a **narrow task** where a distilled model provably matches the big one on that task.
+| Decision | Option A | Option B | Option C | Use when... |
+|---|---|---|---|---|
+| **Org shape** | **Stream-aligned domain teams** + platform (inverse Conway) | Component/layer teams | Feature/matrix squads from a pool | **A** when the goal is flow and end-to-end ownership (our choice). **B** only for genuinely layer-shaped work (rare). **C** never as steady state, no ownership; acceptable only as a time-boxed tiger team. |
+| **Reorg rollout** | **Waves keyed to migration milestones** | Big-bang announcement | Reorg only after migration completes | **A**, bounded dip, checkpoints, attrition managed (our choice). **B** when the org is on fire and speed beats cost. **C** never, layer teams will fight the migration via Conway pressure. |
+| **Deep specialism (search, ML)** | **Complicated-subsystem team** behind a narrow API | Embed specialists in each stream team | Outsource/buy | **A** when the depth is real and the API can be narrow (our choice for relevance). **B** when the specialism is thin enough to commoditize. **C** when it isn't your differentiation. |
+| **Cross-team feature** | **One lead team**, others consumed via APIs | Standing cross-team committee | Redraw the seams | **A** for occasional features (our default). **B** never, a permanent chatty channel. **C** when the *same* teams keep colliding, recurrence is data. |
+
+---
+
+## What interviewers probe here (Director altitude)
+
+- **"You have 40 engineers and this architecture, draw the org."**, *Strong:* draws services and team boundaries as **one diagram**; ~6 teams of 5-8; mostly stream-aligned on business seams + one platform team; states the one-owner rule and the cognitive-load budget; carves a specialism out only with a named reason. *Red flag:* maps teams to layers or to the existing managers, or produces an org chart with no services on it.
+- **"Why not just tell the teams what architecture to build?"**, *Strong:* explains Conway as an optimization pressure, thousands of "who do I ask" decisions, so the durable lever is the communication structure itself; mandates decay, boundaries persist. *Red flag:* treats Conway as a slogan, or believes architecture review boards outrun it.
+- **"What's the human cost of your design, in numbers?"**, *Strong:* prices the dip (~$0.5M), prices senior attrition ($300-500K each), states the < 5% attrition budget, and names the mitigations (choice within structure, managers move with teams, waves with checkpoints). *Red flag:* "people will adapt", the answer of someone who has never run a reorg.
+- **"Team is going 15→50, when do you split, and when does platform form?"**, *Strong:* split on cognitive-load breach, not calendar; hire into intended seams; platform team at ~25-30 when duplication pays for it; expects to redraw twice. *Red flag:* designs the 50-person end-state org on day one, or scales by adding people to existing teams until they're 15 strong.
+- **"Where will your boundaries leak first?"**, *Strong:* names specific seams (the shared orders table, the recurring tri-team feature, platform drifting to gatekeeping) and the detection signal for each; treats recurring coordination as an architecture smell. *Red flag:* believes the drawn boundaries will hold because they're well-drawn.
+
+---
+
+## Common mistakes
+
+- **Drawing the org around current people instead of target seams**, "Priya's team keeps payments because Priya knows payments." Inputs, yes; the design driver, no. Inverse Conway dies here.
+- **Boundaries with 2-3 standing owners** ("checkout and fulfilment co-own orders"). Co-ownership without an end date is no ownership; the seam never forms and the pager game begins.
+- **Ignoring cognitive load**, assigning a 6-person team 12 services because the boxes fit on the slide. The org's capacity number is as real as a node's write budget.
+- **Big-bang reorg announced before any seam exists**, peak dip, peak attrition, target domains with no services to own. Wave it against migration milestones.
+- **Treating attrition as HR's problem.** The people who leave during a botched reorg are precisely the ones holding the undocumented system; their exit *is* an architecture event.
+
+---
+
+## Interviewer follow-up questions (with model answers)
+
+**Q1. Your CEO wants the reorg announced Monday, company-wide, done in one shot. Talk them out of it, or don't.**
+> *Model:* I'd show the cost asymmetry. Sequenced: ~$0.5M of managed productivity dip over three quarters with checkpoints. Big-bang: roughly double the dip, *plus* the attrition tail, every team changes at once, nobody's new domain exists yet as a service (so every boundary starts as a two-owner boundary), and each regrettable senior exit is $300-500K plus unwritten system knowledge; three exits and the big bang costs 2-3× the sequenced plan while delivering a worse org. The exception I'd grant: if the current structure is actively hemorrhaging people *now*, speed can beat sequencing, then I'd announce the **target and the wave plan** Monday (clarity is cheap and calming) but move ownership in waves regardless. Announce big-bang, *execute* in waves.
+
+**Q2. Two teams keep colliding on the same boundary every quarter. Process fix or architecture fix?**
+> *Model:* Once is a feature; every quarter is data. Recurring cross-team coordination on the same seam means the boundary contradicts how the business actually changes, Conway is telling me where the real seam is. I'd resist the standing sync meeting (a permanent chatty channel that dissolves the boundary while keeping its costs) and instead run a short event-storming pass on that flow, then either move the contested service to one owner or redraw the two domains. The trade-off I accept: redrawing costs a mini-reorg (~weeks of dip for two teams); the committee costs forever. One caveat, if the collisions trace to one in-flight migration with an end date, hold the line and let the dual-ownership expire on schedule.
+
+**Q3. With 40 engineers, the payments expert wants a dedicated payments team with herself as lead. Yes or no?**
+> *Model:* No, at this size. A payments team would be 2-3 people (we can't fund 7 without starving a stream), which formalizes a bus factor and maximizes her attrition blast radius; and our PSP integration is mostly bought, so the in-house surface is thin. Payments stays inside Checkout behind a tokenization boundary that contains the PCI scope. What I *would* give her: explicit tech-lead ownership of the payments domain within Checkout, an enabling-mode mandate to spread the knowledge, and a revisit trigger, at 60+ engineers or if we build in-house risk/fraud, a complicated-subsystem payments team becomes the right call. The decision is reversible; the retention conversation happens this week either way.
+
+**Q4. How do you know, six months in, whether the inverse Conway maneuver is working?**
+> *Model:* Three measurable signals. First, **flow**: lead time for a vertical feature, the 6-8-week cross-team queue should be trending toward team-local weeks; I'd track what fraction of changes ship without a blocking dependency on another team (target: > 80%). Second, **boundary integrity**: contract-breaking changes between teams, shared-table count (must hit zero on the dated plan), and recurring cross-team collisions per quarter. Third, **the people NFR**: regrettable attrition against the < 5% budget and team-health surveys. The anti-signal I'd watch hardest: stream teams routing around the platform team, shadow infra means the platform drifted to gatekeeping, and the org is quietly reverting to the architecture of its old communication paths.
+
+---
 
 ### Key takeaways
-- **Cost ≈ (input × in_price) + (output × out_price); output is priced 3–5× higher and is the term you most control; re-sent context (history + RAG) inflates the input bill on *every* call.** Cost scales linearly with usage, so design `$/request` and `$/active-user` up front.
-- **Latency ≈ TTFT + output × TPOT + round-trips.** Prompt caching cuts TTFT, output caps cut the decode term, routing cuts TPOT, and **streaming cuts only *perceived* latency** (sub-second first token) — a UX lever, not a cost one.
-- **Routing/cascades are usually the biggest single win (5–10×)** — cheap model default, escalate on low confidence — but they ship silent regressions without an **eval harness** to bound the routed-down quality.
-- **Three caches, three risk levels:** prompt caching (lossless, up to ~90% off the shared prefix), exact response cache (lossless, low hit), **semantic cache (high hit but a correctness risk — never for personalized/changing data, always gated)**.
-- **Batch the non-interactive work (~50% cheaper), distill the narrow tasks, trim every token, and enforce per-tenant budgets centrally at the gateway** — every lever trades quality, freshness, or latency, so name which.
+- **Conway's law is an input, not trivia:** the system copies the org's communication structure. The Director move is the **inverse Conway maneuver**, choose the target architecture, then shape teams so the easy channels are exactly the intended seams.
+- **Draw one artifact:** services inside team boundaries. **One owning team per boundary** (two only with an end date); a service needing three teams to change is a design error visible before any code moves.
+- **Use the Team Topologies frame:** ~80% stream-aligned teams of 5-8 on business seams, one platform team (X-as-a-service, not gatekeeping), fractional enabling capacity, complicated-subsystem teams only for real depth. **Budget cognitive load like QPS**, 2-3 domains, ~5-8 services per team.
+- **Price the human cost:** ~$0.5M dip for a sequenced reorg; $300-500K per regrettable senior exit; < 5% attrition as a stated NFR. **Attrition risk is part of the architecture decision.**
+- **Sequence the reorg against migration milestones**, platform first, then one team per extracted seam, with checkpoints; in growth (15→50), split on load breach, hire into intended seams, expect to redraw twice.
 
-> **Spaced-repetition recap:** Taxi with the meter always running — spend the fewest coins for the quality the task needs, and make the wait *feel* short. Output dominates the bill (3–5× input) and re-sent context taxes every call. Biggest wins: routing/cascade (5–10×, behind an eval) and prompt caching (~90% off the shared prefix). Semantic cache is cheap but can return a *wrong* answer — never for personalized data. Batch non-real-time work (~50% off). Streaming cuts felt latency, not cost. Enforce budgets at the gateway; the full FinOps practice is the AI-governance lesson's subject.
+> **Spaced-repetition recap:** Org + architecture are **one design**. Inverse Conway: pick the target seams, shape teams onto them, 40 engineers ⇒ ~6 teams (4 stream-aligned of ~7 on business domains, 1 platform, fractional enabling; specialism subsystems only when real). **One owner per boundary; data ownership is the sharpest fracture plane** (a shared table re-merges the teams). Cognitive load is the org's capacity number. Reorg in **waves keyed to migration milestones**, never big-bang: dip ~$0.5M, senior exit $300-500K, attrition < 5% is an NFR. Recurring cross-team collisions = redraw the seam, don't add meetings.
+
+---
+
+*End of Lesson 11.8. The org-design case closes the strategy module's loop: the strangler-fig migration needs teams shaped for the target seams, build-vs-buy decides which teams exist at all, the platform team is one of the four types deployed here, and Conway's law is the reason all of them are architecture decisions wearing org-chart clothes. No IC can fake this question; after this lesson, you shouldn't have to.*

@@ -17,11 +17,23 @@ A self-paced course that drills one repeatable method, **RESHADED**, onto a libr
 1. **Always quantify.** "It scales" is banned. We show the math.
 2. **Every decision states its trade-off and the alternative rejected, and why.**
 
+The course is organized into **five Parts** (13 modules):
+
+| Part | Modules | What it gives you |
+|---|---|---|
+| **I · Method & Fundamentals** | 1–3 | Interview mechanics, the trade-off vocabulary, the reusable building blocks |
+| **II · Design Problems** | 4–5 | The full RESHADED walkthroughs: canonical + business-domain HLDs |
+| **III · Specialized Design Tracks** | 6–10 | LLD/OOD, the data-platform track, the Gen AI & Agentic track |
+| **IV · Strategy & Leadership** | 11–12 | Architecture-and-org strategy, and the behavioral half of the loop |
+| **V · Capstone** | 13 | A fresh problem you drive, plus the red-flags/strong-signals rubric |
+
+> An **Engineering Excellence & Operations** track (security & trust, testing & quality, production troubleshooting) is planned to slot into Part IV next; it isn't built yet.
+
 ---
 
 ## 2. The spine: RESHADED
 
-Run this exact 8-step roadmap on *every* problem. You'll see it named in every walkthrough (Modules 4–9, 12, and 14, adapted per problem) until it's automatic.
+Run this exact 8-step roadmap on *every* problem. You'll see it named in every walkthrough (the design problems in Modules 4, 5, 8, and 10, adapted per problem) until it's automatic.
 
 | Step | Letter | What you do | The interview signal |
 |---|---|---|---|
@@ -73,7 +85,7 @@ Every lesson delivers all of these, in this order:
 10. 3-5 practice questions with model answers
 11. Key takeaways (5) + a 2-3 line spaced-repetition recap
 
-Modules 7-14 adapt this to their format, the LLD lessons add interface sketches, the strategy lessons lead with sequencing and risk, the Gen AI and data-platform lessons keep the contract while leaning on the building blocks their problems rest on, the leadership lessons add a *2015-vs-2026 calibration* and annotated model answers, but the constants hold throughout: intuition first, every decision quantified with its rejected alternative, a trade-offs view, "what interviewers probe," and a spaced-repetition recap.
+The specialized tracks adapt this to their format, the LLD lessons add interface sketches, the strategy lessons lead with sequencing and risk, the Gen AI and data-platform lessons keep the contract while leaning on the building blocks their problems rest on, the leadership lessons add a *2015-vs-2026 calibration* and annotated model answers, but the constants hold throughout: intuition first, every decision quantified with its rejected alternative, a trade-offs view, "what interviewers probe," and a spaced-repetition recap.
 
 ---
 
@@ -89,46 +101,46 @@ Built as self-contained React artifacts, no network calls, at the module where e
 - **Load-balancing comparison** (round-robin / least-conn / hashing; animated distribution), *Module 3*
 - **Sharding/partitioning visualizer** (range / hash / directory; hot-spotting), *Module 2 & 3*
 - **Quorum calculator** (N/W/R sliders → strong-consistency check + availability impact), *Module 2*
-- **Probe simulator** (three-levels-deep follow-up drill per behavioral question), *Module 10*
-- **Story-coverage matrix** (leadership stories × categories; gap highlighting + the mandatory story slots), *Module 10*
+- **Probe simulator** (three-levels-deep follow-up drill per behavioral question), *Module 12*
+- **Story-coverage matrix** (leadership stories × categories; gap highlighting + the mandatory story slots), *Module 12*
 
 ---
 
 ## Director's Fast Path
 
-An honest accounting: the full course is now **~655k words across 14 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
+An honest accounting: the full course is **~650k words across 13 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
 
 **Must do (full reads):**
 - **Module 1**, interview mechanics and estimation reps.
-- **Module 4**, the complete RESHADED walkthrough; it's the template every Module 5 problem reuses.
-- **Module 6**, the capstone plus the red-flags/strong-signals rubric. Read the rubric *before* your first mock.
+- **Lesson 4.1**, the complete RESHADED walkthrough (TinyURL); it's the template every other Module 4 problem reuses.
+- **Module 13**, the capstone plus the red-flags/strong-signals rubric. Read the rubric *before* your first mock.
 - **All cheat sheets**, they're the spaced-repetition layer; re-skim daily.
-- **Deep-read these Module 5 problems**, the clusters that show up most in Director loops: **5.1-5.4** (Pastebin, rate limiter, Instagram, Twitter/feed), **5.6** (Typeahead), **5.7** (Uber/proximity), and **5.13-5.15** (Ticketmaster, job scheduler, LLM serving).
+- **Deep-read these Module 4 problems**, the clusters that show up most in Director loops: **4.2-4.5** (Pastebin, rate limiter, Instagram, Twitter/feed), **4.7** (Typeahead), **4.8** (Uber/proximity), and **4.14-4.16** (Ticketmaster, job scheduler, LLM serving).
 
-**Crux-only: 5.8-5.12** (Dropbox, YouTube, Maps, web crawler, notifications, the storage/streaming deep-dives, rarer in Director loops). Read each one's crux row in the Module 5 cheat sheet and rehearse defending it out loud; open the full lesson only where the defense doesn't come.
+**Crux-only: 4.9-4.13** (Dropbox, YouTube, Maps, web crawler, notifications, rarer in Director loops). Read each one's crux row in the Module 4 cheat sheet and rehearse defending it out loud; open the full lesson only where the defense doesn't come.
 
 **Skim: Modules 2-3.** If your distributed-systems background is solid, at this level it should be, skim the lessons for unfamiliar terms and rely on the Module 2 and Module 3 cheat sheets as your working reference. Open a full lesson only when a cheat-sheet line isn't already obvious to you.
 
-**The expanded problem set (Modules 7-9), pick by the loop you're walking into.** These are the questions the canonical Module 5 set leaves out: **Module 7** the LLD/OOD curveballs (parking lot, elevator, Splitwise, restraint and clean modeling, not infra depth), **Module 8** the architecture-and-org-strategy round that is *most* Director-distinctive (monolith breakup, migrations, build-vs-buy, Conway org design), **Module 9** the non-canonical business-domain HLDs (payments, auctions, Google Docs, "design Kafka"). Don't read all 35, let the company tell you: Amazon/Adobe lean LLD (Module 7), Director/Head-of-Eng loops lean strategy (Module 8), fintech/marketplace targets lean Module 9. Each module's cheat sheet carries the crux of every problem in ~5 minutes; deep-read only the 3-4 closest to your target.
+**The expanded problem set, pick by the loop you're walking into.** These are the questions the canonical Module 4 set leaves out: **Module 6** the LLD/OOD curveballs (parking lot, elevator, Splitwise, restraint and clean modeling, not infra depth), **Module 11** the architecture-and-org-strategy round that is *most* Director-distinctive (monolith breakup, migrations, build-vs-buy, Conway org design), **Module 5** the non-canonical business-domain HLDs (payments, auctions, Google Docs, "design Kafka"). Don't read all of them, let the company tell you: Amazon/Adobe lean LLD (Module 6), Director/Head-of-Eng loops lean strategy (Module 11), fintech/marketplace targets lean Module 5. Each module's cheat sheet carries the crux of every problem in ~5 minutes; deep-read only the 3-4 closest to your target.
 
-**Module 10, the leadership track is not optional.** ~40% of a Director loop is leadership, and it's where most strong system designers lose the offer. Read **10.1-10.3** (the calibration, the four answer frameworks, the story portfolio) first, they're the spine, then the category lessons that match your gaps. Use the **probe simulator** (10.2) and **story-coverage matrix** (10.3) as drill tools, and build your real story bank early; a quantified, probe-resistant portfolio is the single highest-ROI prep on this whole site.
+**Module 12, the leadership track is not optional.** ~40% of a Director loop is leadership, and it's where most strong system designers lose the offer. Read **12.1-12.3** (the calibration, the four answer frameworks, the story portfolio) first, they're the spine, then the category lessons that match your gaps. Use the **probe simulator** (12.2) and **story-coverage matrix** (12.3) as drill tools, and build your real story bank early; a quantified, probe-resistant portfolio is the single highest-ROI prep on this whole site.
 
-**The Gen AI & Agentic track (Modules 11–12) is now table stakes.** Every company is building on LLMs, and Director loops increasingly add an AI-systems design round and AI-strategy questions on top of the classic ones. **Module 11** is the building blocks: the LLM mental model and its token/cost/latency math, embeddings and vector search, RAG, inference and serving, the prompt-vs-RAG-vs-fine-tune decision, guardrails and safety, evaluation/LLMOps, and cost control, then the agentic half (the agent loop, tools and MCP, memory, multi-agent orchestration, durable runtimes, agent safety), capped by two leadership lessons (AI strategy and build-vs-buy; governance, risk, and cost). **Module 12** runs RESHADED across the eight problems these loops actually ask: enterprise RAG, a ChatGPT-style assistant, an LLM gateway/router, content moderation at scale, a tool-using support agent, an autonomous multi-agent coder, image generation, and a real-time meeting assistant. Read **11.1, 11.3, and 11.9** as the spine, then the problems closest to your target. The two non-negotiables hold here too: quantify (in tokens and dollars), and name the trade-off and the rejected alternative. The raw-serving deep dive lives in **5.15**, which Module 11.4 and Module 12 build on.
+**The Gen AI & Agentic track (Modules 9–10) is now table stakes.** Every company is building on LLMs, and Director loops increasingly add an AI-systems design round and AI-strategy questions on top of the classic ones. **Module 9** is the building blocks: the LLM mental model and its token/cost/latency math, embeddings and vector search, RAG, inference and serving, the prompt-vs-RAG-vs-fine-tune decision, guardrails and safety, evaluation/LLMOps, and cost control, then the agentic half (the agent loop, tools and MCP, memory, multi-agent orchestration, durable runtimes, agent safety), capped by two leadership lessons (AI strategy and build-vs-buy; governance, risk, and cost). **Module 10** runs RESHADED across the eight problems these loops actually ask: enterprise RAG, a ChatGPT-style assistant, an LLM gateway/router, content moderation at scale, a tool-using support agent, an autonomous multi-agent coder, image generation, and a real-time meeting assistant. Read **9.1, 9.3, and 9.9** as the spine, then the problems closest to your target. The two non-negotiables hold here too: quantify (in tokens and dollars), and name the trade-off and the rejected alternative. The raw-serving deep dive lives in **4.16**, which Lesson 9.4 and Module 10 build on.
 
-**The Data Platforms track (Modules 13–14) is the analytics-and-data half of the modern leadership remit.** If your scope sits at the intersection of engineering and data, Director loops now probe whether you can design and *govern* the analytical plane, not just the operational one. **Module 13** is the building blocks: the OLTP-vs-OLAP mental model and the freshness/scan-cost/volume/trust lens, columnar storage, the warehouse/lake/lakehouse and open table formats (Iceberg/Delta), the Spark and Flink engines, real-time OLAP, ingestion and CDC, orchestration and dbt, dimensional and medallion modeling, data quality and contracts, governance/catalog/lineage/mesh, and platform FinOps, capped by two leadership lessons (data strategy and build-vs-buy; leading a data-platform org) carrying the 2015-vs-2026 calibration. **Module 14** runs RESHADED across the six problems these loops ask: the warehouse/lakehouse, a real-time OLAP serving store, a CDC/streaming-ETL pipeline, a product-analytics platform, a data-lake-governance/mesh, and a data-observability platform. Read **13.1, 13.3, and 13.4** as the spine, then the problems closest to your target. The two non-negotiables hold here too: quantify (in bytes scanned, freshness, and dollars), and name the trade-off and the rejected alternative. **Lesson 2.9** (batch vs stream, Lambda/Kappa) is the prerequisite the whole track builds on.
+**The Data Platforms track (Modules 7–8) is the analytics-and-data half of the modern leadership remit.** If your scope sits at the intersection of engineering and data, Director loops now probe whether you can design and *govern* the analytical plane, not just the operational one. **Module 7** is the building blocks: the OLTP-vs-OLAP mental model and the freshness/scan-cost/volume/trust lens, columnar storage, the warehouse/lake/lakehouse and open table formats (Iceberg/Delta), the Spark and Flink engines, real-time OLAP, ingestion and CDC, orchestration and dbt, dimensional and medallion modeling, data quality and contracts, governance/catalog/lineage/mesh, and platform FinOps, capped by two leadership lessons (data strategy and build-vs-buy; leading a data-platform org) carrying the 2015-vs-2026 calibration. **Module 8** runs RESHADED across the six problems these loops ask: the warehouse/lakehouse, a real-time OLAP serving store, a CDC/streaming-ETL pipeline, a product-analytics platform, a data-lake-governance/mesh, and a data-observability platform. Read **7.1, 7.3, and 7.4** as the spine, then the problems closest to your target. The two non-negotiables hold here too: quantify (in bytes scanned, freshness, and dollars), and name the trade-off and the rejected alternative. **Lesson 2.9** (batch vs stream, Lambda/Kappa) is the prerequisite the whole track builds on.
 
 **One convention to know:** lessons park optional IC-level detail in collapsible **"Go deeper"** blocks. Skip them by default; open one only when a decision you're defending turns on that detail. They exist for depth-on-demand, not for the first pass.
 
 ---
 
-## 5. The other half of the loop: leadership (now Module 10)
+## 5. The other half of the loop: leadership (Module 12)
 
-At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority**, far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is now a full track: **Module 10, Leadership**, fourteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 10.2 generalizes it into the **four answer shapes**, STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
+At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority**, far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is a full track: **Module 12, Leadership**, fourteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 12.2 generalizes it into the **four answer shapes**, STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
 
 The track's defining promise is **currency**: every category lesson carries an explicit *2015-vs-2026* calibration, because the answers that won offers a decade ago (servant-leadership labels, "hire great people and get out of the way," coach-a-low-performer-forever) now read as out of level in a post-founder-mode, post-ZIRP, AI-era, hybrid world.
 
-**Recommendation:** spend serious time building a **quantified, probe-resistant story portfolio** (Lesson 10.3) covering the mandatory slots interviewers check, an up-chart disagreement you won *and* one you lost and committed to, a termination you ran, a layoff or hard constraint you owned, a decision you got wrong, an incident you commanded. Drill it against the **probe simulator** (10.2) until each story survives three levels of follow-up. When you're ready, we can run a live working session to extract and pressure-test your real stories against the matrix.
+**Recommendation:** spend serious time building a **quantified, probe-resistant story portfolio** (Lesson 12.3) covering the mandatory slots interviewers check, an up-chart disagreement you won *and* one you lost and committed to, a termination you ran, a layoff or hard constraint you owned, a decision you got wrong, an incident you commanded. Drill it against the **probe simulator** (12.2) until each story survives three levels of follow-up. When you're ready, we can run a live working session to extract and pressure-test your real stories against the matrix.
 
 ---
 
-*End of Module 0. Next: Module 1, Interview mechanics.*
+*End of the overview. Next: Module 1, Interview mechanics.*

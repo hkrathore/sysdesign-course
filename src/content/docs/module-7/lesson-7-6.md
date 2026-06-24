@@ -1,269 +1,152 @@
 ---
-title: "7.6 — Meeting / Calendar Scheduler"
-description: The LLD curveball with the best teachable Director move in the set - interval overlap as a first-class abstraction, a check-then-book race solved by per-room serialization, and the recurrence trap named, bounded with a generator, and walked past.
+title: "7.6 — Data Ingestion & Change Data Capture"
+description: How operational data gets into the platform reliably — full vs incremental loads vs change data capture, why log-based CDC reading the WAL/binlog beats polling, why ELT beat ETL, and the buy-vs-build connector call — the "EL" that is the most common source of platform pain.
 sidebar:
   order: 6
 ---
 
-> **Why this gets asked, and what separates a Director answer.** The meeting-room scheduler is a T2, high-frequency LLD/OOD question (Microsoft, Google, Amazon, Meta), rising because it *resembles real work*. A junior candidate writes `Room`, `Booking`, `Scheduler` classes and calls it done. A Director answer does three things in the first ten minutes: makes **interval overlap a first-class abstraction** with boundary semantics stated; names the **check-then-book race** and picks a serialization point on purpose; and - the best move in the OOD set - spots the **recurrence trap**, names RRULE's complexity in one breath, *bounds it* (a generator, never materialized rows), and moves on. The question is small on purpose; what's measured is whether you find the places it bites.
-
 ### Learning objectives
-- Run the RESHADED spine on an **LLD problem**, saying out loud how each step adapts - `D` becomes the interval/booking model, Evaluation becomes the double-booking race, the final `D` becomes "now make it Google Calendar."
-- Make **`TimeRange` a value object** owning the half-open overlap predicate, so back-to-back meetings never false-conflict and the rule is defined exactly once.
-- Prevent double-booking by **choosing a serialization point** - and defend *pessimistic* locking here when Ticketmaster chose optimistic CAS, because the contention shape is 1,000× different.
-- Execute the **recurrence move**: store the rule, generate occurrences into a query window, edits as exceptions - and quantify why materializing is a trap.
-- Sketch the scale-out honestly: shard by calendar, keep the room invariant single-shard, federate free/busy.
+- State the three **ingestion modes**, full batch load, incremental load, and **change data capture (CDC)**, and pick the right one from the data's volume, mutability, and freshness requirement rather than reaching for streaming by default.
+- Explain why **log-based CDC** (reading the database's WAL/binlog/redo log, e.g. Debezium) is the load-bearing technique: it captures *every* insert, update, and delete at sub-second-to-seconds lag with **near-zero source impact**, and reject **query-based CDC** (polling an `updated_at` column) because it misses deletes and adds load to the very database you're trying not to disturb.
+- Defend **ELT over ETL** at architecture altitude: land the **raw** copy first and transform *in-warehouse*, because cheap object storage plus a powerful warehouse make the raw layer **rebuildable** and decouple the source from your business logic, where transform-first throws the raw away and couples the two.
+- Make the **buy-vs-build connector** call with numbers: managed connectors (Fivetran/Airbyte Cloud) are fast to stand up but priced per **monthly active row (MAR)** that balloons at high volume; self-hosted Debezium + Kafka Connect is cheap per row at scale but you operate it.
+- Design the **ingestion contract**: idempotent loads, schema-drift handling at the boundary, and ordering, so a re-run or a late batch never corrupts the landing zone, the property that makes everything downstream survivable.
 
 ### Intuition first
-Picture a **paper sign-up sheet taped to each meeting-room door**. Three properties of that sheet *are* the design. First, each line is a **time range**, and two lines conflict only if they genuinely overlap - a meeting ending at 10:00 and one starting at 10:00 share an instant but not the room, so the boundary rule must be explicit. Second, there is **one sheet and one pen per door**: the sheet itself serializes bookings for that room. Software must *recreate* that serialization deliberately, or two requests both read "3pm is free" and both write - the check-then-book race. Third, the weekly staff meeting is **not 52 pre-written lines** - it's a sticky note saying *"every Tuesday 10-11"* that you expand when checking a date. Recurrence is a **rule you evaluate, not rows you store**. Hold those three: explicit interval semantics, a per-room serialization point, rules-not-rows.
+Getting data **into** the platform is the loading dock, not the warehouse floor. The foundations lesson gave you the whole building, the cash registers (OLTP) up front, the analyst's desk (OLAP) upstairs. This lesson is about the one job that breaks most often in practice: **getting every receipt off every register and onto the dock, reliably, without slowing the registers down.** It sounds like the boring part. It is the part that pages you at 3 a.m.
 
-The contrast to pocket: this is the check-then-book race at **1/1,000th the contention** - which flips the right answer from optimistic CAS to a plain pessimistic lock. Same race, different shape, opposite choice.
+There are three ways to do it. **Full load** is "photocopy the entire register tape every night", simple, but at a million receipts it's wasteful and slow, and last night's photo is a day stale. **Incremental load** is "only copy receipts newer than the last one I grabbed", you ask the register *"what changed since 2 a.m.?"* every few minutes. Cheaper, but it has a quiet, fatal blind spot: if a cashier **voids** a receipt, there's no "newer" receipt to copy, the void is a *deletion*, and your dock never hears about it. Your analyst keeps counting a sale that no longer exists. The third way fixes exactly this: **change data capture** taps the register's own internal audit roll, the tape every register already writes to recover itself after a crash, and **every** event, every sale, every correction, every void, flows off that tape in order, the instant it happens, without anyone asking the register anything.
 
----
+That audit roll is the database's **write-ahead log**, and tapping it is **log-based CDC**. The register doesn't slow down because you're reading a tape it was writing anyway, not interrogating it. You catch deletes because deletes are *on* the tape. And it's fresh because you're reading the tape as it's written, not polling on a timer. Hold that image, **read the log the database already keeps, don't interrogate the database**, and the central decision of this lesson is made.
 
-## R - Requirements
+### Deep explanation
 
-> Adaptation: in an LLD problem, R is where you negotiate *which traps are in scope*. Asking "do meetings recur?" isn't scoping trivia - it's flushing out the deliberate ambiguity the interviewer planted.
+**Ingestion is the "EL" of ELT, and it is where platforms bleed.** The foundations lesson framed the platform as a continuously-rebuilt projection; this lesson is the *rebuild's* first hop, **Extract** from the source and **Load** into the landing zone, before any **Transform**. The Director-altitude statement: *ingestion is the most common source of operational pain in a data platform, not because the idea is hard, but because it sits on the boundary between two teams' systems and fails silently, a stale connector, a missed delete, an unhandled schema change, and the dashboard stays confidently wrong (the analytical-hallucination failure mode).* You design ingestion for **completeness, low source impact, and rebuildability**, in that order, and everything below is in service of those three.
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *One building or a global company?* → **One company, single region**; "make it Google Calendar" is the evolution step.
-- *Do meetings recur?* → **Yes** - the planted trap. Weekly standups, "every 2nd Thursday," edits to "this and all following." Scoped in, depth bounded.
-- *Is double-booking a room ever acceptable?* → **No - the core invariant.** A room is physical. (Attendees double-booking *themselves* is allowed - calendars warn, they don't forbid.)
-- *Back-to-back meetings?* → Must work - 9-10 and 10-11 in one room is the normal case, not a conflict. This forces the interval-boundary decision immediately.
-- *Approvals, features, check-in/auto-release?* → Real; **cut**. Scope is book/find/cancel.
+**The three ingestion modes, and how to choose.** This is the first decision, made per source from volume, mutability, and freshness:
 
-**Functional requirements:**
-1. **Book** a room for a time range (single or recurring), atomically conflict-checked.
-2. **Find** available rooms for a range, filtered by capacity/features.
-3. **Cancel/edit** - for recurring series: *this occurrence*, *this and following*, or *all*.
-4. **Free/busy view** of a room or person over a window.
+- **Full load (snapshot).** Copy the entire table every run. *Use when* the table is small (a few hundred MB, a `countries` or `product_categories` dimension) or has no reliable change-marker. *Cost:* re-reads everything every time, so it's linear in table size and gives at-best run-interval freshness (nightly = a day stale). At a 500 GB orders table, a nightly full load is hours of scan and a day of staleness, untenable.
+- **Incremental (query-based / batch delta).** Pull only rows changed since a high-water mark, `WHERE updated_at > :last_run`. *Use when* the source has a trustworthy, indexed `updated_at` and you can **tolerate missing hard deletes**. *Cost:* runs a query against the **source database** on every poll (load you didn't want), and, the fatal gap, a row physically `DELETE`d leaves no trace for the next poll to find, so deletes silently desync. This is *query-based CDC* and it's the seductive trap, simple to write, wrong in a way you discover months later.
+- **Change data capture (log-based).** Stream every row-level change, insert, update, **and delete**, by reading the database's transaction log. *Use when* you need completeness (deletes matter), low source impact, and seconds-fresh data, which, for any mutable transactional table feeding the platform, is most of the time. *Cost:* operational complexity, you run (or buy) a connector, manage offsets, and handle schema changes, and you re-teach yourself the log's quirks per engine.
 
-**Explicitly cut (and said out loud):** invite fan-out and RSVP state, working-hours preferences, video-conf integration, approvals, check-in sensors. The core is **interval booking with recurrence under a no-double-booking invariant**.
+**Log-based CDC is the technique, and it works by reading the same log replication already reads.** Every durable database writes a **write-ahead log** before it touches the table, Postgres calls it the **WAL**, MySQL the **binlog**, Oracle the **redo log**, SQL Server its transaction log. This log is the database's own crash-recovery and *replication* mechanism: a follower replica becomes consistent precisely by replaying the leader's log. **CDC is just another reader of that log.** A tool like **Debezium** (running on Kafka Connect) connects as a logical-replication client, reads the stream of committed changes, and emits one structured event per row change, `{op: "u", before: {...}, after: {...}, source: {lsn, ts}}`, onto a Kafka topic. The headline properties, each the reason you pick it:
 
-**Non-functional requirements:**
-- **Correctness over scale:** the no-double-book invariant holds under concurrency - a *correctness* problem wearing a small-scale costume.
-- **Read-heavy, latency-sensitive reads:** availability queries dominate; sub-200 ms p99 so "find me a room" feels instant.
-- **Recurrence must be unbounded:** "every Tuesday forever" is legal input; the design can't require an end date.
-- **Time-zone and DST sane:** a 9am Mumbai weekly stays 9am Mumbai across DST changes elsewhere.
+- **Completeness.** Inserts, updates, *and* deletes are all in the log because the database needed them there to recover, so CDC sees the void the poller misses. Even hard deletes appear as a delete event.
+- **Low source impact.** You're reading a log the database writes regardless, not running aggregate `SELECT`s that compete with production traffic. The marginal cost to the source is the log reader's connection and retained log segments, not query load. Contrast the poller, which adds a real query to the OLTP box every interval (the "never starve point traffic" rule).
+- **Freshness.** Changes flow as they commit, so lag is **sub-second to a few seconds** end to end, set by the connector's batching and the transport, not a poll interval.
+- **Ordering and offsets.** The log is ordered (per the engine's LSN/GTID), and the connector tracks its **offset** (the LSN it last read), so a restart resumes exactly where it left off, the same durable-position idea as a Kafka consumer's committed offset.
 
----
+**Reject query-based CDC for completeness and source impact; reject it *not* for simplicity.** The honest trade: query-based polling is genuinely simpler to stand up (a `SELECT … WHERE updated_at >` and a saved timestamp, no replication slot, no log reader). You **reject** it anyway when the source has hard deletes or mutable rows that matter, because (a) it *cannot* see physical deletes, the single most common silent-desync bug in ingestion, (b) it leans on a perfectly-maintained `updated_at` that application bugs and bulk updates routinely break, and (c) it adds query load to the database you were told not to disturb. You **keep** it only for genuinely append-only sources (an immutable events table that never deletes) or tiny dimensions where a full load is even simpler. The Director framing: *query-based CDC trades a fatal correctness gap for a small setup saving, so it's acceptable only where the gap provably can't occur.*
 
-## E - Estimation
+**ELT beat ETL because storage got cheap and warehouses got powerful, and the win is rebuildability.** The old pattern, **ETL**, **E**xtract, **T**ransform (in a separate engine), **L**oad the *finished* result, made sense when warehouse storage was expensive: you couldn't afford to keep raw data, so you transformed it down to just what BI needed and threw the rest away. Two consequences hurt: you **lost the raw** (a new question or a logic bug meant re-extracting from a source that may have changed), and you **coupled business logic to the ingestion path** (the transform lived in brittle, hard-to-test pipeline code). **ELT** inverts the last two letters: **L**oad the **raw** copy first into cheap object storage (S3/GCS, pennies/GB-month), **then T**ransform *in the warehouse* with SQL. Why it won, at architecture altitude:
 
-> Adaptation: in LLD, estimation's job is *inverted* - the math proves the problem is **small**, which tells you where the difficulty actually lives (invariants and model, not throughput) and licenses simple infrastructure. Skipping it means you can't justify why one Postgres is the right answer.
+- **The raw layer is rebuildable.** Because you retain the untransformed landing copy, every downstream table is reproducible by re-running SQL over raw, *idempotent recomputation over retained raw*, the exact property the foundations lesson made non-negotiable. A transform bug is a re-run, not a re-extraction from a moved source.
+- **Source and logic decouple.** Ingestion's only job becomes "land raw faithfully"; all business meaning moves to versioned, tested, in-warehouse transforms (dbt). The two evolve independently.
+- **Cheap storage makes "keep everything" the default.** Object storage at pennies/GB-month removes the original reason to transform-on-the-way-in. You keep raw history and let elastic warehouse compute do the T on demand.
 
-**Assumptions:** 50K employees, 2K rooms, each room booked ~12×/day, 250 working days/yr.
+You **reject ETL (transform-first)** for new analytical platforms because it discards the rebuildable raw and couples logic to pipelines; you'd still reach for transform-on-ingest only when you're *legally required* to drop raw (PII you may not land) or the raw is so enormous that landing it is genuinely uneconomical, both narrow.
 
-**Write QPS:** `2K rooms × 12 ÷ 86,400 ≈ 0.3 bookings/s`; even a 20× Monday-9am peak is **~6 writes/s**. A laptop handles this.
+**The EL tooling layer is a buy-vs-build call, and the numbers decide.** Two ways to run the EL:
 
-**Read QPS:** ~5 availability checks per booking plus passive views ≈ 50× writes → **~15 reads/s, peak ~300/s**. One replica absorbs it.
+- **Managed connectors, Fivetran / Airbyte Cloud.** Hundreds of pre-built source connectors, schema-drift handling, and CDC included; you configure a source and a destination and it runs. *Cost shape:* priced per **monthly active row (MAR)**, a row that changed in the month, so the bill scales with **change volume**. Cheap at low/medium volume and fast to value (days, not a quarter); it **balloons at high volume**, a few hundred million changed rows/month can run into five or six figures monthly, and you don't control the unit economics.
+- **Self-hosted, Debezium + Kafka Connect.** Open-source log-based CDC onto Kafka, then a sink into the lake. *Cost shape:* roughly fixed **infrastructure + engineering operations**, the connect cluster, the Kafka it rides on, and the on-call to run them. Cheap per row at scale (you're paying for boxes, not rows), but you own replication slots, connector failures, schema-registry, and upgrades.
 
-**Storage:** `24K bookings/day × 250 days × ~300 B ≈ 1.8 GB/yr` - ten years fits in RAM. **There is no scale problem.**
+The Director-altitude call: *buy connectors to get to value fast and while change volume is modest, build (Debezium) when per-row pricing crosses your fully-loaded ops cost, typically at high and steady change volume.* You **reject "build everything from day one"** because it spends scarce platform-engineering time re-implementing solved connectors before you know which sources matter; you **reject "buy forever"** once MAR pricing on a high-churn source exceeds what a small CDC team costs to operate. The crossover is an arithmetic question (MAR × rate vs. infra + a fraction of an engineer), not a religious one, and you compute it.
 
-**The number that matters - the recurrence explosion.** Say 30% of meetings are recurring series with no end date. Materialize "weekly forever" just 10 years out: **520 rows per series**; 100K active series → **~50M phantom rows**, most edited or cancelled before they occur - and a true no-`UNTIL` rule can't be fully materialized *at all*. The rule itself is **~100 bytes**. That ratio is the entire argument for rules-not-rows, and the one estimation result this problem turns on.
+**Schema drift is an ingestion concern, and the contract handles it.** The source team adds a column, renames one, widens a type, and a brittle pipeline breaks (the 13.1 schema-drift failure). At ingest you decide the **drift policy** explicitly: additive changes (new column) **auto-propagate** into the landing schema (managed tools and lake formats handle this); breaking changes (drop/rename/type-narrow) should **fail loud or quarantine**, not silently null a downstream metric. The deeper fix is a **schema contract** at the source boundary, but at minimum ingestion must *detect* drift and surface it rather than absorb it wrongly.
 
-**What estimation decided:** single relational primary + one replica; no sharding, no queue, no cache cleverness for v1. The hard parts are the **race** (rare per slot, certain at fleet scale) and the **model**. Spend the interview minutes there.
+**Idempotent loads are the property that makes re-runs safe.** Ingestion *will* re-run, a connector restart replays from the last offset, a batch is re-triggered after a failure, a backfill replays a month. If a re-run **duplicates** rows or **double-applies** a delete, the landing zone is corrupt and every downstream number is wrong. So the load is **idempotent by design**: CDC events carry the source position (LSN) and a primary key, and the landing layer applies them as an **upsert/merge keyed on (pk, position)**, so replaying the same event is a no-op. The append-only "bronze" pattern (land every raw event immutably, dedupe in the T) is the common shape; the contract is *the same input produces the same landing state no matter how many times it's applied*, the idempotent-recompute discipline from 13.1 and 9.7, now at the ingest boundary. The full exactly-once streaming pipeline that builds on this is **the** job, not this lesson's.
 
----
+<details>
+<summary>Go deeper — log-based CDC mechanics and the snapshot-plus-stream handoff (IC depth, optional)</summary>
 
-## S - Storage
+- **Logical decoding / replication slots (Postgres).** Debezium creates a **replication slot** and reads the WAL via logical decoding, which emits row-level change events (not physical page diffs). The slot guarantees Postgres **retains WAL** until the consumer has read past it, which is the operational trap: if the connector is down for a long time, the slot pins WAL and the **source disk fills**. You monitor slot lag and set retention bounds. MySQL's analog is a replication client reading the **binlog** in `ROW` format (not `STATEMENT`, which logs the SQL, not the row changes); Oracle uses LogMiner / redo, and historically needed supplemental logging enabled.
+- **The initial snapshot problem.** CDC only has changes *from now on*; the existing table state isn't in the recent log. So a connector does an **initial snapshot** (a consistent full read of the table) and then **switches to streaming** from the LSN captured at snapshot start, stitching the two so no change is lost or double-counted at the boundary. Getting this handoff exactly-once is the connector's hard part, and a reason to buy rather than re-implement it. Incremental/concurrent snapshots (Debezium's signal-based approach) let large tables snapshot without one giant blocking read.
+- **Tombstones for deletes.** A delete emits a change event with `after: null` plus, in Kafka, an optional **tombstone** (null-value record on the key) so a log-compacted topic actually drops the key. Downstream merge logic must treat a delete event as a delete, not ignore a null `after`.
+- **Transaction boundaries and ordering.** Events carry transaction metadata and a monotonic source position (LSN/GTID); ordering is guaranteed **per source position**, and if you key the Kafka topic by primary key you preserve per-row order (the per-partition ordering of 9.13). Cross-table transactional consistency at the consumer is harder and usually deferred to the T layer.
 
-> Adaptation: for LLD, S shrinks to one decision - *where does the invariant live?* - because volume already told us the store is small.
+</details>
 
-**Choice: a single relational store (Postgres).** Three reasons, each tied to a requirement: (1) the no-double-book invariant wants **transactions and row locks** - the serialization point comes free; (2) availability queries are **range scans over time**, served natively by a B-tree on `(room_id, start_time)`; (3) Postgres can express **interval-overlap exclusion as a database constraint** - a tripwire no application bug can route around.
-
-- *Rejected - in-memory object model only:* the interview toy. The invariant then lives in application memory - two app instances silently double-book. One sentence covers it: "the in-memory `ConflictChecker` is a cache of the truth; the database holds the invariant."
-- *Rejected - NoSQL KV:* nothing needs its scale (1.8 GB/yr), and you'd hand-build the transactions, range scans, and constraint Postgres gives free. Fashion over fit.
-
----
-
-## H - High-level design
-
-> Adaptation: H in an LLD problem is the **module decomposition plus the one critical path drawn end-to-end** - here, the check-and-reserve path, because that's where the race lives.
-
-Modules, one job each: **Availability** (query free/busy), **Booking** (the transactional reserve path), **RecurrenceEngine** (rule → occurrences generator - the only code that understands RRULE), **Notification** (async).
+### Diagram: log-based CDC flow, WAL → Debezium → Kafka → lake
 
 ```mermaid
-flowchart TD
-    REQ[Booking request] --> VAL[Validate half open range]
-    VAL --> TX[Begin txn and lock room row]
-    TX --> SCAN[Load bookings in window]
-    SCAN --> EXP[Expand recurring series in window]
-    EXP --> CHK{Any overlap}
-    CHK -->|yes| REJ[409 with nearest free slots]
-    CHK -->|no| INS[Insert booking]
-    INS --> TRIP{Exclusion constraint}
-    TRIP -->|violation| REJ
-    TRIP -->|ok| OK[Commit then notify async]
+flowchart LR
+    subgraph SRC["Source OLTP (truth)"]
+      DB[("Postgres / MySQL")]
+      WAL["WAL / binlog<br/>(write-ahead log)"]
+      DB -->|writes log<br/>before tables| WAL
+    end
+    WAL -->|logical replication<br/>reads the log| DBZ["Debezium<br/>(Kafka Connect)<br/>insert · update · DELETE"]
+    DBZ -->|one event per<br/>row change, ordered| K["Kafka topic"]
+    K -->|sink connector<br/>idempotent upsert| BRZ[("Bronze / raw lake<br/>S3 · retained · rebuildable")]
+    BRZ -->|T happens here| DBT["dbt transforms"]
+    POLL["Query-based poller<br/>SELECT … WHERE updated_at >"]:::bad -.->|adds query load<br/>MISSES deletes| DB
+    style WAL fill:#1f6f5c,color:#fff
+    style DBZ fill:#e8a13a,color:#000
+    style K fill:#2d6cb5,color:#fff
+    classDef bad fill:#7a1f1f,color:#fff
 ```
 
-**The path, compressed:** validate the range (half-open, end > start); open a transaction and **lock the room's row** - the pen-on-the-door, the deliberate serialization point; gather concrete bookings in the window *and* generated occurrences of any recurring series touching it; run the overlap predicate; insert or reject. The **exclusion constraint** is a second, independent tripwire at commit. Notifications go async after commit - a booking must never fail because email is slow.
+### Worked example: Netflix-style CDC off the operational store
+Take a streaming service's **operational Postgres** holding the `subscriptions` table, plan changes, upgrades, cancellations, and the platform needs a fresh, *complete* picture for revenue, churn, and entitlement analytics. One source table, and every decision in this lesson surfaces.
 
-**The shape to notice:** correctness is concentrated in one short transactional path; everything read-only (find rooms, free/busy) runs lock-free against a replica. That separation keeps the locked section cheap enough that pessimistic locking is a non-event.
+- **Mode.** Subscriptions are **mutable and deletable** (a cancellation may be a status update; a GDPR erasure is a hard `DELETE`), and churn analytics is wrong if it misses a cancellation. So **log-based CDC**, not a poller. *Rejected: query-based on `updated_at`*, a hard-deleted row for a GDPR request would never appear, leaving a "live" subscriber who legally no longer exists, the exact missed-delete trap, and a *rejected full nightly load* of a large table is both day-stale and a heavy scan.
+- **Pipeline.** **Debezium** on Kafka Connect reads the Postgres **WAL** via a logical replication slot, emits an event per row change to a Kafka topic keyed by `subscription_id` (per-row ordering), and a sink connector lands raw events **idempotently** (merge on `subscription_id` + LSN) into the **bronze** lake (S3). **dbt** builds the `subscriptions_current` and `churn_daily` marts from bronze.
+- **Freshness.** CDC gives **seconds** of lag, so entitlement and near-real-time churn views are live; the board's monthly revenue number tolerates a day and reads the same bronze, *one ingestion path, two freshness consumers*, no second pipeline needed (contrast the 13.1 example where two *freshness needs* warranted two paths, here one CDC stream serves both).
+- **Buy vs build.** At, say, **50M subscription changes/month**, Fivetran's MAR pricing is real money and rising with the subscriber base; the team already runs Kafka for the product, so **self-hosted Debezium** is the cheaper steady state, and the operational cost (slot monitoring, connector on-call) is justified by the volume. Had this been a low-churn internal app, *buy Fivetran* would win on speed-to-value, the call flips with volume.
+- **The traps handled.** A **replication slot** left pinned by a stalled connector would fill the Postgres WAL disk, so slot lag is monitored and alerted; an **initial snapshot** seeds existing subscribers before streaming begins, stitched at the snapshot LSN so nothing is lost or doubled; **schema drift** (a new `promo_code` column) auto-propagates additively, while a column drop fails loud rather than nulling churn silently.
 
----
+The number a Director carries out: *complete (deletes included), seconds-fresh, one CDC path feeding both live and board views, rebuildable from retained raw, and self-hosted because at 50M changes/month we're past the buy crossover.*
 
-## A - API design
+### Trade-offs table: ingestion mode and tooling
 
-> Adaptation: in LLD, A is the **interface sketch** - and the types in the signatures *are* design decisions. `TimeRange` and `RecurrenceRule` appearing as first-class types is the point.
-
-```
-interface RoomScheduler {
-  findRooms(range: TimeRange, minCapacity, features) -> List<Room>
-  book(roomId, organizer, range: TimeRange,
-       rule?: RecurrenceRule) -> Booking | Conflict   // Conflict carries alternatives
-  cancel(bookingId, scope: THIS | FOLLOWING | ALL)
-  freeBusy(roomId, window: TimeRange) -> List<TimeRange>
-}
-
-value TimeRange {                    // half-open [start, end), UTC instants
-  start, end
-  overlaps(o) = start < o.end && o.start < end   // defined ONCE, here
-}
-
-value RecurrenceRule {               // freq, interval, byDay, until|count
-  occurrencesIn(window, anchorTz) -> Iterator<TimeRange>   // a GENERATOR
-}
-```
-
-**Design notes (each with the rejected alternative):**
-- **`TimeRange` is a value object owning `overlaps()`.** *Rejected: raw `(start, end)` pairs compared inline.* The half-open predicate `a.start < b.end && b.start < a.end` is famously easy to fumble (`<=` makes back-to-back meetings conflict); one definition makes the boundary rule a *decision*, not a scattered accident.
-- **`book` returns `Conflict` with alternatives.** *Rejected: boolean failure.* The caller's next question is always "then when/where?" - nearest free slots turn a retry loop into one round-trip.
-- **`cancel` takes an explicit scope enum.** *Rejected: separate endpoints per case.* THIS/FOLLOWING/ALL is the canonical recurrence-edit semantics; the parameter forces the series-edit design now, not in production.
-- **`occurrencesIn` is an iterator, never a full list.** *Rejected: `materialize() -> List`.* The signature itself encodes the recurrence decision - an unbounded rule can only be sampled through a window.
-
----
-
-## D - Data model
-
-> Adaptation: per the LLD framing, D *is the centerpiece* - the interval/booking model, and inside it, the recurrence decision.
-
-**`rooms`** - `room_id`, capacity, features, floor. Static, tiny.
-
-**`bookings`** - one row per **concrete** booking: `booking_id`, `room_id`, `range` (half-open timestamp range), `organizer`, nullable `series_id`. Indexed on `(room_id, start)`; carries the **exclusion constraint** - no two rows share a `room_id` with overlapping ranges. The store enforces the invariant even if every line of application code is wrong.
-
-**`series`** - `series_id`, the **RRULE string**, the anchor occurrence's *local* start/end plus a **named time zone**. ~100 bytes representing infinity.
-
-**`series_exceptions`** - `(series_id, occurrence_date, action)`: *cancelled* or *moved-with-new-range*. Single-occurrence edits are **overrides on the rule**, not mutations of materialized rows.
-
-**The recurrence decision - the centerpiece, in one paragraph.** Recurring meetings are stored as a **rule plus exceptions; occurrences are generated on demand** into whatever window a query needs - never materialized as rows. Estimation made the case (one rule ≈ 100 bytes vs. 50M phantom rows; infinite rules can't be materialized at all), and edits seal it: "move all following Tuesdays to 11am" is a **series split** - terminate the old rule at the cut date, create a new series after it - two row writes instead of rewriting hundreds of materialized occurrences under concurrent readers. Full RRULE (RFC 5545) is a genuinely deep spec - BYSETPOS, week-start subtleties, DST edges - and the Director move is to **name that depth, bound it, delegate it**: *"I'd mandate a vetted RRULE library rather than hand-rolling expansion; my prior is the platform team wraps one library behind `occurrencesIn()` so exactly one module in the company understands RFC 5545."* Then move on. Fifteen minutes on BYDAY semantics is the too-deep failure mode.
-
-**Time zones, the quiet sub-trap:** concrete bookings store UTC instants, but the series anchor stores **local wall-clock time + a named zone** - "9am every Tuesday" must stay 9am across DST shifts, so expansion converts to UTC per occurrence. Storing the anchor in UTC is the bug every homegrown calendar ships first.
-
-<details>
-<summary>Go deeper, RRULE mechanics and the expansion algorithm (IC depth, optional)</summary>
-
-RFC 5545 RRULE grammar (the parts that matter): `FREQ` (DAILY/WEEKLY/MONTHLY/YEARLY), `INTERVAL` (every n-th period), `BYDAY` (e.g. `MO,WE`; with ordinals in monthly rules - `2TH` = second Thursday), `BYMONTHDAY`, `BYSETPOS` (select the n-th candidate after BY-filters - "last weekday of month" = `BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1`), `UNTIL` or `COUNT` (absence = infinite), `WKST` (week-start, changes `BYWEEKNO`/interval-weekly results). `EXDATE` lists skipped instants; real systems extend this with override rows (a moved occurrence = EXDATE + a standalone booking linked to the series).
-
-Expansion sketch: start from the anchor (`DTSTART` in its named zone); iterate period-by-period applying FREQ/INTERVAL; within each period generate candidates from BY-rules; filter by BYSETPOS; convert each local candidate to UTC using the zone's rules *at that date* (this is where DST is handled - the local time is fixed, the UTC offset floats); subtract exceptions; yield occurrences intersecting the query window; stop at window end, `UNTIL`, or `COUNT`. Cost: a weekly rule over a 2-week availability window yields ≤2 occurrences in microseconds - expansion is never the bottleneck; correctness of the edge cases is, which is why you buy the library (e.g. lib-recur, rrule.js, dateutil) instead of writing it.
-
-Why materialization also fails *operationally*, beyond row count: a horizon job that pre-writes N months of occurrences must re-run on every series edit (delete-then-rewrite under concurrent bookers), drifts when the job lags, and turns "what does this series mean?" into two sources of truth. If you ever do materialize (see the Evaluation), the rule stays canonical and rows are a disposable cache.
-
-</details>
-
----
-
-## E - Evaluation
-
-> Adaptation: for LLD, evaluation means **attack your own design's invariant** - and here that means the double-booking race, plus the interaction between the race fix and unmaterialized recurrences.
-
-**The race, stated precisely.** Two requests for Room 4, Tuesday 3-4pm, arrive 10 ms apart. Both check; both see "free"; both insert. Classic TOCTOU - and at fleet scale not rare: thousands of booking pairs per day land within seconds of each other on hot rooms, so "unlikely" is a guarantee of corruption. Check and reserve must be **one atomic unit** at some serialization point. Three candidates:
-
-**Option A - pessimistic per-room lock (chosen).** The booking transaction locks the room's row first; check and insert happen inside the lock. Cost: bookings for one room serialize. Run the number: the locked section is ~5 ms of indexed reads against ~25 bookings/room/day - **contention is effectively zero**, so the lock convoy that disqualified pessimistic locking in Ticketmaster (Ticketmaster, 33K req/s on one event) cannot form at 6 writes/s across 2,000 rooms. Same race, contention three orders of magnitude apart, **opposite choice** - making that contrast explicit is the strongest single sentence in this interview.
-
-**Option B - optimistic insert + constraint detection.** Insert blind; the exclusion constraint rejects overlaps; map the violation to a 409. Correct and lock-free - but it only sees **materialized** rows. A rule-only occurrence is invisible to it, so optimistic-only either forces materialization (the trap we refused) or leaves a hole.
-
-**Option C - application-level mutex (in-service or Redis).** Works on one node; wrong the moment you run two instances - or it adds a distributed-lock dependency to dodge a row lock the database already offers. Complexity without benefit.
-
-**Decision: A as the mechanism, B's constraint as a tripwire.** The lock serializes check-and-reserve *including expansion of recurring series in the window*, so unmaterialized occurrences are checked correctly; the constraint independently guards concrete rows against any path that forgets the lock (a migration, a bulk importer). Each layer covers the other's blind spot. *Trade-off accepted:* per-room serialization caps per-room throughput - irrelevant here; I'd revisit only if a "room" became a virtual high-contention resource, where the CAS is the escape hatch.
-
-**Second-order check - recurring-vs-recurring conflicts:** expand both rules over a **bounded validation horizon** (say 12 months) and intersect. Two weekly rules either collide within weeks or never; "beyond the horizon I accept the residual risk and re-validate as it rolls" beats pretending to check infinity.
-
-**Remaining NFR re-check:** availability reads hit a replica lock-free; recurrence edits are 2-row series splits; DST handled at the anchor; the invariant lives in two independent layers. The design holds.
-
-<details>
-<summary>Go deeper, the Postgres mechanics of the lock and the tripwire (IC depth, optional)</summary>
-
-Range type and constraint: store the interval as `tstzrange(start_ts, end_ts, '[)')` - the `[)` half-open bound encodes the back-to-back rule in the type itself. The tripwire: `ALTER TABLE bookings ADD CONSTRAINT no_double_book EXCLUDE USING gist (room_id WITH =, range WITH &&);` - a GiST index where any two rows with equal `room_id` and overlapping (`&&`) ranges reject the second insert with a serialization-safe error you map to 409.
-
-The lock: `SELECT ... FROM rooms WHERE room_id = $1 FOR UPDATE` at the top of the booking transaction pins the room row; concurrent bookers for the same room queue (millisecond waits at this contention), while bookings for *different* rooms proceed in parallel - the lock granularity is exactly the invariant's granularity. The conflict scan inside the lock: `SELECT 1 FROM bookings WHERE room_id = $1 AND range && $2 LIMIT 1` (GiST-indexed), plus expansion of series rows whose rule could intersect the window (filter series by `room_id`, expand via the library, intersect in app code). Keep the transaction free of network calls - notification fan-out strictly after commit - so the lock hold time stays ~5 ms.
-
-If you ever migrate to a store without exclusion constraints (MySQL), the lock remains the mechanism and you emulate the tripwire with a post-insert overlap re-check inside the transaction; the design's correctness never depended on the constraint alone.
-
-</details>
-
----
-
-## D - Design evolution
-
-> Adaptation: the LLD curveball's evolution step is the altitude test in reverse - "now make it Google Calendar." Show you know **where the single-node design stops working**, evolve it without panic, and refuse to gold-plate v1 for a scale it doesn't have.
-
-**What breaks first, in order:**
-
-**1. One company → millions of tenants: shard by calendar.** A room's bookings are a calendar; a person's are a calendar. **Partition by `calendar_id`** - every hard operation (conflict-check a room, render a week view) stays **single-shard**, and the per-room lock survives sharding untouched. *Rejected: sharding by time* - it splits every calendar across shards and makes "current week" a hot partition under all load.
-
-**2. Meetings span calendars: refuse the distributed transaction.** A 10-person meeting touches 11 calendars on many shards; the junior reflex is 2PC across all of them. The Director observation: **only the room carries a hard invariant.** Book the room transactionally on its shard (the v1 path, unchanged), then **fan out attendee copies asynchronously** via a queue - attendee calendars may show conflicts, so eventual consistency there is *semantically correct*, not a compromise. Small CP core, everything else AP - the boundary discipline in a new place.
-
-**3. "Find a time for these 10 people": federated free/busy.** Each shard serves a compact **free/busy projection** (busy intervals only - privacy comes free); an aggregator intersects 10 small interval lists in memory, cached for hot users. Staleness of seconds is fine because **the room booking re-validates transactionally anyway** - projection is a hint, transaction is the truth (the seat-map pattern, verbatim). *Rejected: scatter-gather for full calendars* - slow, and over-shares meeting details.
-
-**4. Scale numbers, to stay honest:** 500M users × ~15 events/week ≈ **12K bookings/s sustained** - a real write load, but trivial per calendar-shard; ~300 B/event ≈ **100+ TB/yr**, finally justifying the distributed store v1 didn't need. The *model* - TimeRange, rules-not-rows, per-resource serialization - survives unchanged; only the deployment grows.
-
-**Where I'd delegate (the explicit Director move):** RRULE expansion to a vetted library wrapped by the platform team; the free/busy aggregation SLA to the serving team - *"my prior is precomputed projections refreshed on write, since meeting-time suggestions tolerate seconds of staleness"*; offline/mobile sync (a CRDT-adjacent problem - the capstone) to a dedicated effort rather than hand-waving it in.
-
----
-
-## Trade-offs table - the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
+| Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
-| **Booking concurrency** | **Pessimistic per-room row lock** | **Optimistic insert + exclusion-constraint catch** | App-level / distributed mutex | **A** when contention is low and unmaterialized state (recurrences) must join the check - our case. **B** as the tripwire layer, or primary when all state is concrete rows. **C** rarely - only when no transactional store sits under you. |
-| **Recurrence storage** | **Rule + exceptions, generate on read** | Full materialization to rows | Bounded-horizon materialization + roller job | **A** as default - 100 B vs. unbounded rows, 2-row edits (our choice). **B** never at scale. **C** when a downstream consumer (search, constraint) genuinely needs concrete rows - keep the rule canonical, rows disposable. |
-| **Conflict-check structure** | **DB range index + overlap scan** | In-memory interval tree per room | Time-slot bitmap per room-day | **A** - the index *is* the interval structure, shared with the invariant (our choice). **B** the classic whiteboard answer; fine as a cache, never as truth. **C** when slots are fixed-granularity (15-min grid) and you want O(1) checks - loses arbitrary-precision ranges. |
+| **Ingestion mode** | **Log-based CDC** (every change incl. deletes; seconds-fresh; low source impact; operationally complex) | **Query-based / incremental** (`updated_at` poll; simple; *misses deletes*; adds DB load) | **Full load / snapshot** (copy all; simplest; wasteful; run-interval stale) | **A** for any mutable transactional table where deletes matter and you need freshness (the common case). **B** only for genuinely append-only sources or where deletes provably can't occur. **C** for small dimensions or sources with no change-marker. |
+| **Transform placement** | **ELT** (land raw first, transform in-warehouse; rebuildable; decoupled) | **ETL** (transform-first, load finished; loses raw; couples logic) | — | **A** as the default for analytical platforms with cheap storage. **B** only when legally barred from landing raw, or raw is uneconomical to store. |
+| **EL tooling** | **Managed (Fivetran/Airbyte Cloud)** (fast, hundreds of connectors; per-MAR pricing that balloons at volume) | **Self-hosted (Debezium + Kafka Connect)** (cheap per row at scale; you operate it) | **Hybrid** (buy long-tail SaaS sources, build high-volume DB CDC) | **A** to get to value fast and while change volume is modest. **B** when per-row pricing crosses fully-loaded ops cost (high, steady volume). **C** the common real-world steady state. |
 
----
+The Director move is choosing the mode from **mutability + deletes + freshness**, defaulting to **ELT** for rebuildability, and treating buy-vs-build as **MAR × rate vs. infra + ops** arithmetic, not dogma.
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here
+- **"How do you get this operational data into the platform?"**, *Strong signal:* names the three modes, picks **log-based CDC** for mutable tables because it captures deletes at low source impact and seconds-freshness, and explicitly says why polling `updated_at` is wrong (misses hard deletes, adds DB load). *Red flag:* "nightly batch dump" with no thought to deletes, freshness, or the load it puts on production, or "just query the source", the 13.1 starve-the-OLTP mistake.
+- **"Why CDC instead of polling a timestamp column?"**, *Strong:* completeness (deletes are *in* the log), low source impact (reading a log replication reads anyway, 2.4, not running queries), and freshness; concedes polling is simpler and acceptable only for append-only sources. *Red flag:* doesn't know deletes are the gap, or thinks CDC and `updated_at` polling are interchangeable.
+- **"ETL or ELT, and why?"**, *Strong:* ELT, land raw first so the platform is **rebuildable** and business logic decouples from ingestion into versioned transforms; ties the shift to cheap object storage + powerful warehouses. *Red flag:* transform-on-ingest by reflex, with no awareness that it discards the rebuildable raw.
+- **"Build CDC yourself or buy a connector?"**, *Strong:* a numbers answer, buy (Fivetran) for speed and modest volume, build (Debezium) when MAR pricing crosses ops cost at high steady volume; states the crossover as arithmetic and often lands on hybrid. *Red flag:* an absolute ("always build", "always buy") with no volume or cost reasoning, the unquantified-decision tell.
+- **"Your connector restarts and replays events, what happens to the data?"**, *Strong:* idempotent loads, events keyed on (pk, LSN) applied as an upsert/merge so a replay is a no-op, plus the rebuildable bronze; defers the full exactly-once pipeline to the end-to-end design. *Red flag:* assumes replay is harmless or, worse, that it duplicates rows and corrupts downstream.
 
-- **"Two requests book the same room for the same slot."** - *Strong:* names TOCTOU unprompted; the serialization point (room-row lock), the check inside it, the constraint as independent tripwire; contrasts 5.13 - same race, 1,000× less contention, so pessimistic wins. *Red flag:* check-then-insert with no atomicity, or a distributed lock service at 6 writes/s.
-- **"The CEO books a daily standup with no end date. What do you store?"** - *Strong:* ~100 bytes - the rule and a zone-anchored start; occurrences generated through query windows; edits as exceptions or series splits; names RRULE's depth and delegates it. *Red flag:* inserting N rows, or a cron pre-writing occurrences forever.
-- **"9-10 and 10-11 in the same room - conflict?"** - *Strong:* no - half-open intervals, predicate stated, owned by `TimeRange`, decided once. *Red flag:* hesitation, or `<=` in the predicate.
-- **"Now make it Google Calendar."** - *Strong:* shard by calendar; room invariant stays single-shard; attendee copies async because only the room is CP; free/busy as a federated hint with transactional re-validation. *Red flag:* 2PC across every attendee's shard, or "the single Postgres scales horizontally."
-- **"What does this cost, and where's the operational risk?"** - *Strong:* a few hundred dollars/month of managed Postgres - the risk isn't infra, it's correctness bugs (boundaries, DST) and the on-call burden of a hand-rolled RRULE engine, which is why the library is mandated. *Red flag:* a multi-region fleet for 1.8 GB/yr.
+The through-line at Director altitude: ingestion is the failure-prone boundary, so you design it for **completeness, low source impact, and rebuildability**, default to log-based CDC + ELT, and delegate the connector internals (replication-slot tuning, snapshot stitching) with a stated prior, *"the data-eng team owns Debezium slot monitoring and the snapshot handoff; my prior is self-hosted CDC given our change volume, and we benchmark the Fivetran bill against it quarterly."*
 
----
+### Common mistakes / misconceptions
+- **Polling `updated_at` and calling it CDC.** Query-based incremental load **cannot see hard deletes** and leans on a perfectly-maintained timestamp; it silently desyncs the moment a row is physically deleted, and it adds query load to the source you were told not to disturb. Log-based CDC reads the change log itself and catches deletes.
+- **Defaulting to a full nightly load.** It re-scans the whole table every run (linear cost, day-stale) and ignores deletes-vs-updates entirely; reserve it for tiny dimensions or sources with no reliable change-marker, not a 500 GB orders table.
+- **Transform-on-ingest (ETL) by reflex.** Transforming before you land **throws away the raw**, so a logic bug or a new question means re-extracting from a source that may have moved, and couples business logic to brittle pipeline code. Land raw (ELT), transform in-warehouse, stay rebuildable.
+- **Treating buy-vs-build as a belief.** "Always build" wastes platform-engineering time re-implementing solved connectors; "always buy" lets MAR pricing balloon past a small CDC team's cost at high volume. It's `MAR × rate` vs. `infra + ops` arithmetic, computed per source, and usually lands on hybrid.
+- **Non-idempotent loads.** If a connector replay or a re-triggered batch duplicates rows or double-applies a delete, the landing zone is corrupt and every downstream metric is wrong. Make loads idempotent (merge on pk + source position) so a replay is a no-op.
 
-## Common mistakes
+### Practice questions
 
-- **Closed intervals.** `start <= other.end` makes every back-to-back meeting a conflict. Half-open `[start, end)`, predicate defined once in a value object.
-- **Materializing recurrences.** Pre-writing occurrence rows explodes storage, can't represent infinite rules, and turns one edit into hundreds of row mutations. Store the rule; generate.
-- **Check-then-book without a serialization point.** A read followed by a write is a race regardless of QPS; at fleet scale "rare" means "daily."
-- **Treating attendee calendars like room calendars.** Only the physical room carries a hard invariant; forcing strong consistency across 10 attendees' shards builds a distributed transaction nobody asked for.
-- **UTC-anchored recurrence.** A recurring meeting follows *wall-clock* time in its home zone; storing the anchor as a UTC instant shifts it an hour at every DST boundary.
+**Q1.** A team proposes ingesting the production `orders` table into the warehouse by running `SELECT * FROM orders WHERE updated_at > :last_run` every five minutes. What breaks, and what would you do instead?
+> *Model:* Two failures. First, **hard deletes are invisible**, a cancelled or GDPR-erased order is physically `DELETE`d, has no newer `updated_at`, and never appears in the delta, so the warehouse keeps counting an order that no longer exists, the silent-desync trap. Second, every poll runs a **query against the production OLTP database**, adding load to the box serving customers (the 13.1 "never starve point traffic" rule) and leaning on an `updated_at` that bulk updates and app bugs routinely break. Instead I'd use **log-based CDC** (Debezium reading the Postgres WAL): it captures inserts, updates, *and* deletes from the log the database writes anyway, at seconds-freshness and near-zero source impact, lands them idempotently in a raw bronze layer, and transforms in-warehouse (ELT). Polling is acceptable *only* if `orders` were genuinely append-only (no deletes, no in-place updates), which it isn't.
 
----
+**Q2.** Estimate when self-hosted Debezium beats Fivetran for a source with 200M changed rows/month, and name the rejected option on each side.
+> *Model:* Fivetran prices per **monthly active row**; 200M MAR is well into volume-pricing territory, plausibly tens of thousands of dollars/month and rising with the business (exact rate varies, but it's clearly five-figures-plus at this scale). Self-hosted Debezium + Kafka Connect costs roughly fixed **infra + ops**, a small connect/Kafka footprint plus a fraction of a data engineer's on-call, call it a few thousand dollars/month all-in if the team already runs Kafka. At 200M MAR the arithmetic favors **build**: per-row pricing has crossed fully-loaded ops cost. *Rejected on the buy side:* staying on Fivetran lets the bill scale linearly with a growing change volume you don't control. *Rejected on the build side:* building at low volume (say 2M MAR) would burn scarce platform-engineering time to save little, there Fivetran's speed-to-value wins. The decision is the crossover, computed per source, and the real answer is often **hybrid**, build the high-volume DB CDC, buy the long-tail SaaS connectors.
 
-## Interviewer follow-up questions (with model answers)
+**Q3.** Why did the industry shift from ETL to ELT, and what architectural property does ELT buy you?
+> *Model:* The shift was driven by **cheap object storage** (S3/GCS at pennies/GB-month) plus **powerful elastic warehouses**. ETL transformed data *before* loading because storage was once too expensive to keep raw, but that **discarded the raw** and **coupled business logic to the ingestion pipeline**. ELT loads the **raw copy first**, then transforms in-warehouse with SQL. The property it buys is **rebuildability**: because the untransformed landing copy is retained, every downstream table is reproducible by re-running SQL over raw, *idempotent recomputation over retained raw*, so a transform bug is a cheap re-run, not a re-extraction from a source that may have changed, and the source and the business logic evolve independently. You'd still transform-on-ingest only when legally barred from landing raw or when raw is genuinely uneconomical to store.
 
-**Q1. Concretely, what stops two assistants double-booking the boardroom for Friday 3pm?**
-> *Model:* The booking transaction locks the boardroom's row before checking - check and insert are atomic per room; the second assistant's transaction waits ~5 ms, re-checks, sees the conflict, gets a 409 with alternative slots. Inside the lock I check concrete bookings *and* expand any recurring series intersecting the window, so rule-only occurrences are protected too. Independently, an exclusion constraint on `(room_id, overlapping range)` rejects overlaps at the storage layer - a tripwire for any path that bypasses the lock. Pessimistic was deliberate: at ~25 bookings/room/day there's no convoy to fear - the opposite of Ticketmaster, where 33K req/s made optimistic CAS mandatory. Same race; the contention shape picks the tool.
-
-**Q2. A user edits a weekly series: "move this and all following meetings to 11am." What happens in the data?**
-> *Model:* A series split, two writes: terminate the existing rule with an UNTIL at the cut date; create a new series anchored at the first moved occurrence at 11am. Past occurrences keep their history; future ones follow the new rule. Single-occurrence edits are lighter - an exception row (cancelled, or moved with an override range). The alternative, mutating materialized occurrence rows under concurrent readers, doesn't exist because we never materialized; the worst edit in the product is two rows. One flag: the new anchor stores local time plus the named zone, so the series still tracks wall-clock time across DST.
-
-**Q3. Your single Postgres is now serving a 500M-user calendar product. First three changes?**
-> *Model:* (1) Shard by `calendar_id` - rooms and people are calendars; every invariant-bearing operation stays single-shard and the room lock carries over unchanged. (2) Split the meeting write path: book the room transactionally on its shard, fan out attendee copies through a queue - only the room is CP; attendee views are eventually consistent *by product semantics*. (3) Federated free/busy: each shard exposes a compact busy-intervals projection; an aggregator intersects them for "find a time," re-validated at booking. At ~12K writes/s and 100+ TB/yr the deployment changes completely - but TimeRange, rules-not-rows, and per-resource serialization survive intact: the evidence the v1 model was right.
-
----
+**Q4.** A CDC connector was down for six hours, then restarted and replayed every change it missed. Two concerns: did it corrupt the warehouse, and did it endanger the source? How do you design against each?
+> *Model:* **Warehouse corruption** is prevented by **idempotent loads**: each CDC event carries a primary key and a source position (LSN), and the landing layer applies it as an **upsert/merge keyed on (pk, LSN)**, so replaying an already-applied event is a no-op, no duplicate rows, no double-applied delete. (The full exactly-once end-to-end guarantee is the pipeline design; here the load just has to be idempotent.) **Source danger** is the **replication-slot trap**: while the connector is down, Postgres **retains WAL** for the slot's unread position, and six hours of pinned WAL can fill the source disk and take down the production database. Design against it by **monitoring slot lag** and alerting before disk pressure, bounding WAL retention, and, for very long outages, being willing to drop and re-snapshot rather than let the slot pin the source. The Director point: CDC's low-impact promise holds *only* if you operate the slot, which is exactly the kind of internal you delegate with a prior and a monitor, not ignore.
 
 ### Key takeaways
-- **Interval overlap is a first-class abstraction:** half-open `[start, end)`, predicate `a.start < b.end && b.start < a.end`, owned by a `TimeRange` value object, defined exactly once - back-to-back meetings are the test case.
-- **The double-booking race needs a chosen serialization point:** per-room row lock around check-and-reserve, exclusion constraint as independent tripwire. Pessimistic wins *here* because contention is ~zero; the CAS wins under a flash crowd - the contention shape picks the tool.
-- **The recurrence trap is the Director move:** name RRULE's depth, bound it - rule (~100 B) + exceptions, generator expansion into query windows, edits as series splits - delegate the engine to a vetted library, move on. Never materialize the infinite.
-- **Estimation proves smallness:** ~6 writes/s peak, ~2 GB/yr - the difficulty is invariants and model, not throughput, so one Postgres is the *defensible* choice, not the lazy one.
-- **Evolution to Google Calendar keeps the model:** shard by calendar, room invariant stays single-shard CP, attendee fan-out and free/busy go async/AP - small strong core, big eventual edge, again.
+- **Three ingestion modes, chosen per source:** full load (small/no-change-marker tables), incremental/query-based (append-only only), and **change data capture** (the default for any mutable table where deletes matter and freshness counts). Choose from mutability, deletes, and the freshness requirement, not by reaching for streaming reflexively.
+- **Log-based CDC is the technique:** read the database's WAL/binlog/redo, the same log replication reads, with a tool like Debezium, to capture **every insert/update/delete** at **sub-second-to-seconds** lag with **near-zero source impact**. Reject query-based polling because it **misses hard deletes** and adds load to the source, accepting it only for genuinely append-only data.
+- **ELT beat ETL because storage got cheap:** land the **raw** copy first and transform in-warehouse, keeping the platform **rebuildable** and decoupling business logic from ingestion. Reject transform-first for new platforms; it discards the rebuildable raw.
+- **Buy-vs-build is arithmetic:** managed connectors (Fivetran/Airbyte) are fast but priced per **MAR** that balloons at volume; self-hosted Debezium is cheap per row at scale but you operate it (slots, snapshots, schema). Build when per-row pricing crosses fully-loaded ops cost; the real answer is often **hybrid**.
+- **The ingestion contract is idempotent loads + drift handling:** merge on (pk, source position) so a connector replay is a no-op, auto-propagate additive schema changes and fail-loud on breaking ones, and watch the **replication slot** so a stalled connector can't fill the source disk. The full exactly-once pipeline is the job.
 
-> **Spaced-repetition recap:** Meeting scheduler = **intervals + a race + a trap**. `TimeRange` half-open, overlap predicate defined once. Check-then-book is TOCTOU: serialize per room (row lock) + exclusion-constraint tripwire - pessimistic because contention ≈ 0 (contrast 5.13). Recurrence: **rule + exceptions, generator, never materialized rows**; edits = series splits; anchor in local time + zone. Scale-out: shard by calendar; only the room is CP; attendees fan out async; free/busy is a federated hint re-validated at booking.
+> **Spaced-repetition recap:** Ingestion is the **EL of ELT** and the most common source of platform pain, design it for **completeness, low source impact, rebuildability**. Three modes: full load (tiny dims), query-based polling (`updated_at`, append-only only, **misses deletes**, adds DB load), and **change data capture** (the default). **Log-based CDC** reads the WAL/binlog/redo, the same log replication reads, via **Debezium** → Kafka → bronze lake, capturing every insert/update/**delete** at **seconds**-freshness with near-zero source impact. **ELT > ETL**: land **raw** first (cheap object storage), transform in-warehouse, stay **rebuildable**. **Buy-vs-build** = `MAR × rate` vs. `infra + ops`; buy for speed/modest volume, build (Debezium) at high steady volume, often **hybrid**. **Idempotent loads** (merge on pk + LSN) make replays safe; mind the **replication slot** filling the source disk. Full exactly-once pipeline → 14.3. Next: 13.7.
 
 ---
 
-*End of Lesson 7.6. The scheduler is Ticketmaster inverted: the same check-then-book race at a contention level where the "wrong" answer there (a plain pessimistic lock) becomes the right answer here - proof that the framework, not the cached answer, transfers. Its signature move: recognize a bounded-depth trap (RRULE), name it, contain it behind a generator interface, and spend the reclaimed minutes on the invariant that matters.*
+*End of Lesson 7.6. Reliable ingestion is the platform's loading dock, and its central technique is **log-based change data capture**: read the WAL/binlog the database already writes for replication, and you capture every insert, update, and delete, including the hard deletes a `updated_at` poller silently misses, at seconds-freshness with near-zero source impact. Default to **ELT** (land raw first, transform in-warehouse) so the platform stays rebuildable; decide **buy-vs-build** by arithmetic (Fivetran's per-MAR bill vs. self-hosted Debezium's infra + ops), often landing hybrid; and make loads **idempotent** so a connector replay can't corrupt the landing zone. This is the conceptual building-block; the end-to-end exactly-once pipeline rides Kafka transport and is designed in **14.3**. Next: 13.7, orchestration, the scheduler that makes these ingestion and transform jobs run, retry, and depend on each other reliably.*

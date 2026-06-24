@@ -1,261 +1,332 @@
 ---
-title: "8.3 — Zero-Downtime Data Migration"
-description: "Migrating live production data, re-shard, engine swap, vendor exit, without loss or downtime: CDC + backfill vs dual-write, dark-read verification, and the expand-migrate-contract ladder with a rehearsed rollback at every rung."
+title: "8.3 — CDC Ingestion & Streaming ETL"
+description: Design the pipeline that gets operational data into the lakehouse reliably and correctly — log-based CDC (Debezium) → Kafka → Flink → idempotent MERGE into bronze — reasoned through RESHADED at Director altitude, where freshness sets streaming-vs-micro-batch, effectively-once upserts keyed on the primary key are the correctness spine, and schema drift plus snapshot-then-stream backfill are the silent killers.
 sidebar:
   order: 3
 ---
 
-> **This question has no textbook answer and no hiding place.** It shows up as the *only* technical question in real Director loops, and as the standard follow-up inside every other problem ("your shortener outgrew Postgres, migrate it live"). A junior answer describes a copy job. A Director answer describes a **risk-management program**: two systems provably in sync while traffic runs, a cutover ladder with a rehearsed way back at every rung, abort criteria written *before* the migration starts, a dual-run budget with an owner and an end date. The plumbing is the easy 30%; verification, sequencing, and go/no-go discipline are the 70%.
+> **This is the unglamorous backbone question, "get our operational data into the lakehouse, continuously and correctly," and it is the one whose failure mode is silent.** A weak answer wires a nightly job that `SELECT *`s from the source database and calls it a pipeline. A Director-level answer opens by recognizing that this is a *correctness* problem wearing a *plumbing* costume: every number downstream, the finance dashboard, the ML feature, the executive metric, is only as trustworthy as the bytes this pipeline lands, and the two ways it corrupts them silently are **missed deletes** (a polling query never sees a row that was deleted) and **double-counting** (a retried event applied twice). The opening move is one question, *what freshness does the destination actually need, and where is exactly-once mandatory versus where is at-least-once-plus-dedup tolerable?*, because that single answer sets streaming-vs-micro-batch and decides how much exactly-once machinery you pay for. The signal is treating CDC, ordering, idempotency, and schema drift as load-bearing design decisions, not as a connector you switch on. This pipeline *lands* data into the bronze layer; everything downstream rests on this getting it right.
 
 ### Learning objectives
-- Frame any live migration, re-shard, engine swap, vendor exit, as one problem: **keep two systems provably in sync under traffic, then move trust one increment at a time.**
-- Choose between **CDC + backfill** and **application dual-write**, defending the choice on ordering, failure-atomicity, and blast radius.
-- Prove the data matches with **dark reads and partition checksums** against a quantified mismatch budget.
-- Run the **expand → migrate → contract** ladder: reads ramp before writes flip, reverse replication keeps the old system warm, every phase has abort criteria and one go/no-go owner.
-- Size the **risk window and dual-run cost**, two fleets plus a pipeline ≈ 2× infra spend; the cutover schedule is a budget line you own.
+- Run the **RESHADED** spine on an **ingestion-pipeline** problem (E becomes events/sec, CDC lag, and exactly-once overhead sizing; A becomes the CDC-event contract and the idempotent-MERGE interface; D becomes the change-event envelope and the bronze landing table), and surface the load-bearing tension out loud: **the pipeline's job is correctness, not throughput, and the freshness requirement decides how much exactly-once machinery to buy.**
+- Open with the **"freshness, and exactly-once where?"** clarifying question and show how the answer flips **streaming (Flink, seconds) versus micro-batch (minutes)** and the cost of the delivery guarantee.
+- Justify **log-based CDC** (Debezium reading the WAL/binlog) over query-based polling, and explain why polling silently misses deletes and loads the source database, the cardinal correctness trap.
+- Place **effectively-once** correctly: idempotent **upserts keyed on the primary key** + Kafka transactions/checkpoints (reusing the billing-batch machinery), so a replayed change applies once; reject at-least-once-without-dedup with reasons.
+- Handle the two silent killers, **schema drift** (a schema registry + additive evolution into the evolvable table) and **backfill** (Debezium's initial-snapshot-then-stream cutover), so the bronze landing is idempotent and replayable (the rebuildability invariant).
 
 ### Intuition first
-You're moving a busy restaurant across the street, and it **never closes**. So you build the new kitchen fully (**expand**), then run *both* for weeks: every order cooked in the old kitchen and shadow-cooked in the new, a tester comparing the plates (**parallel-run with verification**). When the plates match for days, you serve a few tables from the new kitchen, then half, then all (**shift, incrementally**). The old kitchen stays staffed and warm, if the new stove fails on a Saturday night, you walk every table back in minutes (**rollback, rehearsed**). Only after weeks of flawless service do you sell the old building (**contract**). Paying two kitchens at once isn't waste, **it's the price of zero downtime, and deciding how long you pay it is the actual leadership decision.** The anti-pattern this kills: the big-bang weekend cutover, close, move, pray.
+Picture keeping a **mirror copy of a busy ledger in another building.** The ledger clerk makes hundreds of entries an hour, new accounts, corrections, the occasional struck-out line. You have two ways to keep your copy current. The **naive way** is to walk over every hour and photograph the whole ledger (or the pages that *look* changed) and re-transcribe, query-based polling. It's simple, but it has a fatal flaw: when the clerk *strikes out* a line, your photograph of "the current pages" never shows you what was removed, you just stop seeing it, and you have no idea it was ever there, so your mirror keeps a line the real ledger deleted. And photographing the whole ledger every hour exhausts the clerk (loads the source database) and still misses everything that happened between photos.
+
+The **right way** is to read the clerk's **carbon-copy log** of every single pen-stroke, the append-only record the clerk already writes for their own audit: "inserted row 4471," "updated row 88 city to Berlin," "**deleted** row 12." This is log-based CDC, reading the database's own write-ahead log (the WAL in Postgres, the binlog in MySQL), the same replication log every replica already consumes. You see *every* change in order, including deletes, you impose almost no extra load on the clerk (the log is written anyway), and you can replay it. The whole pipeline is: **read the log, ship the changes through a durable ordered pipe, apply them to your mirror exactly once.**
+
+Two things make the mirror trustworthy rather than subtly wrong. First, **order per account**: if "set city = Berlin" and then "set city = Paris" arrive out of order, your mirror ends up wrong, so all changes to one row must stay ordered (you ship them through one ordered lane, keyed by the primary key). Second, **apply each change once**: if the pipe hiccups and re-delivers "deposit $100," you must not deposit twice, so you apply changes as **idempotent upserts keyed on the primary key**, replaying the same change is harmless. The mistake almost everyone makes is the photograph, treating ingestion as "copy the current state on a timer," which silently loses deletes and corrupts every downstream number. The art is reading the log, keeping per-row order, and applying once.
 
 ---
 
 ## R: Requirements
 
-> Adaptation, said out loud: R scopes the **migration scenario and its invariants**, not product features. The functional requirements are the things you refuse to break.
+> Pin the sources, the freshness, and, the architecture-flipping question, **where exactly-once is mandatory.** The spine is standard; R does double duty by extracting the freshness-and-guarantee drivers that set streaming-vs-micro-batch and how much exactly-once machinery to pay for.
 
-**Anchor scenario (concrete numbers beat abstractions):** the TinyURL system outgrew its single Postgres, **10 TB, 5K writes/s, 100K reads/s**, and must move live to a sharded store (the partitioning choice is its own problem; here we migrate *to* it). The same spine covers an engine swap or vendor exit; only the translation layer changes.
+**The opening Director move, the question I ask first:** *"What freshness does the destination actually need, minutes or seconds, and where is exactly-once mandatory versus where is at-least-once-with-dedup tolerable?"* The answer flips the design:
+- **Seconds-fresh, exactly-once mandatory** (the lakehouse mirror of operational tables that feed finance, billing, or ML features) → **streaming** (Flink), with **effectively-once** upserts keyed on the primary key, the full machinery, paid for deliberately.
+- **Minutes-fresh, at-least-once-plus-dedup tolerable** (most analytical marts, where a dedup pass cleans duplicates downstream) → **micro-batch** (Spark Structured Streaming or scheduled batch), simpler and cheaper, dedup handled at read or compaction.
+
+Most real platforms are **mixed**, and the honest answer is *per-source*: the orders and payments tables get seconds-fresh effectively-once; the marketing-events table is fine at minutes with dedup. I'll design the **harder, increasingly-standard case, seconds-fresh effectively-once streaming CDC**, and name explicitly where micro-batch is the right, cheaper call.
 
 **Clarifying questions I'd ask (with assumed answers):**
-- *What's forcing the move, and by when?* → Write/storage headroom; **~6 months of runway**, which must include the parallel-run, not just the build.
-- *What does "zero downtime" mean?* → No write outage beyond the SLO error budget; latency blips during cutover are negotiable, **data loss and silent corruption are not**.
-- *Mutation rate?* → Mostly append, some updates (counters, expiry). Mutation rate decides how hard verification is.
-- *Brief read-only window allowed?* → Assume **no**; if the business later grants 10 minutes, that's a bonus, never the plan.
+- *Freshness, and exactly-once where?* → **Seconds-fresh, effectively-once for the operational mirror** (orders, users, payments); minutes-fresh with dedup acceptable for analytical-only sources. The central decision.
+- *What sources?* → **OLTP databases** (Postgres, MySQL) via their replication log, plus **application event streams** already on Kafka. SaaS/file extracts are a separate, simpler batch path, not this pipeline.
+- *Do deletes matter?* → **Yes, definitively.** GDPR erasure, order cancellations, and corrections must propagate; this alone rules out query-based polling.
+- *Schema change frequency?* → Source schemas evolve continuously (columns added, occasionally renamed); the pipeline must **not break** when a column appears, and must surface drift, not silently drop it.
+- *Initial load?* → Tables already hold **billions of historical rows**; the pipeline must do an **initial snapshot then cut over to streaming** without missing changes in between (the backfill problem).
 
-**Functional requirements (the invariants):** (1) **no data loss**, every existing row and in-flight write lands in the new store exactly once; (2) **no correctness regression**, both stores return the same answers within a stated staleness bound; (3) **zero (budgeted) downtime**; (4) **reversibility**, until decommission, a tested path back.
+**Functional requirements:**
+1. **Capture** every change (insert/update/**delete**) from operational sources, in order per row, with low source impact.
+2. **Transport** changes durably and replayably through an ordered pipe, decoupling capture from apply.
+3. **Apply** changes into the **bronze lakehouse tables** as effectively-once upserts/deletes, so the lakehouse mirrors the source.
+4. **Evolve** with source schema changes (added/dropped/renamed columns) without breaking consumers.
+5. **Backfill / reprocess**: load history via an initial snapshot, and re-run any period from retained raw without double-applying.
 
-**Explicitly CUT:** the new store's own design, feature work during the window (**freeze schema changes** on migrating tables, a moving target makes verification unprovable), org-wide replatforms (same playbook, per system).
+**Explicitly CUT (scoping is the signal):** the source OLTP systems themselves; the lakehouse storage, table format, and downstream silver/gold transforms (the lakehouse lesson owns those, this pipeline *lands into* bronze); the SaaS/file extract path; the BI and ML consumers; and the real-time-OLAP serving path. I scope to **capture → transport → apply-into-bronze + evolve + backfill.**
 
-**Non-functional:** verification is **quantitative**, a mismatch rate with a threshold, not vibes; the dual-run window is bounded and budgeted; rollback at each phase completes in **minutes**; a pipeline crash mid-flight corrupts neither side.
+**Non-functional requirements:**
+- **Correctness over throughput, the headline NFR.** No missed deletes, no double-applied changes, no silent column drops; a wrong number is worse than a slow one.
+- **Effectively-once apply** for the operational mirror, each change reflected once in bronze despite retries and replays.
+- **Low CDC lag** (sub-second-to-seconds, streaming tier) and **low source impact** (capture must not load the production database, the polling trap).
+- **Schema-drift tolerance** (additive changes flow automatically; breaking changes surfaced, not swallowed) and **replayability** (bronze rebuildable from retained raw, the rebuildability invariant).
+
+**The skew, stated:** this is **write-driven, correctness-critical, ordering-and-idempotency-sensitive.** The hard parts are *delivering deletes, keeping per-key order, applying exactly once, and surviving schema drift*, not raw volume. That asymmetry, *correctness dominates throughput*, shapes every downstream choice, and is the opposite of the read-fan-out problems elsewhere in the course.
 
 ---
 
 ## E: Estimation
 
-> Adaptation: E sizes the **risk window** (how long are we exposed?) and the **dual-run cost** (what does safety cost per week?), this problem's QPS-and-storage.
+> Enough math to make a defensible call; here the load-bearing numbers are **change events/sec** (sizes the pipe), **CDC lag** (sets streaming-vs-micro-batch), **exactly-once overhead** (the price of correctness), and **snapshot+stream backfill time** (the cutover cost).
 
-**Backfill, the floor of the risk window.** 10 TB at an effective **200 MB/s** (throttled, the source is serving 100K reads/s) is `10 TB ÷ 200 MB/s ≈ 14 hours`. Call it **a day**; plan two with retries.
+**Assumptions:** a fleet of OLTP databases generating **~50k change events/sec** sustained, peak ~3× → **~150k/sec**; each change event ~**500 bytes–1 KB** (the row's new image plus before-image and metadata, fatter than a raw click because it carries column values); the largest table to backfill holds **~5 billion rows**.
 
-**Change rate vs copy rate, the feasibility check.** 5K writes/s × ~1 KB ≈ **5 MB/s** of change traffic, 2.5% of backfill bandwidth, trivially absorbed by CDC; post-snapshot catch-up is minutes. Inverted ratio = backfill never converges, check it first.
+**Change throughput (sizes the pipe):** `50k/sec × ~750 B ≈ 38 MB/s` sustained, **~110 MB/s peak.** Per day: `50k × 86,400 ≈ 4.3B change events/day`. This is a partitioned-log problem, Kafka, not a "write to a database" problem; the same firehose shape as 9.7, but the payload is a change record, not a click.
 
-**Verification volume.** Row-by-row over 10 TB at 50K compares/s ≈ 2.5 days/pass, too slow to iterate. So: **partition checksums** (thousands of comparisons) for coverage, plus **dark reads** for the hot path, sampling **1%** of 100K reads/s = 1K compares/s ≈ **86M/day** on exactly the rows users touch.
+**Partition count (ordering + parallelism):** sizing ~110 MB/s peak at ~10 MB/s per partition → **~16–32 partitions** for a high-volume table's topic, keyed on the source **primary key** so a row's changes stay ordered. Partition count also caps apply-side (Flink) parallelism, a sized decision, not "crank it up."
 
-**Dual-run cost, the Director's number.** Old fleet ~$50K/mo + new fleet ~$50K/mo + pipeline and verification ~$10K/mo → **~$110K/mo, call it 2.2×** steady state. A 6-week parallel run is a **~$80K premium** plus 3-4 engineers. That's why "dual-run until we feel good" is not a plan: **the exit criteria define the end date, and the budget forces you to write them.**
+**CDC lag (the freshness number that sets the architecture):** for **log-based streaming**, Debezium reads the WAL within milliseconds of commit and Kafka adds single-digit ms, so **Flink's checkpoint interval is the dominant term**: at a **~10s checkpoint**, end-to-end **commit-to-bronze lag is ~seconds to ~10s** (the MERGE lands on checkpoint); tightening to ~1s cuts lag but raises overhead. **Query-based polling**'s lag is the poll interval (minutes) and it *still* misses intra-interval changes and all deletes, so the lag math alone favors log-based for the seconds tier.
 
-**What estimation decided:** copying takes a day, so the calendar is **verification and trust-ramping**; the pipeline absorbs the change rate (feasible); verification = checksums + sampled dark reads; at ~$13K/week, every week of parallel-run must buy a named reduction in risk.
+**Exactly-once overhead (the price of correctness, the number to defend):** effectively-once costs **checkpoint frequency**, Flink commits the Kafka offset + the bronze write atomically, and a tighter interval (lower lag) means more checkpoints, each a coordination + state-snapshot cost. Rule of thumb: **~10–30% throughput overhead** versus at-least-once, with the checkpoint interval as the lag-vs-overhead dial. *The decision this forces:* pay it only where it earns out, ~20% to never double-count a payment is trivially worth it; an analytical-only source is fine on at-least-once + a dedup pass. **This is the per-source call the freshness question set up.**
+
+**Snapshot + stream backfill (the cutover cost):** an initial snapshot of a **5B-row table** at ~200k rows/sec → `5B / 200k ≈ ~7 hours`, chunked to bring it down. Crucially, Debezium **streams WAL changes concurrently** during the snapshot and reconciles, so no changes are missed in the snapshot window (the cutover correctness property). *Trade-off:* a long snapshot loads the source, so run it against a **replica, not the primary**, chunked, accepting longer wall-clock for lower impact. *Rejected:* lock-the-table snapshot (blocks production) or stream-only (misses all history).
+
+**Managed vs self-host crossover:** a managed connector (Fivetran, Airbyte) prices **per row**, which at 4.3B changes/day runs **five-to-six figures/month**; self-hosted Debezium + Kafka + Flink is a fixed infra + ops cost that **wins decisively at this volume** (developed in Design evolution).
+
+**What estimation decided:** ~110 MB/s peak is a partitioned-log firehose (Kafka); seconds-CDC-lag needs log-based streaming, not polling; effectively-once costs ~10–30%, paid per-source; the 5B-row backfill is a ~hours snapshot-then-stream cutover against a replica; and at this volume self-hosting beats per-row pricing. The numbers point straight at the log-based-CDC → Kafka → Flink → idempotent-MERGE architecture below.
 
 ---
 
 ## S: Storage
 
-> Adaptation: S characterizes the **delta between the guarantees** of source and target. The store *choice* was made by whatever forced the move; the work here is the gap analysis.
+> This pipeline mostly moves data rather than owning a final store, but it has three storage decisions with different durability and consistency needs: **the capture source** (where changes come from), **the transport log** (the ordered, replayable pipe), and **the landing table** (bronze, owned by 14.1). Plus the small but critical **apply-side state**.
 
-**The danger is never the data, it's what the application silently leans on.** Moving Postgres → a sharded/NoSQL target, audit for: **transactions** (multi-row atomic updates don't exist the same way, restructure the write or document the non-atomicity); **read-after-write** (free on single-primary Postgres, absent on an eventually-consistent target; unfound write-then-read paths surface in dark reads as "mismatches" that are really staleness); **auto-increment IDs** (they don't shard, the shortener already uses a sequencer; a system that doesn't needs that swap as a *prerequisite* migration); **sort order, collation, triggers**, each a behavior diff that surfaces at 2 a.m.
+**1. The capture source: the database's own replication log (WAL/binlog), via Debezium.**
+- *Access pattern:* tail the write-ahead log from a committed offset (the LSN/GTID), in commit order, with near-zero extra load on the source.
+- *Choice:* **log-based CDC with Debezium**, reading the Postgres WAL / MySQL binlog, the *same* log the database's replicas consume. It captures inserts, updates, **and deletes** with before- and after-images, in order, and tracks its position to resume after a restart.
+- *Rejected, query-based polling* (`SELECT * WHERE updated_at >`): it **silently misses deletes** (a deleted row just stops appearing), **misses intra-poll changes**, and **loads the production database** with repeated scans, trading correctness for simplicity, fatal when deletes matter. *Rejected, trigger-based CDC:* captures everything but adds write-path latency to every production transaction; the log is free because it's written anyway.
 
-**One new piece of infrastructure: the CDC log.** The source's write-ahead log (Postgres WAL via logical decoding, MySQL binlog) exposed as an ordered change stream, typically **Debezium into Kafka**, partitioned by primary key so per-key ordering holds. Replication machinery, pointed *across* engines.
+**2. The transport log: Kafka, partitioned by primary key.**
+- *Access pattern:* append change events at ~110k/sec peak, partitioned so a row's changes stay ordered, retained so both the apply and reprocessing can replay (the 9.13 substrate).
+- *Choice:* **Kafka**, one topic per source table, **partitioned by the source primary key** so all changes to a row land on one partition in commit order (the per-key ordering contract). Retain ~7–30 days so a failed apply or a logic fix can replay, and tee to **object storage (S3)** as long-term retained raw, the replay source for full reprocessing (the 9.7 / 14.1-bronze property).
+- *Rejected, push CDC straight into the lakehouse* with no log between: you lose decoupling (a slow apply backpressures capture and risks falling behind the WAL's retention, which truncates and *loses changes forever*) and replay. The log is the buffer that makes both effectively-once and reprocessing possible, as in 9.7.
 
-*Rejected, snapshot-and-diff without a change stream:* at 5K writes/s the diff never converges. The change stream is what makes "two systems, one truth" possible.
+**3. The landing table: bronze, an open table format (Iceberg/Delta), owned by 14.1.**
+- *Choice:* changes land in **bronze Iceberg/Delta tables on object storage** via the table format's atomic, snapshot-isolated **MERGE** (the A-step). This is *why* 14.1 insisted on an open table format: raw Parquet can't apply updates/deletes safely; the table format's MERGE can.
+- *Rejected, append-only bronze that never applies updates:* valid as the *raw change log* (we keep that in S3), but the *queryable* bronze mirror needs current state per row, which requires MERGE. We do both, append-only raw for replay, merged bronze for query.
+
+**Apply-side dedup/order state** lives in the **Flink keyed state store** (RocksDB-backed), keyed by primary key, holding the last-applied version/offset per row so an out-of-order or replayed change is detected and dropped, the same keyed-state machinery as the dedup, applied to CDC.
 
 ---
 
 ## H: High-level design
 
-> Adaptation: the "architecture" is a **process with machinery**, the sync pipeline plus the phase ladder it enables. The diagram that matters is the ladder; every rung has a rollback arrow.
-
-**The sync mechanism, the load-bearing decision.**
-
-**Option A, CDC + backfill (my default).** Mark the log position, snapshot-copy the 10 TB, replay the captured stream until the target is seconds behind. The application **doesn't change until cutover**. *Pros:* source of truth untouched, zero new risk on the live write path; per-key ordering inherited from the log; failure-atomic, a pipeline crash resumes from its offset. *Cons:* real infrastructure to operate; lag to monitor; the apply path must be idempotent (the stream redelivers on recovery).
-
-**Option B, application dual-write.** The app writes old-then-new on every request. *Pros:* conceptually simple, near-zero lag. *Cons, disqualifying as the primary mechanism:* **not atomic**, old succeeds, new fails, and the stores silently diverge with no record to repair from; concurrent writers can land in **different orders** on the two stores; and it still needs backfill *plus* a reconciliation job, CDC's hard parts anyway, with new failure modes injected into every production write path. *Where B is right:* no usable change log (a closed vendor API you're exiting), one write choke point, continuous reconciliation mandatory.
-
-**Decision:** CDC + backfill; dual-write only where no log exists. *(Option C, managed tools like DMS or pglogical: Option A, operated by someone else.)*
-
-**The phase ladder, expand → migrate → contract:**
+> The shape to make visible: **source WAL → Debezium captures → Kafka transports (ordered per key) → Flink applies effectively-once → bronze lakehouse**, with a **schema registry** governing the change envelope and **retained raw** enabling replay.
 
 ```mermaid
-stateDiagram-v2
-    direction TB
-    Baseline --> Backfill : start CDC then snapshot
-    Backfill --> Shadow : copy done and lag near zero
-    Shadow --> DarkReads : checksums pass
-    DarkReads --> ReadRamp : mismatch under budget
-    ReadRamp --> WriteCutover : SLOs hold at full reads
-    WriteCutover --> BurnIn : reverse CDC running
-    BurnIn --> Contract : weeks clean
-    Shadow --> Backfill : checksum fail so recopy
-    DarkReads --> Shadow : mismatches found
-    ReadRamp --> DarkReads : SLO breach so flip back
-    WriteCutover --> ReadRamp : abort writes to old
-    BurnIn --> WriteCutover : regression found
+flowchart TB
+    subgraph SRC["Operational sources"]
+      DB[("OLTP DB<br/>Postgres / MySQL")]
+      WAL[["Write-ahead log<br/>(WAL / binlog)"]]
+      DB -->|writes| WAL
+    end
+
+    WAL -->|tail log, in order| DBZ["Debezium<br/>log-based CDC connector"]
+    DBZ -->|change events| KAFKA["Kafka<br/>topic per table<br/>partitioned by primary key"]
+
+    SR["Schema registry<br/>(change-event schema, evolution)"]
+    SR -.governs.- DBZ
+    SR -.governs.- KAFKA
+
+    KAFKA --> FLINK["Flink<br/>effectively-once<br/>idempotent upsert keyed on PK"]
+    KAFKA -.tee.-> RAW[("S3 retained raw<br/>change log — replay source")]
+
+    FLINK -->|atomic MERGE| BRONZE[("Bronze lakehouse table<br/>Iceberg/Delta — current mirror<br/>→ 14.1 silver/gold")]
+    RAW -.->|reprocess / backfill| FLINK
+
+    SNAP["Initial snapshot<br/>(then stream cutover)"] -.seed.-> BRONZE
+
+    style WAL fill:#b08d57,color:#fff
+    style KAFKA fill:#e8a13a,color:#000
+    style FLINK fill:#2d6cb5,color:#fff
+    style BRONZE fill:#1f6f5c,color:#fff
+    style RAW fill:#7a1f1f,color:#fff
 ```
 
-**Reading the ladder:** every forward edge has a backward edge, and each backward edge is **cheap until write cutover**, flipping reads back is a config change measured in minutes. Reads ramp first (1% → 10% → 50% → 100%) because a bad read is detectable and recoverable; a lost write is forever. Writes flip last, in one switch at the data-access layer, **with reverse CDC (new → old) started at the same moment**, write-rollback stays possible through weeks of burn-in. Contract happens only when rollback has provably not been needed for weeks: **the only irreversible rung.**
+**Happy path, compressed:** a transaction commits on the source, writing to the **WAL**; **Debezium** tails it (the same log a replica reads), turns each row change into a structured **change event** (op, before/after-image, source LSN, table, primary key), and produces it to **Kafka**, **partitioned by primary key** so a row's changes stay strictly ordered, with a **schema registry** governing the envelope so additive evolution doesn't break consumers. From Kafka, two consumers fan out (the 9.7 shape): **Flink** applies the changes to the **bronze** Iceberg/Delta table via an **atomic, snapshot-isolated MERGE** keyed on the primary key, effectively-once (idempotent upsert + transactional checkpoint), making bronze a current, query-ready mirror; and the raw change log is **tee'd to S3** retained, the replay source for reprocessing. From bronze, the silver/gold take over. For a new table, an **initial snapshot** seeds bronze while Debezium concurrently streams WAL changes and cuts over without a gap.
 
-<details>
-<summary>Go deeper, CDC pipeline mechanics and the snapshot-consistency problem (IC depth, optional)</summary>
-
-The classic race: rows changed *during* the snapshot are captured by both the copy and the change stream, in either order. The standard fix: record the log position (LSN/GTID) *before* the snapshot, replay from that position after, and make the apply path idempotent last-writer-wins, UPSERTs keyed on primary key, optionally guarded by a per-row version/timestamp so an older event never clobbers a newer row. Debezium's snapshot modes implement exactly this dance.
-
-Apply-worker requirements: idempotent UPSERTs (the stream is at-least-once, not exactly-once), per-key ordering (partition the Kafka topic by primary key, never round-robin), schema translation in one place, and dead-letter queues for rows that fail translation rather than stalling the stream. Monitor lag end-to-end (source write timestamp vs target apply timestamp), not just consumer offsets.
-
-Throughput sanity: 5K writes/s × 1 KB = 5 MB/s, one Kafka partition handles 10× that; the bottleneck is usually target write amplification, not the stream.
-
-</details>
+**The shape to notice:** two load-bearing walls. (1) **The log is the buffer**, Kafka decouples bursty WAL capture from the apply and retains changes, so nothing is lost if the apply lags (lose this and a stalled apply lets the source WAL truncate, losing changes *permanently*). (2) **Apply is effectively-once and idempotent**, the PK-keyed MERGE makes replaying a change harmless, which is what makes the pipeline correct under retries and reprocessing. This is a *continuously-refined, always-replayable projection* of operational truth (the medallion / the recompute property), not a one-shot copy.
 
 ---
 
 ## A: API design
 
-> Adaptation: the "API" is the **seam inside your own application**, the choke point all reads and writes pass through, carrying the migration switches. If it doesn't exist, building it is phase zero, often the longest phase.
+> The "API" of an ingestion pipeline is three contracts: the **change-event envelope** (what Debezium emits, the correctness payload), the **idempotent apply** (the MERGE that lands it once), and the **schema-evolution contract** (how drift is handled). The envelope and the idempotency *are* the correctness story.
 
-```
-interface LinkStore {
-  put(link)            // routed by write-flag: OLD | NEW
-  get(shortCode)       // routed by read-flag: 0-100% to NEW, per-tenant override
-  delete(shortCode)
+```json
+// 1) Change-event envelope (what Debezium produces to Kafka) — the correctness payload
+{
+  "op": "u",                         // c=create, u=update, d=delete, r=snapshot read
+  "before": { "id": 88, "city": "Lagos" },     // pre-image (null for inserts)
+  "after":  { "id": 88, "city": "Berlin" },     // post-image (null for deletes)
+  "source": {
+    "table": "users",
+    "lsn": 32985761,                 // source log position — the ordering + idempotency key
+    "ts_ms": 1719072000123,          // source commit time (drives ordering, late handling)
+    "txId": 55123
+  },
+  "key": { "id": 88 }                // primary key → Kafka partition key (per-row order)
 }
-
-migrationControl:
-  setReadPercent(pct, tenantFilter)   // ramp dial — changes in seconds, no deploy
-  setWriteTarget(OLD | NEW)           // the one-way-ish door; flips with reverse CDC on
-  darkReadMode(on)                    // read both, serve OLD, log diffs
 ```
 
-**Design notes (each with the rejected alternative):**
-- **Flags flip at runtime, not deploy time.** *Rejected: routing via deployment*, rollback becomes a 30-minute deploy during an incident; a flag flip is seconds.
-- **One choke point, not N call sites.** *Rejected: `if (migrated)` sprinkled through the codebase*, you can't atomically flip a switch that lives in forty places. If services bypass the layer with raw SQL, **funneling them is the real first milestone**, scope it honestly.
-- **Dark-read mode is part of the interface,** not a bolted-on script, comparison happens where reads happen, tenant and key on every logged mismatch.
+```sql
+-- 2) Idempotent apply into bronze (Flink → Iceberg/Delta MERGE) — effectively-once
+MERGE INTO bronze.users t
+USING changes s ON t.id = s.id
+  WHEN MATCHED AND s.op = 'd'  THEN DELETE                     -- propagate deletes (polling can't)
+  WHEN MATCHED AND s.source_lsn > t._source_lsn                -- apply only NEWER changes
+                               THEN UPDATE SET t.* = s.after, t._source_lsn = s.source_lsn
+  WHEN NOT MATCHED AND s.op != 'd' THEN INSERT *;              -- new row
+-- replaying the same change is a no-op: s.source_lsn is not > the already-applied t._source_lsn
+```
+
+```
+# 3) Schema-evolution contract (registry-mediated)
+register_schema(table="users", schema=v2)   # additive: new nullable column 'country'
+  -> 200 COMPATIBLE      # backward-compatible → flows automatically into the evolvable bronze table
+  -> 409 BREAKING        # column drop/rename/type-narrow → surfaced for review, NOT silently applied
+```
+
+**Design notes (each with its rejected alternative):**
+- **The change event carries `before`, `after`, `op`, and the source `lsn`/`ts_ms`**, the complete, ordered truth including deletes. *Rejected: emitting only the after-image* (the new row state), which can't express a delete and can't detect ordering, you'd be back to the polling trap.
+- **The MERGE is keyed on the primary key and guarded by `source_lsn`**, applying a change only if it's *newer* than what's landed, so replays and out-of-order arrivals are idempotent no-ops, the effectively-once spine (the `eventId` dedup as a version guard on upsert; `lsn`/`ts_ms` plays the `event_time` role for ordering + watermarks). *Rejected: blind upsert without the lsn guard*, which lets a re-delivered older change clobber a newer one (lost-update corruption), or delete-then-insert on raw Parquet, which has no snapshot isolation and corrupts concurrent reads.
+- **Deletes are first-class** (`WHEN MATCHED AND op='d' THEN DELETE`), the thing query-based polling structurally cannot do, and the reason log-based CDC is non-negotiable when deletes matter.
+- **Schema evolution is registry-mediated and additive-by-default**, a new nullable column flows automatically into the table format's evolvable schema (the metadata-only `ALTER`); a drop/rename/type-narrow returns `BREAKING` and is **surfaced for review, never silently applied**. *Rejected: schema-on-read with no registry*, where a renamed column silently lands nulls and corrupts every downstream number with no alarm, the silent-drift killer.
 
 ---
 
 ## D: Data model
 
-> Adaptation: D is the **translation map** between old and new shapes, plus the data the migration itself owns.
+> Two consequential decisions: the **change-event envelope and partition key** (how changes flow, ordered and idempotent) and the **bronze landing shape** (how the mirror is stored and made replayable).
 
-**The translation map.** Re-shard, same engine: near-identity, the work is the partition key and verifying no query relies on single-node features. Engine swap: an explicit per-table mapping, types, nullability, collation, denormalization for the target's access patterns. **Rule: do not redesign the schema mid-migration.** *Rejected: "while we're at it" remodeling*, differences might now be *intended*, and the diff signal drowns. Redesign is a second migration after this one is stable.
+**Change event (the transport record), keyed by primary key, partitioned in Kafka by that key.** Carries `op` (c/u/d/r), `before`, `after`, and the **source `lsn` + `ts_ms`** (the ordering + idempotency basis). Retained raw in S3 for reprocessing.
 
-**Keys must survive the crossing.** The short code stays the primary key on both sides, dark reads compare by key, rollback needs no ID remapping. If the target forces a different key shape, maintain an explicit mapping table; never let the two sides hold different identities for the same row.
+**Partition key = the source primary key.** This is the single most consequential modeling decision, it puts all changes to one row on one Kafka partition in commit order, so the apply sees `set city=Berlin` then `set city=Paris` in the right sequence and the mirror ends correct. *Rejected: partition by table only / round-robin*, which scatters one row's changes across partitions, so two updates to the same row can be applied out of order, the silent corruption this whole design exists to prevent. *Hot-key caveat:* a single hot row (a counter, a celebrity account) overloads one partition (the hot-shard shape); for genuine hotspots, accept that per-row order *must* hold and instead scale the apply, or, if the row is a contended aggregate, push the aggregation downstream rather than sub-sharding the key (sub-sharding would break per-row order, the one thing we can't trade here).
 
-**Migration-owned data:** the CDC checkpoint (the recovery story), the **verification ledger** (per-partition checksums, dark-read mismatch log), and flag state with an audit trail. Tiny in bytes; it's the evidence the go/no-go decision reads.
-
----
-
-## E: Evaluation
-
-> Adaptation, said plainly: **here Evaluation isn't a final re-check, it's the product.** "How do you *know* the data matches while both systems run?" is the question actually being asked.
-
-**Layer 1, completeness: partition checksums.** Carve the keyspace into ~10K ranges; compute a per-range digest on both sides (count + hash, bucketed by last-modified time so hot ranges re-check cheaply); compare continuously; a mismatched range → re-copy just that range. This audits **all 10 TB**, including cold data nobody reads. *Rejected: row counts alone*, counts match while contents diverge; a smoke alarm, not an audit.
-
-**Layer 2, correctness under traffic: dark reads.** For a 1% sample of live reads, query both stores, **serve the old**, log diffs. This catches what checksums can't: hot-path translation bugs, CDC-lag staleness, the read-after-write gaps from S. At ~86M comparisons/day, a 0.01% defect rate is visible within minutes.
-
-**Layer 3, the mismatch budget and abort criteria, written before phase one.** Numbers decided in advance, owned by one person: enter read-ramp only after a clean full-checksum pass and dark-read mismatch **< 0.01% sustained 7 days**, every mismatch class root-caused, an *understood* lag artifact can be waived; an *unexplained* mismatch stops the program by definition. Abort read-ramp on a 15-minute p99 SLO breach → flip back, diagnose, re-enter. Enter write cutover only after **2+ weeks at 100% reads**, reverse CDC tested end-to-end, and write-rollback **rehearsed in staging with a measured time-to-restore**. Pre-written matters because at 2 a.m. sunk-cost pressure says "push through", pre-committed thresholds plus a named owner are the only known defense.
-
-**The residual hard window: the write flip itself.** In-flight writes straddle the switch. Fix: a **2-5 second write-pause drain** at the data-access layer, quiesce, let CDC lag hit zero, flip, resume; a latency blip well inside the error budget. *Rejected: dual-writing through the flip*, it reintroduces every ordering problem CDC was chosen to avoid, at the most dangerous moment.
-
-**Pipeline failure:** CDC crash → resume from checkpoint; lag spikes and recovers. Lag is therefore a first-class dashboard with an alert tied to the rollback SLO: lag beyond what reverse replication can absorb takes cutover off the table that day.
+**Bronze landing table (the queryable mirror).** An Iceberg/Delta table keyed on the primary key, holding **current state per row** plus a hidden `_source_lsn` column (the version guard) and ingestion metadata (`_ingested_at`, `_op`). Updates and deletes apply via MERGE; the table format gives ACID + snapshot isolation so analysts never see a half-applied batch (the table-format guarantee).
 
 <details>
-<summary>Go deeper, checksum design for live, mutating data (IC depth, optional)</summary>
+<summary>Go deeper — effectively-once mechanics and copy-on-write vs merge-on-read for CDC (IC depth, optional)</summary>
 
-Naive table checksums never match on a live system, the sides are read at different instants. Three workable patterns: (1) **time-bucketed digests**, hash rows with `last_modified < T` for T safely older than max replication lag; recent buckets re-verify next pass; (2) **Merkle trees over key ranges** (the Cassandra/DynamoDB anti-entropy approach, cousin of read repair), log-depth drill-down to the exact divergent range; (3) **snapshot-pinned comparison** where both engines support point-in-time reads. In practice: (1) for bulk, (2) to localize failures, (3) where available. Use order-independent digests (sum of per-row hashes) to dodge cross-engine sort-order traps, and normalize types, timestamps, float precision, collation, *before* hashing, or you'll chase phantom mismatches for a week.
+**Effectively-once on a CDC stream** is the same three-legged construction as 9.7, specialized to upserts:
+- **Idempotent apply via PK + version guard:** the MERGE applies a change only if `source_lsn > _source_lsn` already stored. A replayed or duplicated change has an `lsn` not greater than what's landed, so it's a no-op. This makes the *output* idempotent regardless of how many times a change is delivered, the upsert analogue of the `eventId` dedup.
+- **Transactional sink + checkpoint:** Flink checkpoints its keyed state and commits the Kafka consumer offset atomically with the bronze write (Kafka transactions + the table format's atomic commit). On failure it rewinds to the last checkpoint and replays; because the MERGE is idempotent *and* the commit is atomic with the offset, replay produces no duplicates and no loss, exactly the operational meaning of effectively-once from 9.7/9.13.
+- **Watermarks for out-of-order changes:** within a partition Kafka preserves order, but across the snapshot/stream boundary and under reprocessing you can see out-of-order `ts_ms`; the `source_lsn` guard handles it structurally (older never overwrites newer), and watermarks bound how long to wait for stragglers before considering a window settled.
+
+**Copy-on-write (CoW) vs merge-on-read (MoR)** for the bronze MERGE (the per-table trade, now driven by CDC frequency):
+- **MoR** suits high-frequency CDC, each change writes a small delta/delete file and merges at read time, so writes stay cheap and lag stays low; reads pay a merge cost until compaction. This is usually right for a streaming CDC mirror.
+- **CoW** rewrites affected data files on each change, fast reads, heavy writes, better for low-frequency, read-heavy tables.
+- The choice is a **read-vs-write-cost trade per table**, and a credible Director names it and delegates the per-table tuning, with the prior: MoR + scheduled compaction for streaming CDC tables, because the small-files problem is otherwise guaranteed by frequent micro-merges.
+
+**Snapshot-then-stream cutover (Debezium's mechanism):** on first connect to a table, Debezium takes a consistent **initial snapshot** (reading the table, often against a replica, in chunks) emitted as `op=r` ("read") events, *while concurrently* recording the WAL position at snapshot start and streaming subsequent changes. It reconciles so every row is represented exactly once, snapshot for the baseline, then WAL changes from the recorded position, with no gap and no double-apply (the `lsn` guard de-dups any overlap). This is why you don't lose the changes that happen *during* the hours-long snapshot.
 
 </details>
 
 ---
 
+## E: Evaluation
+
+> Re-check against the NFRs and hunt the bottlenecks, naming each trade-off. On this problem the bottlenecks are almost all *correctness* failure modes, the silent ones.
+
+**Re-check vs NFRs:** correctness, log-based capture (incl. deletes) + PK ordering + idempotent MERGE; effectively-once, idempotent upsert + transactional checkpoint; low CDC lag, streaming (seconds); low source impact, log-based not polling; drift-tolerance, registry + additive evolution; replayability, retained raw. Now the bottlenecks.
+
+**Bottleneck 1, missed deletes (the cardinal silent-corruption risk).** An after-image-only or polling pipeline never propagates deletes, so the lakehouse keeps rows the source erased, every count and GDPR-erasure claim wrong, no alarm.
+*Fix:* **log-based CDC** captures deletes as `op=d` events, and the **MERGE's `WHEN MATCHED AND op='d' THEN DELETE`** applies them. *Rejected:* polling, which structurally cannot see a deleted row. The single most important correctness property here, and the strongest reason to reject the "simple nightly SELECT."
+
+**Bottleneck 2, double-apply / out-of-order changes (lost-update corruption).** A retried change applies twice, or two updates to one row arrive out of order, and the mirror lands on the wrong value.
+*Fix:* **partition by primary key** (per-row order) + **idempotent MERGE guarded by `source_lsn`** (apply only newer; replays are no-ops) + **Flink's transactional checkpoint**. *Rejected:* blind upsert with no version guard, which lets an older re-delivered change clobber a newer value. This is the effectively-once as a version-guarded upsert. *Trade-off:* the ~10–30% exactly-once overhead, paid because a double-applied payment is a correctness incident, not a cosmetic one.
+
+**Bottleneck 3, schema drift (the second silent killer).** The source adds, renames, or drops a column; a naive pipeline silently lands nulls, drops data, or crashes the consumer, corrupting downstream with no alarm.
+*Fix:* a **schema registry** mediates the change-event schema, **additive changes** flow automatically into the table format's evolvable schema (the metadata-only `ALTER`), and **breaking changes** (drop/rename/type-narrow) are **surfaced for review, not silently applied**. *Trade-off:* the compatibility gate occasionally blocks a deploy pending review, cheap insurance against silent corruption. *Director note:* renames are the nastiest, they look additive (new column, old goes null) but mean a column moved; flagging them is the senior tell.
+
+**Bottleneck 4, capture falls behind / the source log fills (the permanent-loss risk).** If the apply stalls and Debezium's read position lags past the WAL's finite retention, **those changes are lost forever** and the mirror silently diverges.
+*Fix:* **the log is the buffer**, Kafka absorbs bursts so a lagging apply doesn't immediately threaten the WAL; monitor **WAL/replication-slot lag** as a first-class alert. *Rejected:* pushing CDC straight to the lakehouse with no buffer. *Trade-off:* a slot that never advances (a dead consumer) *itself* blocks WAL cleanup and can fill the source disk, so slot health is a two-sided alert, the failure mode Directors who've run CDC have scars from.
+
+**Bottleneck 5, backfill correctness / the snapshot-stream gap.** Loading billions of historical rows while changes keep flowing risks missing or double-applying changes during the snapshot.
+*Fix:* **Debezium's snapshot-then-stream cutover**, a chunked snapshot emits the baseline while the WAL position is recorded and changes stream from it; the **`lsn` guard de-dups** any overlap, so every row appears exactly once, no gap. *Trade-off:* the hours-long snapshot loads the source, so run it off-peak against a **replica**, chunked. *Rejected:* lock-and-copy (blocks production) or stream-only (no history).
+
+**Closing re-check:** deletes propagate (log-based + MERGE-delete); double-apply and reordering are neutralized (PK partition + lsn-guarded idempotent MERGE + transactional checkpoint); schema drift is surfaced not swallowed (registry + additive evolution); permanent loss is guarded (Kafka buffer + slot-lag alerting); backfill is gap-free (snapshot-then-stream + lsn de-dup). The pipeline is correct first, and fast where it needs to be.
+
+---
+
 ## D: Design evolution
 
-> Adaptation: evolution is the **cutover sequencing itself**, trust moving in increments, plus the 10× variant and the ownership shape. This step and Evaluation *are* the question.
+> Push the dimensions and find what breaks; here the central evolution argument is **streaming-vs-micro-batch per source** and **self-host-vs-managed**, and how to grow without a big-bang bet.
 
-**The trust ramp as a timeline (anchor scenario):**
-- **Weeks 0-2, expand:** stand up the target, build the seam, start CDC, backfill (~1 day), converge. Nothing user-visible; rollback = turn the pipeline off.
-- **Weeks 2-4, prove:** checksums to clean, dark reads 1% → 10%, burn down mismatch classes. The calendar lives or dies here, *this* is what the $13K/week buys.
-- **Weeks 4-5, shift reads:** ramp to 100%, internal tenants first, marquee customer last; each step holds for days against SLOs; rollback is a flag.
-- **Week 6, shift writes:** drain-and-flip, reverse CDC on; the *old* store is now the replica.
-- **Weeks 6-8, burn-in:** new store is system of record; the escape hatch stays warm.
-- **Week 8+, contract:** stop reverse CDC, snapshot to S3 (~$230/mo for 10 TB; keep a quarter, the rollback of last resort), decommission, **delete the migration scaffolding**, a half-dead seam is how the *next* migration becomes unreasonable.
+**The headline trade-off, streaming (Flink) vs micro-batch, decided per source by freshness.** Streaming buys seconds-fresh effectively-once at the cost of operating Flink, checkpoint overhead, and more moving parts; micro-batch (Spark Structured Streaming on a ~minutes trigger over the same Kafka topics) is simpler and cheaper but minutes-fresh and typically at-least-once-plus-dedup. The honest Director position: **stream** the operational mirror (orders, payments, users, anything feeding finance/billing/ML features) where the guarantee is a requirement; **micro-batch** the analytical-only long tail where minutes is fine and a dedup/compaction pass cleans duplicates. **My prior:** stream the handful of correctness-critical tables, micro-batch the rest, and *don't* pay streaming's tax uniformly. Both share the same Debezium→Kafka front half, only the apply tier differs, so it's a per-topic apply choice, not two pipelines (the 2.9 argument referenced, not re-derived).
 
-**At 10× (100 TB, 50K writes/s):** backfill is ~a week even at 1 GB/s, so **migrate shard-by-shard**, the ladder runs per shard, blast radius shrinks to 1/N, shard 1 teaches the org what shards 2-N reuse. Change-rate-vs-copy-rate now has teeth, and dual-run at ~$500K/mo of overlap makes the schedule a CFO conversation, precisely why a Director, not a tech lead, owns the end date.
+**The self-host-vs-managed trade.** A managed connector (Fivetran, Airbyte) is fastest to value but prices **per row**, five-to-six figures/month at 4.3B changes/day, and puts a vendor between you and your replication log; self-hosted Debezium + Kafka + Flink is a **fixed infra + ops cost** that wins decisively at this volume but demands the ops muscle (slot monitoring, registry discipline, Flink ops). *My prior:* **start managed** for low-volume sources and fast value, **self-host the high-volume, correctness-critical tables** where per-row pricing and the strategic dependency don't pencil, the same start-managed-migrate-to-open pattern 14.1 takes.
 
-**Ownership and staffing (the question behind the question):** one accountable go/no-go owner at every rung, me or a named delegate, never "the team"; 2-3 engineers on pipeline + seam; one on verification tooling (the under-staffed role on every failed migration); cutovers in low-traffic hours, both stores' owners on the bridge. **Delegation with priors:** *"Data-infra owns the Debezium/Kafka pipeline and benchmarks apply throughput against our change rate; my prior is one key-partitioned topic is ample at 5 MB/s. The DBA team owns the backfill throttle; my prior is 200 MB/s off a replica, not the primary. I keep the ladder, the abort criteria, the budget, the flip decisions."*
+**At 10× (500k events/sec, ~43B changes/day):** Kafka and Flink scale horizontally (the design's point); the binding constraints become **(1) per-key hot rows** (a contended row can't be sub-sharded without breaking order, so the fix is pushing aggregation downstream, not re-keying), **(2) WAL/slot management at fleet scale** (hundreds of databases, each a slot that must stay healthy, operational not architectural), and **(3) schema-drift volume** (more tables, more drift, so the registry gate becomes a staffed process). Retained raw grows linearly (tier + compress).
 
-**The generic playbook, the reusable template.** Strip the scenario away and six phases govern *any* migration, vendor exit, regionalization, 10× replatform, monolith-to-services data split:
+**Hardest trade-offs to defend:**
+- **Correctness machinery vs simplicity.** Log-based CDC + Kafka + Flink is genuinely more to operate than a nightly `SELECT`; defending *why it's mandatory* is the senior tell, because the failure mode is silent (missed deletes, double-counts) and the output is trusted numbers.
+- **Per-row order vs hot-key spread.** Unlike 9.7 (sub-shard a hot campaign and sum on read), here per-row order is sacred, you *cannot* sub-shard a hot primary key without risking out-of-order apply. The fix is downstream aggregation or apply-side scaling, not re-keying, a subtle but important difference.
+- **Schema-evolution automation vs review.** Auto-applying additive changes is convenient, but a rename masquerades as additive; the line between "flow automatically" and "surface for review" is a judgment call with real correctness stakes.
 
-1. **Assess**, inventory data, dependencies, silent guarantees (S); run the feasibility math, copy rate vs change rate, dual-run cost, rollback SLO (E).
-2. **Stabilize**, freeze schema churn; build the seam (A); verification tooling working *before* moving data.
-3. **Parallel-run**, backfill + CDC, both systems live; checksums + dark reads burn mismatches below budget (H, Eval).
-4. **Shift**, trust moves in increments: reads ramp, writes flip last, reverse-sync keeps the old side warm; every increment's abort path cheaper than continuing.
-5. **Verify**, burn-in as system of record, the old system now the shadow; exit criteria written, one owner says "go."
-6. **Decommission**, archive, kill reverse sync, delete scaffolding, retro. The only irreversible step, last, deliberately.
+**Where I'd delegate (the explicit Director move):**
+- **CDC connector + WAL ops:** *"Platform owns Debezium config, slot health, and WAL-retention sizing; my prior is log-based against a replica with slot-lag as a first-class SLO. I own the contract, every operational table captured log-based with deletes, not the tuning."*
+- **Stream engine + exactly-once tuning:** *"Benchmark Flink's checkpoint interval against our lag-vs-overhead target; my prior is Flink for mature event-time + exactly-once, ~10s checkpoint, tightened only where sub-second is needed."*
+- **Per-table CoW/MoR + compaction:** *"Platform owns it against each table's CDC frequency; my prior is MoR + scheduled compaction for streaming CDC tables."*
+- **Schema-registry policy:** *"Owned as a process; my prior is additive auto-flows, drop/rename/type-narrow gated."* What I keep, **log-based capture with deletes, PK-ordered transport, effectively-once idempotent apply, and drift-surfaced-not-swallowed**, is the altitude.
 
-Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliation, per H's exception); regionalization runs the ladder per region; re-shard per shard. **The phases never change; only the machinery inside phase 3 does**, and that invariance is your answer to "how would you migrate X?" for any X.
+**Handoff:** this pipeline *lands* operational data into **bronze**, which refines it through silver/gold; the **sub-second user-facing** read path is a separate real-time-OLAP store, not this batch/streaming mirror; the **CDC concept** itself is developed in 13.6, the **Flink exactly-once/watermark** mechanics in 13.4, and the **exactly-once + late-event + idempotent-reprocessing** machinery this reuses is 9.7.
 
 ---
 
 ## Trade-offs table: the pivotal decisions
 
-| Decision | Option A | Option B | Option C | Use when... |
+| Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
-| **Sync mechanism** | **CDC + backfill**, log-ordered, app untouched, resumable | **App dual-write**, simple, near-zero lag, but non-atomic + needs reconciliation anyway | **Managed tool** (DMS, pglogical) | **A** default (our choice). **B** only when no change log exists (vendor exit) and writes have one choke point. **C** when homogeneous and it fits. |
-| **Cutover style** | **Incremental ramp**, reads by %, writes last, burn-in | **Big-bang window**, one flip, maintenance downtime | **Per-shard / per-tenant waves** | **A** default (our choice). **B** only with real granted downtime *and* a dataset verifiable offline, rare. **C** at 10× or multi-tenant scale, to shrink blast radius. |
-| **Verification** | **Checksums + dark reads**, full coverage + hot-path truth, quantified budget | **Row counts + spot checks**, cheap, blind to content divergence | **Full row-by-row diff**, airtight, days per pass, stale on arrival | **A** default (our choice). **B** never sufficient alone. **C** for small/frozen datasets, or the one-time final audit before contract. |
+| **Capture method** | **Log-based CDC** (Debezium reads WAL/binlog) | **Query-based polling** (`SELECT WHERE updated_at >`) | **Trigger-based** (DB triggers → audit table) | **A** when deletes matter and source impact must be low, the real case (our choice). **B** only for append-only tables with no deletes and lax freshness. **C** when you can't access the log but can add triggers, accepting write-path load. |
+| **Apply freshness** | **Streaming** (Flink, seconds, effectively-once) | **Micro-batch** (Spark, minutes, at-least-once + dedup) | Scheduled batch (hours) | **A** for the operational mirror feeding finance/billing/ML (our choice for those). **B** for analytical-only sources where minutes + dedup is fine. **C** for slow-moving dimension tables. |
+| **Delivery guarantee** | **Effectively-once** (idempotent PK upsert + transactional checkpoint) | **At-least-once + downstream dedup** | At-most-once | **A** where a double-apply corrupts money/counts (our default for the mirror). **B** cheaper, where a dedup/compaction pass cleans duplicates. **C** essentially never for a mirror. |
+| **Build vs buy** | **Self-host** Debezium + Kafka + Flink | **Managed** (Fivetran/Airbyte, per-row) | Hybrid (managed low-volume, self-host high) | **A** at high volume where per-row pricing doesn't pencil and you have ops muscle (our choice at scale). **B** for fast time-to-value, low volume, ops-light. **C** the pragmatic start, managed first, self-host the firehose. |
 
 ---
 
 ## What interviewers probe here (Director altitude)
 
-- **"How do you know the two systems match?"**, *Strong:* layered proof, checksums for all data, dark reads for live truth, a numeric budget with a sustained-clean window; unexplained mismatches block. *Red flag:* "compare row counts," "run both and watch for errors."
-- **"Dual-write or CDC? Defend it."**, *Strong:* CDC, dual-write is non-atomic (partial failure = silent divergence, no record), unordered, and needs backfill + reconciliation anyway; names the vendor-exit exception. *Red flag:* dual-write "for simplicity" without naming divergence.
-- **"Walk me through rollback after write cutover."**, *Strong:* reverse CDC from the flip keeps the old store current; rollback is a rehearsed flip-back with a measured time-to-restore; contract deferred because it's the only irreversible step. *Red flag:* "we wouldn't need to by then," or rollback = restore a stale backup.
-- **"How long do you run both, and who decides?"**, *Strong:* quantifies the premium (~2.2×, ~$13K/week), ties the window to pre-written exit criteria, names one owner, treats schedule pressure as a risk input, never a verification override. *Red flag:* open-ended "until we're confident"; no cost awareness; decision diffused to "the team."
-- **"What breaks this plan in practice?"**, *Strong:* schema churn, raw-SQL paths bypassing the seam, read-after-write gaps masquerading as mismatch noise, under-staffed verification, sunk-cost pressure at the thresholds. *Red flag:* only technical failures, the people and process failures are the common ones.
+- **"How do you get data from the source into the lake, and why not just poll?"**, *Strong:* **log-based CDC** (Debezium on the WAL), because polling **silently misses deletes** and **loads the source**; treats this as a correctness decision, not a connector choice. *Red flag:* a nightly `SELECT *` with no awareness that it loses deletes and corrupts downstream silently.
+- **"A change gets delivered twice. What lands in the lake?"**, *Strong:* **effectively-once via idempotent MERGE keyed on PK and guarded by `source_lsn`** + transactional checkpoint, replays are no-ops, older never overwrites newer; cites the machinery. Quantifies the ~10–30% overhead and says where it's worth paying. *Red flag:* "exactly-once, Kafka handles it" with no idempotency or version guard, the lost-update trap.
+- **"The source team renames a column. What happens to your pipeline?"**, *Strong:* a **schema registry** gates it, additive changes auto-flow into the evolvable table; a **rename is surfaced for review, not silently applied** (it looks additive but isn't), so downstream isn't silently corrupted. *Red flag:* schema-on-read that lands nulls with no alarm.
+- **"You need to load 5 billion historical rows but the table is live. How?"**, *Strong:* **snapshot-then-stream cutover**, chunked snapshot against a replica while concurrently recording the WAL position and streaming changes, `lsn`-guarded so there's no gap and no double-apply; quantifies the ~hours snapshot. *Red flag:* lock-the-table copy, or stream-only that misses history.
+- **"Streaming or micro-batch?"**, *Strong:* **per source, by freshness**, stream the correctness-critical operational mirror, micro-batch the analytical long tail; same Debezium→Kafka front half, only the apply differs. Doesn't pay streaming's tax uniformly. *Red flag:* one global answer with no freshness reasoning.
 
 ---
 
 ## Common mistakes
 
-- **Big-bang cutover**, converting a reversible program into one bet. The ladder exists so no single moment carries the whole risk.
-- **Dual-write as the primary sync**, non-atomic, unordered, silently divergent; you build CDC's hard parts anyway, after the divergence is in production.
-- **Verification as an afterthought**, counts and vibes instead of checksums + dark reads against a numeric budget. If you can't *prove* match, you have a hope, not a migration.
-- **No rehearsed rollback past write cutover**, without reverse replication, "rollback" means restoring a stale backup and losing writes. Rehearsed = run in staging with a stopwatch, not described in a doc.
-- **Migrating a moving target**, schema churn and "while we're at it" remodeling make the diff signal meaningless. Freeze, migrate, then evolve.
+- **Query-based polling for a table with deletes.** It structurally cannot see a deleted row, so the lake keeps data the source erased, corrupting every count and breaking GDPR erasure, silently. Log-based CDC is the only correct capture when deletes matter.
+- **At-least-once with no idempotency.** A re-delivered change applied twice, or an older change clobbering a newer one, is lost-update corruption. The apply must be an **idempotent PK upsert guarded by the source LSN**; "Kafka gives exactly-once" without a version guard is the trap.
+- **Ignoring schema drift.** A renamed or dropped column silently lands nulls or drops data with no alarm. A **schema registry + additive-auto / breaking-surfaced** policy is non-negotiable; renames are the nastiest because they masquerade as additive.
+- **No log buffer between capture and apply.** Pushing CDC straight to the lake means any apply slowdown lets the source WAL truncate unread changes, **permanent, silent loss**. Kafka is the buffer; replication-slot lag is a first-class alert (and a stuck slot can fill the source disk, a two-sided risk).
+- **Stream-only or lock-and-copy backfill.** Stream-only misses all pre-existing history; lock-and-copy blocks production. Use **snapshot-then-stream cutover** with LSN de-dup so it's gap-free and non-blocking.
 
 ---
 
 ## Interviewer follow-up questions (with model answers)
 
-**Q1. Your TinyURL Postgres is at 80% capacity, 5K writes/s. Sketch the live migration to a sharded store.**
-> *Model:* Six phases. **Assess:** backfill ≈ a day at a throttled 200 MB/s; the 5 MB/s change rate is trivial for CDC, the calendar is verification, not copying. **Stabilize:** freeze schema; funnel all access through one seam with runtime flags. **Parallel-run:** Debezium off the WAL into Kafka keyed by short code; mark the log position, snapshot, replay to convergence; verify with partition checksums plus 1% dark reads against a < 0.01% budget sustained a week. **Shift:** reads ramp 1→10→50→100% behind flags; writes flip last via a 2-5 s drain with reverse CDC started at the flip. **Verify:** 2+ weeks of burn-in, old store as warm replica, flip-back rehearsed. **Decommission:** archive to S3, kill reverse sync, delete scaffolding. Dual-run ≈ $13K/week, why the exit criteria are written before phase one and I own go/no-go.
+**Q1. Walk me through how a single UPDATE on a production Postgres row ends up correctly reflected in the lakehouse.**
+> *Model:* The UPDATE commits to the **WAL**; **Debezium** tails it (the same log a replica reads) and emits a change event, `op=u` with before/after-images, source `lsn`, and primary key, to **Kafka**, **partitioned by primary key** so this row's changes stay strictly ordered. **Flink** applies an **atomic MERGE** into the **bronze** Iceberg table keyed on the primary key, guarded by `source_lsn` (apply only if newer), committing the offset transactionally with the write (effectively-once). The bronze row now mirrors the source; the silver/gold take it from there, and a re-delivery is a no-op by the `lsn` guard. Seconds end-to-end, correct under retries because the apply is idempotent.
 
-**Q2. A teammate proposes dual-writing from the application "because it's simpler than a CDC pipeline." Your response?**
-> *Model:* Three failure modes it buys. **Non-atomicity:** old write succeeds, new fails or the process dies between, silent divergence with no record to repair from; a log-based pipeline resumes from its checkpoint. **Ordering:** concurrent writers can land in opposite orders on the two stores; CDC inherits the source's per-key commit order. **It isn't simpler:** you still need backfill *plus* a reconciliation job to catch the divergence dual-write creates, CDC's hard parts, with new failure modes injected into every production write path. My prior: CDC + backfill whenever a change log exists; dual-write only on a log-less vendor exit, through one choke point, with continuous reconciliation mandatory.
+**Q2. Polling is so much simpler than running Debezium and Kafka. Justify the complexity.**
+> *Model:* For an append-only table with no deletes and lax freshness, I'd *use* polling. The complexity earns out the moment **deletes matter** or **freshness is tight**: polling structurally cannot see a deleted row (it just stops appearing, so the lake silently keeps data the source erased, breaking counts and GDPR erasure), it misses intra-interval changes, and it loads the production database with repeated scans. Log-based CDC reads the WAL the database writes anyway, so it captures every change including deletes, in order, with near-zero source impact, and it's replayable. The complexity is the price of *correctness and low source impact*, preventing a silent failure: every downstream number quietly wrong. Below the bar (no deletes, minutes-fresh OK) I wouldn't pay it; for the operational mirror it's non-negotiable.
 
-**Q3. Mid-ramp at 50% reads, dark reads show 0.4% mismatches. The deadline is in two weeks. What do you do?**
-> *Model:* 0.4% is 40× budget, so the pre-written criteria answer for me: **reads flip back**, a flag, minutes, invisible to users, and we diagnose. That's exactly why abort criteria predate sunk-cost pressure. Then bucket the mismatch ledger by pattern. CDC-lag staleness clustered on recently-written keys is an *understood* artifact, likely a read-after-write path missed in the guarantee audit; fix or route those reads old-side and re-enter quickly. *Unexplained* mismatches, scattered keys, content diffs, are potential corruption; nothing moves until root-caused. On the deadline: two more weeks of dual-run is ~$26K; silent corruption at 100% of reads is unbounded. That trade defends itself.
+**Q3. A duplicate change arrives, and separately, two updates to the same row arrive out of order. Walk me through why the lake still ends correct.**
+> *Model:* Two mechanisms. **Order**: Kafka is partitioned by **primary key**, so a row's changes land on one partition in commit order and Flink applies them in sequence, no cross-partition reordering. **Idempotency**: the MERGE applies a change only if its `source_lsn` is *newer* than what's landed, so a duplicate (same `lsn`) is a no-op and an out-of-order *older* change is rejected rather than clobbering the newer value, no lost update. The transactional checkpoint commits the offset atomically with the write, so crash-replay re-applies safely. This is the effectively-once as a version-guarded upsert: idempotent regardless of delivery count or order, ~10–30% overhead, worth it for a mirror that feeds money.
 
-**Q4. When is the old system actually safe to turn off?**
-> *Model:* Three gates. (1) The new store has been **sole system of record through real events**, a traffic peak, an on-call incident, for weeks, with zero rollback invocations. (2) A **final full checksum audit** passes immediately before severing reverse CDC, the last cheap moment to catch anything. (3) **No residual readers:** the old store's access logs show zero queries for a defined window, there's always a forgotten cron job, and logs find it before deletion does. Then "off" is staged: stop reverse CDC, snapshot to cold storage, decommission compute, delete the scaffolding. Decommission is the only irreversible rung, which is why it's last, and deliberately boring.
+**Q4. The source adds a column one week and renames another the next. What does each do to your pipeline?**
+> *Model:* Different outcomes by design. The **added (nullable) column** is backward-compatible, the schema registry marks it `COMPATIBLE` and it **flows automatically** into the table format's evolvable bronze schema (a metadata-only `ALTER`), existing rows read null for it, no break. The **rename** is the dangerous one: it *looks* additive (a new column appears, the old goes null) but it actually moved data, so the registry's compatibility check flags it `BREAKING` and it's **surfaced for human review, not silently applied**. That gate is exactly what prevents the silent corruption where a rename lands nulls and every downstream aggregation quietly drops the column's data. The discipline is: additive auto-flows, drop/rename/type-narrow gates, drift is never swallowed.
+
+**Q5. What does this pipeline cost, and what would you delegate?**
+> *Model:* The spend concentrates in the **Kafka + Flink tier** (~110 MB/s peak, ~16–32 partitions per high-volume topic, effectively-once adding ~10–30% overhead) and **retained raw** in S3. At 4.3B changes/day, **self-hosting beats per-row managed pricing** (five-to-six figures/month), so I self-host the firehose and keep managed connectors for low-volume sources. I own the **contracts**, log-based capture with deletes, PK-ordered transport, effectively-once idempotent apply, drift-surfaced-not-swallowed, slot-lag as an SLO, and delegate with priors: **connector + WAL ops**, **Flink checkpoint tuning** (~10s), **per-table CoW/MoR + compaction** (MoR for streaming CDC), and the **registry policy** (additive auto, breaking gated). I keep the architecture; I hand off the tuning with a prior.
 
 ---
 
 ### Key takeaways
-- Every live migration is one problem: **two systems provably in sync under traffic, then trust moved one increment at a time**, expand → migrate → contract, a rollback arrow at every rung, the irreversible step last.
-- **CDC + backfill beats dual-write** as the default sync: log-ordered, failure-atomic, resumable, production write path untouched. Dual-write diverges silently on partial failure and still needs backfill + reconciliation, reserve it for log-less vendor exits.
-- **Verification is the product:** partition checksums over all the data, dark reads on ~1% of traffic, a numeric budget (< 0.01% sustained), and *unexplained* mismatches block by definition.
-- **Reads ramp first, writes flip last**, through one runtime-flagged seam, and reverse CDC at the write flip keeps rollback a rehearsed, minutes-long flag flip through burn-in.
-- **The dual-run window is a budget line with an owner:** ~2.2× infra (~$13K/week here), exit criteria written before phase one, one named go/no-go decider, abort thresholds pre-committed against 2 a.m. sunk-cost pressure.
+- **This is a correctness problem in plumbing's clothing.** The pipeline's job is to land operational data into the **bronze** lakehouse reliably; done wrong it silently corrupts every downstream number. Open with **"what freshness, and where is exactly-once mandatory?"**, it sets streaming-vs-micro-batch and how much exactly-once machinery to buy.
+- **Log-based CDC (Debezium on the WAL/binlog) beats query-based polling**, because polling **silently misses deletes** and **loads the source**; the WAL is the same replication log a replica already reads, so capture is complete (incl. deletes), ordered, and near-zero-impact. This is non-negotiable when deletes matter.
+- **Effectively-once is the correctness spine:** **partition Kafka by primary key** (per-row order) + **idempotent MERGE guarded by `source_lsn`** (replays and out-of-order changes are no-ops) + **Flink transactional checkpoint** (the machinery). It costs ~10–30% overhead, paid where a double-apply corrupts money.
+- **The two silent killers are schema drift and the snapshot-stream gap.** A **schema registry** with additive-auto / breaking-surfaced (renames masquerade as additive) stops drift corruption; **snapshot-then-stream cutover** with LSN de-dup makes backfilling billions of live rows gap-free. And the **Kafka buffer** prevents the WAL truncating unread changes, permanent loss, so slot-lag is a first-class SLO.
+- **Decide streaming-vs-micro-batch per source** and **self-host-vs-managed by volume**, stream and self-host the correctness-critical firehose, micro-batch and managed the analytical long tail; the Debezium→Kafka front half is shared. Delegate connector ops, checkpoint tuning, CoW/MoR, and registry policy with stated priors; keep log-based-capture-with-deletes, PK-ordered transport, effectively-once apply, and drift-surfaced.
 
-> **Spaced-repetition recap:** Zero-downtime migration = **assess → stabilize → parallel-run → shift → verify → decommission**, for any variant. Sync via **CDC + backfill** (dual-write only when no log exists); prove match with **checksums + dark reads against a numeric mismatch budget**; ramp **reads first, writes last** through one flag-controlled seam; **reverse CDC** keeps rollback alive through burn-in; dual-run ≈ **2× cost**, so exit criteria are pre-written and one person owns go/no-go.
+> **Spaced-repetition recap:** CDC ingestion = **get operational data into the bronze continuously and *correctly***. Ask **freshness + exactly-once-where** first (sets streaming vs micro-batch, per source). Pipe: **WAL → Debezium (log-based, not polling, 13.6/2.4) → Kafka (partitioned by PK for per-row order) → Flink → idempotent MERGE into bronze Iceberg/Delta**, raw tee'd to S3 for replay. **Effectively-once** = PK partition + **MERGE guarded by `source_lsn`** (replays/out-of-order = no-ops) + transactional checkpoint, ~10–30% overhead. Polling **misses deletes**; the **Kafka buffer** stops the WAL truncating unread changes (slot-lag is an SLO); the two silent killers are **schema drift** (registry: additive auto, rename/drop surfaced) and the **snapshot-stream gap** (snapshot-then-stream + LSN de-dup). Keep log-capture-with-deletes, PK order, effectively-once, drift-surfaced; delegate connector ops / checkpoint / CoW-MoR / registry with priors.
 
 ---
 
-*End of Lesson 8.3. Where a strongly-consistent core is protected with a queue, this lesson protects a* **transition** *with a ladder, replication, partitioning, and pub-sub machinery repurposed so two stores can be one system of record, briefly and provably, while trust moves. The playbook is the takeaway: six phases that survive any migration an interviewer can invent.*
+*End of Lesson 8.3. CDC ingestion & streaming ETL is the unglamorous backbone of the data platform: a log-based-capture → Kafka → Flink → idempotent-MERGE pipeline whose real job is correctness, not throughput, because its silent failures, missed deletes, double-applied changes, swallowed schema drift, corrupt every number the warehouse/lakehouse problem builds on top. The load-bearing decisions are log-based-over-polling, effectively-once-by-PK-upsert, and drift-surfaced-not-swallowed, reusing the exactly-once machinery and the Kafka over the replication log of 2.4. Next: the data platform's governance and lineage plane, knowing where every number came from.*

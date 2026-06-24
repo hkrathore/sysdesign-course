@@ -255,4 +255,4 @@ GET /api/v1/urls/{code}/stats
 
 ---
 
-*End of Module 4. This warm-up taught the method; the next problems run full RESHADED at speed, starting with a deeper TinyURL/Pastebin and moving through Instagram, Twitter, WhatsApp, Uber, YouTube, the web crawler, and LLM serving.*
+*End of Lesson 4.1. This warm-up taught the method; the next problems run full RESHADED at speed, starting with a deeper TinyURL/Pastebin and moving through Instagram, Twitter, WhatsApp, Uber, YouTube, the web crawler, and LLM serving.*

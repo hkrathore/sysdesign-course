@@ -1,150 +1,284 @@
 ---
-title: "11.4 — LLM Inference & Serving"
-description: "Why GPU memory bandwidth — not disk or CPU — is the binding resource for LLM inference, and the mechanics that bound it: prefill vs decode, the KV cache, continuous batching, quantization, and the throughput-vs-latency trade."
+title: "11.4 — Multi-Region & Disaster Recovery"
+description: "Active-active vs active-passive is the wrong question, tier services by revenue-at-risk, pin RTO/RPO per tier as business sign-offs, pay 2× only where the money flows, and rehearse the region-death runbook until the only live decision is declaring."
 sidebar:
   order: 4
 ---
 
-### Learning objectives
-- Name the binding resource for LLM inference — **GPU HBM (high-bandwidth memory)**, not disk or CPU — and explain why decode is **memory-bandwidth-bound**, not compute-bound, so you optimize the right thing.
-- Separate **prefill** (whole prompt in parallel, compute-bound → sets TTFT) from **decode** (one token at a time, sequential, bandwidth-bound → sets inter-token latency), and use the split to predict latency and size hardware.
-- Explain how the **KV cache** grows with sequence length and **bounds how many requests you can batch**, and why long contexts eat batch capacity.
-- Reach for the two throughput levers that don't require buying GPUs — **continuous (in-flight) batching** and **quantization** — and name what each costs.
-- Make the **throughput-vs-latency** call (bigger batch = cheaper tokens but slower per request), separate **real-time from batch/async** serving, and **delegate** kernel/quant tuning with a stated prior while owning the capacity/cost/SLO decision.
+> **This question has a dedicated section in every 2026 senior question bank, and L6+ candidates are expected to raise multi-region failure modes unprompted.** The standard EM form is concrete: *"A region just died during peak. Walk me through it."* The junior answer draws two identical regions and says "active-active." The Director answer knows **RPO≈0 active-active roughly doubles infra cost *and* imports a write-conflict problem you didn't have yesterday**, so it tiers services by criticality, pays the 2× only for checkout, lets analytics ride on backups, states the spend delta, and treats an untested DR plan as fiction. "Everything active-active" is not the strong answer. It is the failure mode.
 
-> This lesson is the **building-block concept layer** — the reusable mechanics of serving one model on a GPU fleet. The **full end-to-end RESHADED design** (estimation, the serving system, autoscaling, the cost floor, the trade-off table) is **the ChatGPT / LLM-serving walkthrough**. This is the building-block → full-design split: learn the primitive here, watch it drive a complete design there. Don't re-derive the serving system in your head while reading this — get the mechanics first.
+### Learning objectives
+- Run an **adapted RESHADED** spine on a resilience strategy: R becomes **RTO/RPO pinned per service tier** (a business sign-off, not an engineering preference), E becomes **cost-delta math**, 2× infra vs revenue-at-risk per hour.
+- Argue the load-bearing tension: **blanket active-active** (~2× spend, conflicts everywhere) vs **tiered DR**, checkout active-active, catalog warm-standby, analytics backup-restore, with the dollar delta stated.
+- Pick a per-tier data strategy with CAP and quorum reasoning: where to pay cross-region write latency for RPO 0, where to accept seconds of RPO, where conflicts are *avoided* rather than resolved.
+- Deliver the **"region just died at peak" walkthrough** as a rehearsed script whose only live decision is *declare*.
+- Run the program like a Director: game-day cadence, survivor-region capacity as a budget line, restore-tested backups, delegated depth with priors.
 
 ### Intuition first
-A GPU is a **kitchen with a tiny counter and a freakishly fast chef.** The chef (the compute units) can chop and cook faster than almost anything — but everything they cook has to fit on the **counter** (HBM, the GPU's on-board memory) at once, and the counter is small. The bottleneck is almost never "can the chef chop fast enough." It's "how much fits on the counter at the same time."
+Think of how a city protects its buildings against fire. The hospital has a second fully-staffed operating theater across town, running 24/7, ambulances pre-routed, because an hour of "the hospital is down" kills people. The library has smoke detectors, insurance, and an off-site archive of its catalog, if it burns, you rebuild over months, and that's *fine*. Nobody runs a duplicate, fully-staffed library "just in case"; the cost is absurd relative to what's at risk. **Disaster recovery is the same allocation problem: protection priced to what each thing is worth, not one gold-plated standard for everything.**
 
-Two things sit on that counter: the **recipe book the chef re-reads for every single word of every dish** (the model weights), and the **running notes for each order in progress** (the KV cache — what's been said so far, so the chef doesn't re-read the whole order to add the next word). The recipe book is huge and fixed; the notes grow as each order gets longer. Whatever counter space is left after the recipe book decides **how many orders the chef can work on at once** — and working on more orders at once is the only way the kitchen gets cheaper per dish, because the chef re-reads the same recipe page once and applies it to every order on the counter.
+Two definitions carry the topic. **RTO** (recovery time objective): how long until service is back, the *outage clock*. **RPO** (recovery point objective): how much recently-written data you may lose, the *amnesia window*. Every DR architecture is a price point on these two dials, and the pricing is brutally non-linear: RTO of a day costs almost nothing (restore from backup); RTO of minutes with RPO of zero means a second region running hot, roughly **double the bill**, plus a problem money can't dissolve: if both regions accept writes, the same cart can be written in two places at once, and *someone* must decide who wins. That's the CAP trade with a 70 ms ocean in the middle.
 
-That single image carries the whole lesson. **Reading the recipe page is the slow part, not the chopping** — so the chef wants as many orders as possible sharing each read (batching), and the limit on batch size is **counter space**, not chef speed. Shrink the recipe book (quantization) and more orders fit. Read the first order's whole sentence in one glance (prefill) but answer it **one word at a time** (decode), and you've found why the first word starts fast but the full answer streams out slowly. Get this intuition right and GPU serving is detail.
+So the Director's move is never "pick active-active or active-passive." It's: **which services are the hospital, and which are the library?**
 
-### Deep explanation
+---
 
-**The GPU is the unit of cost; HBM is the binding resource.** Unlike a web tier where you reason about disk I/O, CPU, and network, an LLM serving fleet is priced in **GPU-hours** (≈ $2–4/GPU-hour for an H100-class card in 2026), and the thing that runs out first is **HBM** — the 80 GB or so of fast memory soldered next to the chip. Two consumers compete for it: the **weights** and the **KV cache**. The weights alone often nearly fill the card, and what's left bounds your batch — and your batch bounds your throughput. So the first sizing question is never "how many FLOPs" — it's "**does the model even fit, and how much room is left for the cache.**"
+## R: Requirements
 
-The weight math is the back-of-envelope you must be able to do out loud: **bytes = params × bytes-per-param.** A **70B** model in **fp16 (2 bytes/param)** is `70 × 10⁹ × 2 = 140 GB` — which does **not** fit one 80 GB H100. So you either span **2 GPUs** (140 GB across 2 × 80 GB, tensor-parallel) or **quantize** to drop the footprint. That single "140 GB > 80 GB" fact is the most common thing candidates get wrong, and it doubles the hardware count if you miss it (the worked example below makes it concrete).
+> **Adaptation, said out loud:** in a product design, R scopes features. Here R produces the **tier catalog with RTO/RPO pinned per tier**, and those numbers are *business sign-offs with a price tag*, not engineering aesthetics. Finance and product own "how much is an hour of checkout worth"; engineering owns "here is what each answer costs."
 
-**Decode is memory-bandwidth-bound, not compute-bound** — the most important and least intuitive fact here. To generate **one** output token, the GPU must stream **every weight** of the model from HBM through the compute units once. For a 70B model that's ~140 GB of reads (fp16) per token-step. At ~3 TB/s of HBM bandwidth, that read *is* the latency floor — the compute units finish their multiply long before the next batch of weights arrives, and sit idle waiting on memory. The consequence is the whole game: **if you're already paying to stream the weights once, you might as well apply them to many sequences at the same time.** That's why batching multiplies throughput almost for free — the expensive weight-read is **shared** across every sequence in the batch. The Director-altitude statement: *decode throughput is set by how many sequences share each weight-read, and that count is capped by HBM, not by the chip's math speed.*
+**Anchor scenario:** an e-commerce platform, **$1B/yr revenue**, single-region today in us-east, **$40M/yr infra spend**, ~80 services. Peak weeks (Black Friday) run ~8× average traffic and a disproportionate share of annual revenue.
 
-**Prefill vs decode — two different machines in one request.** A request runs in two phases with opposite characteristics:
+**Clarifying questions I'd ask (with assumed answers):**
+- *What does an hour of full outage cost?* → Average ≈ **$115K/hr** ($1B ÷ 8,760). At peak, ~**$1M/hr** plus trust damage and press. Revenue-at-risk is *spiky*.
+- *Is revenue uniform across services?* → No, the whole game. **~90% of revenue-at-risk flows through ~15% of services**: checkout, payments, cart, auth, orders.
+- *Threat model?* → Full regional failure, historically **about once every 1-2 years, lasting 2-6 hours**, in every major cloud. Also bad deploys and data corruption, which replication *propagates* rather than protects against, backups stay mandatory even with active-active.
+- *Compliance floor?* → Payment and order data must survive regional loss regardless of cost, a constraint, not a choice.
 
-- **Prefill** processes the **entire prompt in one parallel pass** — all input tokens at once. This is **compute-bound** (the chip is genuinely busy doing matrix math on the whole prompt), takes tens to hundreds of milliseconds depending on prompt length, and it sets **TTFT (time to first token)** — how long until the user sees the first word.
-- **Decode** generates the response **one token at a time, sequentially** — each token depends on the previous one, so there's no parallelism within a single sequence. This is **memory-bandwidth-bound** (as above), runs at ~30–50 ms/token, and it sets **inter-token latency (ITL)** — how fast words stream out after the first.
+**The deliverable of this step, the tier catalog:**
 
-A typical request — 1,000 input tokens, 500 output — spends a few hundred ms in prefill, then ~15–25 s dripping out 500 tokens in decode. **Decode dominates wall-clock; prefill dominates the TTFT budget.** This is the LLM equivalent of the read:write skew that drives a CRUD design — except here the skew is **prefill vs decode**, and recognizing it is the first thing the problem tests (the token/latency model this builds on comes from the LLM-fundamentals lesson).
+| Tier | Services | RTO | RPO | Signed off by |
+|---|---|---|---|---|
+| **0, revenue path** | checkout, payments, cart, auth, orders | **< 5 min** | **≈ 0** (ledger), seconds (cart) | CFO + CPO |
+| **1, customer experience** | catalog, search, recommendations, profile | **< 30 min** | **< 5 min** | CPO |
+| **2, internal / batch** | analytics, ML training, BI, internal tools | **< 24 h** | **< 24 h** | Eng + data lead |
 
-**The KV cache bounds your batch — and long contexts eat it.** To avoid re-reading the whole conversation on every decode step, the model caches the attention **keys and values** for every token it's already seen. This **KV cache is per-request, lives in HBM, and grows linearly with sequence length** — on the order of **~300 KB/token** for a 70B model with modern grouped-query attention, i.e. **~1.3 GB for a 4,000-token sequence.** Now the squeeze is visible: fp16 weights take 140 GB; on a 2-GPU node (160 GB) that leaves ~20 GB for KV, only **~15 concurrent 4K sequences** — far too few to keep an expensive GPU busy. **A 100K-token context consumes ~25× the KV of a 4K one**, so a handful of long-context requests can monopolize the node. The KV cache is the LLM's real "index": it bounds concurrency, therefore throughput, therefore $/token. The byte-math is in the Go-deeper block.
+**Explicitly NOT requirements:** "five nines for everything," multi-*cloud* (a different, far more expensive problem, defer unless a regulator forces it), active-active for Tier 2 "for consistency." Uniformity is not a requirement; it's a failure to prioritize.
 
-**Continuous (in-flight) batching is the throughput unlock.** The naive approach, **static batching**, assembles a batch of N requests and runs it to completion before admitting the next. Because generations vary wildly in length (one stops at 20 tokens, another runs to 800), the batch is **held hostage by its longest member** — finished sequences sit in their KV slots doing nothing while the GPU waits, and utilization craters (often <30%). **Continuous batching** (vLLM, TGI, TensorRT-LLM) works at **per-token granularity**: on every decode step the scheduler **evicts** any finished sequence and **admits** a waiting one into the freed KV slot, so the batch is continuously refilled and the GPU never idles on a straggler. This is the **single biggest utilization lever** — commonly **2–4× throughput on the same hardware**, and far more on bursty, mixed-length traffic. **PagedAttention** complements it by paging the KV cache into fixed-size blocks (like OS virtual memory) instead of reserving each sequence's max length up front, killing fragmentation and packing **~2–4× more** sequences into the same HBM. The cost of continuous batching is a far more complex scheduler (interleaving prefill and decode, managing a dynamic batch) — accepted because it's *the* cost lever in the system. You **reject static batching** for interactive serving: simple, but it leaves your most expensive resource idle.
+**Non-functional constraints:** failover executable by the on-call without heroics (runbook-as-code); the surviving region absorbs **100% of peak**; the plan is **rehearsed**, an RTO never measured in a game day is a guess.
 
-**Quantization makes a model fit and raises the batch.** Quantization stores weights in fewer bits — **fp16 → int8 → int4** — using calibration methods like **AWQ** or **GPTQ** that preserve quality far better than naive rounding. The payoff is **~2× memory cut at int8, ~4× at int4**, doing two things at once: it lets a model **fit on fewer GPUs**, and **frees HBM for a bigger KV cache → bigger batch → higher throughput**. A 70B model is 140 GB at fp16, ~70 GB at int8 (fits one 80 GB H100 with KV room), ~35 GB at int4. The cost is a **small, model-dependent accuracy loss** that must be **measured on real evals**, not assumed — fp8/int8 is usually a clean win; int4 trades more quality for the smallest footprint. You **reject fp16 purity** when the SLO tolerates the measured loss and the GPU savings are large; **reject int4** when the eval shows the hit crosses your bar. This is the main lever to pull *before* buying more GPUs.
+---
 
-**Parallelism for big models, and faster decode** are the next levers when a single card or quantization isn't enough — covered in the Go-deeper block so the visible body stays at altitude.
+## E: Estimation
 
-<details>
-<summary>Go deeper — KV byte-math, tensor/pipeline parallelism, speculative decoding (IC depth, optional)</summary>
+> **Adaptation, said out loud:** no QPS sizing here. Estimation becomes **cost-delta math**, each DR posture's annual cost versus the expected revenue-at-risk it removes. Same estimation discipline: round aggressively, state assumptions, let the numbers decide.
 
-**KV-cache byte math.** KV bytes per token = `2 (K and V) × layers × kv_dim × bytes_per_value`. For a 70B-class model (≈80 layers, 8K hidden, fp16): full multi-head attention keeps a K and V vector per head → ~`2 × 80 × 8192 × 2 B ≈ 2.5 MB/token`. **Grouped-query attention (GQA)** — the modern default — shares each K/V head across a group of ~8 query heads, shrinking `kv_dim` ~8× → **~320 KB/token**. A 4,096-token sequence: `320 KB × 4,096 ≈ 1.3 GB` (GQA) vs ~10 GB (MHA). This ~8× reduction is *why* batches of dozens are feasible at all.
+**Option math, on the $40M base.** A region that must survive alone must carry **100% of peak by itself**, so blanket active-active isn't "2 × 50%," it's close to 2 × 100%-capable:
 
-**Tensor parallelism (TP)** splits each weight matrix *across* GPUs — every GPU holds a slice of every layer and they all-reduce activations each layer. It's how a 140 GB model runs on 2 × 80 GB cards (TP=2). Cost: heavy inter-GPU communication every layer, so TP wants a fast interconnect (NVLink) and is usually confined within one node. **Pipeline parallelism (PP)** splits the model *by layers* across GPUs (GPU 0 holds layers 1–40, GPU 1 holds 41–80) and streams micro-batches through the stages. Cheaper on bandwidth (only activations cross the boundary), but introduces pipeline "bubbles" (idle stages while the pipe fills/drains). Real frontier deployments combine them: TP within a node, PP across nodes.
+- **Blanket active-active (everything, RPO≈0):** ≈ **+$30M/yr** (~1.75× total), duplicate stateful fleets, cross-region replication egress (real money at PB scale), and the engineering tax of making 80 services conflict-safe.
+- **Blanket active-passive (warm standby for everything):** ≈ **+$13M/yr** at ~30% standby capacity, but RTO is now 30-60 min *for checkout too*, and a warm fleet that never takes traffic is the classic failover that fails.
+- **Tiered (the proposal):** Tier 0 ≈ 15% of spend, fully duplicated → **+$6M**; Tier 1 warm standby at ~30% capacity on ~50% of spend → **+$6M**; Tier 2 backups + vault → **+$0.5M**. Total ≈ **+$12.5M/yr, ~$18M/yr less than blanket active-active**, with a *better* RTO on the revenue path than blanket-passive.
 
-**Speculative decoding** attacks decode latency. A small, fast **draft model** proposes the next *k* tokens; the big model then **verifies all k in a single parallel forward pass** (cheap, because verification is one prefill-like pass, not k sequential decodes). Accepted tokens are kept, the first rejected one is corrected. When the draft is right most of the time, you get ~2× fewer big-model steps for the same output — a real ITL win for a small quality-neutral cost (the output distribution is provably preserved). The trade: you now run and maintain two models and a verification loop; have the inference team benchmark acceptance rate on real traffic before adopting.
+**What the spend buys.** Expected event: one regional outage per ~2 years, ~4 hours. At peak: 4 × $1M ≈ **$4M** plus trust damage, call expected loss **~$20M/decade, almost all of it in Tier 0**. Blanket active-active spends **$300M/decade** against that, mostly protecting analytics pipelines nobody would miss for a day. Tiered spends **$125M/decade**, concentrated where the loss concentrates. **Saying the ~$18M/yr delta out loud is the Director signal.**
 
-</details>
+**The number people forget:** survivor-region **capacity headroom**. Tier 0 in each region must be provisioned, or pre-warmed with reserved quota, for 100% of peak Tier-0 traffic. Cloud quota limits are the silent DR killer. That headroom is *in* the +$6M; omit it and your RTO is fiction.
 
-**Throughput vs latency is an SLO trade, not a free lunch.** Bigger batches raise **tokens/sec/GPU** (cheaper $/token, because each weight-read is amortized over more sequences) but **raise per-request latency** (a new request waits longer for a KV slot, and large prefills block the decode loop, pushing up TTFT and ITL). Smaller batches give snappy latency and idle, expensive GPUs. You **cannot** maximize throughput, latency, and cost at once — it's a trilemma. The resolution is to **stop trying to serve one workload**: split a **real-time / interactive path** (smaller batches, latency-bounded, low TTFT — the user is watching) from a **batch / async path** (giant batches, no latency SLO, run off-peak — the cheapest possible throughput for jobs nobody is staring at). A serious LLM API exposes both for exactly this reason. You **reject a single global batch size**: tuned for throughput it breaks the interactive product (TTFT ≫ 1 s); tuned for latency it burns money.
+**What estimation decided:** tiering is the only posture the math supports. RPO≈0 is bought only for the order/payment ledger; everything else trades amnesia-window for dollars at a stated exchange rate.
 
-**Serving stacks and build-vs-buy.** Don't write the inference engine. The mature options:
+---
 
-- **Self-host an open engine** — **vLLM** (continuous batching + PagedAttention, the common default), **TGI** (HuggingFace), **TensorRT-LLM** (NVIDIA, fastest on NVIDIA hardware, more tuning), often fronted by **Triton** as the serving server. You own the GPUs and the ops; you get cost control and model freedom.
-- **Managed inference** — **AWS Bedrock**, **GCP Vertex**, **Fireworks / Together / Anyscale**. Pay per token, no GPU ops, instant scale; you give up cost control at volume and some model/latency control.
+## S: Storage
 
-The **build-vs-buy** call turns on volume and control needs and is worked through in **the AI-strategy & build-vs-buy lesson** — the short version: managed until your token volume makes the per-token markup exceed the cost of running your own fleet, or until you need a model/latency profile the managed offering won't give you.
+> **Adaptation, said out loud:** S here is the **per-tier replication strategy**, and the *write-conflict problem is created or avoided in this step*. Replication mechanics and why cross-region agreement costs an RTT are covered elsewhere; here we only place those tools.
 
-**Autoscaling reality — GPUs don't scale like web servers.** Three facts break the playbook. GPUs are **scarce** (capacity may not be there on demand). **Cold starts are slow** — loading 70–140 GB of weights into HBM takes **tens of seconds to minutes**, so a new node can't absorb a spike in time. And **idle GPUs are very expensive** (~$6/node-hour for a 2-GPU node doing nothing). So you **don't scale from zero** for an active model and don't scale reactively on CPU. Instead you **over-provision a warm floor + warm pool** of pre-loaded standbys, **scale on queue depth / pending-token backlog** (a leading indicator), and absorb spikes with a **queue + backpressure (429)** while the pool spins up. The warm capacity is **idle GPU cost paid for responsiveness** — an explicit $/latency dial a Director owns. (Full autoscaling and queue design lives in the LLM-serving walkthrough.)
+**Tier 0, two sub-decisions, because "checkout" is not one data shape:**
 
-### Diagram: the serving path, HBM as the binding resource
+- **Order/payment ledger, cross-region quorum, RPO 0.** Writes commit to a majority of replicas spanning 3 regions (N=3, W=2), Spanner-style. *Cost:* every ledger write pays ~30-70 ms of cross-region RTT, acceptable, because order placement is once-per-checkout, and compliance demands RPO≈0 anyway. *Rejected, multi-master with LWW/CRDT merge for money:* last-write-wins on a ledger double-charges or loses orders. **For money, avoid conflicts; don't resolve them.**
+- **Carts and sessions, single-writer-per-key, async replication.** Each user's cart is **homed** to one region; only the home region writes it; async replication mirrors it. On regional death, the survivor takes over homing, accepting **seconds of RPO on carts homed to the dead region**. A lost cart line is an apology; a conflicted payment is an incident. *Rejected, quorum writes for carts:* 70 ms on every cart-add to protect apology-grade data is the wrong exchange rate.
+
+**Tier 1, async replica, promote on failover.** Catalog/search/profile keep a cross-region **asynchronous replica**; seconds of lag = seconds of RPO, well inside the 5-min sign-off. *Rejected, sync replication:* an RTT inside every catalog write to protect data the business agreed to lose 5 minutes of.
+
+**Tier 2, backup-restore.** Snapshots and incrementals to a **cross-region, logically isolated vault**; rebuild compute from infrastructure-as-code. The rule everyone skips: **a backup never restored is a hope, not a backup**, quarterly timed restore drills, the measured time *becoming* the real RTO. *Rejected, warm standby for analytics:* paying 24/7 compute to protect a 24-hour RTO.
+
+**Backups exist in every tier, including Tier 0**, replication faithfully copies corruption and `DELETE`s region-to-region in milliseconds. Replication is for region death; point-in-time backups are for human and software error. Conflating them is a classic red flag.
+
+---
+
+## H: High-level design
+
+> The shape to make visible: **one global front door, two regions, three protection levels**, the diagram must show *asymmetry*, because symmetric diagrams are how "everything active-active" sneaks in.
 
 ```mermaid
 flowchart TB
-    C["Client<br/>(streams tokens)"] -->|"POST /chat, stream=true"| API["API gateway<br/>auth · token rate-limit"]
-    API --> Q["Request queue<br/>admission control + priority"]
-    Q -->|"backpressure 429 when full"| C
-    Q --> SCHED["Scheduler<br/>(continuous batching)<br/>evict finished · admit waiting per token-step"]
-
-    subgraph FLEET["GPU fleet — HBM is the binding resource"]
-      SCHED --> PRE["Prefill workers<br/>(compute-bound → TTFT)"]
-      SCHED --> DEC["Decode workers<br/>(bandwidth-bound → inter-token latency)"]
-      PRE --> HBM[("HBM per node<br/>weights (quantized) + KV cache<br/>KV bounds the batch")]
-      DEC --> HBM
+    USR[Users] --> GTM[Global traffic steering]
+    GTM --> RE
+    GTM --> RW
+    subgraph RE[Region East]
+        T0E[Tier 0 checkout active]
+        T1E[Tier 1 catalog active]
+        T2E[Tier 2 analytics]
+        L0E[(Ledger quorum leg)]
+        C1E[(Catalog primary)]
     end
-
-    DEC -->|"token stream (SSE)"| API
-    API -->|"data: token"| C
-    AS["Autoscaler: warm pool,<br/>scale on queue depth, no scale-to-zero"] -. "watches" .-> Q
-
-    style HBM fill:#7a1f1f,color:#fff
-    style SCHED fill:#1f6f5c,color:#fff
-    style PRE fill:#e8a13a,color:#000
-    style DEC fill:#e8a13a,color:#000
+    subgraph RW[Region West]
+        T0W[Tier 0 checkout active]
+        T1W[Tier 1 catalog warm standby]
+        L0W[(Ledger quorum leg)]
+        C1W[(Async catalog replica)]
+    end
+    L0E <--> L0W
+    L0E <--> L0X[(Third quorum leg)]
+    L0W <--> L0X
+    C1E -.-> C1W
+    T2E -.-> VLT[(Cross region backup vault)]
+    style T0E fill:#7a1f1f,color:#fff
+    style T0W fill:#7a1f1f,color:#fff
+    style T1W fill:#2d6cb5,color:#fff
+    style VLT fill:#1f6f5c,color:#fff
 ```
 
-The hot, expensive edge is **scheduler ↔ GPU fleet**, and inside the fleet the red box — **HBM holding weights + KV cache** — is what everything else is fighting over. The queue and autoscaler exist to keep that fleet busy without melting it.
+**Steady state:** traffic steering (latency-based DNS or anycast) splits users by proximity. Tier 0 serves actively in **both** regions, carts homed per user, ledger on the 3-leg quorum. Tier 1 serves from East with West warm at ~30%, replica trailing by seconds. Tier 2 lives in East only, shipping backups to the vault.
 
-### Worked example: fit a 70B model — fp16 vs int4
+**Region-death state:** steering withdraws East; West's Tier 0, *already live*, absorbs the rest within minutes. **Tier 0's failover is a traffic shift, not a cold start**, that's why its RTO is minutes. Tier 1 promotes its replica and scales to full. Tier 2 waits, or restores from the vault.
 
-Take one **70B-parameter** model and ask the only question that sets the bill: **how many GPUs, and how big a batch?** Assume 80 GB H100s and ~4K-token sequences (~1.3 GB KV each, GQA).
+**The load-bearing property:** Tier 0's standby is never idle, it serves production daily, so it cannot silently rot. Active-passive's deepest flaw isn't the 30-min RTO; it's that the passive side is **unproven by construction** until the worst possible moment.
 
-- **fp16 (2 bytes/param):** weights = `70B × 2 = 140 GB`. **Does not fit one 80 GB GPU → 2-GPU node (160 GB), TP=2.** After 140 GB of weights, ~20 GB of HBM is left for KV → `20 ÷ 1.3 ≈` **~15 concurrent sequences.** That's a memory-bound node: ~15 sequences is too few to amortize the weight-reads, so tokens/sec/GPU is low and $/token is high. Full quality, double the hardware, small batch.
-- **int4 (0.5 bytes/param):** weights = `70B × 0.5 ≈ 35 GB`. **Fits a single 80 GB GPU** with ~45 GB left for KV → `45 ÷ 1.3 ≈` **~34 sequences on one GPU** (and PagedAttention pushes effective capacity 2–4× higher still). So int4 **halves the GPU count *and* roughly doubles the batch** — a ~4× swing in $/token for the same traffic. The cost is a model-dependent, eval-measured accuracy hit; int8 (~70 GB, fits one GPU, ~8 KV seqs before paging) is the middle ground when int4's loss is too much.
+---
 
-The headline: **precision is the lever that decides hardware count and batch size simultaneously.** Going from fp16 to int4 took this from "2 GPUs, ~15 sequences" to "1 GPU, ~34 sequences" — before you've tuned a single kernel. The rejected alternative — *brute-force the batch with more/bigger-HBM GPUs* — linearly inflates the most expensive line item to buy capacity that quantization gets nearly free. (The full fleet-count and $/1M-token derivation from DAU lives in **the LLM-serving walkthrough**; this example is just the per-node fit that feeds it.)
+## A: API design
 
-### Trade-offs table: the three serving decisions
+> **Adaptation, said out loud:** no product endpoints here. The "interfaces" of a DR architecture are the **contracts that make failover safe and executable**: write semantics that survive a replay, a health contract the steering layer can trust, and a control plane that is itself region-independent.
 
-| Decision | Option A | Option B | Option C | Use when… |
+```
+# 1. Idempotency on every Tier 0 write — failovers cause retries and replays
+POST /v1/orders   headers: { Idempotency-Key: <uuid> }
+  -> 200 (same response on replay; never a double-charge)
+
+# 2. Health contract for steering — answered from OUTSIDE the region
+GET  /healthz/regional  -> 200 | 503
+  # synthetic probes from 3+ external vantage points; a region cannot
+  # be trusted to report its own death
+
+# 3. DR control plane — runbook as code, hosted outside both regions
+POST /dr/declare   { region, incident_id, commander }   # human-gated
+POST /dr/drain     { region }          # steering withdraws, TTL 60s
+POST /dr/promote   { tier: 1 }         # replica promotion, pre-scripted
+POST /dr/shed      { below_tier: 2 }   # load-shedding order, pre-agreed
+```
+
+**Design notes (each with its rejected alternative):**
+- **Idempotency keys on the revenue path are non-negotiable**, a failover mid-request *will* produce retries against the other region. *Rejected: trusting clients not to retry.* They always retry.
+- **Health is judged externally.** *Rejected: in-region monitoring deciding failover*, a dying region's monitoring dies with it. The observability stack observes; an external arbiter decides.
+- **`declare` is human-gated; everything after it is automation.** *Rejected: fully automatic regional failover*, a false positive evacuates the company on a network blip, and split-brain (both regions believing they're primary) is worse than the outage.
+
+---
+
+## D: Data model
+
+> **Adaptation, said out loud:** the data model of a DR *program* is not a table schema, it's the **catalog mapping every service and dataset to its tier, strategy, conflict policy, and owner**. New services must register a row before launch; the row is what auditors, finance, and the game-day team all read.
+
+| Service | Tier | RTO / RPO | Data strategy | Conflict policy | Owner |
+|---|---|---|---|---|---|
+| payments-ledger | 0 | 5 min / 0 | 3-region quorum | impossible by construction | payments |
+| cart | 0 | 5 min / seconds | home-region per user, async mirror | single writer per key | checkout |
+| auth/sessions | 0 | 5 min / seconds | same as cart | single writer per key | identity |
+| catalog | 1 | 30 min / 5 min | async replica, promote | n/a, single primary | catalog |
+| search index | 1 | 30 min / rebuildable | re-index from catalog | n/a | search |
+| analytics lake | 2 | 24 h / 24 h | vault backups + IaC rebuild | n/a | data |
+
+**Two structural decisions hiding in this table:**
+- **Conflict policy is a per-dataset column, not a system-wide choice.** The ledger makes conflicts impossible (quorum); carts make them impossible differently (one *regional* writer per key); nothing *resolves* conflicts after the fact. The interview trap is proposing multi-master and hand-waving "we'll use CRDTs", the CAP trade applied: pick where you pay, latency now or reconciliation later; for money, always pay now.
+- **"Rebuildable" is a legitimate strategy.** The search index is derived data, re-indexable from the catalog. Exempting derived datasets from replication spend is free money, a surprising fraction of most storage is derived.
+
+<details>
+<summary>Go deeper, conflict-resolution mechanics if you must go multi-master (IC depth, optional)</summary>
+
+If a dataset genuinely needs concurrent writes in two regions (collaborative editing, social counters), the options ladder: **LWW** (last-write-wins by timestamp), simplest, silently drops the losing write, and cross-region clock skew makes "last" a lie; acceptable only where any value is as good as another (presence flags). **Vector clocks / sibling resolution** (Dynamo-style), detects concurrency instead of hiding it, pushes resolution to the application (quorum reads return siblings); operationally heavy. **CRDTs**, counters, sets, registers that merge deterministically; ideal for likes/counters (sharded counters generalize to G-Counters across regions), unusable for invariant-bearing data ("balance ≥ 0" is not CRDT-expressible). **Single-writer-per-key** (our cart choice) sidesteps the ladder entirely by making concurrency impossible per key, at the cost of a homing directory and a re-homing step during failover. The prior: exhaust single-writer designs before accepting any merge semantics, and never put money behind LWW.
+
+</details>
+
+---
+
+## E: Evaluation
+
+> **Adaptation, said out loud:** Evaluation for DR has exactly one form, **game days**. You cannot code-review your way to confidence in a failover; an untested DR plan is fiction with a budget line. This is also where the interview's signature moment lives: *the live walkthrough*.
+
+**The "region just died at peak" script.** 11:40 AM, Black Friday. us-east goes dark. The interviewer wants to watch you run it, and the defining property of a Director answer is that **every decision in the script was made months ago; the only live decision is declaring.**
+
+- **T+0-3 min, detect and declare.** External synthetic probes show East unreachable; internal dashboards are *also* gone, itself the signal. Pre-written rule: *unreachable from a majority of external vantage points for 3 minutes → declare; do not debug first.* One named incident commander declares via the out-of-region control plane. The classic failure: **30 minutes of diagnosis before anyone owns the word "disaster"**, the RTO clock started at T+0 regardless.
+- **T+3-6 min, drain.** `dr/drain east`: steering (60 s DNS TTL or anycast withdrawal) shifts users west. Tier 0 in West is already live, checkout recovers within minutes. Carts homed East lose seconds of writes: the signed RPO, now collected.
+- **T+5-15 min, promote and scale.** `dr/promote tier 1`: catalog replica promotes; the warm fleet scales 30% → 100% against **pre-reserved quota**. If West strains, the pre-agreed shedding order activates: Tier 2 and internal traffic first, then recommendations, then degraded search, **checkout sheds last, by written policy, not by whoever's loudest on the bridge.**
+- **T+15-30 min, verify and communicate.** Synthetic checkout transactions confirm the revenue path. Status page at T+10 (pre-drafted copy); execs get the number they care about: *revenue path restored at T+12, est. loss $200K, Tier 1 degraded 20 more minutes.*
+
+**Re-check vs the signed objectives:** Tier 0 RTO ~6-12 min against a 5-min target at *first* rehearsal, exactly why game days exist: the gap surfaces in a drill, not on Black Friday. RPO: seconds of carts, zero ledger. Tier 1: ~25 min. Pass, barely, with a punch list.
+
+**Game-day cadence (the program, not the event):** quarterly full-region evacuation in production, Netflix has run these as routine for a decade; it's a solved discipline, plus monthly Tier-1 promotion drills and quarterly timed Tier-2 restores. Each drill's measured RTO replaces the aspirational one in the catalog. **Budget the drills**: an evacuation costs engineer-days and elevated error rate; that cost is part of the +$12.5M, and saying so is the credibility move.
+
+**Remaining bottlenecks, named:** the steering layer is now the critical dependency (DNS TTLs are honored unevenly, anycast or client-side failover for the tail); the third quorum leg's placement is a latency-vs-blast-radius choice; split-brain is prevented by the human-gated declare plus steering that never routes to a declared-dead region.
+
+<details>
+<summary>Go deeper, DNS vs anycast failover mechanics and timings (IC depth, optional)</summary>
+
+DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but real-world convergence is 1-5 min, a long tail of resolvers and ISPs ignore TTLs, and some mobile stacks pin resolutions for the app's lifetime. Health-check-driven record withdrawal is automatic but inherits the same tail. Anycast (Cloudflare/Google front-door style): one IP announced from many POPs; withdrawing a region is a BGP route withdrawal converging in seconds, no client-cache problem, but it requires owning or renting an anycast edge. Belt-and-suspenders for Tier 0: client SDKs with a fallback endpoint list and aggressive timeouts, so even TTL-ignoring clients fail over at the application layer within one retry cycle. Measure the real number in game days, "drain completes in 90 s for 95% of traffic, 5-min tail for the rest" is the measured fact that replaces hand-waving.
+
+</details>
+
+---
+
+## D: Design evolution
+
+> Push the design along the axes it will actually be pushed: more regions, data sovereignty, and the cost curve.
+
+**Two regions → three.** The third region already exists as the quorum tiebreaker; it grows a Tier 0 presence when latency or capacity demands. Three active regions improve the math: each needs headroom for only ~50% extra (one peer's share), not 100%, **N+1 across three regions is cheaper per unit of resilience than mirrored pairs.** The price: per-key homing gets a directory service, and the game-day matrix grows from 2 scenarios to 6.
+
+**Data sovereignty arrives.** EU customer data must stay in EU regions, and suddenly *failover itself is constrained*: you cannot evacuate EU users to us-east. Sovereignty forces region-pairs *within* jurisdictions and turns the tier catalog into a tier-×-jurisdiction matrix. Raise this unprompted; it's a 2026-grade signal.
+
+**The cost curve bends the right way.** The +$12.5M is mostly step-cost; revenue growth doesn't double it. And the Tier 0 fleet isn't pure insurance, it serves traffic closer to users and absorbs peak as shared capacity. Mature multi-region spend partially *pays for itself*; blanket active-active for Tier 2 never does.
+
+**What I'd revisit:** if outage data beats the 1-per-2-years prior, Tier 1 relaxes to pilot-light (replicas + IaC, no warm fleet), saving ~$4M; if the business launches same-day delivery, order-management's tier row gets re-signed.
+
+**Where I'd delegate (the explicit Director move):**
+- **Steering:** *"The traffic team owns DNS-vs-anycast and the client-failover SDK; my prior is an anycast front door with DNS fallback, because resolver-TTL tails are the documented failure mode, they own the measured drain time."*
+- **Quorum-store bake-off:** *"Storage benchmarks Spanner vs DynamoDB global tables vs self-run CockroachDB on ledger-write p99 across our three regions; my prior is the managed option, a self-run consensus layer is an on-call surface we'd be buying with the savings."*
+- **Game-day program:** *"Resilience engineering owns the drill calendar and chaos tooling; I own attending the quarterly evacuation and signing the measured-RTO report."* What I keep, the tier catalog, the RTO/RPO sign-offs, the spend delta, and what I hand off, with priors, is the altitude.
+
+---
+
+## Trade-offs table: the pivotal decisions
+
+| Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
-| **Serving path** | **Real-time / interactive** — small batches, latency-bounded, low TTFT, warm pools | **Batch / async** — giant batches, no latency SLO, run off-peak | Single mixed path | **A** for anything a user watches stream (chat, copilots). **B** for offline jobs (bulk summarization, evals) — cheapest $/token. Single path: **reject** — one batch size can't satisfy both. |
-| **Weight precision** | **fp16** — full quality, 140 GB (2 GPUs), ~15 KV seqs | **int8** — ~70 GB (1 GPU), ~2× batch, small eval-gated loss | **int4** — ~35 GB, ~4× batch, larger loss | fp16 when the quality SLO forbids any measured loss. **int8 the usual sweet spot** — big GPU/batch win for a small loss. int4 under extreme cost pressure on loss-tolerant tasks. |
-| **Self-host vs managed** | **Self-host** (vLLM / TGI / TensorRT-LLM) — own GPUs, cost control, model freedom | **Managed** (Bedrock / Vertex / Fireworks) — per-token, no GPU ops | Hybrid (managed burst over self-host floor) | Managed early / for spiky low volume. **Self-host** when token volume makes the per-token markup exceed fleet cost, or you need a model/latency profile managed won't give. |
+| **DR posture** | **Tiered**, active-active Tier 0, warm Tier 1, backup Tier 2 | **Blanket active-active** (+$30M/yr, conflicts everywhere) | **Blanket active-passive** (cheaper; RTO 30-60 min for everything) | **A** as default (our choice), protection priced to revenue-at-risk. **B** only when nearly all services are genuinely revenue-critical (payment networks). **C** only if the business signs off 30+ min RTO on the revenue path, rarer than executives think until shown the peak-hour number. |
+| **Tier 0 write strategy** | **Quorum across 3 regions**, RPO 0, +30-70 ms/write | **Single-writer-per-key + async mirror**, RPO seconds, no conflicts | **Multi-master + merge (LWW/CRDT)** | **A** for money and invariants (our ledger). **B** for per-user data where seconds of loss is an apology (our carts). **C** only for merge-friendly data, counters, presence, never invariants. |
+| **Failover trigger** | **Human-gated declare, automated execution** | **Fully automatic** | **Fully manual runbook** | **A** (our choice), one judgment call, then scripts. **B** risks split-brain and blip-triggered evacuations. **C** turns a 6-min failover into a 90-min one at 3 AM. |
 
-### What interviewers probe here
-- **"What's the bottleneck in LLM serving?"** — *Strong signal:* names **GPU HBM / memory bandwidth**, not disk or CPU; explains decode is **memory-bandwidth-bound** (every weight streamed per token) and that the **KV cache bounds the batch → bounds throughput**. *Red flag:* reaches for a read:write ratio and a giant read cache as if it were a CRUD app, or says "add more CPU / more disk."
-- **"Raise throughput without buying more GPUs — how?"** — *Strong:* **continuous (in-flight) batching** (2–4× by killing static-batch idle) plus **quantization** (fp16→int8 frees HBM for a bigger batch), with PagedAttention to pack KV; names the cost of each (scheduler complexity; eval-gated accuracy loss). *Red flag:* "just send bigger batches" with no awareness of the variable-length stall or the TTFT cost, or "buy bigger GPUs."
-- **"Real-time vs batch — when and why two paths?"** — *Strong:* names the **TTFT-vs-throughput-vs-cost trilemma** and resolves it by **segmenting** traffic: interactive (small batches, warm pools, low TTFT, higher $/token) vs async (giant batches, off-peak, cheapest); explains why one global batch size can't do both. *Red flag:* one undifferentiated pool and "we'll tune the batch size."
-- **"How do you autoscale a $6/hour-per-node GPU fleet?"** — *Strong:* scale on **queue depth**, keep a **warm pool**, **never scale to zero** (cold start = minutes loading weights), absorb spikes with queue + backpressure; names warm-pool idle cost as the $/responsiveness dial. *Red flag:* "autoscale on CPU" or "scale to zero off-peak."
+---
 
-The through-line at Director altitude: **own the capacity, cost, and SLO call; delegate the depth.** Say *"I'd have the inference team benchmark vLLM vs TensorRT-LLM and fp8-vs-fp16 throughput on our real traffic — my prior is a vLLM/PagedAttention stack at fp8 — but I'm not hand-tuning attention kernels on the whiteboard."* You set the tokens/sec/GPU target, the $/1M-token budget, and the latency SLO; you let the systems team own the kernels and the ML team own the quantization eval. **The full serving system — estimation, queue, streaming, autoscaling, the cost floor — is the LLM-serving walkthrough.**
+## What interviewers probe here (Director altitude)
 
-### Common mistakes / misconceptions
-- **Treating it like a CRUD / read-heavy service.** The binding resource is **GPU HBM + bandwidth**, and the asymmetry is **prefill vs decode**, not read:write. Mis-frame this and you size everything wrong (and reach for a Redis cache that solves nothing here).
-- **Sizing "per GPU" for a model that needs several.** 70B fp16 = 140 GB > 80 GB → **2 GPUs/node**; miss it and your fleet count and cost are 2× off.
-- **Forgetting the KV cache bounds the batch.** Throughput is capped by HBM, not raw FLOPs — which is *why* quantization, PagedAttention, and GQA matter, and why a few 100K-token requests can starve a node.
-- **Defaulting to static batching.** It strands the GPU on the longest sequence (<30% utilization); **continuous batching is the default** for interactive serving.
-- **Autoscaling GPUs like web servers.** Cold starts take minutes to load weights — warm pool, scale on queue depth, **never to zero** for an active model; reactive CPU-based scaling lags every spike.
+- **"A region just died at peak, go."** *Strong:* runs the script, declare on a pre-written rule, drain, promote, shed in pre-agreed order, communicate with a revenue number. *Red flag:* starts debugging the region, or describes a failover never drilled.
+- **"Why not active-active everywhere, one posture, simpler?"** *Strong:* two costs, quantified, ~+$18M/yr over tiered, *and* a write-conflict problem imported into 80 services that mostly don't need it. *Red flag:* agrees, or rejects it on vibes without the dollar delta.
+- **"Where do write conflicts come from, and what's your policy?"** *Strong:* conflicts are *created by* allowing two writers per key; we avoid them, quorum for the ledger, single-writer-per-key for carts. *Red flag:* "we'll handle conflicts with timestamps."
+- **"Who set RPO to 5 minutes for catalog?"** *Strong:* the CPO did, with the price of the alternative in front of them, RTO/RPO are business sign-offs engineering prices. *Red flag:* "we picked numbers that seemed reasonable."
+- **"How do you know your RTO is real?"** *Strong:* quarterly production evacuations with measured numbers replacing aspirational ones; timed restores for Tier 2; the drill budget named. *Red flag:* points at the architecture diagram as evidence.
 
-### Practice questions
+---
 
-**Q1.** A team serves a 70B model on single 80 GB H100s in fp16 and is confused why it keeps OOM-ing on startup before any traffic arrives. What's wrong, and what are their two options?
-> *Model:* fp16 weights are `70B × 2 = 140 GB`, which **exceeds a single 80 GB card** — it OOMs loading weights, before any KV cache exists. Two fixes: **(a) span 2 GPUs** with tensor parallelism (140 GB across 160 GB, TP=2) for full quality at double the hardware; or **(b) quantize** — int8 (~70 GB) fits one card with room for a small KV batch, int4 (~35 GB) fits comfortably with a much bigger batch, both for a model-dependent, eval-measured accuracy loss. The principle: **always check `params × bytes-per-param` against HBM before sizing anything else** — it decides GPU count.
+## Common mistakes
 
-**Q2.** Throughput is too low and you've been told "no new GPUs this quarter." Walk me through what you'd try, in order, and the cost of each.
-> *Model:* **First, continuous batching** if you're on static — it's the biggest lever (2–4×) and costs only scheduler complexity (use vLLM/TGI; don't write it). **Then quantization** — fp16→int8 roughly halves the weight footprint, freeing HBM for a bigger KV cache and therefore a bigger batch; cost is a small, **eval-gated** accuracy loss the ML team signs off. **Then PagedAttention** to kill KV fragmentation (~2–4× more sequences packed in the same memory). **Then segment** real-time from batch traffic so latency-relaxed jobs run at giant batch sizes off-peak. Each step raises tokens/sec/GPU without a single new card; only after exhausting these do I argue for hardware.
+- **"Everything active-active."** The genre's signature failure: ~2× spend defended with "resilience," plus a conflict-resolution problem in every service. Tiering by revenue-at-risk *is* the answer; uniformity is the absence of one.
+- **Replication confused with backup.** Replication copies your bad deploy and your `DELETE` to every region in milliseconds. Point-in-time backups survive in every tier, including Tier 0.
+- **A failover that has never run.** Passive fleets rot, quotas bite, runbooks drift. If the last "test" was a tabletop exercise, the real RTO is unknown, and unknown means *long*.
+- **Survivor region without peak capacity.** Drain succeeds, then the West fleet hits a quota wall at 60% of Black Friday load. Pre-reserved headroom is part of the DR bill, not an afterthought.
+- **Treating RTO/RPO as engineering constants.** They're purchases. The Director's job is putting the price list in front of the people who own the revenue and getting signatures.
 
-**Q3.** A request with a 100K-token context is tanking the whole node's throughput. Why, and what do you do?
-> *Model:* The **KV cache grows linearly with sequence length** and lives in HBM, so a 100K-token request consumes ~25× the KV of a 4K one — it **monopolizes the batch capacity** that throughput depends on, and its long prefill blocks the decode loop (hurting everyone's TTFT). Fixes: **per-request context caps** and **token-based rate limits (TPM)** so no tenant's long contexts dominate; **chunked prefill** (an inference-team lever) so a giant prompt doesn't stall the decode loop; **priority/fair-share scheduling** in the queue; and route huge-context or latency-relaxed work to the **async batch path**. The root cause to name: KV cache, not CPU.
+---
 
-**Q4.** Defend separating a real-time path from a batch path to a skeptical architect who wants "one fleet, one batch size."
-> *Model:* It's a **trilemma** — you cannot maximize TTFT, throughput, and cost at once. A **big batch** amortizes the weight-read over many sequences (cheap $/token) but makes new requests wait for a KV slot and lets long prefills block decode (high TTFT) — fine for offline jobs, fatal for a chat UI. A **small batch** keeps TTFT snappy but leaves expensive GPUs idle (high $/token). One global batch size therefore *must* sacrifice either the interactive product or the budget. **Segmenting** lets the interactive pool run small, latency-bounded batches (paying slightly more per token to protect TTFT) while the async pool runs giant off-peak batches at the cheapest possible $/token — which is exactly why a serious LLM API exposes both a streaming and a `/batches` endpoint.
+## Interviewer follow-up questions (with model answers)
+
+**Q1. It's Black Friday peak and us-east just went dark. First 15 minutes?**
+> *Model:* T+0-3: external probes confirm from three vantage points; the pre-written rule says declare at 3 minutes unreachable, the incident commander declares via the out-of-region control plane; nobody debugs first. T+3-6: drain East; Tier 0 in West is already serving production, so checkout recovers inside ~6 minutes; carts homed East lose seconds of writes, the RPO we signed. T+5-15: promote the Tier 1 replica, scale the warm fleet against pre-reserved quota, activate the shedding order, analytics first, checkout last, by written policy. T+10-15: synthetic checkout transactions verify the revenue path; status page and exec comms go out with a dollar estimate. The only live decision was *declare*, everything else was rehearsed in quarterly evacuations, which is why I can give minute marks instead of adjectives.
+
+**Q2. The CFO asks why checkout runs at 40% utilization across two regions. Defend the spend.**
+> *Model:* Insurance with a stated premium and payout. Premium: ~$6M/yr for Tier 0 active in both regions, each able to carry full peak. Risk covered: regional outages run about once per 1-2 years for 2-6 hours; an hour of checkout at peak is ~$1M plus trust damage. Without it, checkout's RTO is 30-60 minutes of cold promotion, optimistically. Note what I'm *not* asking for: the same posture for analytics, that rides backup-restore at +$0.5M, which is why the total is +$12.5M, not the +$30M a blanket policy costs. And the fleet isn't idle: it serves real traffic daily, which is also what keeps it provably working.
+
+**Q3. A staff engineer proposes multi-master writes everywhere so "any region can take any write." Response?**
+> *Model:* One question: *what's the merge rule when both regions write the same key?* For the payment ledger there is no acceptable answer, LWW under clock skew loses or duplicates money, and "balance ≥ 0" isn't expressible as a CRDT. That's the CAP trade made concrete: accepting writes everywhere means paying in reconciliation later, and for invariant-bearing data that bill is unbounded. So the ledger gets a 3-region quorum, conflicts impossible, ~50 ms per write, affordable once per checkout, and carts get single-writer-per-key. Exhaust designs that make conflicts impossible before adopting any that make them merely resolvable.
+
+**Q4. Your catalog says Tier 1 RTO is 30 minutes. How do you know that's true?**
+> *Model:* Because we measure it, the measured number, not the aspiration, lives in the catalog. Monthly drills promote the catalog replica in production and time it; quarterly we evacuate a full region for real. Our first evacuation missed the Tier 0 target, 12 minutes against 5, and that drill-found gap produced the pre-reserved-quota fix and the client-failover SDK. For Tier 2 the discipline is timed restores: a backup never restored is a hope. The drills cost engineer-days and elevated error rates; that's budgeted inside the DR line, because an untested DR plan is fiction we'd be paying $12.5M a year to print.
+
+---
 
 ### Key takeaways
-- **The GPU is the unit of cost and HBM is the binding resource** — not disk or CPU. Two consumers fight over HBM: **weights** (`params × bytes-per-param`; 70B fp16 = 140 GB > one 80 GB card) and the **KV cache**. Decode is **memory-bandwidth-bound** (every weight streamed per token), which is *why* batching multiplies throughput nearly for free.
-- **Prefill vs decode is the skew that matters:** prefill = whole prompt in parallel, compute-bound, sets **TTFT**; decode = one token at a time, sequential, bandwidth-bound, sets **inter-token latency** and dominates wall-clock.
-- **The KV cache (~300 KB/token GQA, ~1.3 GB per 4K sequence) bounds the batch → bounds throughput.** Long contexts eat batch capacity; this is the LLM's real "index."
-- **The two no-new-GPU levers: continuous (in-flight) batching** (2–4× over static; PagedAttention to pack KV) and **quantization** (fp16→int8→int4 cuts memory 2–4×, fits the model and raises the batch for a small, eval-gated loss).
-- **Throughput vs latency is an SLO trade:** bigger batch = cheaper but slower. **Segment real-time (low TTFT) from batch/async (max throughput).** Director move: optimize **tokens/sec/GPU, $/1M tokens, and a latency SLO**; delegate kernel/quant tuning with a stated prior; own capacity/cost/SLO. **The full serving system is the LLM-serving walkthrough.**
+- **DR is an allocation problem, not an architecture pattern.** Tier by revenue-at-risk: checkout active-active, catalog warm-standby, analytics backup-restore. ~90% of the loss flows through ~15% of services. Blanket active-active ≈ +$30M/yr vs ~+$12.5M tiered; the $18M delta buys conflict problems, not resilience.
+- **RTO and RPO are purchases signed by the business.** Engineering prices the menu, RTO of a day is nearly free; RTO of minutes with RPO 0 is ~2× the relevant infra, and finance/product sign the line items.
+- **RPO≈0 across regions imports the write-conflict problem.** Avoid conflicts rather than resolve them: quorum for money, single-writer-per-key for user data, merge semantics only for counter-like data. Never LWW behind a ledger.
+- **The best standby is never idle.** Tier 0 active-active works *because* both sides serve production daily; and replication is not backup, point-in-time backups survive in every tier.
+- **An untested DR plan is fiction.** Quarterly production evacuations, measured RTOs replacing aspirational ones, restore-tested backups, pre-reserved survivor capacity, a script where the only unscripted decision is *declare*.
 
-> **Spaced-repetition recap:** A GPU is a kitchen with a tiny counter (HBM) and a fast chef — the bottleneck is counter space, not chopping. Weights + KV cache fight over HBM; **70B fp16 = 140 GB > one 80 GB card** (quantize or use 2 GPUs). **Decode is bandwidth-bound** (stream all weights per token) → batch to share the read; the **KV cache bounds the batch**. Raise throughput without GPUs via **continuous batching + quantization**. **Prefill → TTFT, decode → inter-token latency.** Segment **real-time vs batch**; autoscale on **queue depth, warm pool, never to zero**. Concepts here; the **full design is the LLM-serving walkthrough**. Cross-refs: the token/latency model, the RAG context that feeds prefill, cost optimization, and the diffusion-serving contrast (compute-bound, not KV-bound).
+> **Spaced-repetition recap:** Multi-region DR = **tier by revenue-at-risk, price each tier's RTO/RPO, pay 2× only where the money flows.** Tier 0 (checkout) active-active, ledger on 3-region quorum (RPO 0, +50 ms/write), carts single-writer-per-key (RPO seconds, no conflicts); Tier 1 async-replica promote (RTO 30 min); Tier 2 backup-restore (RTO 24 h). Blanket active-active ≈ +$30M/yr and conflicts everywhere; tiered ≈ +$12.5M. Region dies at peak: declare on a pre-written rule, drain, promote, shed checkout-last, communicate, every decision pre-made except *declare*. Untested DR is fiction: quarterly evacuations, timed restores.
+
+---
+
+*End of Lesson 11.4. Multi-region DR closes the strategy arc the way the migration lessons opened it: the technology is the easy 30%, replication, quorums, and CAP's bill, and the Director's 70% is the tier catalog, the signed RTO/RPO price list, the $18M/yr delta defended to a CFO, and a game-day program that turns a region's death at peak into twelve scripted minutes.*

@@ -1,337 +1,289 @@
 ---
-title: "5.10 - Google Maps"
-description: A full RESHADED walkthrough of map serving + routing - pre-rendered vector tiles behind a CDN, the road network as a graph, contraction-hierarchies precompute vs raw Dijkstra at query time, live-traffic-adjusted ETA via metric customization, and places search - where the precompute-vs-query-time-compute trade recurs in both subsystems, argued at Director altitude.
+title: "5.10 — Google Docs (Collaborative Editing)"
+description: The convergence problem - many people editing one document at once must merge into a single shared state with zero lost keystrokes, solved by choosing a concurrency-control strategy (OT vs CRDT vs locking) at decision altitude, delegating the algorithm proof with a stated prior, and fanning out cheap ephemeral presence on a separate axis.
 sidebar:
   order: 10
 ---
 
+> **Attempt the capstone first - this lesson is the debrief, not the spoiler.** This is *exactly* the capstone problem, and the capstone hands you the empty whiteboard and a self-critique loop. Drive it yourself there before reading a worked answer here, or you burn the one chance to feel where your own design breaks. **This gets asked because it is the strongest cross-platform business-domain question on the senior loop**, and because it has a signature trap: convergence correctness (OT/CRDT) is genuinely IC-deep, so candidates either *hand-wave* "we use CRDTs" with no idea why, or *rat-hole* for fifteen minutes deriving transformation functions and never reach a design. **What separates a Director answer:** name all three concurrency strategies, decide one against *this* product's requirements, and **delegate the algorithm internals with a stated prior** - "I'd have the collaboration team prove convergence; my prior is a sequence CRDT for the offline story." Knowing the limit of your own depth, out loud, *is* the scored signal here.
+
 ### Learning objectives
-- Run the full **RESHADED** spine on a **read-dominated** serving + routing system - the *inverse* of Uber: there the firehose was driver pings; here map data changes rarely and is read billions of times (read-heavy, massively cacheable).
-- Make the **precompute-vs-query-time-compute** trade the through-line: it appears **twice** - **pre-rendered tiles** vs render-on-demand, and **precomputed routing shortcuts** vs raw Dijkstra at query time. Same trade, two subsystems.
-- **Estimate** the headline numbers - tile-fetch QPS, the petabyte tile footprint that forces vector tiles, and the **CDN offload** that shrinks origin traffic ~100x - and show the subtraction.
-- Explain why **plain contraction hierarchies break under live traffic**, and how splitting topology preprocessing from metric customization restores both fast queries *and* fresh ETAs.
-- Operate at **Director altitude**: tie each call to a requirement, quantify the cost, own the routing depth that 5.7 *delegated* to "the Maps team," and name what *this* problem delegates next.
+- Run the **RESHADED** spine on a problem whose crux is **convergence correctness**, not a read:write ratio - and quantify the load that actually shapes it (presence dwarfs edits; concurrent editors per doc are *tens*, not thousands).
+- Name the three concurrency-control strategies - **OT, CRDT, locking** - state the pros/cons of each, and **decide one for this product** against requirements, cost, and risk.
+- Make the **delegation move** the model answer: name the pivotal convergence call, hand the algorithm proof to a specialist *with a stated prior*, and recognize that an honest depth limit is the signal, not a dodge.
+- Carry the **document-representation** decision (op log vs materialized state) through Storage and Data-model, and place the **durable boundary** where it belongs.
+- Fan out **presence/cursors** on a separate, cheap, ephemeral axis - never down the durable edit path.
 
 ### Intuition first
-Two completely different machines wear one app. The first is a **printing press for pictures of the world**: the Earth is drawn once, sliced into millions of small square tiles at every zoom level, and printed ahead of time. When you pan and zoom you are **fetching pre-printed squares** off the nearest shelf (a CDN edge), exactly like fetching images from any website - the world barely changes, so the press runs rarely and the shelf does almost all the work. The second is a **road atlas with a shortest-path engine**: every road an edge, every intersection a node, "navigate me there" a shortest-path search. The naive search (Dijkstra) is far too slow on a continent-sized graph to run live, so you **precompute a skeleton of expressway shortcuts** a query only has to walk. The twist that makes it *Google Maps*: road weights aren't fixed - **a freeway at 6 p.m. is slower than at 6 a.m.** - so shortcuts built for static distances are wrong the moment traffic moves.
+Picture a single whiteboard with ten people holding markers, all writing at once. The naive fix is a **talking stick** - one marker at a time, everyone else waits (a lock). It prevents collisions but destroys the product: collaborative editing means *simultaneous*, and a per-document lock turns ten writers into a queue of one. So you throw the stick away and let everyone write at once - which raises the only hard question in the problem: **if Alice and Bob edit the same word in the same instant, on two screens with network delay between them, how does the board end up showing the *same* sentence to both, with neither stroke silently erased?**
 
-The whole interesting tension is the same in both machines: **how much do you compute ahead of time (and store/refresh) versus how much do you compute when the user asks?** An interviewer is watching whether you make that trade twice - tiles *and* routing - and can name the cost on each side.
+That is **convergence**: independent, concurrent, intention-carrying edits must merge **deterministically** into one shared state, regardless of arrival order. A different *class* of problem from the social-feed questions (Instagram, Twitter), where a few seconds of staleness is invisible - here a "stale read" means **two people see two different documents**, the cardinal failure. Two algorithm families solve it - **Operational Transformation (OT)** and **CRDTs** - and choosing between them, *not* deriving either, is the whole interview. Hold the picture: a small server that **orders and merges edits into one truth**, wrapped by a big cheap layer fanning out **presence and cursors** that need not be durable or even correct.
 
 ---
 
 ## R - Requirements
 
-"Build Google Maps" hides a dozen products; the first move is to **scope hard** and state the read:write skew up front.
+> Pin the scope, then say the load-bearing fact out loud: the crux is **convergence correctness**; the secondary axis is **presence fan-out** - two problems wearing one product.
 
-**Clarifying questions I'd ask (and the assumptions I'll proceed on):**
-- *Core jobs?* → **(1) Show the map** (pan/zoom), **(2) route A→B with a traffic-aware ETA**, **(3) search for a place.** I scope to these three.
-- *How fresh must map *data* be?* → **Hours to days.** Roads and POIs change slowly; periodic batch refresh is fine. The load-bearing fact: **the underlying data is near-static**, which is what makes tiles and route shortcuts precomputable at all.
-- *How fresh must *traffic* be?* → **~1-2 minutes.** The one fast-moving input - and what stresses the routing precompute.
-- *Latency budget?* → tiles **p99 < ~50 ms** (an image off an edge), route **p99 < ~300 ms**, search **p99 < ~200 ms**.
-- *Global?* → **Yes**, but a route is almost always **within one contiguous region** - a query in India never needs South America's graph. A natural geographic shard (the same locality gift 5.7 exploited).
+**Clarifying questions I'd ask (with assumed answers):**
+- *Plain or rich text?* → **Rich text** - harder data model, but the real product. I'll note where plain text would simplify.
+- *Concurrent editors per doc?* → **Tens, not thousands.** 5,000 simultaneous typists isn't a document, it's a broadcast - treat huge view-only audiences as a *separate* fan-out problem.
+- *Offline editing required?* → **Yes** - close the laptop, keep typing, reconnect and merge. The single requirement that most tilts the OT-vs-CRDT call.
+- *Is a lost keystroke ever acceptable?* → **No.** Convergence is a correctness invariant: same edits → same final state on every replica.
+- *Latency bar?* → Local echo **instant** (optimistic); remote edits visible **< ~200 ms** same-region.
 
-**CUT from scope (stated, with the reason):** Street View / satellite imagery (a separate capture pipeline with the same blob+CDN serving shape), turn-by-turn voice nav and re-routing UX, transit/bike/walk modes (additional graphs - a multi-graph extension), business reviews and the Places *write* side (UGC + moderation), indoor/3D. I scope to **tiles → CDN → client**, **road graph → routing+ETA**, and **places search**, and say so.
+**Functional requirements:**
+1. **Open/load** a document and render current state fast.
+2. **Edit** locally with instant echo; **propagate** to all active editors sub-second.
+3. **Converge** concurrent edits into one consistent state - the crux.
+4. **Presence:** who's here, where their cursor and selection are.
+5. **Offline edit + reconnect merge.**
+6. **Persistence + version history** (snapshots, restore, see-changes-since).
 
-**Functional requirements:** serve map tiles for any (lat, lng, zoom); compute a route A→B with a live-traffic ETA; search places near a location.
+**Explicitly CUT (scoping *is* the signal):** access-control/sharing, comments/suggestions, rich-media embeds, cross-doc search, export, real-time spell/grammar. I scope to **load → edit → converge → present → persist**, and say so.
 
 **Non-functional requirements:**
-- **Read availability ≥ 99.99%** - the map must always draw; routing degrades to last-known traffic, never a blank.
-- **Low read latency** - tiles < ~50 ms p99 (CDN edge), route < ~300 ms, search < ~200 ms.
-- **Massive read scale, modest write rate** - billions of reads/day; map-data writes are a rare, large *batch* job.
-- **Traffic freshness ~1-2 min** without re-running the expensive graph precompute every cycle.
-- **Cost-efficiency** - at this read volume, **egress bandwidth and CDN/storage dominate the bill**.
+- **Convergence correctness** - *the* hard one. All replicas reach the same final state given the same edit set, any arrival order. A correctness invariant.
+- **Low edit-propagation latency** - local echo instant; remote < 200 ms same-region.
+- **Durability + versioning** - committed edits survive crashes; history is restorable.
+- **AP at the client for editing** - a user whose network blips keeps typing offline and merges on reconnect (pushes toward **AP**).
+- **Presence is best-effort** - ephemeral, lossy, cheap; never on the durable path.
 
-**Read:write skew - the crux, inverted from 5.7.** Uber was **write-dominated**; Maps is the **opposite: read-dominated and highly cacheable.** Tiles and the road graph are written rarely (batch) and read billions of times; the same tile and the same popular route serve millions. The *only* fast input is live traffic, and even that is read far more than written. **The architecture is "precompute + cache the near-static heavy artifacts, treat traffic as a frequently-refreshed overlay"** - not a write-ingest problem. Getting this inversion right is the first thing this problem tests.
-
-> **Continuity callback:** in 5.7 I delegated ETA/routing to "the Maps team behind `etaSeconds(from,to)`." **This is that team's problem.** Now I own routing - including the part 5.7 hand-waved: making precomputed shortcuts work under *live* traffic.
+**The skew, stated.** **Not** a read:write ratio problem. Two facts shape everything: (1) **presence/cursor traffic dwarfs edit traffic** - every keystroke and mouse move is a presence event, but only committed edits persist; and (2) **concurrent editors per doc are tens**, so the convergence algorithm runs over a *small* set of ops, not a million. The architecture follows: a **per-document coordination unit** ordering a handful of concurrent edits, fronted by a **cheap ephemeral presence layer** carrying the firehose nobody needs to keep.
 
 ---
 
 ## E - Estimation
 
-*Enough math to make a defensible call - round hard, state assumptions, expose where the cost actually is.*
+> Enough math to make a defensible call. The headline isn't QPS - it's that **edits are rare and small, presence is constant and disposable**.
 
-**Assumptions:** ~**1B** DAU (round anchor; public figures ~1-2B MAU); ~**2B map sessions/day**, ~**20 tiles** pulled per session; routing in ~10% of sessions → **~200M routes/day**; search similar.
+**Assumptions:** 100M docs; 10M DAU; ~2M docs with an *active* editing session at peak; ~3 concurrent editors per active doc.
 
-**Tile-fetch read QPS (the headline read number):**
-```
-2B sessions/day × 20 tiles = 40B tile requests/day
-40B ÷ 86,400 s ≈ 460K tiles/s average  → round to ~0.5M tile reads/s
-peak (×3 diurnal/commute)               → ~1.5M tile reads/s
-```
+**Concurrent connections (the real scale axis):** `2M active docs × 3 editors ≈ 6M live WebSocket connections` at peak. That - not edit volume - sizes the realtime tier. At ~50K connections/node → **~120 stateful gateway nodes**. The architecture problem is *connection fan-out*, not compute.
 
-**The CDN offload - the subtraction that defines the cost:**
-- Tiles are **immutable and identical for everyone** at a given `(z,x,y,style,version)`; a small popular set (cities, highways, low zooms) covers the overwhelming majority of fetches → edge hit rate **~95-99%**.
-- At 99%, the **origin** sees `0.5M × 1% ≈ 5K tile reads/s` (avg), ~15K/s peak - a **~100x reduction**. **This is the whole serving design in one line:** push near-static tiles to the edge; origin compute is a rounding error.
+**Edit (op) rate:** ~10% of editors actively typing at ~5 ops/sec: `6M × 0.1 × 5 ≈ 3M ops/sec` broadcast through the realtime layer. But ops are tiny and **most never persist as individual rows** - they're coalesced.
 
-**Tile storage - the math that forces vector tiles:**
-- At zoom `z` the world is `4^z` tiles of 256×256 px; summed over levels 0-20, `Σ 4^z ≈ 1.5 trillion` tiles.
-- At ~10 KB/raster tile: **~15 PB - per style, per version.** Across ~10 styles, **hundreds of PB** of mostly-ocean squares re-rendered on every map update.
-- **Two decisive consequences:** (1) **don't pre-render everything** - pre-render the populated, high-traffic set; render the long tail on demand and cache it. (2) **Ship vector tiles, not raster** - a vector tile carries geometry + feature tags (~1-5 KB), renders on the client GPU, and **one tile serves every style**, collapsing storage ~10x and shrinking egress.
+**Durable write rate (what hits storage):** we **don't** persist every keystroke. Coalesce per doc into an op-batch every ~1-2 s: `2M docs ÷ 1.5 s ≈ 1.3M durable appends/sec` - large, but each is an **append-only log write** (the cheapest durable pattern), shardable by `doc_id`.
 
-**Road-graph size (the routing working set):** ~**10^8 nodes, a few × 10^8 edges**; with precomputed shortcuts, **tens of GB - it fits in RAM** on a routing server, sharded by region. Routing is a **RAM + CPU** problem, not storage (same shape as the in-memory index, different data).
+**Presence rate (the firehose we throw away):** every cursor move and keystroke is a presence beat. `6M conns × ~5/sec ≈ 30M presence events/sec` - **10× the edit op rate**, and growing with audience, not editors. This is the number that proves presence must be **a separate, ephemeral channel**: persisting data with a ~200 ms useful life would dominate the whole write budget.
 
-**Routing QPS:** `200M/day ≈ 2.3K/s` avg, ~7K/s peak. Small - *because* precomputed shortcuts make each query sub-millisecond, a modest fleet suffices. Naive Dijkstra at seconds/query would need orders of magnitude more machines - **the precompute *is* the capacity plan.**
+**Storage:** materialized state is small: `100M docs × ~100 KB ≈ 10 TB`, ×3 → **~30 TB** - modest. The op log is the growth driver, bounded by **snapshot + log truncation**.
 
-**Live-traffic ingest:** `100M reporters × 1 probe / 30 s ≈ 3M probes/s`, **aggregated** into per-edge speeds and folded into routing as a periodic weight refresh - an *aggregate overlay*, not a per-entity index (the contrast with the ping firehose).
-
-**Bandwidth (the real bill):** `0.5M tiles/s × ~5 KB ≈ 20 Gbps` average payload, multiples at peak - **almost all from CDN edges.** Egress, not compute, dominates; vector tiles + edge caching are the levers.
-
-**The one-line takeaway from E:** **~0.5M tile reads/s ~99% CDN-absorbed, a tile corpus too large (~15 PB/style) to fully pre-render so you go vector + render-the-tail, and a tens-of-GB in-RAM road graph whose precompute turns seconds-per-route into sub-ms.** Read-dominated, cache-dominated, precompute-dominated.
+**What estimation decided:** the scale axis is **6M concurrent connections** (fan-out), not edit compute. Durable writes are a **shardable append log**. **Presence is 10× the edit firehose and disposable.** Convergence runs over **tens** of ops per doc - its *cost* is trivial; only its *correctness* matters.
 
 ---
 
 ## S - Storage
 
-Three data classes - the **precompute-vs-query** trade shows up in the first two.
+> Three data classes with different durability needs. The pivotal call here - **op log vs materialized state** - is the document-representation decision, named explicitly.
 
-**1. Map tiles (immutable, versioned, read-billions).**
-- *Choice:* an **object store** (GCS / S3) fronted by a **CDN** doing ~99% of reads. Tiles are **addressed by version**: a refresh writes *new* objects and flips a pointer - cache invalidation by changing the key, never mutating a cached URL.
-- *Rejected:* serving tiles from a database - a tile is a static blob keyed by a tuple; a DB adds query overhead and replication cost to data that wants to be a dumb cacheable file. *Also rejected:* pre-rendering 100% of tiles - the ~15 PB/style math kills it.
+**1. The document itself - op log + snapshots (durable, the source of truth).**
+- *Access pattern:* append small ops constantly; load current state on open; reconstruct any historical version. Natural fit: an **append-only op log** plus **periodic materialized snapshots** so opening a doc doesn't replay a million ops.
+- *Choice:* **append-only log sharded by `doc_id`** (Kafka-style log or an LSM store like Cassandra/RocksDB) for ops, plus a blob/KV store (S3 or DynamoDB) for snapshots. Open = latest snapshot + replay the **tail**.
+- *The representation decision, stated:* **op log is truth, snapshot is cache** - *not* materialized state as truth. *Rejected - store only current state:* loses version history, the ability to merge an offline client's old-baseline edits, and the audit trail. The op log *is* the feature; state-only is cheaper but throws away three requirements.
 
-**2. The road graph + routing artifacts (near-static, in-RAM, region-sharded).**
-- *Choice:* the graph and its precomputed **shortcut structure** live **in RAM on routing servers, sharded by region**, loaded from a durable copy in object storage. The **traffic overlay** (`edgeId → current speed`) is a separate, frequently-refreshed in-memory structure applied as the metric at query time.
-- *Rejected:* shortest-path against a disk database - a route exploration touches thousands-to-millions of edges; a disk round-trip per edge is fatal to the 300 ms budget. *Also rejected:* a generic **graph database (Neo4j)** as the live router - built for flexible traversals, not the specialized precompute-heavy shortest-path this needs; use a purpose-built routing engine (OSRM/GraphHopper-class) over the in-RAM graph.
+**2. Presence / cursors (ephemeral, best-effort, in-memory).** **In-memory in the gateway**, Redis pub/sub for cross-node fan-out. TTL'd, never durable - cursor-at-412 is worthless 200 ms later. *Rejected - persisting presence:* 30M events/sec with a ~200 ms shelf life would dominate the storage budget for nothing.
 
-**3. Places / POIs (read-mostly, text + geo search).**
-- *Choice:* an **S2 geo-index** (reused from 5.7) for "near me" **plus an inverted text index** (Elasticsearch) for name/category/address, with POI metadata in a KV store (Bigtable/DynamoDB). The search service intersects geo ∩ text and ranks.
-- *Rejected:* a relational `LIKE` + `ST_Distance` scan - can't serve typeahead-latency search at this scale; full-text needs an inverted index, "near me" needs a spatial one.
+**3. Document metadata (title, owner, ACL, snapshot pointers) - small, relational.** A standard relational/KV store keyed by `doc_id`: tiny, read on open, rarely written. Not the interesting part.
 
-**The routing *algorithm*** (precompute vs query-time, and what live traffic does to it) is decided in **Evaluation**.
+The op log carries the convergence ops, and **OT vs CRDT changes what each op *is*** - which is why representation and concurrency strategy are decided together, next.
 
 ---
 
 ## H - High-level design
 
+> The shape to make visible: a **big ephemeral fan-out layer** (connections, presence) wrapping a **small per-document coordination unit** (order + merge + persist) on a **durable op log**.
+
 ```mermaid
 flowchart TB
-    subgraph CLIENT["Client (web / mobile)"]
-      APP["Map app<br/>pan/zoom · route · search"]
-    end
+    A["Editor client A"] -->|"ops over WebSocket"| GW["Realtime gateway"]
+    B["Editor client B"] -->|"ops over WebSocket"| GW
+    GW -->|"route by doc id"| COORD["Doc coordination service"]
+    COORD -->|"order and merge"| LOG[("Op log<br/>append-only sharded by doc id")]
+    COORD -->|"periodic snapshot"| SNAP[("Snapshot store<br/>blob or KV")]
+    COORD -->|"broadcast merged op"| GW
+    GW -.->|"presence beats ephemeral"| PRES["Presence channel<br/>in-memory and Redis"]
+    PRES -.-> GW
+    META["Doc metadata store"] --- COORD
 
-    subgraph SERVE["Tile serving (read-dominated)"]
-      CDN["CDN edge<br/>~99% hit"]
-      OBJ[("Object store<br/>GCS / S3<br/>pre-rendered vector tiles")]
-      RND["On-demand tile renderer<br/>(long-tail tiles → cache)"]
-    end
-
-    subgraph ROUTE["Routing + ETA"]
-      RSVC["Routing service<br/>(region-sharded, in-RAM graph)"]
-      GRAPH[("Road graph + CH/CRP shortcuts<br/>in RAM")]
-      OVL[("Live-traffic overlay<br/>edge → current speed")]
-    end
-
-    subgraph TRAF["Traffic pipeline (the one fast input)"]
-      PROBE["GPS probes<br/>~3M/s"] --> AGG["Aggregator<br/>per-edge speed"]
-      AGG -->|"every ~1-2 min"| CUST["Customization<br/>re-weight graph"]
-      CUST --> OVL
-    end
-
-    subgraph SEARCH["Places search"]
-      SSVC["Search service"]
-      GEO[("S2 geo-index")]
-      INV[("Inverted text index<br/>Elasticsearch")]
-      POI[("POI metadata KV<br/>Bigtable")]
-    end
-
-    subgraph BATCH["Map-data pipeline (rare, heavy = the 'write')"]
-      SRC["Map data sources"] --> BUILD["Batch build:<br/>render tiles + build graph + CH preprocess"]
-      BUILD --> OBJ
-      BUILD --> GRAPH
-      BUILD --> GEO
-      BUILD --> POI
-    end
-
-    APP -->|"GET tile (z,x,y)"| CDN
-    CDN -->|"miss"| OBJ
-    CDN -.->|"miss + not pre-rendered"| RND
-    RND --> OBJ
-    APP -->|"route(A,B)"| RSVC
-    RSVC --> GRAPH
-    RSVC --> OVL
-    APP -->|"search(q, near)"| SSVC
-    SSVC --> GEO
-    SSVC --> INV
-    SSVC --> POI
-
-    style CDN fill:#1f6f5c,color:#fff
-    style GRAPH fill:#1f6f5c,color:#fff
-    style CUST fill:#e8a13a,color:#000
-    style BUILD fill:#7a1f1f,color:#fff
+    style COORD fill:#e8a13a,color:#000
+    style LOG fill:#7a1f1f,color:#fff
+    style PRES fill:#1f6f5c,color:#fff
+    style GW fill:#2d6cb5,color:#fff
 ```
 
-**Three near-independent read paths over one shared batch pipeline:**
+**Happy path, compressed:** a client opens a doc (latest **snapshot** + replay the op-log **tail**) and opens a **WebSocket** to a gateway, which routes it to the **doc coordination service** - the single authority for that `doc_id`, giving a deterministic ordering point. The client applies its edit **locally and instantly** (optimistic echo), then sends the op up; the coordinator **orders** it against concurrent ops, **merges** (CRDT merge), **appends** to the durable op log, and **broadcasts** the merged op to every other editor. On a totally separate channel, **presence beats** flow client → gateway → presence channel (in-memory / Redis pub/sub) → other clients - **never** touching the coordinator or the op log.
 
-1. **View a map.** The app computes which `(z,x,y)` tiles cover the viewport and GETs each from the **CDN** - ~99% edge hits, drawn on the client GPU. A miss falls through to the object store; a not-pre-rendered long-tail tile is generated by the **on-demand renderer** and written back so the next request hits cache.
-2. **Get a route + ETA.** `route(A, B)` hits the region's **routing service**, which runs a shortcut-based query over the **in-RAM graph** using the **live-traffic overlay** as the current edge weights - sub-millisecond graph work; the budget is mostly network.
-3. **Search a place.** The search service intersects the **S2 geo-index** with the **inverted text index**, pulls POI metadata, ranks by distance/relevance/popularity.
-
-**Two background machines feed all three:** the **map-data pipeline** (rare + heavy - re-renders changed tiles into a new version, rebuilds the graph and its expensive topology preprocessing, rebuilds the indexes) and the **traffic pipeline** (frequent + light - aggregates probes into per-edge speeds and re-weights the graph every ~1-2 min *without* redoing topology). That split is the heart of Evaluation. The asymmetry to call out: all three serve paths are **reads against precomputed artifacts**; the only thing that changes often is the traffic overlay, deliberately isolated so it can refresh fast.
+**The shape to notice:** the load-bearing wall runs between **presence + connection fan-out (ephemeral, AP, the 30M/sec firehose)** and **edit ordering + durable op log (the convergence point)**. The per-doc coordinator gives a clean ordering authority; presence is kept off that path.
 
 ---
 
 ## A - API design
 
-Three read calls plus the internal batch/refresh boundary.
+> Mostly a **stateful WebSocket protocol**, not REST - the realtime calls are the interesting ones; metadata is plain HTTP.
 
 ```
-# 1) Tiles - served from the CDN; immutable, versioned, cache-forever
-GET /v{ver}/tiles/{style}/{z}/{x}/{y}.{fmt}     # fmt: pbf (vector) | png (raster)
-  → 200  <tile bytes>
-  Cache-Control: public, max-age=31536000, immutable   # version in path → safe to cache forever
+# --- Load / metadata (HTTP) ---
+GET  /v1/docs/{docId}                 -> 200 { snapshot, snapshotVersion, tailOps:[...], asOf }
+GET  /v1/docs/{docId}/history         -> 200 { versions:[{version, ts, author}] }
+POST /v1/docs/{docId}/restore         body:{ version } -> 200 { newVersion }
 
-# 2) Route + ETA
-POST /v1/route
-  body: {
-    origin:      { lat, lng },
-    destination: { lat, lng },
-    mode:        "drive",            # drive | walk | transit (multi-graph; drive is core)
-    depart_at:   "now",              # now → live traffic; future → predicted traffic
-    alternatives: true
-  }
-  → 200 { routes: [ { polyline, distance_m, eta_seconds, traffic: "live", legs:[...] } ] }
-  → 422 if no route exists (e.g., disconnected regions)
+# --- Realtime editing (WebSocket: client <-> gateway <-> coordinator) ---
+WS   /v1/docs/{docId}/connect
+  -> server: { type:"sync", baseVersion, ops:[...] }       # catch you up on connect
+  client -> { type:"op", baseVersion, op:{...}, opId }      # an edit, tagged with the version it was made against
+  server -> { type:"ack", opId, serverVersion }            # committed + ordered
+  server -> { type:"op", op:{...}, serverVersion }          # someone else's merged edit, pushed to you
+  -> server: { type:"reject", opId, reason }                # stale baseline; client rebases and retries
 
-# 3) Places search
-GET /v1/places/search?q=coffee&lat=&lng=&radius_m=2000&limit=20
-  → 200 { places: [ { placeId, name, lat, lng, category, rating, distance_m } ] }
-
-# --- internal / control plane ---
-POST /internal/traffic/probes          # batched GPS probes → aggregator (the fast overlay)
-POST /internal/maps/publish            # batch pipeline flips to a new tile+graph version
+# --- Presence (separate ephemeral channel, fire-and-forget) ---
+  client -> { type:"presence", cursor, selection }          # NOT acked, NOT durable
+  server -> { type:"presence", userId, cursor, selection }  # fanned out best-effort
 ```
 
-**Design notes (each a choice with a rejected alternative):**
-- **Tiles: `immutable` + year-long `max-age` + version in the path.** We **reject** short TTLs or cache-busting params: tiles never change for a given version, so the primitive is "cache forever, change the URL on a new version." The ~99% hit rate - and the cost of the whole serving tier - hinges on this header.
-- **`route` returns the polyline + `eta_seconds` computed server-side** - we **reject** returning raw edges for the client to sum; ETA depends on the live overlay, which must be server-authoritative.
-- **`depart_at` distinguishes live from *predicted* traffic** ("leave at 8 a.m. tomorrow" uses historical time-of-day profiles) - a different metric, both needed.
-- **No write API for tiles or graph in the data plane** - the only "write" is the versioned batch publish, deliberately off the request path.
+**Design notes (each with its rejected alternative):**
+- **Every client op carries `baseVersion`** - the version it was made against. *Rejected: a bare op with no baseline.* The coordinator needs the baseline to merge correctly against ops the client hadn't seen. The baseline **is** the convergence machinery's input.
+- **`opId` makes ops idempotent.** Reconnects re-send unacked ops; the coordinator dedups on `opId`. *Rejected: trusting at-most-once delivery* - WebSockets drop; clients must safely re-send.
+- **Presence is a separate message type, no ack, no persistence.** *Rejected: one unified event stream* - it would drag the 30M/sec presence firehose through the durable coordinator. The protocol split *is* the architectural split.
+- **On reconnect the server sends a `sync` from the client's last-known version** - the offline-merge entry point.
 
 ---
 
 ## D - Data model
 
-**1. Tiles:** a pure blob addressed by `tiles/{version}/{style}/{z}/{x}/{y}.pbf` - **the key *is* the partition key**, spreading load by geography and zoom naturally, and **changing the version is the cache invalidation**. No relational structure, no secondary indexes - the only access is by exact key.
+> This step carries the **pivotal decision of the whole problem**: the concurrency-control strategy (OT vs CRDT vs locking), which *also* fixes what an "op" is. I decide at **decision altitude** and delegate the internals.
 
-**2. Road graph (in-RAM, region-sharded):** `nodes` (intersections), `edges` (directed segments with length, road class, turn restrictions), the precomputed **shortcut structure** (the topology-preprocessing artifact), and the **`traffic_overlay`** (`edgeId → current speed`, the fast-refreshed metric). **Partition / shard key = geographic region** (coarse S2 cell / metro / country) - the load-bearing decision, mirroring 5.7: a route almost always stays in one region, so a query hits **one shard's in-RAM graph**, with rare **cross-region routes stitched via boundary nodes** between adjacent graphs (a higher-level overlay of inter-region connectors). We **reject** a single global graph on one machine, and **reject sharding by `edgeId` hash - it scatters a local route across every shard, a scatter-gather per query.** The durable graph lives in object storage; the live copy in RAM; the overlay refreshed independently.
+**The three strategies, named with pros/cons (this is the interview):**
 
-**3. Places:** `poi_meta` keyed by `placeId` (Bigtable/DynamoDB), the **S2 geo-index** (cell → placeIds, region-sharded), and the **inverted text index** (term-sharded Elasticsearch) - the dual-index pattern from the search/typeahead lessons. We **reject** DB `LIKE` for text and full-table distance scans for "near me."
+- **Locking (talking stick).** One writer at a time per doc/region. *Pro:* trivially correct, no merge algorithm. *Con:* **kills the product** - collaborative editing means simultaneous; a lock serializes everyone. *Rejected* for live co-editing (survives only in low-collaboration tools).
+
+- **Operational Transformation (OT).** Each op is positional (`insert "x" at 7`); on conflict the server **transforms** one against the other so both apply consistently (two `insert at 7` → one shifts to 8). *Pro:* compact ops, mature (the original Docs/Wave approach). *Con:* the **transformation functions are notoriously hard to get right** across every op-pair, and OT **leans on a central server** to order ops - complicating the offline/peer story.
+
+- **CRDT (Conflict-free Replicated Data Type).** Each element gets a **stable unique ID** and a position from a partial order, so merges are **commutative and associative** - any replica applying the same ops in any order converges, *no transform, no central authority*. *Pro:* converges without a coordinator, strong **offline-first** story, peer-to-peer friendly. *Con:* **metadata overhead** (ID + position per element), tombstones for deletes, historically heavier memory - largely tamed by modern sequence CRDTs (RGA, Yjs, Automerge).
+
+**The decision, defended against *this* product's requirements:**
+> **I'd choose a sequence CRDT, and the requirement that decides it is offline editing.** Close a laptop, keep typing, merge cleanly on reconnect is exactly what CRDTs make easy and OT makes painful: OT's central ordering authority means an offline client's stale-baseline ops need careful server-side transformation against everything that happened while it was gone, whereas CRDTs merge regardless of order or coordinator - so offline-then-reconnect is *the same code path* as normal editing. **The trade I accept:** CRDT metadata/memory overhead per element, mitigated by snapshotting and modern libraries. If offline were cut, I'd reconsider OT for smaller payloads - the call hinges on that one requirement.
+
+**The delegation move (the model answer, not a dodge):**
+> **The internals - proving the merge is commutative, tombstone GC, RGA vs Yjs vs Automerge - I'd delegate to the collaboration team to prove with property tests + a fuzzing harness.** My prior is **Yjs** for its mature offline support. I own the *decision and its justification*; I hand off the algorithm proof with a stated prior. **Hand-rolling a CRDT at the whiteboard is the altitude trap** - it signals IC, not Director. Naming the limit of my depth here is the point.
+
+**What an op is, given the choice:** under the CRDT the op log stores **CRDT operations** (element insert with stable ID + position; delete as a tombstone), not raw positional inserts; snapshots persist the compacted CRDT state. (Under OT it would store positional ops + server-assigned sequence numbers - a different log shape, which is *why* this decision lives here.)
+
+<details>
+<summary>Go deeper - OT transformation vs CRDT merge mechanics (IC depth, optional)</summary>
+
+**OT in one paragraph.** Operational Transformation maintains correctness by *transforming* operations against concurrent ones. If client A does `insert("X", 7)` and client B concurrently does `insert("Y", 7)`, the server picks an order (say A first), commits A, then transforms B's op against A: since A inserted at position ≤ 7, B's insert shifts to position 8, becoming `insert("Y", 8)`. Both replicas end with `...X Y...` in the same order. The hard part is the **transformation matrix** - a correct transform function for *every pair* of op types (insert vs insert, insert vs delete, delete vs delete, with formatting ops multiplying the cases), satisfying the TP1/TP2 transform properties. Getting TP2 right for more than two concurrent sites is famously where OT implementations have shipped subtle convergence bugs for years. This is precisely the IC-deep correctness work a Director names and delegates.
+
+**CRDT in one paragraph.** A sequence CRDT (e.g., RGA, or the position-based scheme in Yjs/Automerge) gives every inserted character a **globally unique, immutable ID** and a **position drawn from a dense total order** (e.g., a fractional index or a tree path between its neighbors' IDs). Insert "between A and B" mints a new ID ordered between A's and B's positions; concurrent inserts at the "same" spot get distinct positions and a deterministic tie-break on ID, so every replica orders them identically. Delete is a **tombstone** (mark, don't remove) so a concurrent edit referencing the deleted element still resolves. Merge is just "union the operation sets" - commutative, associative, idempotent - which is why **no central coordinator is required** and offline merge is free. The costs you pay: per-element ID/position metadata (memory), tombstone accumulation (needs periodic GC/compaction), and snapshot complexity.
+
+**Why offline tilts it:** OT needs the server to transform an offline client's stale-baseline ops against the entire intervening history on reconnect - correct but fiddly, and the server is a required ordering authority. CRDT reconnect is *identical* to online merge: replay the missed ops, merge yours, done. Same code path, no special case. That symmetry is the decisive engineering argument.
+
+</details>
 
 ---
 
 ## E - Evaluation
 
-Re-check against the NFRs and break the design on purpose. The headline bottleneck is the **routing precompute under live traffic** - the part 5.7 delegated, and where strong separates from weak.
+> Re-check against the NFRs and hunt bottlenecks. **The model answer at this step is the delegation move itself** - naming the convergence call and handing the proof to a specialist, scored as strength, not evasion.
 
-**Bottleneck 1 - the routing precompute (the central problem).**
-**Raw Dijkstra** on a continental graph (~10^8 nodes) touches millions of nodes per query - **~seconds**, far over the 300 ms budget at 7K QPS. **Contraction hierarchies (CH)** precompute a skeleton of shortcut edges so a query walks only the skeleton - **sub-millisecond**. That's the precompute-vs-query trade in its purest form: hours of preprocessing once, ~constant-time queries forever.
+**Re-check vs NFRs:** convergence - CRDT merge (delegated proof); latency - optimistic echo + per-doc broadcast; durability - op log + snapshots; offline/AP - CRDT merges on reconnect; presence - ephemeral channel. Now the bottlenecks.
 
-**The tension: plain CH assumes *static* edge weights - live traffic breaks them.** The shortcut structure is built around fixed travel times; the moment a freeway's cost changes, the precompute is built for the wrong metric, and you cannot re-run hours of preprocessing every 2 minutes. **The fix splits the precompute in two: topology preprocessing (rare - redone only when roads change) and metric customization (frequent - stamp the current traffic weights onto the precomputed structure in ~seconds, every ~1-2 min).** Queries stay sub-millisecond against the freshly-customized structure. This is the CRP / customizable-CH family. We **reject** plain CH (can't re-weight cheaply) and **reject** raw Dijkstra (too slow at query time) - the customization split is the only point on the curve satisfying *both* fast queries *and* live traffic. **The Director move: I'd have the routing team benchmark CH vs CRP/CCH on our real graph and refresh cadence - my prior is the customization split, precisely because live traffic demands a cheap re-weight - measured on query p99 and customization time, not asserted.**
+**Bottleneck 1 - convergence correctness (the cardinal risk, and the delegation move).**
+*Fix:* the **CRDT merge** guarantees a concurrent same-word edit converges identically on both screens by construction (commutative ops, stable IDs). **The Director move:** name this as *the* pivotal call, choose CRDT for the offline requirement, and **delegate the convergence proof** - "the collaboration team owns the implementation and proves convergence with property tests + a multi-client fuzzer; my prior is Yjs." *Rejected:* hand-deriving transforms at the whiteboard - the IC rat-hole this question is built to expose. The honest depth limit *is* the signal.
 
-<details>
-<summary>Go deeper - why CH breaks and how the customization split works (IC depth, optional)</summary>
+**Bottleneck 2 - the per-doc coordinator as a single point.**
+*Fix:* a **lightweight, sharded** authority - each doc's coordinator is tiny (tens of editors, tiny op rate), so thousands run across the fleet sharded by `doc_id`, with fast failover (re-elect, rehydrate from snapshot + op-log tail). *Trade-off:* a sub-second rehydrate stall on failover - accepted because per-doc state is small. *(With a CRDT the coordinator is "soft" - clients could merge peer-to-peer - but we keep it for durable ordering and broadcast efficiency.)*
 
-- **Why Dijkstra is slow:** it explores the graph outward from the origin in cost order; on a continental graph the search frontier before reaching a distant destination spans millions of nodes. A* with a good heuristic helps but not enough at this scale.
-- **What CH precomputes:** contract nodes in order of "importance" (roughly: how much through-traffic they carry); each contraction adds **shortcut edges** that preserve shortest-path distances while skipping the contracted node. A query then runs a **bidirectional search that only goes "upward"** in the hierarchy from both ends - touching hundreds of nodes instead of millions. Preprocessing is minutes-to-hours; queries are sub-ms.
-- **Why live traffic breaks it:** both the contraction *order* and the shortcut *weights* are derived from edge costs. Change the costs (traffic) and the shortcuts encode wrong distances; recomputing them is the expensive phase you can't afford every cycle.
-- **The three-phase split (CRP / CCH):** (1) **metric-independent preprocessing** - partition the graph and build the contraction/shortcut *structure* from topology alone, no travel times baked in; redone only on road changes. (2) **Customization** - stamp a metric (live speeds, predicted profile, shortest-distance) onto that structure: ~seconds, run every ~1-2 min, one pass per metric. (3) **Query** - sub-ms over the customized structure. Cost: CRP/CCH queries are somewhat slower than plain CH and the machinery is more complex - the price of dynamic metrics.
-- Open-source reference points: OSRM (CH-based), GraphHopper (CH + CCH modes), RoutingKit (CCH).
+**Bottleneck 3 - the connection fan-out (the real scale).**
+*Fix:* a horizontally scaled **stateful gateway tier** (~120 nodes at 50K conns each) with per-doc subscription, so an op fans out only to that doc's editors (tens), not globally. *Trade-off:* stateful nodes are harder to operate (draining on deploy, sticky routing) - the accepted cost of realtime. This is the genuine scale axis; convergence compute is trivial beside it.
 
-</details>
+**Bottleneck 4 - op-log growth / slow doc open.**
+*Fix:* **periodic snapshots + log truncation** - snapshot the CRDT state every N ops, drop the prefix; open = snapshot + short tail replay. *Trade-off:* snapshots cost storage and a compaction job. *Rejected:* unbounded op log - opens slow forever, history grows without limit.
 
-**Bottleneck 2 - tile storage and the pre-render-everything trap.**
-~1.5T tiles × ~10 KB = **~15 PB/style**, re-rendered every update, mostly empty ocean.
-*Fix - hybrid precompute + vector tiles:* **pre-render the populated, high-traffic set** (a small fraction covers ~the whole hit rate); **render the long tail on demand and cache it**; ship **vector tiles** so one tile serves every style. *Trade:* first-hit latency on cold tiles and a render fleet to operate; vector pushes render cost to the client GPU (fine on modern devices). We **reject** all-pre-rendered (cost) and all-on-demand (every pan renders - latency + compute blowup).
+**Bottleneck 5 - presence flooding the durable path.**
+*Fix:* presence is a **protocol-separate, in-memory, fire-and-forget channel** (Redis pub/sub cross-node), TTL'd, lossy by design. *Trade-off:* a dropped beat means a cursor lags ~200 ms - invisible. *Rejected:* a unified durable event stream conflating the firehose with the source of truth.
 
-**Bottleneck 3 - CDN cache effectiveness and the version flip.**
-The serving cost hinges on the ~99% hit rate; purging the CDN on every map refresh would collapse it.
-*Fix:* **version in the tile key** - a refresh writes new objects and flips clients to `v{N+1}`; old tiles age out naturally, new ones warm as requested - **no mass purge**. *Trade:* two versions co-resident at the edge briefly, and a short origin bump as `v{N+1}` warms. We **reject** TTL-based invalidation (too short → low hit rate; too long → stale maps).
-
-**Bottleneck 4 - hot regions / hot routes.**
-A dense-metro routing shard and a few popular commute routes take disproportionate load.
-*Fix:* **replicate** hot-region graph shards (the graph is read-only between refreshes - replicas are trivial), and **cache popular route results** keyed by `(origin-cell, dest-cell, traffic-epoch)`. *Trade:* the route cache lives one traffic epoch (~1-2 min) - acceptable staleness; cache harder for *predicted* (future-departure) routes, which don't change minute-to-minute. (The 3.7/5.7 hot-key lesson, applied to regions and routes.)
-
-**Bottleneck 5 - traffic-pipeline correctness/lag.**
-3M probes/s aggregated naively is noisy (a few stopped cars ≠ a jam).
-*Fix:* smoothing/outlier rejection over a short window; **historical speed profiles** as fallback for low-probe edges; and the overlay is **best-effort** - if customization is late, route on the **last-good** overlay (slightly-stale traffic, never a blocked router). *Trade:* smoothing delays detecting a fresh jam; the historical fallback can miss an unusual event on a minor road. Bounded staleness for stable, always-available ETAs.
-
-**Re-check vs NFRs:** read availability (CDN + replicated read-only graph + last-good overlay ✓); latency (edge tiles < 50 ms; sub-ms routing query ✓); read scale (batch publish off the path, ~99% offload ✓); traffic freshness (customization every 1-2 min without topology re-preprocess ✓); cost (vector tiles + edge caching minimize egress, the dominant bill ✓).
+**Closing re-check:** convergence by construction (delegated proof); coordinator sharded + failover-fast; fan-out horizontally scaled; doc-open bounded by snapshot+truncate; presence off the durable path. The durable surface stays a small append log; everything ephemeral stays ephemeral.
 
 ---
 
 ## D - Design evolution
 
-**At 10x (~10B sessions/day, ~5M tile reads/s, ~70K route QPS):**
-- **Egress dominates even harder.** More aggressive vector-tile reuse, **client-side tile caching**, finer CDN tiering. The origin stays tiny because the hit rate holds; the spend is the edge fleet and egress contracts.
-- **Routing scales with replicas, not shards.** The per-region graph is read-only between refreshes - add replicas of hot regions. *Trade:* more RAM copies (tens of GB each) - cheaper than recomputation.
-- **Faster traffic + prediction.** Tighten customization cadence and lean harder on **predicted traffic** (per-edge time-of-day models + ML on live conditions) - an ML system with its own SLAs, a place to delegate.
+> Push each dimension up an order of magnitude, find what breaks first, name what I'd delegate.
+
+**At 10× (Figma-scale: 1000s viewing one doc, global editors):**
+- **Split editors from viewers.** Convergence runs over the *editors* (still tens); a 1000-strong **view-only** audience is a **broadcast/CDN fan-out** problem - serve them snapshot+tail, not as CRDT replicas. *Trade-off:* viewers see edits a beat later - fine.
+- **Global editing → regional coordinators.** A single per-doc owner across continents adds RTT per commit. Move to **regional CRDT replicas merging asynchronously** with a designated durable-log writer. *Trade-off:* cross-region convergence is eventually-consistent on the order of inter-region RTT - acceptable; the CRDT still converges.
 
 **Hardest trade-offs to defend:**
-- **Precompute vs query, on both axes simultaneously - the unifying pattern.** Tiles: pre-render (storage) vs on-demand (latency+compute) → the hybrid. Routing: precomputed shortcuts vs query-time search → the customization split. Neither extreme works; the art is choosing the split point and naming what each side costs.
-- **Traffic freshness vs cost/stability:** every shortening of the customization interval multiplies pipeline cost and amplifies noise; predicted traffic is how you escape needing everything live.
-- **Vector vs raster:** vector minimizes storage/egress and enables styling but pushes render cost to the client; raster is dumb-simple but multiplies storage per style. **Vector for the modern client, raster fallback** where needed.
+- **CRDT vs OT.** Chosen on the offline requirement; I pay CRDT's metadata/memory cost and delegate GC/compaction. Drop offline and OT's smaller payloads might win - requirement-driven, not dogma.
+- **Op log vs materialized state as truth.** The log buys history, restore, and offline merge; I pay storage growth, bought back by snapshot+truncation. State-only is cheaper but discards three requirements.
+- **One coordinator per doc.** Buys a clean ordering authority and cheap convergence; costs a per-doc single point, mitigated by tiny rehydratable state and fast failover.
 
-**What I'd revisit:** the on-demand-render threshold vs widening the pre-rendered set (benchmark on real access distributions); the route cache's epoch TTL; region-shard boundaries (too coarse → hot shards, too fine → more cross-boundary stitching).
+**What I'd revisit if requirements changed:** drop offline → reconsider OT; add suggestions mode → a permissions/review-state layer; add huge view-only audiences → the editor/viewer split becomes day-one.
 
-**Where I'd delegate (the Director move):**
-- **The router bake-off (CH vs CRP vs CCH)** - flagged in Evaluation: benchmarked on query p99, customization time, and memory; my prior is the customization split.
-- **Traffic fusion + ETA-prediction ML** - a dedicated team behind `edgeSpeed(edge, time)` / `eta(route, depart_at)` with a freshness/accuracy SLA and a historical fallback. Hand-rolling the ML on a whiteboard is the wrong altitude.
-- **Tile rendering / cartography** (generalization, label placement) - a specialty scoped to the maps-rendering team behind "produce vector tiles for version N."
-- **Imagery (satellite/Street View)** - an adjacent capture+serving system reusing the blob+CDN shape; scoped out.
+**Where I'd delegate (the explicit Director move):**
+- **Convergence algorithm:** *"Collaboration team owns the CRDT - implementation, tombstone GC, convergence proof via property tests + a multi-client fuzzer; my prior is Yjs. I own the decision, not the transform math."*
+- **Rich-text data model:** *"Editor team owns mapping formatting onto CRDT ops; my prior is a tree-structured doc with block-level CRDT nodes."*
+- **Realtime infra:** *"Infra owns the stateful gateway - connection draining, sticky routing, autoscaling 6M connections; my prior is a sharded gateway with per-doc subscriptions."* What I keep - the OT/CRDT decision, op-log-as-truth, the presence/edit split - and what I hand off with a stated prior, **is the altitude.**
 
 ---
 
 ## Trade-offs table - the pivotal decisions
 
-| Decision | Option A | Option B | Option C | Use when… |
+| Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
-| **Routing: precompute vs query** | **Raw Dijkstra at query** | **Plain CH** (precomputed shortcuts) | **CRP / customizable CH** (topology precompute + metric customization) | Dijkstra: tiny/dynamic graphs. Plain CH: **static** weights only. **CRP/CCH: live-traffic routing at scale - the right call here.** |
-| **Tiles: precompute vs query** | **Pre-render 100%** | **Render 100% on demand** | **Hybrid: pre-render hot set + on-demand-cache the tail, as vector tiles** | Pre-render-all: small static map (~15 PB/style globally - prohibitive). On-demand-all: every pan renders. **Hybrid: planet-scale - the right call.** |
-| **Tile store** | **Object store + CDN** | **Database-served tiles** |, | Object store + CDN: immutable blobs keyed by a tuple → ~99% edge hit (the right call). DB-served: never. |
+| **Concurrency control** | **CRDT** (stable IDs, commutative merge, no coordinator needed) | **OT** (positional transforms, central order) | **Locking** (one writer at a time) | **A** when **offline / peer-merge** matters - converges with no central authority (our choice). **B** when payload size + maturity matter and editing is always online. **C** only for low-collaboration tools - **rejected** for live co-editing. |
+| **Document representation** | **Op log as truth + snapshots** | **Materialized state as truth** | **Snapshot-only, no op history** | **A** when you need history, restore, and offline merge (our choice). **B** cheaper but loses versioning. **C** loses both history and merge - rejected. |
+| **Presence transport** | **Separate ephemeral channel** (in-mem + Redis pub/sub) | **Same durable stream as edits** | **Polling** | **A** - 30M/sec disposable firehose off the durable path (our choice). **B** buries storage. **C** too laggy for live cursors. |
 
 ---
 
 ## What interviewers probe here (Director altitude)
 
-- **"What's the read:write ratio, and how is it different from Uber?"** - *Strong signal:* **read-dominated and cacheable** (near-static data, batch-written, read billions of times, ~99% CDN-served) - the inverse of the firehose - with traffic as the lone fast overlay. *Red flag:* reusing the ingest-firehose framing, or missing that the same tile/route serves millions.
-- **"Why not just run Dijkstra, and what breaks contraction hierarchies?"** - *Strong:* Dijkstra is seconds on a continental graph; CH precomputes shortcuts for sub-ms queries; **but CH assumes static weights, and live traffic is dynamic** - so split topology preprocessing (rare) from metric customization (every ~1-2 min). *Red flag:* "use contraction hierarchies" and stopping - missing that CH alone can't do live traffic.
-- **"Why can't you pre-render every tile?"** - *Strong:* the `4^z` math → ~15 PB/style of mostly-empty squares; pre-render the hot set, render+cache the tail, ship vector tiles (one tile, all styles). *Red flag:* "store all the tiles" with no sense of scale.
-- **"Where's the cost, and what are the levers?"** - *Strong:* **CDN egress + storage** dominate (compute is a rounding error behind ~99% hit); levers are vector tiles, immutable-versioned URLs, client caching, predicted-traffic route caching. *Red flag:* sizing a giant render fleet while ignoring the edge.
-- **"Where would you delegate?"** - *Strong:* the router bake-off and the traffic-fusion/ETA ML, behind clean interfaces with stated priors and SLAs - while personally owning the precompute-vs-query decision and the CH-can't-do-traffic insight. *Red flag:* whiteboarding the ML model, or asserting a specific production algorithm as fact.
+- **"OT or CRDT - and why?"** - *Strong:* names **all three** (incl. why locking kills the product), picks one **against a requirement** (CRDT *because* offline merge is required), states the trade (metadata overhead), and **delegates the proof with a stated prior** (Yjs). *Red flag:* "we use CRDTs" with no idea why - or fifteen minutes deriving transforms.
+- **"How do two people editing the same word converge?"** - *Strong:* by construction - CRDT ops are commutative with stable per-element IDs and a deterministic tie-break, so every replica orders them identically with no lost keystroke. *Red flag:* "last write wins" (loses keystrokes) or "lock the paragraph" (kills co-editing).
+- **"What's the real scale axis?"** - *Strong:* **6M concurrent connections** (fan-out), not edit compute; convergence runs over *tens* of ops per doc; **presence is 10× the edit firehose and disposable**. *Red flag:* sizing a giant transactional core, or "thousands of concurrent editors per doc."
+- **"Where's your durable boundary?"** - *Strong:* durable = op log (truth) + snapshots; ephemeral = presence on a separate channel; metadata small/relational. Keeps the durable surface a small append log. *Red flag:* persisting presence, or storing only current state and losing history.
+- **"What do you own vs delegate?"** - *Strong:* owns the OT/CRDT *decision* + representation + presence split; delegates the algorithm proof, rich-text schema, and gateway infra **each with a stated prior**. *Red flag:* hand-rolling the CRDT (IC), or hand-waving convergence (too high).
 
 ---
 
 ## Common mistakes
 
-- **Treating it as write-heavy / reusing the Uber framing.** Maps is read-dominated and cacheable; the heavy artifacts are batch-written and precomputed.
-- **"Use contraction hierarchies" and stopping.** Plain CH bakes static weights; **live traffic breaks it.** Naming the customization split is the IC-vs-Director line on this problem.
-- **Pre-rendering every tile.** ~15 PB/style of mostly-empty squares. Pre-render the hot set, render+cache the tail, ship vector.
-- **Mass-purging the CDN on every map update.** Collapses the ~99% hit rate. Version the tile key; old tiles age out, new ones warm gradually.
-- **Sharding the road graph by edge-id instead of region.** A local route becomes a fleet-wide scatter-gather. Shard by region, stitch long-haul via boundary nodes.
+- **Hand-waving "we'll use CRDTs"** with no reason and no trade-off - or rat-holing on transform-function derivation. Both miss the altitude: **name three, decide one against a requirement, delegate the proof.**
+- **Treating convergence as a staleness problem.** A stale read here means **two people see two different documents** - a correctness invariant, not a latency knob.
+- **Putting presence on the durable edit path.** It's 10× the edit firehose with a ~200 ms shelf life; a separate ephemeral channel is mandatory.
+- **Storing only the current document state.** Discards history, restore, *and* offline merge - three requirements. The **op log is truth**; the snapshot is a cache.
+- **Sizing for thousands of concurrent editors per doc.** Real concurrency is *tens*; the scale axis is **connection fan-out**, not convergence compute.
 
 ---
 
 ## Interviewer follow-up questions (with model answers)
 
-**Q1. Estimate the tile-fetch QPS and explain why the CDN, not the origin, defines the cost.**
-> *Model:* ~2B sessions/day × ~20 tiles → **~40B requests/day ≈ 0.5M/s avg, ~1.5M/s peak.** Tiles are immutable and identical for everyone at a given `(z,x,y,style,version)`, and a small popular set covers most fetches → **~95-99% edge hit rate**. At 99% the origin sees **~5K tiles/s - a ~100x reduction.** The serving tier is a CDN + object store; the cost is egress + edge storage, not origin compute. That subtraction *is* the serving design, and it's only possible because tiles are versioned-immutable and cache-forever.
+**Q1. OT or CRDT for this, and defend it.**
+> *Model:* Three strategies: locking (rejected - it serializes co-editing and kills the product), OT, CRDT. I choose a **sequence CRDT**, and the deciding requirement is **offline editing** - under a CRDT, reconnect-and-merge is the *same code path* as online editing (commutative merge, no central ordering authority), whereas OT must transform an offline client's stale-baseline ops against all intervening history on reconnect. The trade I accept is CRDT metadata/memory overhead, mitigated by snapshotting and a mature library; if offline were cut I'd reconsider OT for smaller payloads. The convergence *proof* I delegate to the collaboration team with property tests and a fuzzer; my prior is **Yjs**. Owning the decision, delegating the internals, is the point.
 
-**Q2. Why isn't Dijkstra enough, and how do you keep ETAs live without re-running the precompute every minute?**
-> *Model:* Dijkstra touches millions of nodes per continental query - seconds, far over budget at thousands of QPS. Contraction hierarchies precompute shortcuts → sub-ms queries; but plain CH **bakes in static weights**, and traffic changes them every minute - you can't re-run hours of preprocessing per cycle. So **separate the slow part from the fast part**: topology-only preprocessing redone only when roads change, and a cheap **metric customization (~seconds, every ~1-2 min)** that stamps current per-edge speeds - aggregated from ~3M probes/s, with historical-profile fallback for low-probe edges and last-good overlay if a refresh is late - onto the precomputed structure. Queries stay sub-ms. I'd have the routing team benchmark CH vs CRP/CCH; my prior is the customization split, because live traffic demands a cheap re-weight.
+**Q2. Alice and Bob both insert a character at position 7 at the same instant. What happens?**
+> *Model:* Each inserted character gets a **globally unique, immutable ID** and a position from a dense order between its neighbors. The two inserts mint distinct IDs "around" 7, and every replica applies a **deterministic tie-break on those IDs** - so all replicas end with the same two characters in the same order: both screens identical, neither keystroke lost. There's no "winner"; both survive deterministically. Convergence by construction - exactly why I chose a CRDT over a hand-written transform.
 
-**Q3. Why pre-render some tiles but not all, and why vector over raster?**
-> *Model:* All tiles = `Σ 4^z ≈ 1.5T` per style ≈ **~15 PB/style**, mostly empty ocean, re-rendered every update. So pre-render the populated, high-traffic set and **render the long tail on demand, then cache it** - a cold rural tile is computed once. **Vector over raster** because a ~1-5 KB vector tile renders to *any* style on the client GPU - one stored tile serves all ~10 styles, collapsing storage ~10x and shrinking egress, the dominant cost. Trades: client-side render cost and first-hit latency on cold tiles - both acceptable against the storage/egress savings.
+**Q3. What's the durable write rate, and what do you actually persist?**
+> *Model:* Not every keystroke as a row - I coalesce ops per doc into an append-batch every ~1-2 s, so with ~2M active docs that's ~**1.3M durable appends/sec**, an append-only op-log write sharded by `doc_id` (the cheapest durable pattern). Presence (~30M events/sec) is **never** persisted - separate in-memory channel, ~200 ms shelf life. Snapshot + truncate keeps doc-open fast and storage bounded. The durable surface is a small shardable append log plus snapshots, not a hot transactional core.
 
-**Q4. How would you build places search, and what would you delegate in this whole system?**
-> *Model:* Search is a **dual-index join**: an **S2 geo-index** prunes to POIs near the point, intersected with an **inverted text index** for name/category/address, ranked by distance + relevance + popularity, metadata from a KV store. A DB `LIKE` + distance scan can't hit typeahead latency. **Delegate:** the router bake-off (CH vs CRP/CCH, prior: customization split), traffic-fusion + ETA-prediction ML behind `eta(route, depart_at)` with an SLA and historical fallback, and the cartography/tile-rendering pipeline. I personally own the **precompute-vs-query decision on both axes** and the **CH-can't-do-traffic → customization-split** insight - that's the architectural call; the bake-off and the ML are specialist depth I scope and delegate.
+**Q4. 5,000 people open the same doc during a launch. Does your design hold?**
+> *Model:* I'd reframe: 5,000 *editors* on one doc is a broadcast, not a document - a different problem. I **split editors from viewers**: convergence runs only over the handful editing (tens); the large **view-only** audience is served snapshot+tail over a read-optimized broadcast/CDN path, not as CRDT replicas (they see edits a beat behind - fine). The convergence algorithm never scales with audience; **connection fan-out** does, handled by the stateful gateway tier with per-doc subscriptions. So yes - by recognizing it's a fan-out problem in a convergence costume.
 
 ---
 
 ### Key takeaways
-- Google Maps is **read-dominated and cacheable** - the *inverse* of Uber's write firehose. Tiles and the road graph are **batch-written/precomputed** and read billions of times; the **only fast input is live traffic**. Design precompute + cache, not ingest.
-- The **precompute-vs-query-time-compute** trade is the spine and appears **twice**: tiles (pre-render the hot set vs render-on-demand → hybrid + vector, because all-pre-render is ~15 PB/style) and routing (precomputed shortcuts vs Dijkstra). Name the cost on each side.
-- **Routing:** Dijkstra is seconds on a continental graph; precomputed shortcuts are sub-ms - but **plain CH assumes static weights and live traffic breaks it**. The fix: **topology preprocessing (rare) + metric customization (~seconds, every 1-2 min) + instant queries.** This single insight is the IC-vs-Director line.
-- **Serving:** immutable versioned tiles on an **object store + CDN** with cache-forever URLs → **~99% edge hit, origin sees ~100x less**. Egress + storage dominate the bill; vector tiles and edge/client caching are the levers. **Shard the graph by region**, never by edge-id.
-- **Director moves:** own the precompute-vs-query decision and the CH-can't-do-traffic insight; **delegate** the router bake-off and the traffic/ETA ML behind clean interfaces with stated priors and SLAs; quantify that the spend is CDN egress, not compute.
+- The crux is **convergence correctness**, not a read:write ratio: concurrent edits must merge **deterministically** into one state with **zero lost keystrokes** - a correctness invariant, not a staleness tolerance.
+- **Name all three strategies, decide one against a requirement:** locking (rejected - serializes co-editing), OT (positional transforms, central order), CRDT (stable IDs, commutative merge, no coordinator). **CRDT wins *because* offline editing is required**, and the algorithm proof is **delegated with a stated prior (Yjs)**. The honest depth limit is the scored signal, not a dodge.
+- **Op log is truth; the snapshot is a cache.** Buys history, restore, and offline merge; growth bounded by **snapshot + log truncation**. The concurrency choice fixes what an "op" is.
+- **The scale axis is connection fan-out** (~6M WebSockets), not edit compute - concurrency per doc is *tens*; the durable write rate is a **shardable append log** (~1.3M coalesced appends/sec).
+- **Presence is 10× the edit firehose and disposable** - a separate ephemeral channel, never the durable path. Draw the durable boundary tight: op log + snapshots durable; presence ephemeral.
 
-> **Spaced-repetition recap:** Google Maps = two precompute machines. **Tiles:** pre-render the hot set + render-on-demand the tail, ship **vector** (one tile, all styles), serve from **object store + CDN** with versioned cache-forever keys → ~99% edge hit, origin ~100x smaller; egress is the bill. **Routing:** Dijkstra is seconds; **precomputed shortcuts are sub-ms - but plain CH can't do live traffic**, so split **topology preprocessing (rare) + traffic customization (every 1-2 min) + instant query** (CRP/CCH). Read-dominated, cache-dominated, precompute-dominated; **shard the graph by region**; delegate the bake-off and the ETA ML. This is the team 5.7 delegated routing *to*.
+> **Spaced-repetition recap:** Google Docs = the **convergence** problem - many editors, one document, zero lost keystrokes, both screens identical. **Name three strategies (locking / OT / CRDT), pick CRDT because offline editing is required, delegate the convergence proof with a stated prior (Yjs)** - delegation is the model answer, not a dodge. **Op log = truth, snapshot = cache** (history + offline merge; bound with snapshot+truncate). Scale axis is **connection fan-out (~6M WS)**, not edit compute; concurrency per doc is *tens*. **Presence is a separate ephemeral channel** (10× the edit firehose). This is the **Capstone** problem - drive it yourself first.
+
+---
+
+*End of Lesson 5.10. Google Docs is the convergence question the social-feed problems let you dodge: the Director skill is to name the OT/CRDT/locking decision, decide it against the offline requirement, and **delegate the algorithm proof with a stated prior** rather than hand-roll a CRDT at the whiteboard. It is the capstone problem; this lesson is the debrief. Presence fan-out reuses the live-comments design; AP/CP reasoning is the standard consistency trade-off.*

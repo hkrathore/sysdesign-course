@@ -1,287 +1,145 @@
 ---
-title: "7.5 — Rate Limiter (LLD Form)"
-description: The in-process half of the rate limiter, algorithm selection as class design, a Strategy seam, per-client concurrency, and the climb to 50 servers that hands off to 3.10/5.2.
+title: "7.5 — Real-Time OLAP & Serving Engines"
+description: The analytical store that answers simple aggregation queries in sub-second p99 at hundreds-to-thousands QPS over seconds-fresh data, columnar segments, rollup, and a real-time/historical node split, contrasted with the warehouse and reasoned at Director altitude.
 sidebar:
   order: 5
 ---
 
-> **Why this gets asked.** The rate limiter is one of the few problems asked in *both* LLD and HLD rounds, Stripe, Google, Amazon, Meta, and Cloudflare all run it, deliberately probing the seam between the forms. The course covers the distributed half; this is the missing half: **design the `RateLimiter` class**. A junior answer recites token-bucket mechanics. A Director answer treats **algorithm selection as a requirements decision**, puts it behind a **Strategy seam**, gets **per-client concurrency** right without a global lock, and names, unprompted, **where the in-process design stops and 3.10/5.2 begins.** Interviewers ask the climb; have it ready.
-
 ### Learning objectives
-- Design the **`RateLimiter` interface and Strategy hierarchy** so token bucket, sliding-window log, and fixed window are interchangeable per rule.
-- Choose the algorithm **per requirement, not by reflex**: burst tolerance, memory per client, the asymmetric cost of a false reject vs a false accept.
-- Make `allowRequest` correct under concurrency with **per-client locking**, naming the global-lock convoy rejected and the CAS delegated.
-- Size the per-client **state store** (memory math decides bucket vs log at 1M clients) and bound it with eviction.
-- Deliver the **two-altitude framing**: this class is the in-process half; 3.10/5.2 are the distributed half; the climb between them is the real question.
+- Name the **second analytical store** as a distinct class: a warehouse/lakehouse answers *complex, flexible* queries in seconds-to-minutes at *low* concurrency; a **real-time OLAP / serving engine** (Druid, Pinot, ClickHouse) answers *simple aggregation* queries in **sub-second p99** at **hundreds-to-thousands QPS** over **seconds-fresh** data, and the gap between those two profiles is the whole reason this class exists.
+- Explain the four mechanics that make sub-second-at-high-concurrency possible, **columnar time-partitioned immutable segments**, **pre-aggregation / rollup at ingest**, **inverted/bitmap indexes** for fast filtering, and **memory-resident hot data**, at decision altitude (mechanics in Go-deeper).
+- Describe the **real-time + historical node split** and the **broker scatter-gather**: stream ingestion pulls fresh data from Kafka, deep storage holds the aged segments, and a broker fans a query across both tiers and merges.
+- Make the load-bearing decision, **serve from a real-time OLAP store vs serve from the warehouse**, by matching the *query's concurrency and freshness need* to the store, and name the rejected alternative each time.
+- Decide **pre-aggregation/rollup vs storing raw**, and frame the **Druid-vs-Pinot-vs-ClickHouse** bake-off as a delegated call with a stated prior, the Director move.
 
 ### Intuition first
-Picture a security turnstile with three interchangeable mechanisms. A **coin dispenser** drips tokens into a cup; a coin admits you, a quiet hour banks coins, so a group can burst in. A **logbook** records every entry time; the guard counts the last hour before admitting you, exact, but the book gets thick. A **tally counter** that resets on the hour is cheap and dumb, 100 people at 9:59 plus 100 at 10:01 is 200 in two minutes, because the reset is a cliff.
+Think of the difference between the **accountant's research library** and the **arrivals board at an airport**. The library (the warehouse) is where an analyst goes to answer a hard, one-off question, *"reconstruct net revenue by cohort by channel for the last three years, adjusting for refunds"*, and she's happy to wait two minutes and to be one of only a handful of people in the building. It's built for *flexibility and depth at low concurrency*. The arrivals board is the opposite: ten thousand travelers stare at it at once, each wants one simple fact (*"is flight 482 on time?"*), every one of them needs the answer in well under a second, and the board has to reflect a gate change from thirty seconds ago. Nobody asks the arrivals board to reconstruct three years of flight history, and nobody asks the research library to serve ten thousand simultaneous glances.
 
-The LLD question is not "which mechanism is best." It is: **design the turnstile so the mechanism is a plug-in**, different doors have different policies (the vault wants the logbook, the lobby the coin cup), and ensure two people hitting it in the same instant each get **exactly one atomic decision**, without the whole building queuing behind one guard. Interface first, mechanism second, concurrency third. That ordering *is* the answer.
+A real-time OLAP store is the arrivals board for analytics. It powers the **user-facing dashboard** an advertiser refreshes every few seconds, the **live ops screen** a thousand on-call engineers watch during an incident, the **"your post got 12,400 views in the last 5 minutes"** counter inside a product. The questions are deliberately simple, *count, sum, group-by-a-few-dimensions, filter-by-time*, but they must return in **sub-second p99**, at **thousands of queries per second**, over data that is **seconds old, not hours old**. The trick the board pulls off is that it **does the hard work before you look**: it pre-counts the totals at ingest, it lays the data out so a filter touches almost nothing, and it keeps the recent stuff in memory. That, not raw horsepower, is how it stays instant for everyone at once.
 
----
+The mistake almost everyone makes is reaching for one analytical store for both jobs. **The warehouse cannot be the arrivals board** (it answers tens of concurrent queries in seconds, not thousands in milliseconds), and **the arrivals board cannot be the research library** (it has pre-decided which questions it answers, and pays for that with lost flexibility). Recognizing that user-facing, high-concurrency, sub-second analytics is a *different store* from internal ad-hoc analytics is the judgment this lesson trains.
 
-## R: Requirements
+### Deep explanation
 
-> **The adaptation:** "scope and scale" becomes **contract and constraints**, method contract, policy surface, hot-path budget. Saying the adaptation out loud at every step is itself signal.
+**Start with the divide, because it's the whole lesson.** The data-platforms foundations lesson split the world into OLTP (one entity now, point access) and OLAP (all entities over time, scans). Real-time OLAP is a *split inside OLAP itself*. A cloud warehouse or lakehouse (Snowflake/BigQuery/Trino-on-S3) is optimized for **flexible, complex queries at low concurrency**: arbitrary joins, deep history, any group-by, and it's perfectly happy to take **2–30 seconds** and serve **tens of concurrent queries** because its users are analysts and scheduled jobs. A real-time OLAP store is optimized for the opposite corner: **simple aggregation queries at high concurrency with sub-second latency over fresh data**. The Director-altitude statement: *the warehouse answers hard questions slowly for a few people; the serving engine answers easy questions instantly for everyone, and they are two stores because no single engine sits well in both corners at once.* You **reject** "just point the user-facing dashboard at the warehouse" because a warehouse that's fine for 30 analysts melts at 3,000 QPS of dashboard refreshes, its per-query overhead and concurrency model were never built for that, and you **reject** "use the serving engine as our general analytics store" because it has traded away the flexibility (arbitrary joins, full raw granularity, ad-hoc anything) that ad-hoc analysis needs.
 
-**Clarifying questions (with assumed answers):**
-- *In-process library or network service?* → **In-process v1**; the distributed form is 3.10/5.2, and I'll name the climb at the end. Asking this first pins the altitude, the strongest opening move.
-- *Per-client, per-endpoint rules?* → **Yes**, runtime-configurable: `client × endpoint → rule`.
-- *Is bursting acceptable?* → **Depends on the rule**, exactly why the algorithm must be a per-rule Strategy, not hardcoded.
-- *Cost of a wrong decision?* → Asymmetric: a **false reject** on Stripe's charge API is lost revenue; a **false accept** on login is a brute-force window. The expensive direction differs per endpoint.
+**The performance budget is the requirement, so quantify it.** This class earns its existence at numbers a warehouse can't hit:
 
-**Functional requirements:** (1) `allow(clientId, resource)` → allowed/denied + `retryAfter` + remaining quota (the caller emits 429 headers, a decision object, not a boolean); (2) **pluggable algorithms** per rule; (3) runtime-configurable rules; (4) per-client isolation.
+- **Latency:** **sub-second p99**, often **single-digit-to-tens of milliseconds** for a pre-aggregated lookup, low-hundreds of ms for a heavier group-by, over **billions of rows**. Contrast the warehouse's **seconds-to-minutes**.
+- **Concurrency:** **hundreds to low thousands of QPS**, because the queries back a product surface every user hits. Contrast the warehouse's **tens of concurrent queries** before it queues.
+- **Freshness:** **seconds** from event to queryable (ingestion lag measured in single-digit seconds), because the data is fed off a stream. Contrast the warehouse's **minutes-to-hours** load cadence.
 
-**Non-functional requirements:** **hot-path latency**, `allow()` runs on *every* request, budget **< 50 µs** (< 2.5% of a 2 ms handler); **thread safety**, check-and-update atomic per client; **bounded memory**, ~1M clients in heap with idle eviction; **no external dependency in v1**.
+When an interviewer asks "why not the warehouse?", *those three numbers are the answer*, concurrency and latency and freshness, all an order of magnitude tighter.
 
-**Explicitly CUT:** distributed coordination, Redis, multi-node consistency, quota billing, admin UI. Cutting them by name, *with a forwarding address*, is the Director move.
+**Four mechanics buy that budget. You name them at decision altitude; the internals live in Go-deeper.**
 
----
+- **Columnar, time-partitioned, immutable segments.** Data is sliced by time into **segments** (Druid's term; Pinot calls them segments, ClickHouse uses parts/partitions), typically covering a time interval, holding millions of rows, stored **columnar** and **immutable** once sealed. Immutability is the unlock: a sealed segment can be memory-mapped, cached, replicated, and load-balanced freely because it never changes. Time-partitioning means a query with a time filter (almost all of them) **prunes** straight to the relevant segments and ignores the rest. *Decision consequence:* you query a few recent segments, not the whole dataset.
+- **Pre-aggregation / rollup at ingest.** This is the signature move. Instead of storing every raw event, the store **rolls up** at ingest: rows sharing the same dimension values within a time bucket are collapsed into one row carrying pre-computed aggregates (count, sum, min/max, approximate distinct via HyperLogLog). A billion raw events become tens of millions of rolled-up rows. *Decision consequence:* the query reads a fraction of the data and the aggregate is **partly pre-computed**, which is most of where the sub-second comes from. The cost is stated below: you lose raw granularity.
+- **Inverted / bitmap indexes for filtering.** Beyond columnar min/max pruning, serving engines build **inverted indexes** (value → which rows) and **bitmap indexes** on dimension columns, so a `WHERE country = 'US' AND device = 'mobile'` resolves by **intersecting bitmaps** rather than scanning. *Decision consequence:* high-cardinality filters stay fast, which is what user-facing slice-and-dice demands.
+- **Memory-resident hot data.** Recent segments, the ones nearly every query hits, are kept **in memory or on local SSD**, not fetched cold from object storage per query. *Decision consequence:* the common case never touches the network or a cold disk, so p99 stays tight under load.
 
-## E: Estimation
+**The architecture is a real-time tier and a historical tier, fronted by a broker.** This is the structural shape to draw:
 
-> **The adaptation:** no fleet sizing, the **three numbers that decide the class design**: hot-path budget, lock utilization, memory per client.
+- **Real-time / ingestion nodes** subscribe to a stream (**Kafka**, Kinesis, Pulsar), build segments *in memory* as events arrive so the data is queryable within **seconds**, and periodically **hand off** sealed segments to deep storage and the historical tier.
+- **Historical nodes** load sealed, immutable segments from **deep storage** (S3/HDFS) and serve queries over the aged data, the bulk of the dataset, from local SSD/memory.
+- **Deep storage** (S3) is the durable system of record for segments, cheap, repl-free at the object layer, and the thing that makes the cluster **rebuildable**: lose a historical node and its segments reload from S3.
+- A **broker** receives every query, uses the time range to decide **which segments live where**, **scatters** sub-queries to the real-time nodes (for the freshest minutes) and the historical nodes (for everything older), and **gathers and merges** the partial aggregates into one answer. *This scatter-gather over a fresh tier + a historical tier is the mechanism that makes "sub-second over seconds-fresh data" possible*, fresh data and aged data are served by different nodes optimized for each, and the broker hides the seam.
 
-**Hot-path budget.** One server at **5K req/s**, handler p50 ~2 ms. At 50 µs, `allow()` adds 2.5% latency and `5K × 50 µs = 0.25` CPU-sec/sec, a quarter core. At 1 ms (a careless contended implementation): 5 full cores for rate limiting alone. The budget rules out anything heavier than a map lookup plus arithmetic under a brief lock.
+**There's a lambda-ish handoff where streaming ingest meets batch backfill.** The real-time tier gives you speed-of-ingest but is the weaker authority, its in-memory segments can miss very-late events or need a logic fix. So these systems also accept **batch ingestion**: a job reads the retained raw (the same S3 raw an Ad Click Aggregator keeps) and **overwrites** segments for a time range with a clean, complete, possibly-recomputed version. The streaming path keeps the board fresh; the batch path **backfills and corrects**. *This is the same speed-vs-truth handoff as the Lambda architecture*, the stream is fast and forgivably approximate at the bleeding edge, the batch re-derives the authoritative segments, just expressed inside one serving store's ingestion rather than across two separate pipelines.
 
-**Why a global lock dies.** A 10 µs critical section under one global lock: at 5K req/s the lock is 5% busy, fine. At 50K req/s (a beefy gateway box): **50% utilization**, and by the queueing math waits explode well before saturation, every request queues behind one lock. Contention must be per-client.
+**Where this is NOT the answer.** Two boundaries a Director states explicitly. First, this is **general real-time analytics OLAP**, distinct from **monitoring/observability time-series**: Prometheus and friends are purpose-built for operational metrics (regular-interval numeric series, label-set queries, alerting, downsampling/retention tiers for infra health), whereas Druid/Pinot/ClickHouse serve arbitrary high-cardinality business analytics (per-user, per-campaign, per-SKU slice-and-dice) at product-facing concurrency. They overlap in the middle, but reaching for a serving engine to do node-CPU alerting, or for Prometheus to power a customer-facing analytics product, is a mismatch. Second, this is the **concept** lesson, the full design of one of these systems (capacity, ingestion topology, segment sizing, failure modes, RESHADED end to end) is **14.2**; here you learn *what the class is and when to choose it*, and defer the build.
 
-**Memory per client, this decides the algorithm.** Token bucket: 2 longs ≈ **50 B with overhead**; 1M clients ≈ **50 MB**, trivial. Sliding-window log: a timestamp per request in the window, at 1,000 req/min, `1,000 × 8 B = 8 KB`/client; 1M clients ≈ **8 GB**, dead as a default. The same log on *5 attempts/hour* (password resets): 40 B, fine for **low-limit, high-stakes rules.**
+<details>
+<summary>Go deeper, the mechanics that turn a billion rows into a sub-second answer (IC depth, optional)</summary>
 
-**What estimation decided:** no global lock, no network hop, **token bucket as default**, the log confined to low-limit rules. The numbers picked the design before taste voted.
+- **Segment anatomy.** A Druid/Pinot segment is a self-contained columnar file: each dimension column stored as a **dictionary-encoded** integer array (the distinct values held once in a dictionary, rows referencing them by id) plus, per dimension value, a **bitmap** (often Roaring-compressed) marking which rows hold it. Metric columns (the things you sum) are stored as compressed numeric arrays. A `GROUP BY country WHERE device='mobile'` ANDs the `device='mobile'` bitmap against each country's bitmap and sums the metric over the set bits, no row scan, just bitmap intersection and a masked sum.
+- **Rollup math.** Rollup is a `GROUP BY` applied *at ingest* over (truncated-timestamp, all dimensions). If your dimensions are low-cardinality relative to event volume, the compression is dramatic, **10×–100×+** fewer rows is common (1B raw events → ~10–50M rolled rows). Counts become `SUM` of partial counts; distinct counts must be **approximate** (HyperLogLog sketches stored per row and merged at query) because exact distinct can't be pre-rolled. The lever is dimension cardinality: add a high-cardinality dimension (like `user_id`) to the rollup and the ratio collapses toward 1:1, which is *why you don't roll up on raw identifiers*.
+- **Why immutability matters operationally.** Sealed segments are content-addressable and never mutated, so they replicate and cache trivially, rebalance across historical nodes without coordination, and reload from deep storage (S3) on node loss. Updates/corrections aren't in-place edits; they're **segment replacement** (re-ingest a time interval as a new segment version, the broker switches to it atomically). This is what makes the batch-backfill correction path clean.
+- **The broker's segment-to-node map.** The broker (with a coordinator/controller) holds the timeline of which segment versions are current and which nodes hold them. A query's time range selects a set of segments; the broker scatters to the holders (real-time nodes for the newest, historical for the rest), each node returns a *partial* aggregate, and the broker does the final merge. Concurrency scales by **replicating hot segments** across more historical nodes so thousands of QPS spread out.
+- **ClickHouse's different shape.** ClickHouse isn't node-typed like Druid/Pinot; it's a columnar SQL database with a `MergeTree` engine that sorts data by a primary key and merges parts in the background. Rollup is via `AggregatingMergeTree`/materialized views rather than ingest-time rollup config. It tends to be **fewer, fatter nodes and full SQL**, trading Druid/Pinot's elastic real-time/historical separation for operational simplicity and SQL expressiveness.
 
----
+</details>
 
-## S: Storage
-
-> **The adaptation:** "what persists, in which store" becomes **"where does counter state live, in which structure"**, the instinct, aimed at the heap.
-
-**Choice: an in-heap concurrent map, `client:resource → StateEntry`** (a `ConcurrentHashMap`), each entry owning its algorithm state *and its own lock*. Lookup is lock-free; mutation locks only the entry.
-
-- *Rejected, Redis in v1:* an intra-AZ round trip is ~0.5-1 ms, **20× the entire 50 µs budget**. Redis answers a *different* requirement (shared state across nodes); it arrives in Design evolution.
-- *Rejected, one synchronized global map:* the convoy computed above; it poisons the box's p99.
-
-**The eviction requirement (the leak everyone forgets).** Clients are unbounded, every new API key or IP allocates an entry forever; a scraper cycling IPs is a slow OOM. **Bound the map: TTL expiry of idle entries or an LRU cap.** Trade-off: eviction forgets history, benign for buckets (a fresh client starts full anyway), *not* for the password-attempt log, so **security rules get longer TTLs**. A the distributed-cache building block cache-eviction decision hiding inside a class design.
-
----
-
-## H: High-level design
-
-> **The adaptation:** the box diagram becomes a **class collaboration diagram**. Four pieces: facade, rule registry, state store, Strategy seam.
+### Diagram: real-time OLAP serving architecture
 
 ```mermaid
-flowchart TD
-    REQ[allowRequest from handler] --> FAC[RateLimiter facade]
-    FAC --> REG[Rule registry]
-    FAC --> MAP[Per client state store]
-    MAP --> ENTRY[State entry with own lock]
-    FAC --> STRAT[Strategy interface]
-    STRAT --> TB[Token bucket]
-    STRAT --> SW[Sliding window log]
-    STRAT --> FW[Fixed window counter]
-    ENTRY --> DEC[Atomic check and update]
-    TB --> DEC
-    DEC --> OUT[Decision with retryAfter]
+flowchart LR
+    KAFKA["Kafka<br/>event stream"] --> RT["Real-time nodes<br/>build segments in memory<br/>(queryable in seconds)"]
+    RAW[("Retained raw<br/>S3")] --> BATCH["Batch ingest<br/>backfill / correct"]
+    RT -->|hand off sealed segments| DEEP[("Deep storage<br/>S3, immutable segments")]
+    BATCH -->|overwrite segments| DEEP
+    DEEP --> HIST["Historical nodes<br/>aged segments on SSD/memory"]
+    BROKER["Broker<br/>scatter-gather + merge"] --> RT
+    BROKER --> HIST
+    QUERY["Dashboard / app<br/>sub-second, high QPS"] --> BROKER
+    style RT fill:#e8a13a,color:#000
+    style HIST fill:#1f6f5c,color:#fff
+    style BROKER fill:#2d6cb5,color:#fff
+    style BATCH fill:#7a1f1f,color:#fff
 ```
 
-**The flow:** the facade resolves the **rule**, fetches-or-creates the client's **state entry**, and dispatches to the rule's **Strategy**, which checks-and-updates *under the entry's lock*, returning a `Decision`.
+### Worked example: the live advertiser dashboard (the serving half of 9.7)
+Recall the Ad Click Aggregator: one Kafka firehose, two paths, a fast approximate **stream** for dashboards, a slow exact **batch** for billing. That lesson named "an OLAP store, Druid/ClickHouse/Pinot" as the dashboard's serving layer and moved on. *This is that store, and here's why it's the right class.*
 
-**The load-bearing decision, the Strategy seam.** Algorithms are objects behind one interface; the rule names which it wants.
-- *Why:* requirements demand different algorithms per endpoint (burst-friendly bucket for charges, exact log for logins). Hardcoding one makes the next requirement a rewrite; the seam makes it a config line, and each strategy unit-tests against a fake clock.
-- *Rejected, one über-algorithm with a strictness knob:* conflates genuinely different state shapes (two longs vs a timestamp deque) behind leaky parameters; you inherit the union of all bugs.
-- *Rejected, subclassing per algorithm:* welds the algorithm to the facade, so one limiter can't serve mixed rules, our actual requirement. Composition over inheritance, chosen from the requirement.
+- **The requirement, in numbers.** ~500k campaigns; advertisers poll their dashboard every ~5–30s; assume **~1,000–3,000 dashboard QPS** at peak; each query is "clicks/impressions for *my* campaign, by minute, last N hours, sliced by region/device", and it must return in **sub-second p99** over a firehose ingesting **100k+ events/sec**, ~**8.6B events/day**. That profile, simple aggregation, product-facing concurrency, seconds-fresh, is exactly the serving-engine corner.
+- **Why not the warehouse here.** A Snowflake/BigQuery-class store is the right home for the *billing* recompute and for analysts' ad-hoc revenue questions, but **rejected** for the live dashboard: at 3,000 QPS of small refreshes its concurrency model queues and its per-query latency is seconds, not milliseconds, and it loads on a minute-to-hour cadence, not seconds. The dashboard needs the arrivals board, not the research library.
+- **Rollup does the heavy lifting.** The dashboard's grain is `(campaign_id, minute, region, device)`, all low-cardinality relative to 8.6B daily events. Rolling up at ingest collapses the firehose by **~10–100×** into per-minute aggregate rows; a "last 6 hours by minute" query touches a handful of recent **segments**, reads two metric columns, intersects a `campaign_id` bitmap, and returns in tens of milliseconds. *Trade-off named:* the store no longer holds individual click rows, so "show me this one user's exact click sequence" isn't answerable here, that's what the **retained raw in S3** is for. Rollup bought sub-second-at-scale and cost raw granularity, deliberately.
+- **Fresh tier + batch correction.** The **real-time nodes** ingest Kafka so a click is on the dashboard within seconds; the **batch** path re-derives authoritative segments from the retained raw (folding in late mobile events, applying the fraud verdict) and **overwrites** the corresponding segments, so the dashboard *converges to truth* exactly as the batch back-corrects the OLAP store. Same speed-vs-truth handoff, expressed inside the serving store.
 
-**Second decision: strategies are stateless; state lives in the entry.** One `TokenBucketStrategy` serves a million clients. *Rejected, a strategy object per client:* a million objects duplicating identical logic, murkier locks. This factoring later lets state move to Redis while strategies stay.
+The number a Director carries out: *"the live dashboard is a real-time OLAP serving store, rolled-up segments off the Kafka stream, sub-second at a few thousand QPS, seconds-fresh, with a batch backfill correcting it, and it is deliberately a different store from the warehouse we bill and analyze from."*
 
----
+### Trade-offs table: real-time OLAP vs the warehouse, and the choices within
+| Decision | Option A | Option B | Use when… |
+|---|---|---|---|
+| **Where to serve the analytics** | **Real-time OLAP / serving engine** (Druid/Pinot/ClickHouse) | **Cloud warehouse / lakehouse** (Snowflake/BigQuery/Trino) | **A** for user-facing or live-ops dashboards, *high concurrency* (100s–1000s QPS), *sub-second* p99, *seconds-fresh*, *simple* aggregations. **B** for internal ad-hoc, flexible/complex queries, deep history, *low concurrency*, seconds-to-minutes is fine. *Reject A for B's job* (it lacks join flexibility/raw granularity); *reject B for A's job* (it queues at high QPS and is seconds-slow). |
+| **Pre-aggregation / rollup vs raw** | **Roll up at ingest** (pre-computed aggregates, 10–100× smaller) | **Store raw events** (full granularity) | **A** when queries hit known low-cardinality grains and need to be fast and cheap, *loses* per-event granularity and locks the queryable dimensions. **B** when you need arbitrary drill-down to the individual event, *dearer storage, slower scans*. Common answer: **roll up in the serving store, keep raw in S3** for the rare deep query and for backfill. |
+| **Druid vs Pinot vs ClickHouse** (delegated bake-off) | Druid / Pinot (node-typed: real-time + historical + broker, built for streaming ingest + high-QPS scatter-gather) | ClickHouse (columnar SQL DB, MergeTree, fewer/fatter nodes, full SQL) | **Druid** when you want mature streaming ingest, time-partitioned rollup, and elastic concurrency at scale (classic Netflix/analytics-product shape). **Pinot** for the lowest-latency user-facing queries with rich indexing (the LinkedIn profile-view shape). **ClickHouse** when you want **SQL + operational simplicity** and fat-node raw-ish speed over strict real-time/historical separation. Delegate with a stated prior (below). |
+| **Serve from stream-fed OLAP vs from the warehouse output** | **Stream → real-time OLAP** (seconds-fresh, self-correcting) | **Batch → warehouse → BI** (minutes-to-hours fresh) | **A** when the surface is live/interactive and freshness is a stated requirement. **B** when day-or-hour-old is fine, *don't pay the streaming-ingest + always-on-memory tax* for freshness nobody asked for. |
 
-## A: API design
+The Director move is matching the **query's concurrency, latency, and freshness profile** to the store, and never forcing one analytical engine to cover both the arrivals-board and research-library corners.
 
-> **The adaptation:** this *is* the centerpiece, endpoints become **method signatures**; the interface is the product.
+### What interviewers probe here
+- **"Why not just serve this dashboard from your warehouse / Snowflake?"**, *Strong signal:* names the three numbers, the warehouse does **tens** of concurrent queries in **seconds** on a **minute-to-hour** load cadence; a user-facing dashboard needs **thousands of QPS, sub-second p99, seconds-fresh**, which is a different store's corner. *Red flag:* "we'll add warehouse compute / a BI cache" with no grasp that the concurrency and latency model, not horsepower, is the wall.
+- **"How does it return a group-by over billions of rows in milliseconds?"**, *Strong:* pre-aggregation/rollup at ingest shrinks the data 10–100×, columnar time-partitioned segments prune to a few recent segments, bitmap/inverted indexes resolve filters without scanning, and hot segments are memory-resident, names the mechanics at decision altitude. *Red flag:* "it's columnar so it's fast" with no mention of rollup, pruning, or the concurrency story.
+- **"What does rollup cost you?"**, *Strong:* you lose **raw, per-event granularity** and you pre-decide the queryable dimensions, so arbitrary drill-down to a single event isn't possible, which is exactly why you **keep raw in S3** alongside and can backfill from it. *Red flag:* treats rollup as free, or stores raw in the serving engine and wonders why it's expensive and slow.
+- **"How is the data only seconds old, and how do you keep it correct?"**, *Strong:* real-time nodes build segments in memory off Kafka (queryable in seconds) and hand sealed segments to historical nodes; a **batch path re-derives and overwrites** segments from retained raw to fold in late events and corrections, the lambda-ish speed-vs-truth handoff, with the broker scatter-gathering across both tiers. *Red flag:* assumes streaming ingest is exact, or has no correction/backfill path.
+- **"Druid or Pinot or ClickHouse?"**, *Strong:* gives the distinguishing traits and **delegates with a prior**, "Druid/Pinot for node-typed streaming ingest + high-QPS scatter-gather, Pinot for the tightest user-facing latency, ClickHouse for SQL + operational simplicity; data-platform benchmarks the final two on our concurrency/freshness profile, my prior is the one the org already runs." *Red flag:* a brand-name pick with no traits and no bake-off.
 
-```text
-interface RateLimiter {
-    Decision allow(String clientId, String resource);   // hot path, thread-safe
-    void setRule(String resource, Rule rule);           // runtime config
-}
+The through-line at Director altitude: real-time OLAP is the **second analytical store**, chosen by *concurrency + latency + freshness*, paid for with **rollup at ingest** (sub-second-at-scale in exchange for raw granularity), kept fresh by a **stream-fed real-time tier** and correct by a **batch backfill**, and the engine bake-off is delegated with a stated prior (the real-time-OLAP-serving problem builds one end to end).
 
-record Decision(boolean allowed, long retryAfterMs, long remaining)
+### Common mistakes / misconceptions
+- **Serving a high-concurrency, user-facing dashboard from the warehouse.** It's built for tens of concurrent, seconds-slow, flexible queries, it queues and misses sub-second at thousands of QPS. The serving engine exists precisely for that corner; match the store to the concurrency/latency/freshness profile.
+- **Storing raw events in the serving engine for flexibility.** That throws away rollup's 10–100× win, balloons storage and latency, and still won't match the warehouse's join flexibility. Roll up in the serving store; keep raw in cheap object storage for the rare deep query and for backfill.
+- **Assuming streaming ingest is exact.** The real-time tier is fast but the weaker authority on very-late events and logic fixes; without a **batch backfill that overwrites segments**, the board drifts. Speed comes from the stream, truth from the batch re-derive.
+- **Confusing this with a metrics/observability time-series store.** Prometheus-class systems are for operational/infra metrics, alerting, and regular-interval series; real-time OLAP serves arbitrary high-cardinality *business* analytics at product concurrency. Using one for the other's job is a mismatch.
+- **Picking Druid/Pinot/ClickHouse by brand instead of profile.** They differ on node model (typed real-time/historical vs fat SQL nodes), ingest, indexing, and SQL surface; the right answer states the distinguishing traits and delegates the final bake-off with a prior (and reaches for the warehouse, not any of them, when the workload is actually low-concurrency ad-hoc).
 
-record Rule(long limit, long windowMs, long burstCapacity, StrategyType type)
+### Practice questions
 
-interface RateLimitStrategy {                           // the Strategy seam
-    Decision tryAcquire(ClientState state, Rule rule, long nowNanos);
-    ClientState newState(Rule rule, long nowNanos);     // first sight of a client
-}
-```
+**Q1.** A product team wants an in-app "your store's orders in the last hour, by minute, sliced by region" panel that every seller sees on login, call it ~2,000 QPS at peak, must feel instant, data no more than a few seconds stale. They propose querying the analytics warehouse you already run. What do you tell them, and what do you build instead?
+> *Model:* I'd reject the warehouse for this surface: it's tuned for tens of concurrent, seconds-to-minutes, flexible queries, at 2,000 QPS of small refreshes it queues and its per-query latency is seconds, not the sub-second this needs, and it loads on a minute-to-hour cadence, not seconds-fresh. This is the arrivals-board corner, so I'd serve it from a **real-time OLAP store** (Druid/Pinot/ClickHouse): ingest the order stream from Kafka into **real-time nodes** (queryable in seconds), **roll up at ingest** to the `(store_id, minute, region)` grain so a billion events become tens of millions of rows, and let columnar time-partitioned **segments** + a `store_id` bitmap return the panel in tens of milliseconds. The warehouse stays the home for the team's ad-hoc and historical analysis, two stores, matched to two query profiles. Trade-off I'd name: rollup means I can't drill to an individual order from this store, so I keep raw in S3 for that and for backfill.
 
-**Design notes (each with its rejected alternative):**
-- **`Decision`, not `boolean`.** The caller needs `Retry-After` and remaining quota for 429 headers; a bare boolean forces a second, racy query. *Rejected: `boolean allow()`*, cleaner-looking, starves the caller.
-- **Time is a parameter.** Inject a **monotonic** clock: wall clock steps backward under NTP and mints free tokens; injection makes boundary tests deterministic. *Rejected: inline wall time*, untestable, subtly wrong.
-- **`tryAcquire` is check-AND-consume in one call.** *Rejected: separate `check()` then `consume()`*, the gap is a TOCTOU race; two threads both pass `check`, both take the last token. The contract must make the race **inexpressible**, the single-atomic-statement instinct, applied to method design.
-- **`newState` lives on the strategy**, each algorithm owns its state shape; the facade stays ignorant of internals, the property that survives the later move to Redis.
+**Q2.** Your real-time OLAP dashboard shows ~3% more events for the last hour than the same figure once it's a day old. Bug or expected? Explain the mechanism.
+> *Model:* Expected, and it's the lambda-ish handoff. The **real-time tier** ingests off the stream and is fast but the weaker authority at the bleeding edge, it can't have seen very-late events (an offline mobile client flushing an hour later) and may include things a later rule excludes. The **batch path** re-derives authoritative segments from the **retained raw**, folding in late arrivals and applying corrections (e.g. a fraud/validity filter), and **overwrites** the segments for that time range; the broker switches to the corrected version atomically. So the recent number is fast-and-approximate, the settled number is the batch re-derive, and the dashboard *converges to truth*, the same speed-vs-truth split as 2.9/9.7, just inside one serving store's ingestion. It's a bug only if it *never* converges, which would point at a broken backfill.
 
----
+**Q3.** A staff engineer wants to add `user_id` to the rollup dimensions so the team can drill into any individual user from the serving store. What breaks, and what's the right design?
+> *Model:* Rollup is a `GROUP BY` over (time-bucket, dimensions) at ingest, and its compression depends on dimensions being **low-cardinality** relative to event volume. `user_id` is high-cardinality, adding it collapses the rollup ratio toward **1:1**, so you've effectively gone back to storing raw: storage balloons, segments stop being small, and the sub-second-at-high-QPS budget evaporates. The right design keeps the serving store rolled up on low-cardinality grains (region, device, campaign, minute) for the fast dashboard, and answers per-user drill-down from the **retained raw in S3** via the warehouse/lakehouse or a targeted scan, a query that's rare, low-concurrency, and tolerant of seconds-to-minutes, which is the *other* store's corner. Don't put a high-cardinality drill-down workload on the arrivals board.
 
-## D: Data model
+**Q4.** Distinguish a real-time OLAP serving engine (Druid/Pinot/ClickHouse) from a metrics/observability time-series store (Prometheus-class). When would you reach for each?
+> *Model:* Different jobs that look similar because both are "fast and time-indexed." A **metrics/observability** store is purpose-built for *operational* telemetry: regular-interval numeric series keyed by label sets, alerting/rules, downsampling and retention tiers for infra health, you reach for it to watch CPU/error-rate/latency and page on-call. A **real-time OLAP** store serves *arbitrary high-cardinality business analytics*, per-user, per-campaign, per-SKU slice-and-dice, at product-facing concurrency and sub-second latency, powering customer-facing dashboards and live product counters. They overlap in the middle, but I wouldn't drive node-level alerting from Druid, nor power a customer analytics product from Prometheus. Reach for observability for *system health*, real-time OLAP for *user-facing analytics over fresh business events*.
 
-> **The adaptation:** schema/keys/indexes become **per-client state records and the map key**.
-
-**Map key: `clientId + ":" + resource`**, per-client *and* per-endpoint isolation in one lookup. *Rejected: keying by client alone*, a burst on a cheap endpoint drains quota for the expensive one.
-
-**State records, per strategy:** token bucket, `tokens` + `lastRefillNanos` (~50 B); sliding-window log, a deque of timestamps (8 B × limit); fixed window, `windowStart` + `count` (~50 B). Each entry also carries **its own lock** and `lastAccessNanos` for eviction, the data model anticipates Evaluation's concurrency and Storage's TTL.
-
-The fixed-window flaw, once: rule 100/min, 100 requests at 0:59 and 100 at 1:01 are both allowed: **200 in two seconds**, because the reset is a cliff. Fine for coarse abuse caps; unacceptable where the limit *is* the contract. (Algorithm internals are the material; here we need only state shapes and costs.)
-
-<details>
-<summary>Go deeper, full token-bucket strategy listing with per-entry locking (IC depth, optional)</summary>
-
-```java
-final class TokenBucketState implements ClientState {
-    double tokens;            // fractional tokens keep refill math exact
-    long   lastRefillNanos;
-    long   lastAccessNanos;   // for TTL eviction
-    final Object lock = new Object();
-}
-
-final class TokenBucketStrategy implements RateLimitStrategy {
-    public ClientState newState(Rule r, long now) {
-        var s = new TokenBucketState();
-        s.tokens = r.burstCapacity();       // start full
-        s.lastRefillNanos = now;
-        return s;
-    }
-    public Decision tryAcquire(ClientState cs, Rule r, long now) {
-        var s = (TokenBucketState) cs;
-        synchronized (s.lock) {                       // per-client lock only
-            double ratePerNano = (double) r.limit() / (r.windowMs() * 1_000_000L);
-            s.tokens = Math.min(r.burstCapacity(),
-                                s.tokens + (now - s.lastRefillNanos) * ratePerNano);
-            s.lastRefillNanos = now;
-            s.lastAccessNanos = now;
-            if (s.tokens >= 1.0) {
-                s.tokens -= 1.0;
-                return new Decision(true, 0, (long) s.tokens);
-            }
-            long retryNanos = (long) ((1.0 - s.tokens) / ratePerNano);
-            return new Decision(false, retryNanos / 1_000_000L, 0);
-        }
-    }
-}
-```
-
-Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, atomic on a ConcurrentHashMap, so two threads seeing a new client cannot mint two states. Lazy refill (compute elapsed tokens at read time) means **no background refill thread**, the same lazy-reclaim instinct as the hold expiry: correctness never depends on a timer.
-
-</details>
-
----
-
-## E: Evaluation
-
-> **The adaptation:** "stress vs NFRs" becomes **concurrency on the hot path**, where LLD designs live or die. Walk the race, the three options, then decide.
-
-**The race.** Bucket has 1 token. Threads A and B call `allow()` for the same client; naive code lets both read `tokens == 1`, both pass, both decrement, **two admits on one token**, corrupt state. Every algorithm here is read-modify-write; without atomicity the limiter *over-admits precisely under load*.
-
-**Three options, one decision:**
-
-1. **Global lock.** Correct, simple, and the Estimation math shows 50% utilization at 50K req/s and a box-wide convoy. *Rejected:* it works until the box grows, then fails at the worst time.
-2. **Per-client lock on the entry, the choice.** Contention exists only when a client races *itself*, rare, or exactly the abuser whose requests *should* serialize; distinct clients never contend. The critical section is ~10 arithmetic ops, sub-µs. Cost: one lock per entry (~16 B; +16 MB at 1M clients).
-3. **Lock-free CAS**, pack state into one atomic 64-bit word, compare-and-swap, losers retry. Fastest under extreme contention; much harder to write and extend (the log can't pack into 64 bits). *Rejected as default, kept as the named escalation:* "I'd have the platform team benchmark CAS vs per-client locks under our hottest client's profile; **my prior is the lock loses < 1 µs and wins on maintainability**."
-
-**Re-check the NFRs:** latency, map get + entry lock + arithmetic ≈ single-digit µs; memory, 50 MB + 16 MB of locks, TTL-bounded; clock, monotonic, injected. One residual: first-sight state creation must be atomic (`computeIfAbsent` is) or two threads mint two states.
-
-<details>
-<summary>Go deeper, lock striping and the CAS packing trick (IC depth, optional)</summary>
-
-**Lock striping:** an array of N locks, entry locked by `hash(key) % N`. With N = 1,024, unrelated clients collide with probability ~1/1,024, but per-entry locks are already cheap; striping only pays when entries are too small to carry a lock.
-
-**CAS packing** for the bucket: encode integer `tokens` (20 bits) and a truncated refill timestamp (44 bits) into one `AtomicLong`. Acquire loop: read, compute refill + decrement into a new word, `compareAndSet`, retry on failure. Tens of millions of ops/s on a single mega-hot key vs ~5-10M lock/unlock pairs/s. Costs: fractional tokens gone, timestamp wraparound handling, and the sliding log is unpackable, so two concurrency models in one codebase. That last sentence usually ends the meeting.
-
-</details>
-
----
-
-## D: Design evolution
-
-> **The adaptation:** "scale under new constraints" becomes **the climb from one process to 50 servers**, the seam where this lesson hands off to 3.10/5.2. Interviewers ask this climb almost every time.
-
-**The constraint arrives:** 50 servers behind a load balancer. Each enforces 100 req/min locally → a client spraying across nodes gets **up to 5,000 req/min, 50× the limit.**
-
-**Three responses, escalating:**
-
-1. **Divide the limit: 100/50 = 2 per node.** Free, and broken: traffic is never uniform, so a client routed 80/20 is falsely rejected on the hot node while quota idles elsewhere; the divisor changes on every autoscale. *Only for coarse ceilings tolerating 2-3× error.*
-2. **Sticky routing: consistent-hash clients to nodes**, each local limiter becomes globally correct for its clients. Elegant, fragile: node loss remaps clients with fresh state, and it hijacks LB policy. *Real when the LB already hashes by client.*
-3. **Centralize: Redis-backed counters, atomic Lua, ~1 ms per request, the rate-limiter building block and 5.2**, with their race windows and fail-open/fail-closed posture. The practical winner is usually the **hybrid**: local burst allowance + async sync, hot path at local speed, global error bounded by the sync interval.
-
-**The two-altitude framing, said out loud (memorize this move):** *"Today's design is the in-process half, and the Redis design still needs it: every node keeps local state, strategies, and thread safety; the shared store is just another state store behind the same seam. The distributed half, where shared state lives, what happens when Redis is down, what the millisecond costs, is a different problem: The rate-limiter building block/5.2."* That demonstrates what the dual-form question tests: **which problem you're solving, and where the other one starts.**
-
-**Where I'd delegate:** the CAS-vs-lock benchmark (prior above); Redis failover posture to the platform team, *"my prior is fail-open with an alarm: fail-closed turns a Redis blip into a full outage; brief abuse exposure is the cheaper risk"*; rule governance to the API platform owner, limits are revenue policy.
-
----
-
-## Trade-offs table: algorithm selection as class design
-
-| Dimension | A, Token bucket | B, Sliding-window log | C, Fixed window | Use when… |
-|---|---|---|---|---|
-| Burst behavior | Bursts to bucket size, smooth average | Exact rolling limit, no forgiveness | **2× burst at boundary** | **A** when bursts are legitimate; **B** when the limit is a contract; **C** when approximate is fine |
-| Memory per client | ~50 B | 8 B × limit (8 KB at 1K/min) | ~50 B | **B** only for low-limit rules, 5/hour logins, not 1K/min APIs |
-| Cost of false reject | Low, burst absorbs jitter | Higher, strict edge | Spiky, boundary artifacts | **A** for revenue paths; **B** where a false *accept* is the expensive error (auth) |
-| **Verdict** | **The default** | The low-limit, high-stakes specialist | The cheap coarse ceiling | The Strategy seam makes this per-rule config, not an argument |
-
-(All three fit the 50 µs budget, memory and semantics differentiate them, not CPU.)
-
----
-
-## What interviewers probe here (Director altitude)
-
-- **"Why three algorithms behind an interface?"**, *Strong:* maps each to a requirement (burst tolerance, memory, false-reject cost); the seam is forced by per-endpoint differences. *Red flag:* "Strategy pattern is best practice", pattern as incantation.
-- **"Two threads, one token left."**, *Strong:* the read-modify-write race, check-and-consume atomic *in the contract*, per-client locks, the convoy quantified. *Red flag:* `synchronized` everywhere, no cost stated.
-- **"This now runs on 50 servers."**, *Strong:* "50× the limit" instantly, then the climb (divide → sticky-hash → shared store), the hybrid, fail-open, 3.10/5.2 as a distinct problem. *Red flag:* "put it in Redis" with no latency cost named.
-- **"What's in memory after a month?"**, *Strong:* the unbounded-map leak, TTL/LRU eviction, eviction forgetting history (benign for buckets, not security logs). *Red flag:* never considered unbounded clients.
-- **"What would you delegate, and what's your prior?"**, *Strong:* CAS benchmark (prior: lock wins), Redis failover (prior: fail open), rule governance to the platform owner. *Red flag:* ten minutes of CAS bit-packing, or nothing kept.
-
----
-
-## Common mistakes
-
-- **Leading with an algorithm instead of the interface.** Refill math before any contract exists reads as IC reflex. Interface, seam, state, the algorithm is a plug-in.
-- **`check()` and `consume()` as separate methods.** The gap is a TOCTOU race the interface invites. One atomic call, make the race inexpressible.
-- **One global lock.** Correct, and it convoys the box at scale; per-client locks cost 16 B per entry. Quantify, don't assert.
-- **An unbounded client map.** Every new API key allocates state forever; a key-cycling scraper is a slow OOM. TTL eviction is part of the design.
-- **Forgetting the climb.** Never volunteering that 50 servers makes local limits 50× wrong. The two-altitude handoff is the highest-value sentence in the interview.
-
----
-
-## Interviewer follow-up questions (with model answers)
-
-**Q1. Sketch your core interface and defend its shape.**
-> *Model:* `Decision allow(clientId, resource)` on the facade; `Decision tryAcquire(state, rule, now)` on the Strategy. Three choices: **`Decision`, not boolean**, the caller needs `retryAfter` and remaining quota for 429 headers; **check-and-consume in one call**, separate check/consume is a TOCTOU gap the contract must make impossible; **time injected, monotonic**, wall clock steps backward under NTP and mints free tokens. Strategies stateless and shared; per-client state in a locked map entry, the factoring that later lets state move to Redis.
-
-**Q2. When would you actually pick the sliding-window log, given its memory cost?**
-> *Model:* When the limit is small and a false *accept* is the expensive error. At 1,000 req/min the log is 8 KB/client, 8 GB for a million clients, dead as a default. At 5 attempts/hour on password reset it's 40 B, free, and exact: no boundary burst, no burst allowance (a bucket's forgiveness is precisely wrong for brute force). Bucket as fleet default for revenue paths; the log for low-limit security rules, a per-rule config line, which is why the seam exists.
-
-**Q3. Your limiter is correct on one node. Production runs 40 nodes behind an LB. Walk me up.**
-> *Model:* Local enforcement is now globally wrong, 100/min per node is up to 4,000/min for a spraying client. Three rungs: **divide by N** (free; breaks on traffic skew and every autoscale); **consistent-hash clients to nodes** (globally correct per client; fragile on churn, hijacks LB policy); **Redis with atomic Lua**, the 3.10/the rate-limiter problem design, ~1 ms per request against my 50 µs budget, so the practical winner is the **hybrid**: local burst allowance with async sync. Posture: **fail open with an alarm**, fail-closed converts a Redis blip into a self-inflicted outage. The class survives the climb: the shared store is another state store behind the same seam.
-
-**Q4. Why per-client locks rather than lock-free CAS?**
-> *Model:* CAS is faster under contention, and the contention doesn't exist: distinct clients never share a lock; a client racing itself spends sub-µs in the critical section. CAS costs real things: bucket state must pack into 64 bits, the log can't pack at all, two concurrency models in one codebase. **Decision: per-client locks; platform team benchmarks CAS; prior: the lock loses under a microsecond and wins maintainability.**
-
----
+**Q5.** You've decided on a real-time OLAP store but the team is split on Druid vs Pinot vs ClickHouse. How do you resolve it at Director altitude, and what's your prior?
+> *Model:* I resolve it as a delegated bake-off with a stated prior, not a brand preference. The distinguishing traits: **Druid**, mature streaming ingest, time-partitioned rollup, node-typed (real-time/historical/broker) for elastic high-QPS scatter-gather; **Pinot**, the tightest user-facing query latency with rich indexing (the LinkedIn profile-view shape); **ClickHouse**, full SQL and operational simplicity on fewer, fatter nodes, trading the strict real-time/historical separation for ease. My prior: *whichever the org already runs*, because the operational cost of a second specialized store usually dominates the per-query delta; absent that, Druid/Pinot for a streaming-ingest, high-QPS user-facing shape and ClickHouse if SQL ergonomics and fewer moving parts matter more than elastic separation. Then: "data-platform benchmarks the final two on our concurrency, freshness, and rollup-ratio profile; I own the *decision criteria* and keep the architectural choice (rollup at ingest, stream-fed real-time tier, batch backfill), and delegate the head-to-head." The full design is 14.2.
 
 ### Key takeaways
-- **The LLD rate limiter is algorithm selection *as class design*:** token bucket (default; 50 B/client), sliding-window log (exact; low-limit high-stakes rules only), fixed window (cheap; 2× boundary burst). Each is a requirements answer.
-- **The Strategy seam is forced by per-endpoint requirements:** stateless shared strategies, per-client state records, and the seam later absorbs the Redis-backed store.
-- **The interface is the correctness story:** `Decision` not boolean, check-and-consume in one atomic call (no TOCTOU), injected monotonic clock. Make races inexpressible in the contract.
-- **Concurrency: per-client locks**, not a global lock (10 µs × 50K req/s = 50% utilization = convoy), not CAS by default (delegated with a prior). TTL-evict the state map or it's a slow OOM.
-- **Always volunteer the climb:** 50 nodes makes local limits 50× wrong → divide → sticky-hash → shared store, hybrid in practice, fail open. Knowing where the in-process half ends is the Director signal.
+- **Real-time OLAP is the second analytical store.** The warehouse/lakehouse answers *complex, flexible* queries in *seconds-to-minutes* at *low* concurrency; a serving engine (Druid/Pinot/ClickHouse) answers *simple aggregation* queries in **sub-second p99** at **hundreds-to-thousands QPS** over **seconds-fresh** data. Choose by concurrency + latency + freshness, and never force one store into both corners.
+- **Four mechanics buy sub-second-at-scale:** columnar **time-partitioned immutable segments** (prune to a few), **pre-aggregation/rollup at ingest** (10–100× fewer rows, partly pre-computed), **bitmap/inverted indexes** (filters without scans), and **memory-resident hot data** (the common case never goes cold).
+- **The architecture is a real-time tier + a historical tier behind a broker:** streaming nodes build segments off Kafka (queryable in seconds) and hand sealed, immutable segments to historical nodes loading from **deep storage (S3)**; the **broker scatter-gathers** across both tiers and merges, and a **batch path overwrites segments** to backfill and correct, the lambda-ish speed-vs-truth handoff.
+- **Rollup is the signature trade-off:** it buys sub-second-at-high-QPS and cheap storage, and it **costs raw granularity** and locks the queryable dimensions, so roll up in the serving store and **keep raw in S3** for the rare deep query and for backfill; never roll up on high-cardinality identifiers.
+- **Distinct from observability time-series**, this is general business analytics, not infra metrics/alerting, and the **Druid/Pinot/ClickHouse** pick is a delegated bake-off with a stated prior (often "whichever the org runs"). The full RESHADED design is **14.2**.
 
-> **Spaced-repetition recap:** LLD rate limiter = **interface + Strategy + per-client state under concurrency**. `Decision allow(client, resource)`; check-and-consume atomic; injected monotonic clock. Bucket default; log for low-limit security rules; fixed window = 2× boundary burst. Per-client locks; TTL-evict the map. The climb: 50 nodes = 50× the limit → divide / sticky-hash / Redis, hybrid + fail-open. Name the seam unprompted.
+> **Spaced-repetition recap:** Real-time OLAP / serving engines (Druid, Pinot, ClickHouse) are the **arrivals board** of analytics, *simple aggregations, sub-second p99, hundreds-to-thousands QPS, seconds-fresh*, vs the warehouse's **research library** (*complex, flexible, low-concurrency, seconds-to-minutes*). Sub-second-at-scale comes from **columnar time-partitioned immutable segments + rollup at ingest (10–100×) + bitmap indexes + memory-resident hot data**. Shape: **real-time nodes** ingest Kafka (queryable in seconds) → hand off sealed segments to **historical nodes** loading from **deep storage (S3)**; a **broker scatter-gathers** across both; a **batch path overwrites segments** to backfill/correct (the lambda-ish speed-vs-truth handoff, 2.9/9.7). Rollup costs **raw granularity** → keep raw in S3 for drill-down. Choose this **over the warehouse** for user-facing/live high-QPS; choose the **warehouse over this** for ad-hoc/flexible/low-concurrency. Distinct from observability time-series. Delegate Druid-vs-Pinot-vs-ClickHouse with a prior. The build is 14.2.
 
 ---
 
-*End of Lesson 7.5. This lesson built the class inside each node, interface, Strategy seam, per-client locking under a 50 µs budget; the rate-limiter building block and the rate-limiter problem own where shared state lives and what happens when it's unreachable. The interview rewards the candidate who can stand at the seam and describe both sides.*
-
-
-
-
+*End of Lesson 7.5. A real-time OLAP / serving engine is the second analytical store, sub-second, high-concurrency, seconds-fresh aggregation, bought with columnar segments, ingest-time rollup, and a stream-fed real-time tier fronted by a scatter-gather broker, chosen over the warehouse whenever the surface is user-facing and live (and the reverse for ad-hoc flexibility), reusing the Lambda speed-vs-truth handoff from 2.9/9.7. Next: 13.6, ingestion and CDC, how operational data actually flows into the analytical platform in the first place.*

@@ -1,420 +1,151 @@
 ---
-title: "9.5 — Food Delivery Marketplace"
-description: Design the three-sided DoorDash/Uber Eats marketplace around its load-bearing tension, one order state machine coordinating eater, restaurant, and courier under a 5-10× lunch/dinner peak, choosing actor-boundary service decomposition, an event-driven state machine, and a dispatch optimizer that trades delivery speed against courier fairness and cost.
+title: "9.5 — Adapting the Model: Prompt vs RAG vs Fine-Tune"
+description: The spectrum from prompt engineering through context engineering and RAG to fine-tuning and continued pretraining — when each is the right tool, the data/eval/ops cost of each, and why "fine-tuning to add facts" is the classic mistake.
 sidebar:
   order: 5
 ---
 
-> **Why this gets asked at DoorDash, Uber, Grab, and Instacart, and what separates a Director answer.** This is not a proximity problem (that's the proximity-matching problem); it's a *marketplace coordination* problem with three actors whose incentives conflict, a restaurant-prep waiting period that makes naive dispatch wrong, a payment flow that must split a single charge across three parties, and a 5-10× intraday peak that the system must absorb without over-provisioning for. The IC answer draws a "place order → dispatch courier" flow and calls it done. The Director answer identifies the **order state machine** as the correctness core, draws service boundaries on **actor boundaries** (which also maps to org topology), names where eventual consistency is safe (menus, ETAs) and where it is not (order state, payment), and quantifies the fleet-sizing problem the peak creates.
-
 ### Learning objectives
-- Run the full **RESHADED** spine on a three-sided marketplace; adapt H/D to decompose services by **actor boundary** and explain why that mirrors the team topology.
-- Model the **order state machine** as the correctness core, define valid transitions, identify the transitions that must be atomic, and distinguish the states where eventual consistency is acceptable.
-- Quantify the **5-10× lunch/dinner peak**, size the courier fleet, and pick a dispatch strategy that balances delivery time, courier fairness, and cost, stating what you are giving up in each trade.
-- Know where **the payment-split** adds complexity beyond a standard charge (see the payment platform) and delegate the PCI surface.
-- Draw the **strong/eventual boundary** explicitly: menus and ETAs are hints; order state and payment are the invariant.
+- Lay out the **adaptation spectrum** cheapest/fastest → most expensive — prompt engineering → context engineering / RAG → fine-tuning (LoRA, then full) → continued pretraining — and know that you **climb it only when eval proves the rung below can't hit the bar.**
+- Apply the **one decision rule that scores**: fresh/private **facts → RAG**; new **behavior/format/style/skill → fine-tune**; both → RAG **on** a fine-tuned model; lower latency/cost at fixed quality → **distill** into a smaller fine-tune. State the misconception out loud: **fine-tuning teaches behavior, not facts.**
+- Price fine-tuning correctly — **LoRA/PEFT** (small swappable adapter, cheap) vs **full fine-tune** (expensive, one model) — and recognize that the real cost is **data curation + an eval harness + retraining as the base model moves**, not GPU hours.
+- Name the operational tax a Director owns: a fine-tune **locks you to a base-model version**, so every base upgrade is a re-curate-and-retrain project, not a config flip.
+- Default to **prompt + RAG**, and treat fine-tuning as **earning-the-right** — only after prompt/RAG demonstrably fail, and only with data, an eval, and an ops plan in hand.
 
 ### Intuition first
+Adapting a model is like getting a brilliant new hire productive in your company. The **cheapest move is a good briefing**: a clear job description and a few worked examples ("here's how we write a ticket; reply in this format"). That's **prompt engineering** — instant, free to change, the first thing you try.
 
-Think of a short-order diner with three parties who must all show up at the same moment: the customer who ordered, the cook who has to make the food, and the delivery person who has to carry it. If the delivery person arrives while the cook is still chopping onions, the driver idles and the food goes cold. If the driver arrives ten minutes after the food is ready, the food goes cold anyway. The whole system's quality hinges on *timing coordination*, and the kitchen's prep time is the hardest variable because it is noisy, restaurant-dependent, and unknown until the cook actually starts. That coordination is the state machine. Every order moves through a sequence of gates, placed, restaurant-accepted, prep started, ready for pickup, picked up, en route, delivered, and the hard design question is: which transitions must the system enforce atomically, which services observe vs. own state, and how do you get a courier to the restaurant at *exactly* the moment the food is ready rather than ten minutes early or ten minutes late?
+When the job needs **facts the hire doesn't have and that keep changing** — this quarter's pricing, last week's policy, a customer's account history — you don't send them back to school to memorize it. You **hand them the right document at the moment they need it.** That's **context engineering / RAG**: the facts live in a binder the hire reads from on each task, and you can update the binder in five minutes without re-hiring anyone.
 
-That timing problem is what distinguishes this question from proximity matching. Uber's core problem is a write firehose and a nearby query. DoorDash's core problem is coordinating three actors across an unpredictable restaurant-prep wait, at a demand spike that arrives twice a day on a clock you can predict.
+You only **send someone for real training** when the gap isn't knowledge but **ingrained skill or style** — they need to *think* like your senior staff, always produce output in your house format, speak in your brand voice. Training reshapes how they work; it does **not** reliably stuff in facts (and a half-remembered fact recited confidently is worse than a binder lookup). That's **fine-tuning**. And **rebuilding their schooling from scratch** — continued pretraining — is something almost no team does; you hire someone already schooled.
 
----
+Keep the image: **briefing (prompt) → binder (RAG) → training (fine-tune) → re-schooling (pretrain).** It predicts which lever fixes which problem, and it tells you the single most common mistake — sending the hire to *training* to memorize *this week's prices*, which is slow, expensive, stale the moment it ends, and exactly what the binder was for.
 
-## R: Requirements
+### Deep explanation
 
-> **RESHADED step 1:** Scope the three-sided marketplace to a defensible core, draw the actor boundaries out loud, and state the non-functional invariants before the design.
+**The spectrum, rung by rung — cheapest/fastest to most expensive.** Each rung is a strictly bigger commitment of data, money, and ops than the one below. You move up only when the rung below provably can't clear the bar (and you prove it with eval).
 
-**Clarifying questions I'd ask (with assumed answers):**
+- **Prompt engineering** — shape behavior with words. A precise **system prompt** (role, rules, refusals), **few-shot examples** (3–8 demonstrations of the exact input→output you want), and **structured-output** constraints (force JSON via schema/grammar). Change cost: **seconds**, no training, no data pipeline. This is where 60–80% of "make the model do X" problems actually get solved. **Rejected as insufficient only when** the behavior is too nuanced to specify in examples, the few-shot examples eat too much of the context budget on every call, or the format/skill simply won't hold no matter how you phrase it.
+- **Context engineering / RAG** — change what the model *sees*, not what it *is*. Inject retrieved documents, tool results, and dynamically assembled context at query time. This is how you supply **fresh, private, citable facts** without touching weights. Change cost: **update the index, not the model** — minutes, and the model is untouched. **Rejected when** the gap isn't information but behavior/skill — no amount of context teaches a model to reliably emit your house format or reason in your domain if it fundamentally won't.
+- **Fine-tuning (SFT, then LoRA/PEFT or full)** — change the weights so the model *internalizes a behavior*. **Supervised fine-tuning (SFT)** trains on thousands of curated input→output pairs that demonstrate the target behavior. **LoRA/PEFT** freezes the base model and trains a small low-rank **adapter** (often <1% of the parameters) — cheap, fast, and **swappable** (one base model, many task adapters). A **full fine-tune** updates all weights — more capacity to shift behavior, but expensive and it produces **one bespoke model** you now own and maintain. Change cost: a **re-training run plus the data and eval work behind it** — days to weeks of human effort, not minutes.
+- **Continued pretraining** — keep training the base model on a large new corpus (billions of tokens) to shift its fundamental knowledge or adapt it to a new domain/language. This is a **platform-team / model-vendor activity**, measured in large GPU clusters and weeks. For an application team, this is **almost never the answer** — name it to show you know the ceiling exists, then reject it: the data scale, cost, and expertise dwarf any app-level problem, and RAG + a light fine-tune get you there far cheaper.
 
-- *Three-sided or two-sided?* → **Three-sided:** eater, restaurant partner, courier. Restaurant prep time is the distinguishing variable that makes naive dispatch wrong.
-- *What's the delivery SLA?* → Best-effort; **30-45 min end-to-end** is the UX bar. The NFR is customer-visible ETA accuracy, not a hard SLA.
-- *Is payment a split?* → Yes, a single eater charge must fan out to restaurant payment (food cost), courier payment (delivery fee), and platform fee. See the payment platform for the ledger design; scope here to the split trigger and idempotency.
-- *Scale?* → **~5M orders/day** globally (reasonable DoorDash/Uber Eats proxy), heavy concentration in US metros, 5-10× peak vs. off-peak.
-- *Consistency bar on menus vs. orders?* → **Menus: eventual** (a stale price by a few minutes is a minor UX issue, handled by re-pricing at checkout). **Order state: strong**, a courier and a restaurant must never observe the same order in contradictory states.
+The Director-altitude statement: *you climb the adaptation spectrum the way you'd escalate spend on any capability — start at the cheapest rung that could work, and only buy the next rung when eval proves the current one can't clear the bar.*
 
-**Functional requirements (scoped core):**
+**The decision rule that scores — and the misconception it kills.** Almost every "how do we adapt the model" question reduces to one diagnosis: **is the gap facts, or behavior?**
 
-1. Eater browses restaurants and menus, places an order, tracks delivery status.
-2. Restaurant receives the order, confirms acceptance, marks food ready.
-3. System dispatches a courier to the restaurant at the right time (not when the order is placed).
-4. Courier navigates to restaurant for pickup, navigates to eater for delivery, marks each milestone.
-5. System charges the eater, splits payment to restaurant and courier (see the payment platform for the ledger; scope here to the trigger + idempotency key).
-6. ETA is continuously updated as prep and delivery progress.
+- **Need fresh/private FACTS** (our 2026 product catalog, this customer's tickets, today's policy) → **RAG.** Facts change; weights are expensive to change; you want citations and an audit trail. RAG gives all three.
+- **Need new BEHAVIOR / format / style / tone / domain skill** (always emit strict JSON, always answer in our terse support voice, reason like a tax specialist, classify into our 40-label taxonomy) → **fine-tune.** This is a *skill* baked into weights, not a *fact* fetched at query time.
+- **Need BOTH** (answer from changing docs *and* always in our voice/format) → **RAG on a fine-tuned model.** Fine-tune the behavior once; RAG the facts continuously. They compose cleanly because they fix different things.
+- **Need lower latency/cost at the same quality** → **distill**: use a big model to generate training data, then fine-tune a **smaller** model to match its behavior on your task. You're trading a general giant for a specialized small model.
 
-**Explicitly CUT:** restaurant onboarding, menu ingestion pipelines, surge pricing, promotional discounts, loyalty/rewards, ratings, refunds UX, driver onboarding/background check, map rendering. I scope to **browse → order → dispatch → delivery → payment trigger** and say so.
+State the misconception explicitly, because it's the single most common LLM-design error: **fine-tuning teaches behavior, not facts.** Fine-tuning on documents does **not** reliably make a model "know" them — it learns the *style and shape* of those documents, then **confidently hallucinates** facts it half-absorbed, with **no citation** and **no way to update** short of retraining. "Our model doesn't know our new product, so let's fine-tune the product docs in" is the textbook wrong answer. The right answer is **RAG**: put the docs in an index, retrieve them at query time, cite them, update them in minutes.
 
-**Non-functional requirements:**
+**Fine-tuning economics — the GPU bill is the cheap part.** Engineers fixate on training compute; the real cost lives elsewhere.
 
-- **Order state: strong consistency / CP**, the state machine transition `PLACED → ACCEPTED` must not fork; a courier must not be dispatched to an already-cancelled order.
-- **Menus and ETAs: eventual**, staleness of 30-120 s is invisible to users; these must not be served from the order-state store.
-- **Dispatch latency: < 5 s** from restaurant-accepted to courier-notified; this is on the critical user-visible path.
-- **Peak tolerance: 5-10× lunch (12-2 pm) and dinner (6-9 pm)** intraday spikes; infrastructure must scale to peak without over-provisioning the trough by 10×.
-- **Payment idempotency:** the charge-and-split must be exactly-once even on retry/timeout.
+- **LoRA/PEFT vs full fine-tune.** LoRA trains a tiny adapter on a frozen base: cheaper compute, faster iteration, and **one base model can host many swappable adapters** (a support adapter, a summarization adapter, a classification adapter) — you don't multiply your serving footprint. A full fine-tune rewrites every weight: more behavioral capacity, but it's **expensive and yields a single dedicated model** you must serve and version on its own. For app teams, **LoRA is the default**; reach for a full fine-tune only when LoRA's capacity provably isn't enough to shift the behavior far enough — and prove that with eval, not vibes.
+- **The dominant costs are human, not hardware.** Three of them: **(1) data curation** — assembling and cleaning thousands of high-quality, correctly-labeled demonstration pairs is the slow, expensive, irreplaceable part, and garbage data produces a worse model than no fine-tune; **(2) an eval harness** — without an automated way to prove the fine-tune beats prompt+RAG *and doesn't regress*, you're shipping on faith; **(3) ongoing retraining** — the part teams forget. The base model **moves** (the vendor ships a better version, deprecates yours), and every move means **re-curating data and retraining your fine-tune to ride it**. A GPU run is hours; the data + eval + retraining loop is a standing commitment.
 
----
+**The maintenance tax: a fine-tune locks you to a base-model version.** This is the operational consequence a Director must name. The moment you fine-tune, you **fork off the public model.** When the base vendor ships a model that's cheaper, faster, and smarter next quarter, a **prompt+RAG** system adopts it by changing one model name. A **fine-tuned** system can't — your weights are welded to the old base, so you must **re-curate the data and retrain** before you can ride the upgrade. In a market where base models improve every few months (mid-2026), that's a recurring tax that often **erases the quality edge** the fine-tune bought you, because the next base model — prompted well, RAG-grounded — may already match your fine-tune for free. **Reject fine-tuning** whenever prompt+RAG gets within striking distance, precisely to stay on the upgrade curve.
 
-## E: Estimation
-
-> **RESHADED step 2:** Quantify the trough and the peak, derive fleet sizing, and name what the peak math decides architecturally.
-
-**Assumptions:** 5M orders/day, avg order value ~$35, avg delivery time ~35 min, avg restaurant prep ~18 min, courier active-session ping every 5 s.
-
-**Steady-state order QPS:**
-`5M ÷ 86,400 ≈ 58 orders/s` average. Lunch/dinner peak at 8× average → **~460 orders/s peak**. Write-contended but not extreme; a sharded transactional store handles this easily.
-
-**Order state events (the write amplification the state machine creates):**
-Each order generates ~8 state transitions (placed, accepted, prep-started, ready, courier-assigned, picked-up, en-route, delivered). Peak: `460 × 8 ≈ 3,700 state events/s`. These must be durable and sequenced; Kafka absorbs the fan-out.
-
-**Courier location ingest (the write firehose):**
-~500K active couriers globally, pinging every 5 s → `500K ÷ 5 = 100K writes/s`. Peak at 8× → **~200K location writes/s** in aggregate (but geographically sharded, a US-East metro shard sees ~5-10K/s). This is the same pattern as proximity matching; I won't re-teach the geospatial index design.
-
-**Restaurant-prep wait and fleet sizing:**
-Avg prep time 18 min; target courier arrival = food-ready time. Courier transit to restaurant averages ~8 min → dispatch ~10 min after order placed. If we dispatch at order placement instead (naive), the courier waits ~10 min at the restaurant: at peak, `460 orders/s × 10 min × 1 courier/order = 276,000 courier-minutes/hour` wasted, roughly **4,600 idle courier-hours/hour** at peak. At a $15/hr courier cost that is **$69K/hour in idle cost at peak**, per metro at scale. This is why prep-time-aware dispatch is a business decision, not an engineering nicety.
-
-**Storage:**
-- Order table: `5M orders/day × 365 × ~2 KB/order ≈ 3.65 TB/yr`. Shardable; not large.
-- Menu catalog: ~500K restaurant partners × ~50 items avg × ~500 B/item ≈ **12.5 GB**, trivially fits in a distributed cache.
-- Location index: ~500K active couriers × ~200 B ≈ **100 MB** in RAM, the live index is a RAM problem, not storage.
-
-**What estimation decided:**
-- Peak is 8× trough, autoscaling on the stateless tiers handles this; the state store is the one thing that cannot elastically scale at lunch.
-- Wasted courier-idle cost justifies a prep-time estimator and delayed dispatch.
-- Menu staleness is acceptable; order state is not. The storage and consistency choices follow from these numbers, not from taste.
-
----
-
-## S: Storage
-
-> **RESHADED step 3:** Three data classes with different consistency requirements; pick stores by access pattern and invariant, not by what's trendy.
-
-**1. Order state (strongly consistent, write-contended at peak).**
-
-Access pattern: atomic state transitions (`PLACED → ACCEPTED`, `ACCEPTED → COURIER_ASSIGNED`, etc.), each conditional on current state; must never fork or apply out of order. Volume: ~460 writes/s peak, ~3.65 TB/yr. Correctness absolute.
-
-Choice: **relational/NewSQL transactional store**, sharded Postgres or CockroachDB, sharded by `order_id` (high-cardinality, no hot-shard). Each transition is a single conditional `UPDATE ... WHERE status = 'expected_state'`; multi-row operations (order + payment-ledger entry) need real transactions.
-
-Rejected, eventually-consistent KV for order state: last-write-wins on two concurrent `ACCEPTED` events can put a restaurant and a courier in contradictory states. The volume doesn't justify the operational complexity of strong-consistency workarounds on a store that isn't built for it.
-
-**2. Menu catalog and restaurant metadata (read-heavy, AP).**
-
-Access pattern: ~2M reads/s browsing menus, ~1 write/menu change, staleness of 60-120 s acceptable.
-
-Choice: **Redis distributed cache** (TTL ~2 min) backed by a **document store** (DynamoDB or Firestore) for menu content. CDN-cacheable at the edge for the static parts. Menu reads must never touch the order-state store.
-
-Rejected, serving menus from the order store: couples a 2M-reads/s browse firehose to a CP database designed for ~460 writes/s peak. Wrong tool; wrong coupling.
-
-**3. Courier location (write-dominated, eventual, in-memory).**
-
-Same pattern as the proximity problem, I won't re-derive. The live index is ~100 MB RAM; geohash-based with adaptive cell sizing for dense metros; geo-sharded. Durability: **none needed**, a missed ping is recovered in 5 s.
-
-**4. Dispatch queue and ETA state (Kafka + Redis).**
-
-Dispatch decisions and ETA updates flow through **Kafka** (durable, replay on failure); in-flight ETA state lives in **Redis** (low-latency reads for the tracking UI). ETAs are hints; they never block a state transition.
-
-**5. Payment ledger (strongly consistent, see the payment platform).**
-
-The split trigger writes to the payment ledger in the same transaction as the `DELIVERED` state transition, using an idempotency key. The ledger design (multi-party settlement, restaurant payout, courier payout) is the payment platform's subject; scope here is the idempotent trigger.
-
----
-
-## H: High-level design
-
-> **RESHADED step 4, Adaptation, said out loud:** I decompose services by **actor boundary** (eater-facing, restaurant-facing, courier-facing) rather than by technical layer. This mirrors the team topology: a team owns the full vertical for one actor, can ship features end-to-end without coordinating across three other teams' backlogs, and owns the on-call surface for their actor's SLA. The Order Orchestration service sits at the center, it owns the state machine and is the only writer of order state.
-
-```mermaid
-flowchart TB
-    EATER["Eater app"] --> GW["API Gateway"]
-    REST_APP["Restaurant app"] --> GW
-    COURIER_APP["Courier app"] --> GW
-
-    GW -->|"browse menus"| MENU["Menu Service"]
-    MENU --> MENU_CACHE[("Redis / CDN<br/>menu cache AP")]
-    MENU -.-> MENU_DB[("DynamoDB<br/>menu store")]
-
-    GW -->|"place order"| ORCH["Order Orchestration<br/>state machine owner"]
-    ORCH -->|"atomic CAS transition"| ORDER_DB[("Transactional store<br/>order state STRONG<br/>sharded by order_id")]
-    ORCH --> BUS["Kafka<br/>event bus"]
-
-    GW -->|"restaurant confirm<br/>prep updates"| REST_SVC["Restaurant Service"]
-    REST_SVC --> ORCH
-
-    BUS --> DISPATCH["Dispatch Service<br/>prep-time-aware"]
-    BUS --> ETA_SVC["ETA Service"]
-    BUS --> PAY["Payment Service<br/>idempotent split"]
-    BUS --> NOTIFY["Notification Service"]
-
-    GW -->|"courier location ping"| LOC["Location Service<br/>geo-sharded"]
-    LOC --> LOC_CACHE[("Redis geohash<br/>live index RAM")]
-    DISPATCH --> LOC_CACHE
-
-    PAY --> LEDGER[("Payment Ledger")]
-    ETA_SVC --> ETA_CACHE[("Redis<br/>ETA state AP")]
-
-    style ORDER_DB fill:#7a1f1f,color:#fff
-    style ORCH fill:#e8a13a,color:#000
-    style DISPATCH fill:#2d6cb5,color:#fff
-    style PAY fill:#1f6f5c,color:#fff
-```
-
-**Happy path, compressed:**
-
-1. Eater browses the menu via **Menu Service** (Redis/CDN, never touching order state).
-2. `POST /orders` hits **Order Orchestration**, which writes `PLACED` atomically to the order store and emits an event to Kafka.
-3. Kafka fans out: **Restaurant Service** notifies the restaurant app; **ETA Service** computes an initial estimate.
-4. Restaurant confirms via **Restaurant Service** → Orchestration transitions `PLACED → ACCEPTED → PREP_STARTED` with conditional writes.
-5. **Dispatch Service** subscribes to `PREP_STARTED` and the prep-time estimate; it holds the courier assignment until `estimated_ready_time - courier_travel_time`. At that moment it queries the **Location Service** for nearby available couriers (the geo-query), assigns the best match, and transitions `COURIER_ASSIGNED`.
-6. Courier picks up, marks `PICKED_UP`; delivers, marks `DELIVERED`.
-7. `DELIVERED` transition writes an idempotency-keyed entry to the **Payment Ledger**, triggering the three-way split.
-8. **Notification Service** fans out status updates to eater, restaurant, and courier at each transition.
-
-**The shape to notice:** Order Orchestration is the single writer of order state. All other services are either event consumers or APIs that request a transition, they never write order state directly. This is the correctness boundary; it is also the on-call boundary.
-
----
-
-## A: API design
-
-> **RESHADED step 5:** Keep to the calls the three actors need; status codes and idempotency are the correctness story.
-
-```
-# --- Eater-facing ---
-GET  /v1/restaurants?lat=&lng=&radius_km=     -> 200 { restaurants:[...] }
-GET  /v1/restaurants/{restaurantId}/menu       -> 200 { sections:[...] }
-                                               # served from cache; asOf timestamp in response
-
-POST /v1/orders
-  body: { restaurantId, items:[{itemId, qty}], deliveryAddress, paymentToken }
-  headers: { Idempotency-Key: <uuid> }
-  -> 201 { orderId, status:"PLACED", etaMinutes }
-  -> 409  # duplicate idempotency key (client retry)
-
-GET  /v1/orders/{orderId}                      -> 200 { status, etaMinutes, courierLocation? }
-
-# --- Restaurant-facing ---
-POST /v1/orders/{orderId}/accept               -> 200 { status:"ACCEPTED" }
-  -> 409  # already accepted or cancelled (concurrent press)
-POST /v1/orders/{orderId}/prep-started
-  body: { estimatedPrepMinutes }               -> 200 { status:"PREP_STARTED", dispatchEta }
-POST /v1/orders/{orderId}/ready                -> 200 { status:"READY_FOR_PICKUP" }
-
-# --- Courier-facing ---
-PUT  /v1/couriers/{courierId}/location
-  body: { lat, lng, bearing, speed }           -> 204
-  # 5-s ping; geo-sharded; write-heavy; no strong consistency needed
-
-POST /v1/orders/{orderId}/pickup               -> 200 { status:"PICKED_UP" }
-POST /v1/orders/{orderId}/deliver
-  body: { proofOfDelivery? }
-  headers: { Idempotency-Key: <uuid> }
-  -> 200 { status:"DELIVERED" }
-  -> 409  # idempotency (courier retry on network failure)
-```
-
-**Design notes (each with rejected alternative):**
-
-- **`Idempotency-Key` on `POST /orders` and `deliver`.** Rejected: trusting clients not to retry, network failures guarantee retries; without the key a double-tap creates two orders or two payment charges.
-- **Separate restaurant-accept and prep-started.** Rejected: merging them into one call. The restaurant may accept immediately but not start prep for 5 min (queued behind existing orders). Separating the calls lets the dispatch service use `estimatedPrepMinutes` for the delayed-dispatch calculation; conflating them forces a static prep estimate, wasting courier idle time.
-- **Menu endpoint explicitly returns `asOf` timestamp.** The menu is a hint; a re-price check happens at order creation. Rejected: omitting `asOf`, a client can't know whether to re-fetch without it.
-- **Courier location is a `PUT`, not an event stream.** Each ping is independent and idempotent; a dropped ping is harmless. Rejected: a persistent WebSocket for location, connection overhead at 500K couriers is unnecessary when the ping is fire-and-forget.
-
----
-
-## D: Data model
-
-> **RESHADED step 6:** The order table's shard key and state column are the most consequential decisions; everything else follows from them.
-
-**`orders`, shard key: `order_id` (UUID v4, high cardinality, no hot shard)**
-
-| Field | Type | Notes |
-|---|---|---|
-| `order_id` | UUID | Primary key, shard key |
-| `status` | enum | State machine current state |
-| `restaurant_id` | UUID | FK; also an index for restaurant-facing queries |
-| `courier_id` | UUID nullable | Assigned after dispatch |
-| `eater_id` | UUID | |
-| `idempotency_key` | string unique | On `POST /orders`; dedup client retries |
-| `items` | JSONB | Snapshot of what was ordered at order time |
-| `delivery_address` | JSONB | Geo-point + text |
-| `estimated_ready_at` | timestamp | Set at `PREP_STARTED`; drives dispatch timing |
-| `version` | int64 | Optimistic concurrency for state transitions |
-| `created_at` | timestamp | |
-| `updated_at` | timestamp | |
-
-**State machine, the core Mermaid artifact:**
-
-```mermaid
-stateDiagram-v2
-    [*] --> PLACED : eater places order
-    PLACED --> ACCEPTED : restaurant confirms
-    PLACED --> CANCELLED : eater cancels or timeout
-    ACCEPTED --> PREP_STARTED : restaurant starts prep
-    ACCEPTED --> CANCELLED : restaurant rejects
-    PREP_STARTED --> READY_FOR_PICKUP : restaurant marks ready
-    READY_FOR_PICKUP --> COURIER_ASSIGNED : dispatch assigns
-    COURIER_ASSIGNED --> PICKED_UP : courier confirms pickup
-    PICKED_UP --> DELIVERED : courier confirms delivery
-    DELIVERED --> [*]
-    CANCELLED --> [*]
-```
-
-**Each transition is a conditional `UPDATE ... WHERE order_id = ? AND version = ? AND status = 'expected_state'`**, one row, optimistic CAS. Exactly one writer wins; the loser sees 0 rows updated and returns 409. No distributed lock needed; the transactional store's row-level serialization is sufficient.
-
-**Why `order_id` is the shard key (and not `restaurant_id`):**
-
-Sharding by `restaurant_id` creates a hot shard for a high-volume restaurant at peak, a pizza chain with 500 lunch orders an hour concentrates all writes on one shard. `order_id` distributes writes uniformly. The cost: queries like "show restaurant dashboard" require a secondary index on `restaurant_id`, with an occasional scatter-gather for the restaurant-facing read. That read path is low-frequency (a restaurant checks their queue, not a hot path), so the scatter cost is acceptable. Rejected alternative: sharding by `restaurant_id` with a counter-shard defense, the solution exists, but `order_id` sharding avoids the problem without a workaround.
+**Eval-driven escalation — the rule that keeps you honest.** The whole spectrum collapses into one discipline: **only escalate up a rung when eval proves the cheaper rung can't hit the bar.** Build the golden eval set *first*; measure prompt-only; if it misses the bar, add RAG and measure again; if a behavior gap remains, *then* fine-tune and prove the fine-tune both clears the bar and beats prompt+RAG by enough to justify the standing maintenance cost. Skipping eval is how teams spend a quarter fine-tuning to fix a problem a better prompt would have solved in an afternoon.
 
 <details>
-<summary>Go deeper, prep-time estimation model (IC depth, optional)</summary>
+<summary>Go deeper — preference tuning (RLHF / DPO), and what each fine-tune flavor is for (IC depth, optional)</summary>
 
-The dispatch service's effectiveness depends on `estimated_ready_at`. A naive fixed estimate (e.g., "always 18 min") wastes courier idle time when a restaurant is slow; a stale estimate dispatches couriers too early. Production systems use a small regression model per restaurant:
-
-- Features: hour of day, day of week, current queue depth (count of `ACCEPTED` orders for this restaurant), item count, item complexity bucket.
-- Target: actual `READY_FOR_PICKUP - PREP_STARTED` from historical orders.
-- Update cadence: retrained nightly per restaurant; served from a feature store (Redis).
-- Fallback: restaurant's rolling p75 from the last 7 days.
-
-The model output is `estimated_prep_seconds`; dispatch fires at `PREP_STARTED + estimated_prep_seconds - avg_courier_travel_seconds_from_nearest_available`. Getting within ±3 min of the actual ready time is the SLO that minimizes idle wait while keeping pickup-to-door time low. Accuracy beyond that yields diminishing returns and the model cost grows super-linearly.
-
-The decision to delegate: "I'd have the ML platform team own the prep-time estimator as a prediction service; my prior is a restaurant-level gradient-boosted tree retrained nightly with a rule-based fallback. The dispatch service calls it at `PREP_STARTED` and treats the output as advisory, it can always fall back to the restaurant's stated `estimatedPrepMinutes`."
+- **SFT (supervised fine-tuning)** teaches the model to *imitate* curated (input → ideal output) pairs. It's the workhorse — start here for any behavior/format/skill gap.
+- **Preference tuning** goes further: instead of one "right" answer, you supply **pairs ranked good-vs-bad** and train the model to *prefer* the better one. Two methods:
+  - **RLHF (Reinforcement Learning from Human Feedback):** train a separate **reward model** on human preference rankings, then RL-optimize the policy against it. Powerful (it's how the big chat models were aligned) but **complex, unstable, and expensive** — a reward model, an RL loop, careful tuning.
+  - **DPO (Direct Preference Optimization):** skips the separate reward model and optimizes directly on the preference pairs with a simple classification-style loss. **Much simpler and cheaper than RLHF**, comparable results for most app needs — the pragmatic default *if* you're doing preference tuning at all.
+- **When does an app team need preference tuning?** Rarely. It's for shaping subtle qualities SFT can't easily demonstrate (helpfulness, harmlessness, "good taste"). The Director move is **delegate with a prior**: "If we need preference tuning, start with **DPO** over RLHF — far less machinery for comparable results; I'd only justify RLHF if DPO provably can't shape the behavior. But first prove SFT + a sharp prompt can't get there." Most teams never get past SFT.
+- **Adapter mechanics (LoRA):** instead of updating a weight matrix W, train two small low-rank matrices A·B added to it; only A·B is trained and stored (megabytes, not gigabytes). Multiple adapters can be hot-swapped on one served base model, and merged into the base at inference time for zero added latency.
 
 </details>
 
----
+### Diagram: the adaptation decision tree
 
-## E: Evaluation
+```mermaid
+flowchart TD
+    START[New capability needed] --> Q1{What is the gap?}
 
-> **RESHADED step 7:** Re-check against the NFRs, find the bottlenecks, fix each with a named trade-off.
+    Q1 -->|Fresh / private<br/>FACTS| RAG["RAG<br/>retrieve + cite at query time<br/>update index in minutes"]
+    Q1 -->|New BEHAVIOR / format /<br/>style / domain skill| Q2{Prompt enough?}
+    Q1 -->|BOTH facts<br/>+ behavior| BOTH["RAG on a<br/>fine-tuned model<br/>fine-tune style, RAG facts"]
 
-**Re-check vs. NFRs:**
+    Q2 -->|Yes — system prompt<br/>+ few-shot| PROMPT["Prompt engineering<br/>cheapest, change in seconds"]
+    Q2 -->|No — eval proves<br/>prompt + RAG miss| FT{Need lower<br/>latency / cost?}
 
-- Order state strong? Yes, transactional store, conditional CAS writes, single writer (Orchestration service).
-- Menus eventual? Yes, Redis/CDN, never touches order store.
-- Dispatch < 5 s? At `PREP_STARTED` the dispatch service computes `fire_at = now + estimated_prep - avg_travel`; a Redis sorted set with score = `fire_at` lets a dispatch worker `ZRANGEBYSCORE ... 0 now` poll at 1-s granularity. The courier assignment query uses the geo-index.
-- Peak tolerance? Stateless services autoscale; the order store is the constraint, addressed below.
+    FT -->|No| LORA["Fine-tune<br/>LoRA adapter first,<br/>full FT only if needed"]
+    FT -->|Yes, at fixed quality| DISTILL["Distill<br/>big model → small<br/>fine-tuned model"]
 
-**Bottleneck 1, order-state hot shard at peak.**
+    PRETRAIN["Continued pretraining<br/>almost never for app teams<br/>platform / vendor scale"]
 
-`460 orders/s × 8 transitions = 3,700 writes/s` distributed across `order_id` shards. With 20 shards, each shard handles ~185 writes/s, well within a single Postgres node's write budget (~5-10K writes/s). The 5-10× peak pushes to ~1,850 writes/s per shard at the extreme, still manageable. The safety valve: add shards; `order_id`-sharded data is trivially re-sharded (new orders route to the new shard; old orders stay put). Rejected: a single Postgres for order state, at peak, `3,700 writes/s` on one node with contention is marginal; one slow disk flush cascades.
+    style PROMPT fill:#1f6f5c,color:#fff
+    style RAG fill:#1f6f5c,color:#fff
+    style BOTH fill:#e8a13a,color:#000
+    style LORA fill:#e8a13a,color:#000
+    style DISTILL fill:#e8a13a,color:#000
+    style PRETRAIN fill:#7a1f1f,color:#fff
+```
 
-**Bottleneck 2, the restaurant-prep wait and courier idle cost.**
+### Worked example: a customer-support assistant with two hard requirements
 
-Quantified in E: naive dispatch wastes ~$69K/hr in idle courier cost at scale. The delayed-dispatch mechanism (fire at `estimated_ready_at - travel_time`) requires the dispatch service to hold a pending assignment in a durable scheduled queue (Redis sorted set + Kafka for durability). Trade-off: delayed dispatch adds latency to the `COURIER_ASSIGNED` transition, if the restaurant marks `READY` earlier than estimated, the courier has not yet been dispatched and there is a brief pickup delay. Fix: subscribe to `READY_FOR_PICKUP` in addition to the timer; dispatch immediately on early-ready. Rejected alternative: always dispatch at `ACCEPTED`, maximizes courier availability at restaurant but burns idle time; at DoorDash scale the cost is material.
+A support assistant must do two things: **(a)** answer customers from **policy docs that change weekly** (refund windows, shipping rules, regional terms), and **(b)** **always** reply in **strict JSON** (so the UI can render structured cards) **and** in the **brand's terse, warm tone**. Treat them as two separate problems, because they sit on different rungs.
 
-**Bottleneck 3, three-way payment split reliability.**
+- **Requirement (a) — the changing facts → RAG.** Index the policy docs; retrieve and cite the relevant passages at query time. **Rejected: fine-tune the policies into the model.** That's the classic mistake — the policies change weekly, so a fine-tune is stale within days, can't cite its source (support answers must be auditable), and would have the model confidently invent a refund window it half-learned. RAG updates in minutes when legal edits a policy, and every answer points to the clause it used. **Also rejected: long-context stuffing** of all policies on every call — it scales poorly across regions and burns input tokens re-reading a static corpus on every request.
+- **Requirement (b) — the format and tone → prompt first, light fine-tune only if eval forces it.** Start with **prompt engineering**: a system prompt that mandates the JSON schema + tone, **structured-output / JSON-mode** to hard-enforce the schema, and a few **few-shot examples** of the exact voice. Measure on the golden set. If — and only if — eval shows the model still drifts off-format or off-voice under real traffic (e.g., it breaks JSON 3% of the time, or the tone wobbles on edge cases the prompt can't cover), **escalate to a light LoRA fine-tune** on a few thousand curated (query → ideal JSON-in-brand-voice) pairs to bake the behavior in. **Rejected: jump straight to fine-tuning the format.** It's slower, costs data + eval + a maintenance tax, and usually a sharp prompt + JSON-mode already clears the bar — you'd be paying for a rung you didn't need.
+- **Putting it together — RAG on a (possibly) fine-tuned model.** The facts come from retrieval; the behavior comes from prompt (and a thin adapter only if eval demands it). If we do fine-tune for tone/format, we **keep the fine-tune as small as possible** so a base-model upgrade next quarter is a cheap re-train, not a rebuild — and we re-evaluate each upgrade whether the new base, *prompted well*, makes the adapter unnecessary.
 
-The `DELIVERED` transition and the payment-ledger write must be atomic or idempotent. If the transaction commits the `DELIVERED` state but the ledger write fails, the courier delivered for free. Fix: write the ledger entry in the same database transaction as the state transition, using the order's idempotency key as the ledger entry's dedup key (see the payment platform). Downstream settlement (payout to restaurant/courier) is asynchronous and retry-safe. Trade-off: coupling the ledger write to the state transition means a slow payment-DB write can delay `DELIVERED` ack, acceptable because this path is not user-latency-critical.
+Every choice traces to a requirement: weekly-changing + auditable policies (RAG), strict-format + brand-voice behavior (prompt, then a minimal fine-tune only if eval forces it), and the standing constraint of riding base-model upgrades cheaply (keep any fine-tune thin and eval-justified).
 
-**Bottleneck 4, dispatch fairness vs. delivery time optimization.**
+### Trade-offs table
 
-A pure delivery-time optimizer always assigns the nearest courier, which concentrates orders on couriers in high-density areas and starves suburban couriers of income. This is a courier-retention risk (business NFR). Options: (A) pure proximity, minimizes delivery time, unfair to suburban couriers; (B) zone-balanced assignment, fair, but can route a courier from across a zone when a closer one exists; (C) a weighted score: `score = α × proximity + β × courier_earnings_deficit_today`. The third option lets the business tune the tradeoff via `α`/`β` without an architecture change. Reject pure proximity for a mature marketplace (courier churn is real); reject pure fairness for a new one (delivery time drives eater retention in early growth).
+| Dimension | **Prompt** | **RAG** | **LoRA fine-tune** | **Full fine-tune** | **Continued pretrain** |
+|---|---|---|---|---|---|
+| **Up-front cost** | ~zero | moderate (index + pipeline) | meaningful (data + eval) | high (data + eval + compute) | very high (cluster + corpus) |
+| **Data needed** | a few examples | a corpus to index | thousands of curated pairs | thousands+ of curated pairs | billions of tokens |
+| **Freshness** | instant (edit prompt) | minutes (re-index) | stale until retrain | stale until retrain | stale until retrain |
+| **Adds facts?** | no | **yes (cited)** | no (and pretends to) | no (and pretends to) | yes, but uncitable |
+| **Adds behavior/skill?** | some | no | **yes** | **yes (most)** | yes |
+| **Latency at serve** | base | + retrieval hop | base (adapter merged) | base | base |
+| **Control / determinism** | low–med | med (grounded + cited) | high (baked in) | highest | high |
+| **Maintenance tax** | none | keep index fresh | **re-train on base upgrades** | **re-train + serve own model** | **own a model lineage** |
+| **Use when…** | first; behavior fits in words | facts are fresh/private/citable | behavior won't hold via prompt, eval proves it | LoRA's capacity isn't enough | almost never (platform/vendor) |
 
-<details>
-<summary>Go deeper, dispatch as an assignment problem (IC depth, optional)</summary>
+### What interviewers probe here
+- **"The model doesn't know about our 2026 product line — let's fine-tune it on the product docs, right?"** — *Strong signal:* **no — that's RAG, not fine-tune.** Names the misconception (fine-tuning teaches behavior, not facts), and that fine-tuning docs in yields confident, uncitable, un-updatable hallucination; products change, so put the docs in an index, retrieve and cite at query time. *Red flag:* "yes, fine-tune the docs in" — the single most common LLM-design error.
+- **"So when *is* fine-tuning actually the right call?"** — *Strong:* when the gap is **behavior/format/style/domain-skill**, not facts; and only after **prompt + RAG demonstrably fail on eval**; with curated data and an eval harness in hand. Adds: LoRA before full FT, and keep it thin to ride base upgrades. *Red flag:* reaches for fine-tuning as a first move, or to "improve quality" in general without naming a specific behavior gap eval proved.
+- **"What does fine-tuning cost you operationally?"** — *Strong:* the cost isn't GPU hours — it's **data curation + an eval harness + retraining as the base model moves**, and the **lock-in tax**: you're welded to a base version, so every vendor upgrade is a re-curate-and-retrain project, often erasing the edge a better base model gives prompt+RAG for free. *Red flag:* thinks the cost is the training run, or assumes a fine-tuned model is "done."
+- **"You need both fresh facts and a strict house format — how?"** — *Strong:* **RAG on a fine-tuned (or just well-prompted) model** — they compose because they fix different gaps; fine-tune/prompt the behavior, RAG the facts; try prompt before fine-tune for the format. *Red flag:* tries to do both with one lever (fine-tune everything, or prompt-stuff the whole corpus).
 
-At a per-order level, dispatch is a bipartite matching problem: available couriers (left) × pending ready orders (right), with edge weight = utility score. In real-time at peak, exhaustive Hungarian matching across all couriers and orders in a metro is O(n³), which is too slow for a 5-s dispatch SLA.
+The through-line at Director altitude: **prompt and RAG are cheap, reversible, and ride every base-model upgrade for free; fine-tuning is a standing liability you earn the right to take on.** "Default is prompt + RAG. We fine-tune only if eval shows a behavior gap prompt+RAG can't close — and then I want a data-curation owner, an eval harness, and a retraining plan for the next base model before we start. My prior is we don't need it yet; if we do, LoRA first, and I'd have the ML team prove DPO over RLHF if preference tuning ever comes up."
 
-Production systems approximate: (1) limit the candidate set to couriers within a geohash cell (reduces n dramatically); (2) use a greedy assignment with a priority queue sorted by score; (3) batch assignments on a 2-5 s tick rather than per-event (amortizes the matching cost). The greedy solution is within a small factor of optimal for the delivery-time objective because the geographic constraint already reduces the feasible set; the fairness objective benefits from the batching window, which allows the system to consider multiple pending orders before assigning any courier.
+### Common mistakes / misconceptions
+- **Fine-tuning to add facts.** The headline error: facts go in an **index (RAG)**, not weights. Fine-tuning on documents teaches their *shape*, then hallucinates their *content* — confidently, uncitably, un-updatably.
+- **Fine-tuning before prompt + RAG.** Skipping the cheap rungs spends weeks on a problem a sharp prompt or a retrieval fix solves in a day. **Earn the right** with eval first.
+- **Pricing fine-tuning as GPU hours.** The real bill is data curation + an eval harness + retraining every time the base moves — a standing commitment, not a one-off run.
+- **Forgetting the lock-in tax.** A fine-tune welds you to a base version; the next free base upgrade may match your fine-tune for nothing, and you can't take it without re-training.
+- **Full fine-tune by reflex.** LoRA/PEFT (cheap, swappable adapters) covers most behavior gaps; reserve a full fine-tune for when eval proves LoRA's capacity isn't enough.
 
-I'd delegate this to a dedicated Dispatch/ML team with a stated prior: "greedy geo-constrained matching on a 3-s tick with a tunable fairness weight; revisit with multi-order batching if courier utilization targets aren't met."
+### Practice questions
 
-</details>
+**Q1.** A PM says: "Our assistant doesn't know our new pricing — fine-tune it on the pricing page." What do you say?
+> *Model:* **No — that's a RAG problem, not a fine-tune problem.** Pricing is a **fact**, and it **changes**; fine-tuning bakes a stale snapshot into weights, can't cite the source, and will confidently invent prices it half-learned. Put the pricing docs in an **index**, retrieve and cite them at query time, and the answer updates the moment pricing changes — no retraining. Fine-tuning teaches **behavior, not facts**; the only thing I'd fine-tune here is *how* it presents pricing (format/tone), and only if a prompt can't get that.
 
-**Bottleneck 5, 5-10× peak and infrastructure cost.**
+**Q2.** When is fine-tuning genuinely the right tool, and how would you justify it to me?
+> *Model:* When the gap is **behavior, not knowledge** — a format/style/tone/domain-skill the model must reliably produce (strict JSON, our support voice, classify into our taxonomy, reason like a domain specialist) — **and** eval proves **prompt + RAG can't close it**. Justification has three parts: (1) an **eval** showing prompt+RAG misses the bar and the fine-tune clears it without regressing; (2) **curated training data** with an owner; (3) a **retraining/ops plan** for the next base model. I'd start with **LoRA** (cheap, swappable), escalate to full FT only if LoRA's capacity isn't enough, and keep the fine-tune thin so base upgrades stay cheap.
 
-The trough is ~58 orders/s; peak is ~460 orders/s. Stateless services (API gateway, Menu, Notification, ETA) autoscale horizontally, add instances in 30-60 s with a container platform. The location ingest path is geo-sharded and handles peak natively. The constraint is the order-state database: you cannot instantly double its shard count at 12:01 pm. Mitigation: pre-provision for peak (accept the trough over-cost); or use a connection pool layer (PgBouncer) to absorb connection spikes without adding shards. The operational cost of a 10× over-provisioned order DB is small relative to overall COGS for a marketplace; the alternative (under-provisioned and degrading at peak) costs orders and courier trust. This is a business decision, not a purely technical one, name it as such.
+**Q3.** What does a fine-tuned model cost you operationally, beyond the training run?
+> *Model:* Three standing costs. **Data curation** — assembling/cleaning thousands of high-quality pairs is the slow, expensive part, and bad data makes the model *worse*. **An eval harness** — without it you can't prove the fine-tune helps or catch regressions. **Retraining as the base moves** — the base vendor ships better models every few months; a prompt+RAG system adopts them by changing one name, but a fine-tune is **locked to its base version**, so each upgrade is a re-curate-and-retrain project. That lock-in often **erases the edge**: the next free base model, prompted well and RAG-grounded, may already match your fine-tune. That's why I reject fine-tuning whenever prompt+RAG gets close.
 
----
-
-## D: Design evolution
-
-> **RESHADED step 8:** Push each dimension, find what breaks first, name what you'd hand to a specialist.
-
-**At 10× order volume (50M orders/day):**
-
-Order-state sharding scales linearly, `order_id` key distributes cleanly, add shards as needed. The dispatch optimizer gains a **multi-order batching** dimension: route one courier to two nearby ready orders in sequence, halving per-order delivery cost at the price of delivery-time variance. This adds a `BATCHED` state to the machine and a batch-graph service, but doesn't change the CAS invariant. Location ingest scales via geographic sharding, no architecture change.
-
-**Hardest trade-offs to defend:**
-
-- **Delayed dispatch vs. guaranteed courier availability.** The prep-time estimate has error; handle early-ready by subscribing to `READY_FOR_PICKUP` and firing immediately; handle late-ready by accepting some idle cost. The ±3-min SLO is the business decision on how much idle time to trade for model complexity.
-- **Actor-boundary decomposition under pressure.** As the codebase matures, each actor's service will be tempted to write order state directly ("it's faster"). Keeping Orchestration as the single writer is an organizational decision as much as a technical one. Enforce it via access control on the order store, not just convention.
-- **Menu staleness on flash deals.** 120-s TTL is fine for stable menus. Flash deals require push invalidation: `PATCH /menus/{id}` from the restaurant service calls a cache invalidation API; Kafka-buffered invalidation decouples the dependency at the cost of slightly longer max-staleness.
-
-**Where I'd delegate:**
-
-- **Prep-time prediction:** "ML platform team; my prior is a restaurant-level gradient-boosted regressor retrained nightly, rule-based fallback. Dispatch treats it as advisory."
-- **Payment settlement and PCI:** "Payments team owns the split ledger behind `triggerSplit(orderId, idempotencyKey, amounts)`. I provide the idempotency key and amounts at `DELIVERED`; PCI stays on their side."
-- **Dispatch fairness weights:** "Courier growth team owns `α`/`β`; I expose them as runtime config. Weekly courier-earnings distribution is the health metric."
-- **Geo-index bake-off:** "Mapping team owns the geohash vs. S2 vs. H3 decision; my prior is geohash with adaptive cell sizing for dense metros."
-
----
-
-## Trade-offs table: the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when |
-|---|---|---|---|---|
-| **Order state store** | **Transactional SQL / NewSQL sharded by `order_id`** | Cassandra with conditional writes | DynamoDB with transactions | **A**, multi-row atomicity (order + ledger) + conditional CAS at ~460 writes/s peak; volume too small to justify NoSQL complexity. **B**, if single-row transitions only; fragile on multi-row. **C**, viable for single-region; cross-region gets expensive. |
-| **Dispatch timing** | **Delayed: fire at `estimated_ready_at - travel`** | Eager: dispatch at `ACCEPTED` | On-demand: dispatch at `READY_FOR_PICKUP` | **A** (our choice), minimizes courier idle; requires a reliable prep estimator. **B**, maximizes courier availability; wastes idle time at scale. **C**, zero idle time; pickup delay if no nearby courier. |
-| **Dispatch objective** | **Weighted score: proximity + fairness** | Pure proximity | Pure zone fairness | **A**, mature marketplace; courier retention matters. **B**, early growth; delivery time drives eater NPS. **C**, contractor-heavy models with income guarantees. |
-| **Service decomposition** | **Actor boundaries** (eater / restaurant / courier / orchestration) | Technical layers (API / logic / data) | Monolith | **A**, enables team autonomy, aligns on-call with actor SLA. **B**, every feature crosses three team backlogs. **C**, fine at < 5 engineers; serializes at scale. |
-| **Menu staleness** | **Cache TTL ~120 s + push invalidation on explicit change** | Cache TTL only (no push) | Strong consistency (no cache) | **A**, best tradeoff: low staleness on changes, low cost at rest. **B**, up to TTL delay on explicit menu changes (unacceptable for flash deals). **C**, couples browse firehose to CP order store; never. |
-
----
-
-## What interviewers probe here (Director altitude)
-
-- **"What prevents dispatching a courier to a cancelled order?"**, Strong: conditional CAS, `COURIER_ASSIGNED` is only valid from `READY_FOR_PICKUP`; a concurrent cancellation wins the row first; dispatch sees 0 rows updated and re-queries. Red flag: "we check before dispatching", a read-then-write race condition.
-
-- **"Why not dispatch at order-placed?"**, Strong: names the idle-cost consequence (~$69K/hr wasted at peak) and frames delayed dispatch as a business optimization. Red flag: vague "keep the courier available" without the number.
-
-- **"Where is your strong/eventual boundary?"**, Strong: strong on order state and payment ledger (three actors must never see contradictory states); eventual on menus and ETAs (hints; correctness lives at the CAS transition). Names the CP choice. Red flag: "eventual everywhere", fine for menus, creates coordinated bugs on order state.
-
-- **"How do you handle the 5-10× peak?"**, Strong: stateless services autoscale; order DB pre-provisions for peak (names the cost explicitly); connection pooling absorbs burst; order-DB over-provision cost is small relative to COGS. Red flag: "just add servers" without naming the constraint.
-
-- **"Why actor-boundary decomposition?"**, Strong: invokes Conway's law, one team ships end-to-end for one actor, on-call aligns with actor SLA, no three-team coordination per feature. Red flag: "microservices are better" without the org argument.
-
----
-
-## Common mistakes
-
-- **Dispatching at order-placed instead of at ready-minus-travel.** This is the single most common design gap. The restaurant-prep wait makes naive dispatch expensive and operationally wrong; always quantify the idle-cost consequence.
-- **Making menus strongly consistent.** A 120-s stale menu that re-prices at checkout is acceptable UX. Serving menus from the order-state store couples a 2M-reads/s browse firehose to a CP transactional database and is a scaling catastrophe.
-- **Treating the order state machine as a single actor's concern.** Three actors (eater, restaurant, courier) write to it via separate services; the correctness invariant requires a single writer (Orchestration) with conditional CAS transitions. Letting each actor's service write state directly creates race conditions.
-- **Ignoring idempotency on `DELIVERED` and the payment split.** Courier apps retry on network failure; without an idempotency key the delivery confirmation fires the payment split twice, charging the eater twice and triggering a compliance incident.
-- **Not naming the peak as a fleet-sizing and cost problem.** The 5-10× intraday spike is not just a traffic-scaling question, it determines over-provisioning cost, courier pool sizing, and whether the dispatch system can absorb demand without degrading. A Director answer names the business cost of the design choices.
-
----
-
-## Practice questions (with model answers)
-
-**Q1. A restaurant marks an order `READY_FOR_PICKUP`, but the courier assigned to it just cancelled. What happens?**
-
-> Model answer: The courier cancellation triggers a state transition `COURIER_ASSIGNED → READY_FOR_PICKUP` (reverting to the pre-assignment state, with the `courier_id` cleared). The Orchestration service emits a `CourierCancelled` event to Kafka; the Dispatch service consumes it and re-runs the courier assignment query against the live geo-index. Since the food is already ready, dispatch fires immediately, no prep-time delay. If no courier is available within, say, 3 min, the system escalates (broader search radius, higher courier incentive via a surge bonus). The key invariant: the order state reverts cleanly via the same conditional CAS that protects all other transitions; the courier's cancellation is idempotent (retries don't corrupt state).
-
-**Q2. Menu items have real-time limited availability (e.g., "only 5 portions of the special left today"). How does your menu design handle this?**
-
-> Model answer: A Redis atomic `DECR` on a per-item counter handles the hot path, sub-millisecond, never touches the order store. The transactional store holds the authoritative count; Redis is reconciled every minute. Trade-off: a Redis crash before persistence can over-commit by one, acceptable for a physical "daily special," not for a legally-enforced quantity (use the transactional store and accept the latency). Same pattern as the GA ticket counter.
-
-**Q3. The system needs to show the eater a live ETA updated every 30 s as the courier moves. How does the ETA flow work without hammering the order store?**
-
-> Model answer: ETA is a hint, not order state. The ETA Service subscribes to courier-location events from Kafka, recomputes using current position + routing API, and writes to **Redis** (`eta:{orderId}`, TTL 60 s). The eater's polling call reads from Redis, never the order store. If Redis is down, the API falls back to the `last_eta_minutes` column updated lazily at state transitions. Correctness property: a stale ETA is a UX degradation; order state is unaffected. Rejected: writing ETA to the order store on every courier ping, ~100K writes/s against a CP store sized for ~3,700 state-transition writes/s.
-
-**Q4. How does the three-way payment split handle a partial refund for a missing item?**
-
-> Model answer: A partial refund reverses a fraction of the restaurant's payout and credits the eater; the courier's delivery fee is untouched (they delivered). This is a ledger operation (see the payment platform): the Refund Service issues a credit memo against the restaurant's payout entry with the order's idempotency key as anchor. If the restaurant was already settled in the nightly batch, the credit becomes an AR item against the next cycle. Director delegation: "credit the eater immediately; recover from the restaurant via next-cycle offset, this must be in the partner contract."
-
----
+**Q4.** You need answers grounded in weekly-changing docs *and* always in strict JSON + brand voice. Lay out the adaptation plan and your rejected alternatives.
+> *Model:* **Split it by gap.** The changing docs are **facts → RAG**: index them, retrieve + cite at query time, fresh in minutes. The JSON + voice is **behavior → prompt first**: system prompt + **JSON-mode/structured output** + few-shot of the voice; measure on a golden set. **Only if** eval shows the format/voice still drifts, escalate to a **thin LoRA fine-tune** for the behavior. Net: **RAG on a fine-tuned (or just well-prompted) model** — they compose. *Rejected:* fine-tuning the policies in (stale, uncitable, hallucinated — they change weekly); long-context stuffing all policies every call (doesn't scale across regions, burns tokens); and jumping straight to fine-tuning the format before proving a prompt can't do it.
 
 ### Key takeaways
+- **The spectrum is an escalating cost ladder:** prompt → RAG → LoRA → full fine-tune → continued pretraining. **Climb only when eval proves the rung below can't hit the bar.** Continued pretraining is almost never an app-team move.
+- **One decision rule:** fresh/private **facts → RAG**; new **behavior/format/style/skill → fine-tune**; **both → RAG on a fine-tuned model**; **latency/cost at fixed quality → distill** to a smaller fine-tune.
+- **Fine-tuning teaches behavior, not facts.** "Fine-tune the docs in" is the classic error — it yields confident, uncitable, un-updatable hallucination. Facts belong in a RAG index.
+- **The cost of fine-tuning isn't GPU hours** — it's **data curation + an eval harness + retraining as the base model moves**. LoRA/PEFT (cheap, swappable adapters) is the default; full fine-tune only when eval proves LoRA's capacity isn't enough.
+- **A fine-tune locks you to a base-model version** — the maintenance tax. Prompt + RAG ride every base upgrade for free; a fine-tune must be re-trained to. **Default to prompt + RAG; treat fine-tuning as earning-the-right**, with data, eval, and an ops plan.
 
-1. **The order state machine is the correctness core.** Eleven states, actor-driven transitions, each enforced by a conditional CAS (`UPDATE ... WHERE status = 'expected_state'`). One writer (Orchestration) prevents the race conditions that arise when three actors can each write state directly.
-2. **Delayed dispatch is a business optimization, not an afterthought.** Dispatching at `estimated_ready_at - travel_time` instead of at order-placed eliminates ~$69K/hr in idle courier cost at scale. The prep-time estimator is worth building.
-3. **Draw the strong/eventual boundary at the invariant, not at "everything strong for safety."** Menus and ETAs are hints, serve them from Redis/CDN. Order state and payment ledger are the invariant, serve them from a transactional store. Coupling browse traffic to the CP store is a scaling failure.
-4. **Decompose by actor boundary.** Eater service, Restaurant service, Courier service, Orchestration, each maps to a team, an on-call rotation, and an actor's SLA. This is the Conway argument applied: the org chart should match the service boundaries, or Conway's law will enforce a coupling you didn't intend.
-5. **The 5-10× peak is a fleet-sizing and cost problem, not just a traffic problem.** Stateless services autoscale; the order DB pre-provisions for peak (accept the cost explicitly); connection pooling absorbs burst. Naming the cost and the decision is the Director move.
-
-> **Spaced-repetition recap:** Food delivery = **three-sided marketplace coordination**, eater, restaurant, courier, with a restaurant-prep waiting period that makes naive dispatch wrong. Core artifact: an **11-state order state machine** with conditional CAS transitions (`PLACED → ACCEPTED → PREP_STARTED → READY → COURIER_ASSIGNED → PICKED_UP → DELIVERED`), single writer (Orchestration service). **Delayed dispatch** fires at `estimated_ready_at - travel_time`, not at order-placed. **Strong**: order state + payment ledger. **Eventual**: menus (120-s TTL) and ETAs (Redis hint). Service decomposition by **actor boundary** mirrors team topology. Peak is 5-10× lunch/dinner; stateless autoscales, order DB pre-provisions. Payment split is idempotency-keyed at `DELIVERED`; delegate PCI surface to Payments. Geo-matching reuses the proximity design, don't re-teach.
-
----
-
-*End of Lesson 9.5. Food Delivery inverts the Ticketmaster contention frame: here the hard problem is not flash-crowd rate control but temporal coordination of three actors across a noisy restaurant-prep wait, the state machine as the single source of truth, delayed dispatch as the cost optimizer, and actor-boundary decomposition as the org-design signal.*
+> **Spaced-repetition recap:** Briefing → binder → training → re-schooling = prompt → RAG → fine-tune → pretrain, cheapest to most expensive; climb only when eval proves the rung below fails. The decision rule: **facts → RAG, behavior → fine-tune, both → RAG on a fine-tune, latency/cost → distill.** The headline misconception: **fine-tuning teaches behavior, not facts** — "fine-tune the docs in" is wrong; that's RAG (cited, updatable in minutes). Fine-tune's real cost = **data + eval + retraining as the base moves**, plus the **lock-in tax** (welded to a base version; prompt+RAG ride upgrades free). **LoRA before full FT; default prompt + RAG; earn the right to fine-tune.** Preference tuning (DPO over RLHF) — delegate with a prior, rarely needed.

@@ -1,149 +1,356 @@
 ---
-title: "10.6 — Hard People Calls"
-description: The low-performer, firing, PIP, brilliant-jerk, and flight-risk cluster, answered in STAR-L with a diagnose-feedback-plan-decide-cost-learn spine, built to survive a four-level probe, and calibrated to the 2026 decisiveness-plus-compassion bar.
+title: "10.6 — Multi-Agent Autonomous Coding / Research Agent"
+description: Design a Devin/Claude-Code-style system that takes a high-level goal and works autonomously over a long horizon — planning, parallel sub-agents, sandboxed tool execution, durable checkpoints, and verification — where the binding constraints are reliability under compounding error, runaway cost, and sandbox safety, not model IQ.
 sidebar:
   order: 6
 ---
 
-> Every Director loop runs a hard-people-calls round, and it's the single most-probed behavioral cluster, Amazon bar-raisers drill it three and four levels deep precisely because it's the easiest place to catch a rehearsed or AI-drafted story. What they're scoring is **decisiveness with dignity**: did you diagnose before you acted, give early dated feedback, run a real process, make the call on a deadline, and own the team cost of waiting too long. At Director altitude the variants escalate, the low performer is a *manager*, the calibration spans teams you don't personally observe, and a candidate who has *never* terminated anyone reads as conflict-avoidant. This is the lesson where "I coach indefinitely, firing is a failure of leadership" stopped scoring around 2022, and where a cold "it was an easy call" scores *worse* than it used to. The round lives in the narrow band between those two failures.
+> **Why this problem separates Directors from ICs:** the demo is trivial and the production system is brutal, and the gap between them is the entire interview. An autonomous agent that resolves a GitHub issue end-to-end looks like magic for five minutes — then you ship it and discover that a task needing 40 sequential model decisions, each 95% reliable, succeeds about **13% of the time** (0.95⁴⁰), that a stuck agent re-planning in a loop quietly burned **$300 of tokens overnight**, and that "let it run `bash`" is one indirect-prompt-injection away from `rm -rf`. An IC tunes the prompt and the planner. A Director recognizes that **autonomy is the risk**, not the feature, and that the whole job is *bounding the loop*: durable checkpoints so a crash resumes instead of restarting, a sandbox so model-written code can't escape, hard budgets and a kill switch so cost is capped, a verifier so "done" means *tests pass* not *the model says so*, and human gates on the irreversible. Get autonomy wrong and you don't have a bug — you have a runaway process with your credentials and a credit card.
+
+---
 
 ### Learning objectives
-- Run the hard-people story on a **process spine**, diagnose skill vs will vs *system*, early dated feedback, a time-boxed plan, a decision with a deadline, the cost of inaction, the "one quarter earlier" learning, delivered as STAR-L.
-- Build the story **probe-resistant**: hold the numbers, the alternatives, the timeline, and the stakeholders three levels below the headline, because this is the cluster interviewers drill hardest.
-- Answer the **PIP-philosophy** variant with candor about its **dual function**, a genuine improvement vehicle *and* legal documentation the employee reads as a termination notice, landing between naive ("PIPs usually work") and cynical ("PIPs are paperwork").
-- Hold the **brilliant-jerk line** under modern efficiency pressure: acknowledge the louder post-layoffs business case to keep them, and still make the call, with the cost math.
-- Calibrate to the **2026 bar**: weeks not quarters, a real termination story as table stakes, and a *higher* compassion bar than 2015, the decisive-and-humane synthesis.
+
+1. Quantify why **long-horizon autonomy is unreliable** — the p^N compounding-error math — and design verification, checkpointing, and re-planning as the countermeasures rather than hoping for a better model.
+2. Decide **when multi-agent helps and when it hurts**: parallel, independently-verifiable subtasks justify the ~10–15× token multiplier; a single coupled thread of control does not.
+3. Architect a **durable, sandboxed agent runtime** — checkpointed state, isolated tool execution, idempotent side effects — reusing the exactly-once and untrusted-execution machinery from the payments and agent-runtime designs.
+4. Make **cost and safety first-class controls**: per-task token/time/step budgets, a kill switch, least-privilege tools, and human-in-the-loop gates placed by reversibility and blast radius.
+5. Run a **RESHADED spine where the NFRs invert the usual order** — task success rate, bounded cost, and containment dominate; raw QPS is a footnote — and design-evolve toward graduated autonomy.
+
+---
 
 ### Intuition first
-A good surgeon's hardest skill isn't cutting, it's calling the operation. Three failures, all fatal in their own way. **Operate too late**: you watch the vitals slide for months, hope they stabilize, and by the time you move the damage has spread to everything around the problem, that's the manager who lets a low performer drift for three quarters while the team quietly rots. **Operate carelessly**: you cut without a diagnosis, blame the patient, and walk away cold, that's the surprise firing, the "easy call," the contempt. The skill is the *third* path: read the vitals early, run the diagnostic to know whether it's skill, will, or a system you built wrong, give the patient a real and dated shot at recovery, and when the call has to be made, make it cleanly, on time, and humanely, owning that you watched the chart too long. Interviewers in this round are reading *your* chart. They want to see that you diagnose before you cut, that you moved when the data said move, and that you can describe the hardest thing a leader does, ending someone's job, without either flinching from it or enjoying it.
+
+Hiring a brilliant contractor for a week is the right mental model. You don't hand them your production database password on day one and check back Friday. You give them a **scoped workspace** (a sandbox), a **clear deliverable with an acceptance test** ("the bug is fixed when this failing test goes green"), a **budget** ("don't spend more than X hours"), **checkpoints** ("show me the plan before you start, and ping me before you touch anything in prod"), and a **way to verify the work** rather than taking their word for it. A great contractor with no acceptance test, no budget, and root access is not an asset — they're an unbounded liability, however talented.
+
+That's exactly the shift an autonomous agent forces. A chatbot that's wrong *says* something false; an agent that's wrong *does* something — edits the wrong file, force-pushes, deletes records, spends money. And because each step's small errors **compound**, the longer you let it run unsupervised, the worse the odds. So the interesting engineering is not "make the model smarter." It is: **how do you let a fallible, occasionally-hijacked autonomous process do real work for hours, cap the damage and the bill, and *know* — not hope — that the result is correct.**
 
 ---
 
-## The questions
+## R: Requirements
 
-These are all past-event questions (STAR-L), with one philosophy-shaped exception, the PIP-view question, that switches instruments mid-cluster.
+> Scope before build. The NFR priority here **inverts** the read-heavy problems in this course: throughput is trivial (you run thousands of tasks, not millions of QPS), and the binding constraints are **task success rate, bounded cost, and containment**. State that inversion out loud.
 
-| Variant | What it's really testing |
-|---|---|
-| "Tell me about managing an underperformer." (Director: an underperforming *manager* or team) | Diagnose-before-act, dated feedback, a real process, a decision, not endless coaching. |
-| "Have you ever fired someone? Walk me through it. What would you do differently?" | A real, well-run termination is table stakes; the "differently" is where self-awareness scores. |
-| "What's your view on PIPs? Did anyone ever pass?" | Candor about the dual function, philosophy-shape, not a story (Position-Mechanism-Number-Limit). |
-| "Your highest performer is toxic to the team, what do you do?" (brilliant jerk) | Behavior-is-performance, and holding the line under the post-layoffs business case to keep them. |
-| "Your top performer resigns / has an offer." | Charter over checkbook, creative retention and honest triage, not a panic counter-offer. |
-| "How do you run performance calibration fairly? A manager inflates ratings?" | Cross-team fairness, forced-distribution pressure, legal-defensible documentation. |
-| "How fast do you act on a clear miss? When did you wait too long?" | The 2026 decisiveness bar, weeks not quarters, plus owned self-criticism. |
-| Netflix: "Apply the keeper test. Would you re-hire everyone today?" | Whether you can hold a high bar without dressing it as cruelty. |
+**Clarifying questions I'd ask (with assumed answers):**
 
-The merge: every one of these except the PIP-view question is a **past-event** question, so they take **STAR-L** built on the process spine below. The PIP-view variant is **philosophy-shape**, answer it in Position → Mechanism → Number → Limit, because there's no single story to tell, there's a stance to defend.
+- *What's the task domain?* → **Software engineering tasks** (fix a bug, implement a feature from an issue, write tests) **and research tasks** (gather, synthesize, and cite from many sources). One platform, two task shapes — coding is *verifiable* (tests), research is *parallelizable*. We'll design for both and let that contrast drive the multi-agent call.
+- *How autonomous?* → **Graduated.** Default to bounded autonomy with HITL gates on irreversible actions; full hands-off only for low-blast-radius tasks. Autonomy is a per-task dial, not a global setting.
+- *What can it touch?* → **A sandboxed workspace** (a clone of the repo, a scratch VM), plus scoped tools (search, file edit, code execution, run tests, web fetch). **Not** production systems directly without a human gate.
+- *Who's the user?* → Developers and analysts kicking off tasks asynchronously; they expect to leave and come back, with progress streamed and approval prompts when needed.
+- *Hard limits?* → A **per-task budget** (tokens, wall-clock, steps) is mandatory. Tasks that exceed it stop and ask, never silently continue.
+
+**Functional requirements:**
+
+1. Accept a **high-level goal** ("fix issue #482", "research vendor options for X and summarize with citations"), an autonomy level, and a budget.
+2. **Plan and decompose** the goal into steps/subtasks, and **re-plan** when a step fails.
+3. **Use tools** in a sandbox: read/edit files, execute code, run tests, search code, fetch/search the web.
+4. **Iterate** toward the goal, **verifying** progress against a ground-truth signal (tests pass, cross-checked sources).
+5. **Stream progress and a full trace**, and **pause for human approval** at defined checkpoints.
+6. **Return a verified artifact** (a diff/PR, a cited report) plus the trace and a cost accounting.
+
+**Explicitly cut:** the foundation model itself (we consume a serving API), the IDE/PR UI, fine-tuning the base model, and a self-improvement training loop. I'll name these as delegated or out of scope.
+
+**Non-functional requirements, priority order:**
+
+| Priority | NFR | Target |
+|---|---|---|
+| 1 | **Task success rate** | Maximize verified-correct completion; *measured*, not asserted |
+| 2 | **Bounded cost & time** | Hard per-task ceiling (tokens / $ / wall-clock / steps); never runaway |
+| 3 | **Containment / safety** | Sandboxed execution; no irreversible action without a gate; least privilege |
+| 4 | **Reproducibility / observability** | Full, replayable trace of every step and tool call |
+| 5 | **Durability** | A crash mid-task resumes from a checkpoint, not from scratch |
+| 6 | **Latency** | Minutes-to-hours per task; async by nature — *not* an interactive-latency problem |
+| 7 | **Throughput** | Thousands of concurrent tasks; trivially horizontal — a footnote |
+
+**The inversion, stated explicitly:** unlike the conversational assistant where TTFT and QPS dominate, here a task takes minutes to hours and you run thousands, not millions per second. The scarce things are **a correct outcome, a capped bill, and a contained blast radius.** Every architectural decision flows from NFRs 1–3.
 
 ---
 
-## The framework
+## E: Estimation
 
-The spine is a process, and the story *is* the process executed once. Six beats, in order, they double as the probe-defense, because each beat is exactly where a senior interviewer drills.
+> Enough math to prove the crux is reliability and cost, not throughput.
 
-- **Diagnose, skill vs will vs system.** Before you blame the person, rule out the system: was the expectation unclear, the project a bad fit, the onboarding broken, *your hiring*? Then separate skill (can't, a coaching problem) from will (won't, a different problem). Naming this split is the first signal you're a leader, not a complainer.
-- **Early, dated, explicit feedback.** *When exactly* did you first say it plainly, and in writing. "No surprises" starts here. The most common red flag in the whole cluster is feedback that arrives for the first time inside a PIP.
-- **Time-boxed structured plan.** Measurable goals, weekly check-ins, named support (a paired senior engineer, a coach), 30-90 days end to end. A plan with a date, not "I kept coaching."
-- **Decision with a deadline.** A documented turnaround or a respectful exit, delivered *personally*, never a surprise, HR partnered not outsourced. The deadline is what separates a decision from indefinite hope.
-- **Cost of inaction, named.** What the team paid for every extra week you waited, velocity, morale, an engineer who told you in a skip-level it was overdue. Owning this cost is the maturity marker.
-- **Learning, almost always "one quarter earlier."** Plus the upstream fix: tighter calibration, a hiring-rubric change, a "missed-commitment triggers the conversation in two weeks" rule. The story ends in a mechanism, not a feeling.
+**The reliability math (the most important number in the room).** Model a task as N sequential decisions, each independently correct with probability p. End-to-end success ≈ pᴺ:
 
-Then survive the probe: hold the numbers, the rejected alternatives (did you consider a transfer? a role change?), the timeline, and the HR/stakeholder partnership three levels down. Never announce the spine aloud.
+| Per-step reliability p | 5 steps | 20 steps | 40 steps |
+|---|---|---|---|
+| 0.95 | 77% | 36% | **13%** |
+| 0.99 | 95% | 82% | 67% |
+
+This is why naive long-horizon agents fail in production despite great demos: **errors compound multiplicatively.** You cannot prompt your way out of 0.95⁴⁰. The design response is to (a) **shorten the chain** (decompose, constrain, use deterministic workflow steps where possible), (b) **raise effective p with verification + retry** (catch a bad step and redo it, so a step's *effective* reliability approaches 1), and (c) **checkpoint** so a failure costs one step, not the whole task.
+
+**Token and cost per task.** A non-trivial coding task runs ~20–60 model turns; with planning, tool results, and re-reading context, call it **~0.5–2M tokens** for a single agent. Multi-agent fan-out (an orchestrator plus several workers, each with its own context) commonly runs **~10–15× the tokens of a single chat turn-for-turn** — Anthropic has reported their multi-agent research system using roughly that multiplier. So a multi-agent task can be **~5–20M tokens ≈ low-single-digit to low-double-digit dollars per task** at 2026 frontier prices. That number is why **budgets are an NFR, not a nicety**: a stuck agent re-planning in a loop overnight is a four-figure incident.
+
+**Concurrency and capacity.** At, say, 10k tasks/day averaging 20 minutes of wall-clock, Little's Law gives ~140 concurrent tasks (`10000/86400 × 1200s ≈ 139`). Each needs a sandbox (a microVM/container) and durable state — so we size a **pool of a few hundred warm sandboxes**, not millions of anything. The model inference is delegated to a serving tier and is the dominant *cost*, not a capacity headache for *this* system.
+
+**What estimation decided:** throughput is trivial; the crux is that success decays as pᴺ (→ verification + checkpoints + decomposition) and cost scales with the multi-agent multiplier (→ hard budgets + the single-vs-multi decision). The numbers justify the entire NFR inversion.
+
+---
+
+## S: Storage
+
+> Five data classes, each chosen for what the autonomy and recovery requirements demand — not for QPS.
+
+**1. Durable task & step state (the resumability core).**
+
+- Access pattern: write a checkpoint after every step (plan, tool call + result, decision); on crash, reload the latest checkpoint and resume.
+- Choice: a **durable-execution / workflow engine** (Temporal, AWS Step Functions, Restate, or DBOS) backing the agent loop, with state in its persistent store (Postgres-class). The engine gives durable timers, retries, and exactly-once step semantics for free.
+- Rejected: holding agent state in process memory. A crash at step 30 of 40 would restart from zero — re-running every tool call (double side effects) and re-burning every token. Durability is non-negotiable when tasks run for hours.
+
+**2. The sandbox / workspace (isolated, ephemeral).**
+
+- Access pattern: a per-task isolated environment to clone the repo, edit files, and **execute model-written code** safely.
+- Choice: a **per-task microVM (Firecracker) or hardened container (gVisor)** from a pre-warmed pool, with **no inbound access and tightly controlled egress** (untrusted execution). Fresh sandbox per task; destroyed after.
+- Rejected: a shared executor or running tools in the orchestrator's process. Model-written code is *untrusted by construction*; one escape or one injected `curl … | sh` and the blast radius is your control plane.
+
+**3. Artifact store (workspace snapshots & outputs).**
+
+- Choice: **object storage (S3-class)** for workspace snapshots tied to checkpoints, diffs/PRs, and final reports. Append-only, cheap, range-fetched for replay. The git repo itself is the natural artifact store for coding tasks (commits = checkpoints).
+
+**4. Agent memory (semantic + procedural).**
+
+- Choice: a **vector store** for retrievable long-term memory — prior task traces, learned project conventions ("this repo uses pnpm, tests run with `make test`"), and reusable skills. Working memory lives in-context and is compacted as the task grows.
+- Rejected: stuffing all history into the context window — it blows the budget and triggers context rot.
+
+**5. Trace / observability store (audit + eval).**
+
+- Choice: a **structured trace store** (LangSmith/Langfuse/Phoenix-class, or OpenTelemetry into a columnar store) recording every prompt, tool call, result, token count, latency, and cost — keyed by task and step, fully replayable. This is both the debugging surface and the **evaluation dataset**.
+
+---
+
+## H: High-level design
+
+> The shape to make visible: an **orchestrator/planner** that decomposes work and (only when justified) fans out to **worker agents**, all running inside a **durable runtime** that checkpoints every step, executing tools only in a **sandbox**, gating irreversible actions behind **HITL**, and treating a **verifier** — not the model's self-assessment — as the definition of done. Budgets and a kill switch wrap everything.
 
 ```mermaid
-flowchart TD
-    M["Clear performance miss"] --> DG["Diagnose<br/>skill vs will vs system"]
-    DG --> FB["Early dated feedback<br/>in writing no surprises"]
-    FB --> PL["Time boxed plan<br/>measurable goals weekly support"]
-    PL --> DEC{"On the deadline"}
-    DEC -->|Turned around| KEEP["Keep and grow"]
-    DEC -->|Did not| EXIT["Respectful exit<br/>delivered personally HR partnered"]
-    EXIT --> COST["Name the team cost<br/>of every week waited"]
-    COST --> LRN["Learning<br/>act one quarter earlier plus upstream fix"]
+flowchart TB
+    USER["User: goal + autonomy level + budget"]
+    API["Task API / Gateway"]
+    ORCH["Orchestrator / Planner agent<br/>decompose · re-plan · synthesize"]
+    BUDGET{"Budget + kill-switch guard<br/>tokens / $ / steps / wall-clock"}
+    W1["Worker agent A<br/>(parallel, independent subtask)"]
+    W2["Worker agent B"]
+    DUR[("Durable runtime<br/>checkpoint per step · idempotent")]
+    SBX["Sandbox pool<br/>microVM/gVisor · egress-controlled<br/>file edit · code exec · run tests"]
+    VER{"Verifier / Critic<br/>tests pass? sources cross-checked?"}
+    HITL{"HITL gate<br/>irreversible / high-blast-radius?"}
+    LLM["LLM serving tier"]
+    OUT["Verified artifact + trace + cost"]
+    MEM[("Vector memory<br/>conventions · skills · past traces")]
+    TRACE[("Trace store<br/>replayable audit")]
+
+    USER --> API --> ORCH
+    ORCH <--> BUDGET
+    ORCH -->|parallel + verifiable only| W1
+    ORCH -->|else single thread| W2
+    W1 & W2 --> SBX
+    ORCH <--> LLM
+    W1 & W2 <--> LLM
+    ORCH & W1 & W2 -. checkpoint .-> DUR
+    ORCH <--> MEM
+    SBX --> VER
+    VER -->|fail| ORCH
+    VER -->|pass| HITL
+    HITL -->|approve| OUT
+    HITL -->|reject / edit| ORCH
+    ORCH & W1 & W2 -. emit .-> TRACE
+
+    style DUR fill:#7a1f1f,color:#fff
+    style SBX fill:#7a1f1f,color:#fff
+    style VER fill:#2d6cb5,color:#fff
+    style BUDGET fill:#7a1f1f,color:#fff
+    style ORCH fill:#e8a13a,color:#000
+    style HITL fill:#e8a13a,color:#000
 ```
 
-For the **PIP-view** question, switch to philosophy-shape: **Position** (a PIP formalizes a conversation already happening, it never *starts* it) → **Mechanism** (passable criteria, weekly check-ins, the candid negotiated-exit path offered alongside) → **Number** (your real pass rate, some pass, most don't, and say so) → **Limit** (its dual function as documentation is real, and pretending otherwise to the employee is the dishonest move).
+**Happy path, a coding task ("fix issue #482"):**
+
+1. User submits the goal with autonomy level and a budget (e.g., 3M tokens / 30 min / 50 steps). The **budget guard** initializes a ledger.
+2. A **sandbox** is leased from the warm pool; the repo is cloned in.
+3. The **orchestrator** plans: reproduce the bug, locate the cause, fix, run tests. Each step is **checkpointed** to the durable runtime before execution.
+4. The orchestrator works the steps via sandboxed tools (read code, edit, run the test suite). Because this task is a **single coupled thread of control** (each edit depends on the last), it stays **single-agent** — no fan-out.
+5. The **verifier** runs the repo's failing test: green = the ground-truth definition of done. Red = the orchestrator re-plans and retries the step (this is what raises effective per-step reliability).
+6. Tests pass → the diff hits the **HITL gate**. Opening a PR for human review is reversible, so it's allowed under bounded autonomy; *merging to main* is not, and stays gated.
+7. The verified diff, the full trace, and the cost are returned. The sandbox is destroyed.
+
+**The research-task variant** is where multi-agent earns its keep: the orchestrator fans out **parallel worker agents**, each researching an independent sub-question in its own context, each returning **cited** findings the orchestrator can verify and synthesize. The subtasks are parallel *and* independently checkable — the only condition under which the 10–15× token cost is justified.
+
+**The load-bearing idea:** the model proposes; the **verifier and the budget guard dispose.** "Done" is defined by an external signal (tests, cross-checked citations), and "how far it can go" is defined by the budget and the HITL gates — never by the agent's own confidence.
 
 ---
 
-## 2015 vs 2026: the calibration
+## A: API design
 
-This cluster got re-scored hard in both directions at once, more decisive *and* more humane. Six shifts separate a current answer from a stale one.
+> An asynchronous, long-running job API with streaming progress and approval callbacks — not a request/response endpoint.
 
-- **The center of gravity moved to decisiveness, weeks, not quarters.** "I coach indefinitely; firing is a failure of leadership" now reads as not operating at level. Meta's low-performer cuts, Microsoft's PIP-or-severance ultimatum, and a ~30% rise in formal performance procedures since 2020 set the context: the strong answer acts on a clear miss in weeks. "When did you wait too long?" expects a real, owned answer, almost always "a quarter too long."
-- **But the compassion bar rose too, post-2022.** A cold "it was an easy call, I just cut him" scores *worse* than it used to. The decisive-and-humane synthesis is the bar: you moved fast *and* you treated the exit with dignity, severance advocacy, intro calls, an eight-minute conversation that was direct but not cruel. Relish or contempt is an instant fail; so is flinching.
-- **A real termination story is table stakes.** At Director level, never having run one, with no adjacent story (a managed-out transfer, a PIP you owned), reads as inexperience or conflict-avoidance. You need one loaded.
-- **PIPs are scored on candor about the dual function.** A PIP is *both* a genuine improvement vehicle *and* legal documentation, and the employee reads it as a termination notice the day they get it. Naive "PIPs usually work" and cynical "PIPs are just paper for the file" both fail. The honest answer holds both truths and offers the negotiated-exit path candidly.
-- **The brilliant-jerk line is now contested under efficiency pressure.** Post-layoffs, the business case to keep the toxic top performer got *louder*, "we can't afford to lose that output right now." The scored answer acknowledges that pressure and still holds the line, with the cost math: the research figure is a toxic worker costing roughly **$12,500** in turnover-driven costs versus a superstar adding roughly **$5,300** of value, the toxic star is net-negative even before you count the silent attrition. Behavior is performance.
-- **Retention shifted from checkbook to charter.** Comp budgets are tight, so the flight-risk answer is creative non-monetary retention (scope, a hard problem, a real career conversation) plus honest triage, *who do I let the market take*, not a panic counter-offer, which mostly buys a six-month rental at a higher number. And calibration answers now have to handle forced-distribution pressure without torching trust, with legally defensible documentation.
+```
+# --- Submit a task ---
+POST /v1/tasks
+  body: {
+    goal: "Fix issue #482: null deref in checkout",
+    repo: "git@…", autonomy: "bounded",          # suggest | bounded | auto
+    budget: { tokens: 3_000_000, wall_clock_s: 1800, steps: 50, usd: 8.00 },
+    acceptance: "tests in checkout_test.py pass"  # the verification signal
+  }
+  -> 202 Accepted { taskId, status: "planning" }
+
+# --- Observe (stream the trace) ---
+GET  /v1/tasks/{taskId}                 -> { status, step, plan, cost_so_far, budget_remaining }
+GET  /v1/tasks/{taskId}/stream          -> SSE: step events, tool calls, partial results
+GET  /v1/tasks/{taskId}/trace           -> full replayable trace (audit)
+
+# --- Human-in-the-loop ---
+POST /v1/tasks/{taskId}/approvals/{gateId}
+  body: { decision: "approve" | "reject" | "edit", note }
+  -> 200 { resumed: true }
+
+# --- Control ---
+POST /v1/tasks/{taskId}/cancel          -> 200 (kill switch — tears down sandbox)
+GET  /v1/tasks/{taskId}/artifacts       -> { diff_url, pr_url | report_url, cost }
+```
+
+**Design notes (each with its rejected alternative):**
+
+- **Async job, not synchronous.** Tasks run minutes-to-hours; a blocking call is wrong. Rejected: a synchronous "do the task" endpoint — it can't survive a client disconnect or a multi-hour run.
+- **Budget is a required field on submit.** Rejected: a global default budget — task cost varies by orders of magnitude; an unbounded task is a cost incident. Force the caller to declare the ceiling.
+- **The acceptance signal is an input.** Passing the verification target in (a test, a rubric) is what lets the verifier define "done" objectively. Rejected: letting the agent decide it's finished — self-assessed completion is how confidently-wrong results ship.
+- **Approval callbacks resume a durable workflow.** The HITL gate suspends the run durably and waits (possibly hours) for a human; it is not a busy-wait. Rejected: polling the model "are we approved yet?" — wastes tokens and can't survive a restart.
 
 ---
 
-## Model answers
+## D: Data model
 
-### Answer 1: "Have you ever fired someone? Walk me through it." (STAR-L on the process spine)
+> The state that makes the system durable, auditable, and cost-bounded. Checkpoint granularity, idempotency, and the budget ledger are the consequential decisions.
 
-> *(Situation/Task)* "A senior engineer, eight years tenured, missed three consecutive committed milestones on a revenue-blocking payments integration, the kind of person everyone assumes is safe because of seniority, which is exactly why it festered. *(Action, Diagnose)* First I checked the system, not the person: scope was clear, the spec was stable, and two peers on the same project were landing their pieces, so it wasn't a broken setup or a bad-fit project. That pointed at the person. The harder diagnosis was skill versus will: he was clearly capable at level historically, so this read as a will-to-coast problem dressed up as a skill gap, which it often is at senior levels. *(Action, Feedback)* First explicit conversation was March 4th, direct, named the pattern, and I put it in writing the next day so there was no ambiguity later. That date matters: he heard it plainly twelve weeks before anything formal, never a surprise. *(Action, Plan)* A 30-day expectations doc with measurable milestones, weekly check-ins, and I paired him with a staff engineer on the hardest reconciliation piece so support wasn't the missing variable. Two check-ins showed effort but the gap held. *(Action, Decision)* I partnered with HR in week three and ran a 60-day formal plan with criteria he could genuinely hit, passable, not a trap. He hit one of four. I delivered the termination myself, eight minutes, direct and humane; he told me he wasn't surprised, which is the only acceptable outcome of that conversation. Severance above policy, and I made two intro calls for him. *(Result)* Team velocity recovered within a sprint, and in a skip-level afterward an engineer told me it was overdue. *(Learning)* That last part is the one I own, the team paid for my extra quarter of hope. What I changed structurally: any missed *committed* milestone now triggers the explicit conversation within two weeks, not two months. I'd rather have the uncomfortable talk early and be wrong than wait and make the team carry it."
+**`tasks`** — `task_id` (PK), `goal`, `autonomy_level`, `acceptance_signal`, `status` (PLANNING / RUNNING / AWAITING_APPROVAL / VERIFYING / DONE / FAILED / KILLED), `budget` (JSON), `cost_spent` (JSON ledger), `created_at`. Sharded by `task_id` — tasks are independent, so even distribution beats locality here.
 
-**Why it scores:**
-- **The diagnosis comes first and rules out the system before the person**, system, then skill-vs-will, which is the single fastest way to signal you're a leader who looks in the mirror, not a complainer.
-- **Every beat carries a date or a number** (March 4th, 30/60 days, week three, one of four, recovered within a sprint), probe-resistant three levels down, and the house rule honored in a behavioral answer.
-- **It's decisive *and* humane**, twelve weeks to the call, but delivered personally, eight minutes, severance above policy, intro calls, landing the 2026 synthesis instead of either ditch.
-- **"He wasn't surprised" is the load-bearing line**, it proves the no-surprises process worked, and senior interviewers listen for exactly that.
-- **The Learning is "one quarter earlier" plus an upstream mechanism** (the two-week trigger), not a feeling, the cost of inaction owned without self-flagellation, which is where the L is scored at L7+.
+**`steps`** — append-only, `step_id` (PK), `task_id` (FK), `seq`, `type` (PLAN / TOOL_CALL / OBSERVATION / DECISION / VERIFY / APPROVAL), `input`, `output`, `tokens`, `cost`, `latency_ms`, `checkpoint_ref`, `created_at`. **Append-only** so the trajectory is an immutable audit trail — replayable for debugging and as eval data. This is the same append-only-ledger instinct as payments, applied to agent decisions.
 
-### Answer 2: "Your highest performer is toxic to the team. What do you do?" (the brilliant jerk)
+**`tool_calls`** — `call_id` (PK), `step_id`, `tool`, `args_hash`, `idempotency_key`, `result`, `side_effecting` (bool), `status`. The **`idempotency_key`** is load-bearing: side-effecting tool calls (open PR, send email, write to an external system) must be **idempotent** so a durable retry after a crash doesn't double-act — exactly the payments idempotency pattern, now applied to agent actions.
 
-> *(Situation/Task)* "Our strongest IC, owned the billing core, top of every output ranking, and I'd traced two regretted attritions and one stalled senior hire directly to how he operated: public demolitions in design reviews, contempt for anyone slower. *(Action, Diagnose)* I made the diagnosis explicit to myself first: behavior *is* performance, so his net contribution was actually negative once you counted the people leaving and the people going silent around him. That reframes the whole problem, this isn't 'great engineer, rough edges,' it's a negative-output situation that happens to ship a lot of code. *(Action, Feedback)* I told him exactly that, with three documented incidents, and made it concrete: change was a condition of staying, not a suggestion. No hinting. *(Action, Plan)* A real chance, not a setup, 60 days, an executive coach, and *observable* criteria: design reviews where others spoke first, zero public takedowns. He improved for about six weeks and then reverted, which is the common arc. *(Action, Decision)* I exited him despite the roadmap risk everyone was afraid of, we spent one quarter on a knowledge transfer we should have forced years earlier, and that's a cost I named going in. *(Result)* The aftermath was the canonical one: the team got measurably faster within two quarters, because three people who'd gone quiet started contributing again, the hidden tax he'd been levying came off. *(Learning)* The lesson I now give my own managers: every month you keep a brilliant jerk, you're teaching the whole team that output buys immunity. And here's the 2026 part, post-layoffs, when the pressure to keep your top producer is *loudest*, that's exactly when the line matters most, because that's when everyone's watching what you actually reward. The cost math backs it: the research has a toxic worker running ~$12.5k in downstream costs against ~$5.3k of superstar value, net-negative before you even count the silent attrition I was watching in real time."
+**`budget_ledger`** — per-task running totals of tokens / $ / steps / elapsed, checked before *every* model call and tool call. When any dimension hits its ceiling, the run transitions to AWAITING_APPROVAL or KILLED. This is what makes "bounded cost" a hard guarantee rather than a hope.
 
-**Why it scores:**
-- **"Behavior is performance" reframes the trap**, the question assumes a trade-off between talent and team; the answer dissolves it by counting the toxic star as net-negative output, which is the only stance that holds up.
-- **It gives a real, time-boxed chance with observable criteria** before exiting, not a snap "fire the jerk," which would read as impulsive, and names the reverted-after-six-weeks arc honestly.
-- **It names and pays the roadmap-risk cost explicitly** (one quarter of knowledge transfer "we should have forced years earlier") rather than pretending the call was free, the rejected alternative (keep him for the roadmap) considered and overridden with reasoning.
-- **It hits the 2026 calibration head-on**, the post-layoffs business case to keep them is named as *louder*, and the line held anyway, with the cost figures, exactly the contested-under-efficiency-pressure beat interviewers now probe.
-- **The Learning scales past the one person**, it's a principle handed to his managers ("output buys immunity"), which is Director altitude, not IC.
+**Checkpoint granularity — the trade-off named:** checkpoint **after every step**. Finer (mid-step) is wasteful and complex; coarser (per-plan) means a crash re-runs many tool calls, re-incurring side effects and cost. Per-step is the sweet spot: a crash costs one step of redo, and idempotency keys make even that safe.
+
+<details>
+<summary>Go deeper — raising effective per-step reliability with verify-and-retry (IC depth, optional)</summary>
+
+The pᴺ math assumes each step either succeeds or silently corrupts the trajectory. Verification breaks that assumption. If a step's raw reliability is p and the verifier catches failures with probability q, then with up to r retries the step's *effective* reliability approaches:
+
+`p_eff ≈ 1 − (1 − p)·(1 − q)^?` — informally, undetected failures are what propagate, so a strong verifier (high q) plus retry pushes p_eff toward 1 for *detectable* errors.
+
+The practical consequences:
+- **A cheap, reliable verifier beats a smarter generator.** Running the test suite (q ≈ 1 for "does it compile and pass") raises effective reliability far more than upgrading the model.
+- **Decompose to shrink N.** Ten verified 4-step subtasks beat one unverified 40-step chain: each subtask re-verifies, so errors don't compound across the whole length.
+- **The residual risk is *undetectable* errors** — a fix that passes the existing tests but is subtly wrong. That's why HITL on the final diff and good acceptance signals still matter; verification is only as good as the test.
+
+</details>
 
 ---
 
-## What interviewers probe here
+## E: Evaluation
 
-- **"When did you first tell the person, exactly?"**, *Strong:* a specific early date, in writing, weeks before anything formal; the PIP or exit was never the first signal. *Red flag:* the feedback first appeared inside the PIP, a surprise termination dressed as process.
-- **"Did anyone ever pass your PIP? What's your real pass rate?"**, *Strong:* honest candor, some pass, most end in exit, and the PIP is *both* an improvement vehicle and documentation the employee reads as a notice; offers the negotiated-exit path candidly. *Red flag:* "PIPs usually work" (naive) or "I PIP to paper the file" (cynical), both fail.
-- **"What did waiting cost the team?"**, *Strong:* a concrete cost, velocity, a quiet engineer, a skip-level "this was overdue", owned without self-flagellation, paired with the upstream fix. *Red flag:* no cost named, or a story where the manager is the hero with no team toll.
-- **"Post-layoffs, why not keep the brilliant jerk for the roadmap?"**, *Strong:* names the louder business case, holds the line on behavior-is-performance with the cost math, and accepts the roadmap risk knowingly. *Red flag:* "we routed around him" or "we quarantined him" as the *end state*, tolerating toxicity is the fail.
-- **"Your top performer just resigned with an offer. Go."**, *Strong:* diagnose why first (comp, growth, manager, burnout, comp is rarely the real reason), then charter-not-checkbook retention or honest triage; a counter-offer only as a deliberate bridge, never a panic reflex. *Red flag:* an instant counter-offer, which buys a six-month rental and signals you only act when threatened.
+> Re-check against the NFRs. The bottlenecks are reliability, cost, and containment failures — not throughput.
+
+**Re-check vs NFRs:** success rate → verifier-gated completion + decompose + retry; bounded cost → the budget ledger checked before every call + kill switch; containment → sandbox + least-privilege tools + HITL on irreversible actions; reproducibility → the append-only trace; durability → per-step checkpoints in the durable runtime.
+
+**Failure 1 — Compounding error over a long horizon (the defining failure).**
+A 40-step task drifts: an early wrong assumption poisons every later step, and the agent confidently delivers a broken result. *Mitigation:* (a) **decompose** so no chain is 40 unverified steps; (b) **verify** each subtask against ground truth (tests, cross-checked sources) so a bad step is caught and **retried/re-planned**, raising effective reliability; (c) **checkpoint** so recovery is cheap. The Director framing: you don't fix compounding error with a better model — you fix it by **shortening chains and verifying often.**
+
+**Failure 2 — Runaway cost (the overnight $300 incident).**
+A stuck agent loops — re-planning, re-reading, retrying — and burns tokens with no progress. *Mitigation:* the **budget ledger** (tokens / $ / steps / wall-clock) is checked before every model and tool call; **loop/no-progress detection** trips early; a hard **kill switch** tears down the task and sandbox. A task that exhausts its budget **stops and asks**, never silently continues. Cost is capped by construction, not by vigilance.
+
+**Failure 3 — Destructive or hijacked action (the safety failure).**
+The agent runs model-written code, or an **indirect prompt injection** (a malicious string in a fetched web page, a repo file, or a tool result) tries to make it exfiltrate secrets or `rm -rf`. *Mitigation, defense-in-depth:* the **sandbox** (microVM/gVisor, controlled egress) contains code execution; **least-privilege tools** mean the agent literally lacks a "delete prod" capability; **HITL gates** on anything irreversible; all tool output is **untrusted input**. You cannot fully prevent injection — you **contain the blast radius** so that even a hijacked agent can't do irreversible damage.
+
+**Failure 4 — Multi-agent where it doesn't belong (the cost-multiplier failure).**
+Someone fans out a tightly-coupled task (refactor one file, debug one stack trace) across many agents. Now you're paying the ~10–15× multiplier *and* fighting coordination/consistency on shared state, for worse results than a single agent. *Mitigation:* the **single-vs-multi rule** — multi-agent only for subtasks that are **parallel and independently verifiable** (research fan-out); single agent or a deterministic workflow for coupled threads of control. The default is one agent; multi-agent must earn its multiplier.
+
+**Failure 5 — Non-reproducibility.**
+"It worked yesterday" with no way to see what it did. *Mitigation:* the **append-only trace** captures every prompt, tool call, and decision, replayable step-by-step — both for incident response and as the eval dataset.
+
+**Evaluating the agent (Director framing):** you evaluate the **trajectory, not just the final answer** — did it take a wasteful or dangerous path even if it eventually succeeded? Use a **task-success benchmark** (a held-out set of issues with known-good fixes; for coding, SWE-bench-style verified resolution rate), **trajectory eval** for safety/efficiency, and **red-teaming** for harmful action sequences (including injection-to-action). Task success rate is a *measured* number gating releases, not a vibe — and a prompt or model change that regresses it doesn't ship.
+
+---
+
+## D: Design evolution
+
+> Graduated autonomy as the primary evolution, because it adds a trust-and-governance machine the bounded version doesn't have.
+
+**Graduated autonomy.** Start every new task type at **suggest-only** (the agent proposes, a human executes). As the **measured** success rate and safety record on that task type clear a bar, promote it to **bounded** (auto-execute reversible actions, gate irreversible ones), and only well-proven, low-blast-radius types to **auto**. Autonomy is *earned per task type with data*, and demotion on a regression is automatic. The governance question — *who authorizes raising autonomy, and on what evidence* — is a Director-owned control, not an engineer's config flag.
+
+**Learned skills (procedural memory).** Promote repeatedly-useful patterns ("this repo's tests run with `make test`", "our deploy needs flag X") into the **procedural memory** store so future tasks start smarter. Guard against memory poisoning — a wrong learned fact silently degrades every future run, so learned skills are themselves verified before promotion.
+
+**The eval harness as product.** The held-out task benchmark and trajectory evals become the **regression gate** for every prompt/model/tool change — and, increasingly, a competitive moat: the team that measures agent quality rigorously ships improvements safely while others ship regressions blind.
+
+**Scale-out and integration.** Thousands of parallel tasks scale by adding sandboxes and workers (stateless given the durable store); the cost ceiling, not the compute, is the real governor. Integrate as a **PR-opening bot in CI** or an IDE agent — at which point the HITL gate *is* code review, a control developers already trust.
+
+**Builds on:** untrusted code execution / sandboxing (the same isolation problem), payments idempotency + append-only ledger (reused for tool calls and the trajectory), the agent loop and agent-vs-workflow, multi-agent orchestration (the single-vs-multi decision), durable runtime + HITL, agent action safety + trajectory eval, and the tool-using support agent (the same safety machinery at lower autonomy).
+
+---
+
+## Trade-offs table: the pivotal decisions
+
+| Decision | Option A | Option B | Option C | Use when… |
+|---|---|---|---|---|
+| **Single vs multi-agent** | **Single agent** | **Orchestrator + parallel workers** | Deterministic workflow (LLM at decision points only) | **A** for coupled threads of control (one diff, one stack trace) — avoids the 10–15× multiplier and coordination risk. **B** only for parallel, independently-verifiable subtasks (research fan-out). **C** when the path is known — most reliable and cheapest of all. |
+| **Runtime** | **In-memory loop** | **Durable-execution engine (Temporal/Step Functions/DBOS)** | Queue + external state store | **B** for any task over a few minutes — crash-resume, idempotent steps, durable HITL waits. **A** only for sub-minute toy tasks. **C** if you must hand-roll, but you'll re-implement B badly. |
+| **Definition of "done"** | **Agent self-assessment** | **External verifier (tests / cross-checked sources)** | Human review of every result | **B** is the default — objective ground truth raises effective reliability. **A** never (confidently-wrong results). **C** for high-blast-radius output where the verifier can't be trusted alone. |
+| **Tool execution** | **In-process** | **Sandbox (microVM/gVisor), egress-controlled** | Sandbox + per-tool least-privilege scopes | **C** as the target — isolation *and* capability scoping. **B** as a baseline. **A** never for model-written code — it's untrusted by construction. |
+| **Cost control** | **Monitor & alert** | **Hard budget ledger + kill switch** | Soft budget that requests approval to continue | **B/C** are mandatory — pre-flight checks before every call cap cost by construction. **A** alone is how the overnight $300 bill happens. |
+
+---
+
+## What interviewers probe here (Director altitude)
+
+- **"It works perfectly in demos but fails on long real tasks. Why?"** — *Strong signal:* names **compounding error** (success ≈ pᴺ), does the arithmetic (0.95⁴⁰ ≈ 13%), and prescribes **decompose + verify-and-retry + checkpoint** to shorten chains and raise effective per-step reliability — *not* "use a better model." *Red flag:* "tune the planner prompt" with no grasp that the failure is multiplicative and structural.
+
+- **"How do you stop it from burning $1,000 or running `rm -rf /`?"** — *Strong signal:* two separate controls — a **hard budget ledger** checked before every call (with loop detection + kill switch) for cost, and **sandbox + least-privilege + HITL on irreversible actions** for safety; notes that **injection-to-action** means you contain rather than prevent. *Red flag:* "we'd monitor and alert" — alerting is post-hoc; the damage is already done.
+
+- **"Single agent or multi-agent — and why?"** — *Strong signal:* default single agent; multi-agent **only** for parallel, independently-verifiable subtasks because it costs ~10–15× the tokens and adds coordination/consistency risk; a coupled thread of control stays single-agent or becomes a deterministic workflow. *Red flag:* "more agents = better/faster" with no awareness of the multiplier or the coupling constraint.
+
+- **"How does it know it succeeded?"** — *Strong signal:* an **external verifier** defines done — tests pass for code, cross-checked citations for research — never the agent's self-assessment; the acceptance signal is an input. *Red flag:* "the agent reports it's done" — the confidently-wrong failure.
+
+- **"It crashed at step 30 of 40. What happens?"** — *Strong signal:* a **durable runtime** resumes from the last per-step **checkpoint**; side-effecting tool calls are **idempotent** so the retried step doesn't double-act. *Red flag:* "it restarts the task" — re-running side effects and re-burning the budget.
 
 ---
 
 ## Common mistakes
 
-- **The PIP is the first the person hears of it.** A surprise termination is the cardinal sin of this cluster. Feedback is early, dated, and in writing; the formal plan formalizes a conversation already months old, it never starts it.
-- **Coaching with no deadline.** "I kept working with them" with no decision date reads as conflict-avoidance and as not operating at level. A plan has a clock; a decision has a deadline.
-- **Describing the person with contempt, or the exit with relish.** Cold "easy call" energy scores worse in 2026 than it did in 2015. So does performative anguish with no plan. The bar is decisive *and* humane, direct, dignified, severance and references where you can.
-- **Tolerating the brilliant jerk as an end state.** "We route around him" or "we quarantined him to a solo project" is a fail, it teaches the team that output buys immunity. Behavior is performance; make the call.
-- **No self-reflection, or a 100% save rate.** Blaming the employee with zero "I should have acted a quarter earlier," or claiming you've turned everyone around, both read as fabricated. The honest learning and a real failure rate are what make the story credible.
+- **Treating autonomy as the feature instead of the risk.** The longer it runs unsupervised, the worse the odds and the higher the bill. The engineering is *bounding* the loop — verify, checkpoint, budget, gate — not unleashing it.
+- **No external verifier.** Letting the agent decide it's finished ships confidently-wrong work. "Done" must be an objective signal (tests, cross-checked sources) supplied as input.
+- **Multi-agent by default.** Fanning out a coupled task pays the 10–15× token multiplier and fights shared-state coordination for *worse* results. Multi-agent is for parallel, independently-verifiable subtasks only.
+- **In-memory state.** A crash mid-task restarts from zero, re-running side effects and re-spending the budget. Long-running agents need a durable, checkpointed, idempotent runtime.
+- **Cost control by alerting.** Monitoring tells you *after* the money's gone. The budget must be a hard pre-flight ceiling with a kill switch — checked before every model and tool call.
 
 ---
 
-## Practice prompts
+## Practice questions with model answers
 
-1. **Run the firing story on the spine, with dates.** "Walk me through someone you let go." *(Sketch: STAR-L on the process spine, diagnose system-then-skill-vs-will, the dated first conversation in writing, a time-boxed plan with named support, the decision delivered personally with severance and references, the named team cost, and "one quarter earlier" plus the two-week-trigger upstream fix. Hold every date and number for the probe.)*
-2. **Defend your PIP philosophy to a skeptic.** "Aren't PIPs just legal cover?" *(Sketch: philosophy-shape, Position: a PIP formalizes a conversation already happening; Mechanism: passable criteria, weekly check-ins, the candid negotiated-exit path offered alongside; Number: your real pass rate, some pass most don't; Limit: the documentation function is real and pretending otherwise to the employee is the dishonest move. Land between naive and cynical.)*
-3. **Hold the brilliant-jerk line under pressure.** "It's right after a layoff and he owns the billing core, you can't lose him." *(Sketch: name the louder business case, reframe with behavior-is-performance and the $12.5k-vs-$5.3k cost math, give the real time-boxed chance with observable criteria, accept the roadmap risk knowingly, and end with the principle for your managers, output buys immunity is the lesson you refuse to teach.)*
-4. **Keep a flight risk without a checkbook.** "Your best engineer has a 30% higher offer." *(Sketch: diagnose the real driver first, comp is rarely it; charter-not-checkbook retention (scope, a hard problem, an honest career path) or deliberate triage if the gap is genuinely about money you can't match; a counter-offer only as a conscious bridge with a tripwire, never a reflex, and accept that some you let the market take.)*
+**Q1. Your coding agent resolves 70% of issues in eval but only 35% in production. What's going on and what do you change?**
+
+> *Model:* Production tasks are **longer and less constrained**, so the pᴺ chain is longer and success decays. First, instrument it: the **trace** shows where trajectories diverge. Then attack N and p: **decompose** long tasks into verified subtasks so errors don't compound across 40 steps; strengthen the **verifier** (run the full suite, not a smoke test) so bad steps are caught and **retried**, raising effective reliability; ensure the eval set actually mirrors production task length/ambiguity (a too-easy eval is why the numbers diverged). A bigger model is the *last* lever — the structural fix is shorter, verified chains.
+
+**Q2. A teammate wants to fan every task across 8 agents for speed. Evaluate.**
+
+> *Model:* Only correct for tasks whose subtasks are **parallel and independently verifiable** — e.g., researching 8 independent sub-questions, each returning cited findings the orchestrator verifies and merges. For a **coupled** task (one diff, one debugging thread), fan-out is wrong twice: it pays the **~10–15× token multiplier** and it creates shared-state coordination problems that *lower* quality. The rule: default single agent; reach for multi-agent when the work is genuinely parallel and each piece is independently checkable; use a deterministic workflow when the path is known. Speed is rarely the real win — most "slow" is sequential dependency that more agents can't break.
+
+**Q3. An indirect prompt injection in a fetched web page tells the agent to email a customer database to an attacker. Trace what stops it.**
+
+> *Model:* Defense-in-depth, no single layer trusted. The agent runs in a **sandbox** with **controlled egress**, so an arbitrary outbound connection is blocked. **Least-privilege tools** mean the agent has no "dump the customer DB" or "email arbitrary address" capability in the first place. Any irreversible/external action hits a **HITL gate**. All fetched content is treated as **untrusted input**. You **assume injection is possible** and design so the blast radius is contained — the worst case is a wasted step the verifier rejects, not data exfiltration. The residual control is the **audit trace** for detection. Prevention isn't fully possible; containment is the design.
 
 ---
 
 ### Key takeaways
-- **Run the process spine, every time:** diagnose system-then-skill-vs-will, early dated feedback in writing, a time-boxed plan with named support, a decision on a deadline delivered personally, the named team cost, and the "one quarter earlier" learning with an upstream fix. The story *is* the process executed once (STAR-L).
-- **Decisive *and* humane is the 2026 synthesis.** Weeks not quarters on a clear miss, but severance, references, an eight-minute dignified conversation, and "he wasn't surprised." Cold scores worse than it used to; so does flinching.
-- **PIP candor: hold the dual function.** A genuine improvement vehicle *and* documentation the employee reads as a notice. Naive "they usually work" and cynical "it's just paper" both fail; some pass, most don't, and offer the negotiated exit candidly.
-- **Brilliant jerk: behavior is performance.** Net-negative output once you count silent attrition (~$12.5k cost vs ~$5.3k value). Name the louder post-layoffs business case and hold the line anyway, tolerating toxicity teaches the team that output buys immunity.
-- **Flight risk: charter over checkbook.** Diagnose the real driver, retain with scope and hard problems, triage honestly, and never reflexively counter-offer, it buys a six-month rental. A termination story you can defend to the floor is table stakes at Director level.
 
-> **Spaced-repetition recap:** Hard-people calls is the most-probed behavioral cluster, scored on **decisiveness with dignity**. Answer in **STAR-L on a six-beat spine**: diagnose (system → skill vs will), early dated feedback in writing, time-boxed plan with support, decision on a deadline delivered personally with HR, the named team cost, and "one quarter earlier" plus an upstream fix. **2026 bar: weeks not quarters, but a higher compassion bar than 2015**, decisive *and* humane. **PIP** = dual function (improvement vehicle *and* documentation), candor about both, some pass most don't. **Brilliant jerk** = behavior is performance, net-negative (~$12.5k vs ~$5.3k), hold the line even when the post-layoffs case to keep them is loudest. **Flight risk** = charter over checkbook. Never let the PIP be the first feedback; never describe the exit with contempt or relish.
+1. **Autonomy is the risk, not the feature.** Success decays as pᴺ over a long horizon (0.95⁴⁰ ≈ 13%), so the entire design is *bounding the loop*: decompose to shorten chains, verify to catch and retry bad steps, checkpoint to recover cheaply.
+2. **An external verifier defines "done" — never the agent.** Tests for code, cross-checked citations for research, supplied as an input. Verify-and-retry raises *effective* per-step reliability far more than a smarter model does.
+3. **Cost and safety are hard, pre-flight controls.** A budget ledger (tokens/$/steps/wall-clock) checked before every call plus a kill switch caps cost by construction; a sandbox + least-privilege tools + HITL on irreversible actions contains a hijacked or buggy agent. Injection-to-action you *contain*, you don't prevent.
+4. **Multi-agent must earn its ~10–15× multiplier.** Use it only for parallel, independently-verifiable subtasks; keep coupled threads of control single-agent or as a deterministic workflow.
+5. **Production agents are durable, idempotent, observable distributed workflows.** Per-step checkpoints in a durable runtime, idempotent side-effecting tool calls, and an append-only replayable trace — the exactly-once and untrusted-execution machinery of the payments and agent-runtime designs, applied to autonomy.
+
+> **Spaced-repetition recap:** Autonomous coding/research agent = **autonomy is the liability you bound**, not the feature you unleash. Reliability collapses as **pᴺ** (0.95⁴⁰ ≈ 13%) → **decompose + verify-and-retry + checkpoint** (a cheap verifier beats a smarter model). Cost explodes under the **~10–15× multi-agent multiplier** → **multi-agent only for parallel + independently-verifiable subtasks**, single-agent/workflow otherwise, with a **hard budget ledger + kill switch**. Containment over prevention: **sandbox + least-privilege tools + HITL on irreversible actions**, all tool output untrusted. **Durable runtime** with per-step checkpoints + **idempotent** tool calls so a crash resumes, not restarts. "Done" = an **external verifier** (tests / cross-checked sources), never self-assessment. Evaluate the **trajectory**, not just the answer; success rate is a measured release gate. Throughput is trivial; **success rate, bounded cost, and containment** are the crux.
 
 ---
 
-*End of Lesson 10.6. Hard people calls is the decisiveness-with-dignity cluster; the next lesson lifts the same instincts up a level to managing managers and org design, where the underperformer is a manager you can't directly observe, and diagnosis runs on second-hand, delayed signal.*
+*End of Lesson 10.6. The autonomous agent inverts the conversational-assistant instincts: latency and QPS are footnotes, and the design is dominated by making a fallible, occasionally-hijacked long-running process produce verifiably-correct work without runaway cost or irreversible damage. The next problem turns to a different resource frontier — text-to-image generation, where the binding constraint is GPU-seconds in a queue, not tokens in a loop.*

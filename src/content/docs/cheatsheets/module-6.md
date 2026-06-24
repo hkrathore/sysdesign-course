@@ -1,73 +1,86 @@
 ---
-title: "Module 6 — Director Rubric Cheat Sheet"
-description: "Red-flags vs strong-signals scorecard, 5 axes, 8 RESHADED steps, 2 fatal altitude modes."
+title: "Module 6 — LLD & OOD Curveballs Cheat Sheet"
+description: "The load-bearing decision and canonical Director answer for all 10 LLD/OOD curveballs, restraint, invariants, and the one race, on one page."
 sidebar:
   order: 6
 ---
 
-### The scorecard the room runs on you. Self-assess the night before. Print this.
+### Every LLD problem is undersized on purpose. The empty space is the test.
 
-The round is a **design review you've been asked to chair**, graded on judgment, not whether you can hand-derive a hash. Every strong cell carries a **Director tell**; if your answer reads identically on a staff-IC scorecard, you haven't cleared the bar. Each red cell is the **hand-wavy twin** of the strong one, watch for the twin.
-
----
-
-## Director weighting (heaviest first)
-
-**trade-offs (4) > scope (1) ≈ communication (5) > estimation (2) ≈ design (3).**
-
-- Offer is **won/lost on axis 4**, **gated by axis 1**, **textured by axis 5**.
-- Axes **4 & 5 are scored continuously at every one of the 8 steps**, not a single "trade-offs moment" at the end. Same answer, graded twice (axes lens + process lens), that's why the two tables aren't duplicates.
-- Axis 5 (communication) is **not** a RESHADED step, it runs underneath everything.
-- Axis 3 has **diminishing returns**: past a clean decomposition, more boxes ≠ more signal; grinding mechanics there is an **active anti-signal** ("why is this Director hand-tuning a B-tree?").
+> The design-problem track punished designing **too small for the load**. The LLD track inverts it: the danger is designing **too big for the requirement**. For each problem: **the load-bearing decision** (the one thing the round turns on) + **the canonical one-line answer**. The pattern catalog is not the point, *restraint, the invariant, and the one real race* are. Spot which RESHADED letters collapse (E → capacity/state-space math, A → class interfaces, H → state machine) before you draw a box.
 
 ---
 
-## Table A: the 5 scoring axes
+## The 10 cruxes (memorize the right column)
 
-| # | Axis (weight) | ✅ Strong signal (Director tell) | 🚩 Red flag (hand-wavy twin) |
+| # | Problem | The load-bearing decision | Canonical answer |
 |---|---|---|---|
-| 1 | **Requirements & scoping** *(heavy)* | 3-4 sharp clarifiers, then **cut to a defensible core of 3-5 features**, rest explicitly deferred. Read:write ratio + availability bar pinned **as numbers** before designing. | Draws boxes before scoping. Builds every feature. "Make it scalable + reliable", no SLO, no read:write. |
-| 2 | **Estimation & quantification** *(medium)* | **Orders of magnitude** to make a call: "~700k writes/s → ~10 TB/day → fleet, not a box." Rounds, states assumptions, **number drives a decision** (cache it / shard it). | "It'll be a lot of traffic." No QPS/storage. Or the opposite: 5-min exact arithmetic that changes no decision. |
-| 3 | **High-level design** *(medium, diminishing)* | Clean split, **single responsibilities**, legible happy-path flow. Knows when to **stop adding boxes** and move to trade-offs. | Monolith blob, or 30-box diagram with no data flow. Lingers here (comfortable), burning axis-4 clock. |
-| 4 | **Trade-off depth & decision-making** *(heaviest)* | Names **2-3 viable approaches**, pros/cons each, **commits to one**, defends vs requirement + cost + risk. Pre-empts "why not X?" by volunteering the rejected option + revisit condition. | Lists options, never **decides**. Or decides but **can't name one downside of own choice**. Design presented as obviously correct. |
-| 5 | **Communication & leadership** *(heavy)* | **Drives** + structures out loud. Handles "why not X?" without defensiveness. **Delegates with a stated prior** ("I'd have storage benchmark leveled vs size-tiered; prior is leveled, reads dominate"). Names cost + on-call unprompted. | Waits to be led. Defensive or silently caves on pushback. Grinds every detail (won't delegate) **or** delegates everything (no own depth). |
+| 7.1 | **Parking Lot** | How much do you build? | **Restraint.** 3 entities (Lot/Spot/Ticket) + a Vehicle value object; one Strategy (pricing, the *stated* varying axis), nothing else. Volunteer the last-spot race: **atomic free-list `poll()`**, `HELD`+timeout, DB partial-index backstop. |
+| 7.2 | **Elevator** | FIFO, nearest-first, or SCAN? | **Ask "simulation or real hardware?" first.** Per-car UP/DOWN/IDLE FSM + two sorted queues; **SCAN/LOOK**, defended on the *starvation bound* (SSTF starves the far floor), not average wait. The real problem is **bank allocation** (8 cars). |
+| 7.3 | **Vending Machine** | How do you make illegal states impossible? | **State pattern**, class per state, handlers return next state, illegal events rejected once in the base class. **Conservation of money** by ordering: check change feasibility *before* the motor; **journal before the motor**; reconcile on boot in the customer's favor. |
+| 7.4 | **LRU Cache** | Algorithm recall, or interface design? | **Design the `Cache` contract first**; eviction is a **Strategy-pluggable policy** (LRU/LFU/TTL), swappable without callers noticing. HashMap+DLL is *one sentence*. Lock granularity by **measurement**, a coarse lock is fine until a number says otherwise. |
+| 7.5 | **Rate Limiter (LLD)** | Which algorithm, and where does the lock go? | **Strategy seam** (token bucket / sliding-log / fixed window), chosen per requirement. **Token bucket default**; sliding-log only for low-limit, high-stakes rules (memory math). **Per-client lock, never global** (convoy). Name the climb to the distributed rate-limiter at scale. |
+| 7.6 | **Meeting Scheduler** | What serializes a check-then-book? | **`TimeRange` value object owns the half-open `[)` overlap rule.** **Pessimistic per-room lock**, *opposite* of Ticketmaster's CAS, because contention is 1,000× lower. **Recurrence = a rule you evaluate, not rows you store** (520 rows/series materialized). |
+| 7.7 | **Splitwise** | How do balances never drift? | **State the invariant first: balances sum to zero, always.** **Immutable double-entry ledger** + balances as *derived views* → violation is impossible by construction. **Integer cents** + a deterministic remainder rule. Min-cash-flow = name it, defer it. |
+| 7.8 | **Movie Ticket Booking** | Which lock strategy for seat claims? | **One DB is the arbiter** (kill the `ConcurrentHashMap` answer). Seat FSM `AVAILABLE→HELD(ttl)→BOOKED`; **optimistic `UPDATE … WHERE status='AVAILABLE'`**, design for opening night (10-50 contenders/seat), not the matinee. No lock held across payment. |
+| 7.9 | **Chess** | Inheritance vs composition, and what do you cut? | **Negotiate scope out loud (the scored deliverable).** Split **piece geometry** (`Piece` polymorphism, ~150 lines, in scope) from **game-state legality** (`RulesEngine`, 400+ lines, stubbed). Litmus: *decidable from the piece's move shape alone?* → geometry. |
+| 7.10 | **Amazon Locker** | What is the real scarce resource? | **Reserve a *promise* early, bind the *slot* late.** Hard-reserving at checkout costs ~60% of throughput (Little's law). 3 entities (slot/package/code). **Expiry does NOT free capacity, reclaim is a physical carrier event** (the trap no memorized problem has). |
 
 ---
 
-## Table B: the 8 RESHADED steps (same answer, graded as process)
+## Recurring patterns (the same 6 moves, reused)
 
-| Step | RESHADED | ✅ Strong signal (Director tell) | 🚩 Red flag (hand-wavy twin) |
-|---|---|---|---|
-| 1 | **R: Requirements** | Functional vs non-functional split; **scope to 3-5 core**, rest parked; read:write + numeric SLO (e.g. 99.99%) that **drives later choices**. | Jumps to building. No scope cut. NFRs vague ("highly available"), no number to design against. |
-| 2 | **E: Estimation** | "Enough math for a defensible call", OoM QPS/storage/bandwidth, **rounded**, sizes the fleet + justifies cache/shard. | "It scales", no figure, **banned (Rule 1)**. Or a rabbit-hole of exact computation that changes nothing. |
-| 3 | **S: Storage** | **Matches data shape to store** + why: "write-heavy append → LSM/Cassandra; transactional+joins → Postgres", and names the cost (compaction tax, secondary-index expense). | "I'll use a database." No family chosen, or a default with **no alternative + no trade-off (Rule 2)**. |
-| 4 | **H: High-level design** | Clear responsibilities, happy path drawn, **read + write paths distinguished**. Stops at the altitude where the decision lives. | Diagram with no data flow, or detail that obscures the decision. Mistakes box-count for signal. |
-| 5 | **A: API design** | A few clean signatures that **expose the real contract** (idempotency keys, pagination, auth boundary), only as deep as the design turns on. | Skipped, or 40 endpoints enumerated like a CRUD spec, depth with no decision in it. |
-| 6 | **D: Data model** | Schema + **keys/indexes for the access pattern**; names the **partition key** + why; flags the write tax of each secondary index. Denormalizes deliberately + says so. | Normalized tables, no thought to access pattern or partition key. Indexes "to be safe", no awareness they tax every write. |
-| 7 | **E: Evaluation** | **Stresses own design**, names the component that **saturates first, with a number**, + the specific lever (shard hot key / read replica / cache). Re-checks vs Step-1 SLOs. | Surprised anything breaks. "Add more servers", no mechanism, no named bottleneck. Never re-validates vs requirements. |
-| 8 | **D: Design evolution** | Past v1: **behaviour at 10×**, which assumption breaks, migration path, **cost/operability** of the next step. A roadmap with trade-offs, not a rewrite. | "It already scales." No 10× story, no failure mode, no awareness the v1 choice has a ceiling. |
-
-**The single most repeated Director tell (Table B):** at any detail *below* the decision's altitude → **"state a default, delegate with a stated prior, move on"**, not resolve it personally. *"I'd have the X team benchmark A vs B; my prior is B because [requirement]"* beats ten minutes of correct mechanics, it shows judgment, org-trust, and altitude awareness at once.
+| Pattern | Where it shows up | The move |
+|---|---|---|
+| **One Strategy per *stated* varying axis, and not one more** | Parking (pricing), Rate Limiter (algorithm), Cache (eviction), Splitwise (split type), Elevator (dispatch) | Every abstraction names the requirement that bought it. Pricing varies → `PricingStrategy`; assignment doesn't → no strategy. **Same pattern, opposite verdict; the requirement decides, not the catalog.** |
+| **Explicit state machine; illegal transitions unrepresentable** | Vending (6 states), Elevator (UP/DOWN/IDLE), Parking (spot lifecycle), Booking (seat lifecycle), Locker (slot lifecycle) | A `HELD`/`Refunding`/`OutOfService` state, not an `if`. Draw the **failure transitions unprompted**, they are the interview. Keep the (state×event) matrix as an exhaustiveness **test**. |
+| **Name the invariant first, make it structural** | Splitwise (sum-to-zero), Vending (conservation of money), Booking/Parking (no double-issue) | Build so violating it is *impossible by construction* (immutable ledger, atomic claim), not guarded by audit. Enforce it twice, in memory for speed, in the store for truth (defense in depth). |
+| **The one race, volunteered before they ask** | Parking (two gates, last spot), Booking (two users, one seat), Scheduler (check-then-book), Vending (cancel vs dispense) | Atomic claim, free-list `poll()`, conditional `UPDATE … WHERE status=…`, or a per-room lock. **Pick the primitive by contention shape, then quantify it** (even a coarse lock survives at gate-scale, say so). |
+| **Pick the concurrency primitive by *contention shape*, not reflex** | Booking → optimistic CAS (storms); Scheduler → pessimistic lock (6 writes/s); Cache/Rate Limiter → coarse vs striped by ops/s | Design locks for the worst shape you must *survive*, not the average. **The exact same race gets opposite answers** when contention differs by 1,000× (Ticketmaster vs the meeting scheduler). |
+| **Journal before the irreversible physical action; reconcile on boot** | Vending (motor), Parking (restart from open tickets), Booking (idempotent confirm), Locker (door open) | Write-ahead the intent, *then* act; on restart, replay the tail and resolve in-doubt in the **customer's favor**, idempotent via a txn/idempotency key. The exactly-once story, shrunk to one box. |
 
 ---
 
-## The two fatal failure modes (both break the altitude contract)
+## Numbers to know (per problem)
 
-| Mode | Sounds like | Why fatal | Reads as | One-line self-correction |
-|---|---|---|---|---|
-| **Too high, hand-waving** | "It scales horizontally." "We'd add caching." No mechanism, no number, no downside of own choice. | Asserts conclusions with no mechanism, but the **mechanism is the leadership content**. | *Not technical enough to lead.* | **Add a number + a mechanism.** *"At ~50k read QPS the redirect path saturates first → cache sharded by URL hash + read replica; cost is cache-stampede risk on eviction."* |
-| **Too deep, rabbit-holing** | 20 min tuning B-tree fanout / hand-deriving a hash; exhaustive math that changes no decision; never reaches trade-offs. | Burns the clock **below the altitude where the decision lives**; no decision made; axis 4 never exercised. | *Not operating at level.* | **Zoom out + delegate the tuning.** *"Going deeper than this decision warrants. Point is collision-free IDs via [approach]; tuning won't change the architecture, so I'd delegate it."* |
-
-Target = the **band between them**: deep where the decision turns on it, high enough to keep deciding + driving everywhere else. **Naming your own altitude correction out loud is itself a strong signal.**
+| Problem | Headline figures |
+|---|---|
+| Parking Lot | 1,000 spots · ~0.13 cars/s arrival (4 OOM below a throughput problem) · ~0.3 MB live state (fits L2) · ~0.2 GB/yr tickets · coarse-lock contention ~0.0001%, **nothing scales, so build nothing that scales**. |
+| Elevator | 30 floors · 8 cars · up-peak ≈ 12% of 3,000 in 5 min → **1.2 arrivals/s** · one car ≈ 22 people/5 min (~6% of peak) → bank of `360/22 ≈ 8` is load-bearing · controller ≈ tens of events/s, **~10,000× headroom → one thread, no locks**. |
+| Vending | **6 states × 8 events = 48 cells, ~15 legal** (33 = the bug surface) · 4 booleans = 16 states for 6 (illegal configs type-check) · jam ~0.1-0.5% of vends → **1,500-7,500 money-taken incidents/day** at fleet scale · ~3 s dispense window → power loss is a *when*. |
+| LRU Cache | 5K RPS × 10 ops = **~150K cache ops/s** peak · 1M entries × ~650 B ≈ **650 MB** (payload + ~15-20% node overhead) · ~200 ns/locked op → one global lock ≈ **2-5M ops/s → 15-30× headroom** (striping is solving a non-problem). |
+| Rate Limiter | 5K req/s, `allow()` ≤50 µs = 2.5% latency, ¼ core · global lock at 50K req/s = **50% utilization → convoy** · token bucket ~50 B/client → 1M = **50 MB**; sliding-log at 1K req/min = 8 KB → 1M = **8 GB (dead as default)**. |
+| Meeting Scheduler | 2K rooms × 12/day ÷ 86,400 = **0.3 bookings/s** (~6/s peak) · ~1.8 GB/yr · **recurrence: "weekly forever" 10 yrs = 520 rows/series; 100K series = ~50M phantom rows** vs a ~100 B rule, the whole rules-not-rows argument. |
+| Splitwise | 10M MAU × 5/mo ≈ **20 writes/s** (~100/s peak) · ~35 GB/yr · **₹2,000/3 as float = 2000.01 (invariant dead); as cents = 200000/3 = 66666 r2 → [66667, 66667, 66666]**, 2 paise assigned by a stated rule. |
+| Movie Booking | **Contenders-per-seat at claim instant: ~1 matinee, ~10-50 opening night** (the decision number) · ~4 bookings/s avg, ~100/s peak (trivial) · TTL 10 min ≫ 2-30 s payment → expiry-vs-payment race rare by construction. |
+| Chess | 64 squares · ≤32 pieces · ~35 legal moves/position · **geometry ≈ 150 lines/~20 min; legality 400+ lines/hours** (castling = 5 preconditions, en passant needs prev move), 3:1 work for the layer with the *least* design signal. The scarce resource is **45 minutes**. |
+| Amazon Locker | 30K slots/metro · ~1.5-day dwell · **Little's law: λ = 30K/1.5 ≈ 20K packages/day** = total capacity · **hard-reserve at checkout (+2-day transit) → 30K/3.5 ≈ 8.5K/day = −60% throughput** · ~0.25 alloc/s (toy QPS). |
 
 ---
 
-## The 60-second pre-loop self-check (a "no" = a red-flag row to fix)
+## What interviewers probe (the strongest 4: and the strong-signal answer)
 
-1. **Cut scope to 3-5 features** + parked the rest out loud? *(axis 1 / R)*
-2. **Every number drove a decision**, refused "it scales" without one? *(Rule 1 / axis 2 / E)*
-3. **Every choice named the rejected alternative + why**, and a downside of the one I picked? *(Rule 2 / axis 4)*
-4. **Named the component that breaks first, with a number + a lever?** *(E, Evaluation)*
-5. **Delegated ≥1 below-altitude detail with a stated prior**, not ground it myself? *(axis 5 / altitude dial)*
+| The probe | Strong signal (Director) | Red flag |
+|---|---|---|
+| **"Walk me through your classes."** (Parking, Chess, Locker, Booking) | 3 entities, each justified by a requirement; **cut list stated out loud** ("reservations are a different problem; out of v1"). For Chess: announce the geometry/legality split and the time budget *before* coding. | 10 classes in 5 minutes; `AbstractVehicleFactory` before a single clarifying question; starts coding the Knight and drowns. |
+| **"Two [cars/users] race for the last [spot/seat], what happens?"** (Parking, Booking, Scheduler, Vending) | Already volunteered it. Names the atomic claim (free-list `poll()` / `UPDATE…WHERE status=…` / per-room lock), the `HELD`/TTL window, lazy reclaim, **and quantifies** why the chosen primitive fits the contention shape (even a coarse lock survives at gate-scale). | "I'd add `synchronized` everywhere"; surprise that concurrency exists in an OOD question; a `ConcurrentHashMap` of locked seats that dies at the second app instance. |
+| **"Why this pattern and not a `switch` / why one Strategy and not five?"** (Vending, Parking, Rate Limiter) | By **maintenance arithmetic, not taste**: new state = one class vs ~8 edited handlers; 48-cell test pins it. "Pricing varies by stated requirement; assignment doesn't, same pattern, opposite verdict." | Pattern-naming with no cost argument ("Strategy is best practice"), the LLD twin of "it scales." Abstractions on every axis "for flexibility." |
+| **"Power dies / payment fails / process restarts mid-operation."** (Vending, Booking, Parking, Locker) | **Journal before the irreversible action**, reconcile on boot in the customer's favor, **idempotent via txn/idempotency key**; no lock held across payment; restart rebuilds derived state from the durable record. Connects to the exactly-once design problems unprompted. | "The transaction is atomic" with no notion of *where* durability lives; in-memory-only state that loses open sessions on restart; retry-the-motor (double-vend). |
 
-> **Recap:** The room scores **trade-off judgment + communication over mechanics**. Strong = quantify the claim + name the rejected alternative; red = the hand-wavy twin. Two fatal modes, **too high → add a number + mechanism**, **too deep → zoom out + delegate**. Aim for the band: decide everywhere, go deep only where the decision turns.
+---
+
+## Universal red flags (any LLD problem)
+
+- 🚩 **Class explosion before scope lock**, valet, EV charging, loyalty nobody asked for. Scope-cutting is the *first* scored behavior.
+- 🚩 **Pattern-first design**, Singleton/Factory/Observer named before requirements are. Every abstraction must name the requirement that bought it.
+- 🚩 **Inheritance with no behavioral variation**, `Car`/`Truck`/`Motorcycle` subclasses that differ only by data are an enum wearing a costume.
+- 🚩 **A state diagram with only the happy path**, no `Refunding`, no `OutOfService`, no `HELD`. The failure transitions *are* the interview.
+- 🚩 **Floating-point money**, an instant design-review flag. Integer cents + a deterministic remainder rule, always.
+- 🚩 **Check-then-act under contention** instead of an atomic claim, double-sell, double-issue, double-book.
+- 🚩 **In-memory state holding a business invariant**, dies at the second app instance or a restart. The durable store is the arbiter.
+- 🚩 **Reaching for distributed machinery** (Redis, sharding, queues) in a 0.3 MB / 6-writes-per-second problem, building-block reflexes mis-fired.
+- 🚩 **No quantification**, not classifying which RESHADED letters collapsed, not pricing change-cost (the budget a Director actually protects).
+
+---
+
+> **Spaced-repetition recap:** 10 LLD curveballs, scored on **restraint, the invariant, and the one race**, not the pattern catalog. **Restraint:** Parking (3 entities, one Strategy), Chess (negotiate scope, split geometry from legality), Locker (3 entities, reserve a promise / bind the slot late). **Explicit FSM, illegal states unrepresentable:** Vending (State pattern, conservation of money by ordering), Elevator (SCAN on the starvation bound; the real problem is the bank), Booking (`AVAILABLE→HELD→BOOKED`). **Invariant-first:** Splitwise (immutable ledger sums to zero, integer cents). **Interface over algorithm:** LRU Cache (contract first, eviction pluggable, lock by measurement), Rate Limiter (Strategy seam, token-bucket default, per-client lock, climb to the distributed rate-limiter at scale). **Pick the lock by contention shape:** Booking → optimistic CAS (storms), Scheduler → pessimistic lock (6 writes/s), *same race, opposite answer, 1,000× apart*. Always: classify the skew (E→state-space/capacity math), name the trade + rejected alternative, journal before the irreversible action, delegate firmware with a stated prior.

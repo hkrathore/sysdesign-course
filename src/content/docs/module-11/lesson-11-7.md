@@ -1,165 +1,270 @@
 ---
-title: "11.7 — Evaluation & LLMOps"
-description: Why evaluating a non-deterministic, open-ended system is the hardest and most-skipped part of shipping AI — offline eval sets, LLM-as-judge and its biases, online eval, regression gating in CI, and the tracing/observability stack for prompts, retrievals, tokens, and cost.
+title: "11.7 — Internal Developer Platform"
+description: "Internal developers are customers who can refuse the product, design the golden path with escape hatches, price it against toil removed, and sequence an 8-team Jenkins migration that never blocks a release, measured in adoption and time-to-first-deploy."
 sidebar:
   order: 7
 ---
 
+> **Platform engineering is now a defined interview genre**, and the documented prompt is concrete: *"8 product teams on a crumbling Jenkins. Design the platform and the migration."* It is a change-management question wearing a technical costume. The junior answer designs a beautiful Kubernetes abstraction and says "and then teams migrate." The Director answer starts from the uncomfortable truth: **your developers are customers who can refuse the product**, a mandate produces compliance theater and shadow infrastructure, and the only metrics that count are **adoption rate and time-to-first-deploy**, feature count is vanity. The platform earns migration; it doesn't decree it.
+
 ### Learning objectives
-- Articulate **why LLM evaluation is uniquely hard** — non-deterministic output, open-ended tasks, no single ground truth, and a quality bar that is *multi-dimensional* (correct? grounded? safe? on-tone?) — and why that makes "it looked fine in the demo" a failure mode, not a sign-off.
-- Build an **offline eval harness**: a curated golden set, reference-based metrics where a right answer exists, and **LLM-as-judge** for open-ended quality — while naming the judge's biases (position, verbosity, self-preference) and the mitigations that make it trustworthy.
-- Pick **task-specific metrics**: RAG splits into *retrieval* and *generation* failures; classification uses P/R/F1; open generation uses *win-rate vs a baseline* — because a single "accuracy" number hides which half broke.
-- Treat **eval as a CI gate**, not a report — every prompt/model/RAG change must pass the golden set before it ships. This is the single highest-leverage LLMOps practice.
-- Own the **observability stack** — trace the full chain (prompt, retrieved chunks, tool calls, tokens in/out, latency, cost) — as both your debugger and the source of new eval data, and plan for **drift** (the base model changes under you).
+- Run an **adapted RESHADED** spine on a platform-strategy problem: R = **developer-customer discovery**, E = the **toil-removal and adoption math**, A = the **platform contract**, the golden-path API that *is* the product.
+- Frame the load-bearing tension, **golden path vs mandate**: adoption is voluntary, so the path must beat the status quo, with **escape hatches** so the paved road never becomes a cage.
+- Make the **Backstage/Humanitec vs in-house** call with the build-vs-buy rule: buy the undifferentiated chassis, build the paths that encode *your* opinions.
+- Sequence the **8-team Jenkins migration** so no release is ever blocked, pilots, dual-running, the deadline arriving last.
+- Operate the platform as a **Team Topologies platform team**: a product org with a roadmap, support SLAs, and a budget defended in toil-hours returned.
 
 ### Intuition first
-You wouldn't ship code with no tests. An LLM feature with no eval is **exactly that** — except worse on two counts: the output is **non-deterministic** (the same prompt yields different text run to run), and there is often **no single right answer** to assert against. So the comfortable habit of "I tried five prompts in the playground, looked good, ship it" is the equivalent of merging to main because the happy-path demo worked once on your laptop.
+A city wants people off a dangerous dirt road. Option one: barricade it by decree, drivers are furious, half cut through farm fields (shadow IT). Option two: **build a highway that is faster than the dirt road**, and watch traffic move on its own. The dirt road empties because the highway *wins*; only then do you decommission it. An IDP is the highway: the **golden path** is the paved, opinionated route from "I have code" to "running in production with logs, metrics, and rollback," so much faster than hand-rolled Jenkins-plus-Terraform that choosing it is self-interest, not obedience. And highways have **exits**: a team with a genuinely unusual workload (GPU training, an embedded toolchain) must be able to leave the paved road *without leaving the city*, a sanctioned escape hatch at a lower support tier. Platforms without exits don't get compliance; they get covert off-roading you can no longer see, secure, or budget.
 
-Picture the difference between a **multiple-choice exam** and an **essay exam**. Traditional software is the multiple-choice exam — there's an answer key, the grader is a script, and `assertEqual` either passes or fails. An LLM feature is the **essay exam**: the same question has many good answers and many subtly-wrong ones, and grading requires *judgment* — is it correct, is it grounded in the source, is it the right tone, is it safe? You cannot grade an essay exam with `assertEqual`, so the entire discipline of LLMOps is about **building a credible grader, applying it to a fixed set of questions, and refusing to ship anything that scores worse than what's already live.** Keep that image — *essay exam, not multiple-choice* — because it explains why every technique below exists.
+The math that makes this real: in a 400-engineer org, infrastructure toil, pipeline babysitting, Terraform copy-pasta, "how do I get a database" Slack archaeology, plausibly eats **15% of engineering time: 60 engineer-years/yr, ~$15M at $250K loaded**. A 7-person platform team costs ~$1.75M/yr. If the golden path claws back a third of the toil, ~$5M/yr returned, **but only at high adoption**. Adoption *is* the metric; everything below is engineered toward it.
 
-### Deep explanation
+---
 
-**Why eval is genuinely hard — name the four properties.** A designer who treats LLM eval like unit testing will build the wrong harness. Four properties make it different:
-- **Non-determinism.** Temperature > 0 means identical input → different output. A single pass tells you almost nothing; you need to run the eval set and reason about *distributions*, not assert a string.
-- **Open-endedness.** "Summarize this ticket" has no canonical answer — there are dozens of good summaries and dozens of bad ones, and the line between them is fuzzy.
-- **No single ground truth.** For most generative tasks there is no answer key to diff against. You either build one (expensive, human-labeled) or you grade by comparison/rubric.
-- **Multi-dimensional quality.** "Good" is not one axis. A support answer can be *factually correct* but *off-tone*, *grounded* but *unsafe*, *fluent* but *not actually answering the question*. Collapsing all of that into one number throws away the information you need to fix it.
+## R: Requirements
 
-The Director-altitude statement: *LLM quality is a distribution over a multi-dimensional, judgment-graded space — so eval is a measurement system you have to build and calibrate, not a pass/fail you get for free.*
+> **Adaptation, said out loud:** in a product design, R scopes user features. Here the users are **internal developers**, and R is literally **customer discovery, interview the 8 teams before drawing boxes**. Skip it and you build the platform the platform team wants. The artifact is a ranked pain inventory, not a feature list.
 
-**Offline eval: the golden set is the asset.** The foundation is a **curated eval set** (the "golden set") — a fixed collection of representative inputs with, where possible, known-good outputs or graded references. It must look like production: real query distribution, edge cases, the hard 10% that breaks things, and known past failures (every production incident becomes a permanent eval case so it can never silently regress again). A few hundred well-chosen cases beats tens of thousands of generic ones. Three grading approaches, escalating in cost and fidelity:
+**Anchor scenario:** ~400 engineers, ~50 services, 8 product teams (stream-aligned, in Team Topologies vocabulary) on a self-hosted Jenkins: ~200 hand-written Jenkinsfiles, plugins two years behind on CVEs, **~1.5 FTE of informal labor** keeping it alive, and **2-3 days** from repo creation to first production deploy.
 
-- **Reference-based metrics** — use when a right answer exists. *Exact-match / F1* for extraction and classification; for free text, *string-overlap* metrics (BLEU, ROUGE) are cheap and deterministic but correlate weakly with human judgment because they reward surface n-gram overlap, not meaning. Use them where the task is constrained enough that overlap *is* correctness (a date extractor, a JSON field), reject them as your primary signal for open generation — they'll happily pass a fluent wrong answer that shares words with the reference.
-- **LLM-as-judge** — use a strong model to *grade* outputs against a rubric when there's no reference. This is the workhorse for open-ended quality: scalable, fast, and far better correlated with human judgment than n-gram overlap. It's also where the traps live (next paragraph).
-- **Human evaluation** — the gold standard for fidelity and the calibration anchor for everything else, but slow, expensive, and unscalable. You keep a **small** human-labeled set as ground truth and use it to validate that your automated judge agrees with humans.
+**What the team interviews surface (assumed answers):**
+- *Top pain?* → **Time-to-first-deploy** (days of yak-shaving) and **flakiness** (Jenkins stalls block releases ~2×/month).
+- *What do teams NOT want?* → To learn Kubernetes internals, write Terraform, or be migrated mid-quarter. Two teams: "don't touch my release dates."
+- *Outliers?* → One GPU/ML team, one mobile team. **The golden path will not fit everyone, plan for it now.**
+- *Who pages?* → Teams own their services' on-call (keep that), but everyone pages *the Jenkins guy*, an informal SPOF that is itself part of the case for change.
 
-**LLM-as-judge — powerful, and biased in known ways.** Asking a model "is this answer good, 1–5?" works, but the judge is itself an LLM and carries systematic biases you must engineer around:
-- **Position bias** — in a pairwise A-vs-B comparison, judges favor whichever answer is presented *first* (or sometimes last) regardless of quality. *Mitigation:* run each comparison **both orders** and average, or randomize order across the set.
-- **Verbosity bias** — judges reward longer, more elaborate answers even when a terse answer is better. *Mitigation:* an explicit rubric that scores *correctness and concision*, and length-controlled comparisons.
-- **Self-preference bias** — a judge tends to prefer text generated by *itself* (or its own model family). *Mitigation:* use a judge from a **different** model family than the one under test where you can; cross-check with humans.
-- **Brittleness to the prompt** — a vague "rate this" gives noisy scores. *Mitigation:* a **detailed, explicit rubric** with concrete criteria and few-shot examples of each score; ask for a **reasoning-then-score** (the rationale both improves the score and makes the judge auditable).
+**Functional requirements (golden path, v1):**
+1. **Scaffold**: new service from a template, repo, pipeline, infra, observability wired, in minutes.
+2. **Build & deploy**: push-to-deploy CI/CD with staged rollout and one-command rollback.
+3. **Self-serve infrastructure**: the 3-4 most-requested resources (Postgres, Redis, queue, bucket), no tickets.
+4. **Golden observability**: logs, metrics, dashboards, alerts by default (the observability mechanics, here a *product feature*).
+5. **Service catalog**: who owns what, what's on the path, production-readiness at a glance.
 
-The two structural mitigations that matter most: **prefer pairwise comparison over absolute scoring** (models are far more reliable at "is A better than B?" than at "is this a 7 or an 8?" — and pairwise gives you a clean *win-rate vs baseline*), and **periodically calibrate the judge against your human-labeled set** — measure judge-vs-human agreement, and if it drifts below your bar, the judge is no longer trustworthy and the rubric or judge model needs work. **Rejected alternative:** a single absolute 1–10 score from a vague prompt, same model family as the system under test, run once — it's cheap and feels like eval, but it's noisy, biased toward your own model, and uncalibrated, so it gives false confidence.
+**Explicitly CUT from v1:** multi-cloud abstraction, a PaaS for every workload shape (GPU and mobile go to sanctioned hatches), cost dashboards, preview environments, all real, all behind adoption of the core path. **Five things 8 teams use beats 25 things 2 teams use.**
 
-**Task-specific metrics — measure the failure where it lives.**
-- **RAG** splits in two, and the fixes differ, so you *must* separate them: **retrieval quality** — *context recall* (was the answer-bearing chunk retrieved at all?) and *context precision* (how much of what we retrieved was relevant?); and **generation quality** — *faithfulness / groundedness* (does the answer stick to the retrieved context or hallucinate beyond it?) and *answer relevance* (does it actually address the question?). A confident, well-cited, wrong answer is a *retrieval* failure if the right chunk never came back, but a *faithfulness* failure if the right chunk was present and the model ignored it — one number can't tell you which.
-- **Classification / routing** — standard **precision, recall, F1** against a labeled set, with the confusion matrix so you see *which* classes confuse.
-- **Open-ended generation** (summaries, chat, drafting) — **win-rate vs a baseline** via pairwise LLM-as-judge: "does the new version beat the current production version on this golden set, and by how much?" This is the metric that gates a prompt or model change.
+**Non-functional requirements, unusual ones:**
+- **Adoption is voluntary.** No VP edict in year one; the path wins on merit or the design has failed. (The security baseline is the one legitimate mandate, and the platform makes compliance *free*.)
+- **Never block a product team's release.** The migration NFR; any cutover that risks a date is rejected by construction.
+- **Metrics pinned up front:** % of services on the golden path (target 70% by month 12), **time-to-first-deploy < 1 hour**, support tickets per service trending *down*, DORA deploy frequency trending up. Not feature count.
+- **The platform is a product:** a named owner, a public roadmap, a support SLA (< 4h first response), quarterly developer-NPS. Directors fund products, not projects.
 
-**Online eval: production is the only fully realistic test set.** Offline eval gates the change; online eval tells you what's actually happening with real users on real traffic. The toolkit:
-- **A/B tests** — route a fraction of traffic to the new version and compare on *business* metrics (task completion, deflection rate, conversion), not just intrinsic quality. The truth that offline can't give you.
-- **Guardrail metrics** — alarms that catch a regression the A/B target missed: refusal rate, latency p95, **cost per request**, error/timeout rate, safety-filter trips. A change that lifts quality 3% but doubles cost or refusal rate is not a win.
-- **User feedback, explicit and implicit.** Explicit: thumbs up/down, star ratings — high signal, low volume (most users never click). Implicit is the rich vein: did the user **accept** the suggestion, **edit** it (and how much), **regenerate**, **copy** it, or immediately **rephrase and ask again** (a silent failure)? Implicit signals are abundant but noisy — instrument them deliberately.
-- **Shadow deployment** — run the new version *in parallel* on live traffic without showing users its output, log both, and compare. Catches real-world failures with **zero user risk** before you route a single real request to it. The cost is double inference on shadowed traffic — so shadow a sample, not 100%.
+---
 
-**Regression gating: eval as a CI gate is the whole ballgame.** This is the single most important practice in LLMOps, and the one most teams skip. **Every change to a prompt, the model version, the RAG pipeline, or a tool definition must run against the golden set and must not regress below the bar before it ships** — exactly like a test suite blocks a merge. Without this gate, quality erodes invisibly: someone "improves" a prompt, it helps the three cases they eyeballed and quietly breaks thirty they didn't, and you find out from a customer. **"Looked fine in a demo" is how quality silently regresses.** The gate converts that from an inevitability into a blocked PR. **Rejected alternative:** manual spot-checking before each release — it doesn't scale, it's biased toward the cases the author already has in mind, and it has no memory of past failures, so the same regression recurs. The gate is also what lets you move *fast*: with a trustworthy eval suite, a junior engineer can change a prompt confidently because the gate catches what their eyeballs miss.
+## E: Estimation
 
-**Observability and tracing: your debugger and your eval-data mine.** An LLM call is not one request — it's a *chain* (retrieve → assemble prompt → call model → maybe call a tool → call again). When the output is wrong, you cannot debug from the final string; you need the **full trace**: the exact prompt sent, the retrieved chunks and their scores, every tool call and its result, tokens in/out, latency per step, and **cost per call**. Tools in the **LangSmith / Langfuse / Phoenix** class capture this. Tracing serves two jobs: it's how you **debug** a specific bad output (you can see the wrong chunk that poisoned the answer), and it's how you **grow the eval set** — you mine production traces for failures and interesting cases and fold them back into the golden set, so the harness tracks the real distribution and every new failure becomes a permanent regression test. This closes the loop: production teaches the eval set, the eval set gates production.
+> **Adaptation, said out loud:** no QPS. Estimation is two ledgers, **platform-team cost vs toil removed**, plus the **adoption arithmetic** that decides whether they ever balance. Same estimation discipline: round aggressively, state assumptions.
 
-**Drift and versioning — the ground moves under you.** Two kinds of drift: **model drift** — the provider updates the model behind a stable API endpoint, so behavior changes without you deploying anything (your carefully-tuned prompt now responds differently); and **data drift** — the input distribution shifts (new product, new user behavior) so yesterday's golden set no longer represents today's traffic. Defenses: **pin model versions** explicitly (use the dated/pinned endpoint, not the floating "latest" alias) so upgrades are a deliberate, eval-gated decision rather than a surprise; **continuously re-run eval** on a schedule, not just on PRs, to catch silent provider-side changes and data drift; and **version everything** — prompts, model IDs, RAG configs, and the eval set itself — so every production result is reproducible and you can bisect a regression to the change that caused it. Treat the prompt like code: it lives in version control, it has a changelog, and it ships through the gate.
+**Cost.** Heuristic: platform teams run **~5-8% of engineering**. At 400 engineers, 7 × $250K ≈ $1.75M/yr + ~$300K infra/tooling ≈ **$2M/yr all-in**.
 
-**Cost and tokens are a first-class metric.** Quality is not the only axis you gate on. Tokens-in/tokens-out and **cost per request** belong in every trace and every guardrail (a quality win that triples cost may be a net loss), and in the regression report alongside the quality score. The full treatment — caching, model-tiering, batching, and the economics of the call — is the cost lesson's subject; here the point is narrow: **if your eval and observability don't account for cost, you're optimizing half the system.**
+**Return.** 400 × 15% toil ≈ 60 eng-yr ≈ **$15M/yr**. The path removes a third *for adopted services*: **$5M/yr at full adoption**; ~$2.5M at 50%, barely break-even; underwater at 20%. **The business case is linear in adoption**, which is why adoption is the number reported to the CFO, and why mandates that produce fake adoption corrupt the only number that justifies the spend.
 
-<details>
-<summary>Go deeper — judge calibration, RAG metric mechanics, and eval-set hygiene (IC depth, optional)</summary>
+**Throughput sanity check:** 50 services × ~4 deploys/day ≈ **200 deploys/day**, a few thousand CI jobs, trivially served by autoscaled managed runners at ~$15-20K/month. The hard part of an IDP is **never** infrastructure load; it is product-market fit with 8 picky internal customers. Saying that sentence in the interview is itself signal.
 
-- **Quantifying judge trust:** measure judge-vs-human agreement with **Cohen's κ** (or simple % agreement) on the human-labeled set. A κ below ~0.6 means the judge disagrees with humans too often to gate on; fix the rubric, add few-shot anchors, or change the judge model, then re-measure. Track κ over time — it drifts as the judge model is updated provider-side.
-- **Pairwise → ranking:** for comparing many variants, run pairwise judgments and aggregate into a ranking with an Elo/Bradley-Terry model (the LMSYS Chatbot Arena approach). More robust than absolute scores but O(variants²) comparisons — sample pairs rather than running the full matrix.
-- **RAG metric computation (RAGAS-style):** *faithfulness* = decompose the answer into atomic claims, then check each claim is entailed by the retrieved context (an LLM-judged NLI step); the score is the fraction of supported claims. *Context precision* rewards relevant chunks ranked high; *context recall* needs a reference answer to check whether all its facts were retrievable. These are themselves LLM-judged, so they inherit judge bias — calibrate them too.
-- **Eval-set hygiene:** keep a **held-out** slice you never tune against, or you'll overfit the prompt to the eval set (Goodhart's law — the metric stops measuring quality once it becomes the target). Refresh the set as the distribution drifts, and de-duplicate so a single over-represented case doesn't dominate the score.
-- **Synthetic eval data:** when you lack labeled cases, generate candidate Q&A pairs from your corpus with an LLM to bootstrap a golden set — but **human-review the synthetic set** before trusting it, or you bake the generator's blind spots into your gate.
+**The Jenkins ledger:** ~1.5 informal FTE (~$375K/yr) + 2 release-blocking outages/month × ~4 engineer-days ≈ ~$250K/yr + an unpatched CVE surface: **~$600K/yr to keep the dirt road open**, the number that anchors the decommission case *later*, not the opening move.
 
-</details>
+**What estimation decided:** a 7-person team; the case lives or dies on adoption (70%/12 months); deploy volume is a non-problem; time-to-first-deploy (2-3 days → **< 1 hour**) is the flagship metric because every team feels it viscerally.
 
-### Diagram: the LLMOps loop
+---
+
+## S: Storage
+
+> **Adaptation, said out loud:** "what persists" is the **platform's sources of truth**, and the rule is **everything as code, in git**, the platform's own changes ride the discipline it sells.
+
+Three stores: **golden-path templates and infra modules** in git (the platform team's product code); each service's **`platform.yaml` manifest** (next section) in *that service's* repo, the team owns the declaration, the platform owns the machinery; and the **service catalog** in a small Postgres (a relational store fits, tiny data, relational queries like "services owned by team X failing readiness check Y"), hydrated *from* git and org metadata. *Rejected, a hand-maintained catalog/wiki:* stale within a quarter; a catalog that ingests from the repos stays true because lying to it would require lying to your own deploy.
+
+---
+
+## H: High-level design
+
+> The shape to make visible: **two front doors** (portal for discovery, CLI/git for daily flow) converging on **one platform API**, with the **escape hatch drawn as a first-class, sanctioned route**, not omitted in embarrassment.
 
 ```mermaid
 flowchart LR
-    subgraph OFFLINE["Offline — the gate (CI)"]
-        GS[(Golden set<br/>+ human-labeled<br/>ground truth)] --> JUDGE["Eval run<br/>reference metrics +<br/>LLM-as-judge rubric"]
-        JUDGE --> GATE{Pass the bar?<br/>no regression vs<br/>production baseline}
-    end
+    DEV[Product engineer] --> PORTAL[Portal and catalog]
+    DEV --> CLI[Platform CLI and git]
+    PORTAL --> SCAF[Scaffolder golden templates]
+    PORTAL --> PAPI[Platform API]
+    CLI --> PAPI
+    SCAF --> PAPI
+    PAPI --> CICD[Managed CI CD]
+    PAPI --> IAC[Infra orchestration]
+    CICD --> ENV[Runtime environments]
+    IAC --> ENV
+    PAPI --> OBS[Default observability]
+    DEV -.->|sanctioned tier 2| ESC[Escape hatch raw IaC]
+    ESC -.-> ENV
 
-    GATE -->|fail| BLOCK[Block the change<br/>prompt / model / RAG]
-    GATE -->|pass| DEPLOY[Deploy<br/>pinned model version]
-
-    subgraph ONLINE["Online — production"]
-        DEPLOY --> SHADOW[Shadow + A/B<br/>guardrails: cost, latency, refusal]
-        SHADOW --> TRACE["Trace every call<br/>prompt · chunks · tools<br/>tokens · latency · cost"]
-        TRACE --> FB[User feedback<br/>thumbs · edits · regen · accept]
-    end
-
-    FB --> MINE[Mine traces:<br/>failures + new cases]
-    TRACE --> MINE
-    MINE -->|fold back in| GS
-
-    style GATE fill:#7a1f1f,color:#fff
-    style JUDGE fill:#e8a13a,color:#000
-    style TRACE fill:#1f6f5c,color:#fff
-    style MINE fill:#2d6cb5,color:#fff
+    style PAPI fill:#2d6cb5,color:#fff
+    style ESC fill:#e8a13a,color:#000
 ```
 
-The loop is the lesson: **offline eval gates the change → deploy a pinned version → online eval + tracing + feedback observe reality → mine traces into the golden set → re-eval.** Skip any arrow and quality leaks: skip the gate and regressions ship; skip tracing and you can't debug or grow the set; skip the fold-back and your eval set rots while production drifts.
+**The flow, compressed:** scaffold from a template (portal or CLI, same API) → a repo with code skeleton, `platform.yaml`, and a working pipeline. Daily loop is git-native: push → managed CI → staged deploy with canary and one-command rollback; declared infra is reconciled from the manifest; logs, metrics, dashboards, paging exist on day one. The **catalog** reads it all back: every service, owner, tier, readiness score.
 
-### Worked example: a "small prompt tweak" that quietly drops groundedness 8%
+**The build-vs-buy call, quantified once (the rule: build only where you differentiate).** The portal/catalog/scaffolder chassis is **undifferentiated**, adopt **Backstage** (open source, ~1-1.5 engineers of ongoing operation ≈ $300-400K/yr) or a SaaS portal (Port/Cortex-class, ~$50-100K/yr, less control). Building an in-house portal is **~8-10 engineer-years ≈ $2.5M** to reproduce a commodity, rejected without ceremony. The **golden-path templates, pipeline opinions, and infra modules are the differentiation**, they encode *your* stack, compliance posture, and on-call model, built in-house. My prior: **Backstage chassis + in-house paths**; I'd have the platform lead spike one SaaS alternative for the operating-cost delta, but the buy-the-chassis/build-the-paths split survives either vendor.
 
-A RAG support assistant is live: it answers customer questions from the docs corpus, faithfulness is the bar (a hallucinated answer is worse than a refusal). An engineer wants the answers warmer, so they edit the system prompt — adding "Be friendly and reassuring, and reassure the customer their issue is common and easily solved." In the playground it reads great on three sample tickets. Here's how the harness catches what the demo can't:
+**Team shape (one line):** a **platform team** serving stream-aligned teams via self-service, not a gatekeeping ops team, not a visiting enabling team, though during migrations it temporarily adds enabling-team mode (pairing on the first cutover).
 
-1. **The gate runs on the PR.** The change triggers the eval suite against the **golden set of ~300 real tickets** with known-good grounded answers. The pairwise LLM-as-judge (different model family, both orders averaged, explicit faithfulness rubric) compares new vs production.
-2. **Quality looks mixed, then the metric split tells the story.** Overall "helpfulness" win-rate is slightly *up* (it does read warmer). But the report doesn't collapse to one number — **faithfulness drops 8%**: the "reassure them it's easily solved" instruction nudges the model to *invent* reassuring detail not in the retrieved docs ("this usually resolves within a few minutes") — confident, friendly, and **ungrounded**.
-3. **The gate blocks the merge.** Faithfulness is a hard gate (regression > 2% blocks), so the PR fails CI. No customer ever sees the regression. Contrast the no-harness world: it ships on the strength of three good demos and silently degrades grounding for weeks until a customer is told something false and complains.
-4. **Tracing localizes the cause in minutes.** The engineer opens the traces for the failing cases: the retrieved chunks are *correct* (retrieval recall is fine), but the generated answer adds claims absent from those chunks. That pinpoints it as a **generation/faithfulness** failure caused by the prompt, not a retrieval failure — so the fix is the prompt, not the index.
-5. **The fix and the permanent guard.** Reword to "be friendly *and* answer only from the provided docs; do not speculate about timelines." Re-run the gate: warmth retained, faithfulness back to baseline, merge passes. The worst failing cases are **added to the golden set** so this exact regression can never recur silently.
+---
 
-Every step traces to the discipline: the **golden set** caught what eyeballs missed, the **metric split** said *which* half broke, **tracing** said *why*, and the **gate** stopped it from shipping — and the eval set is now stronger than before the change.
+## A: API design
 
-### Trade-offs table: offline eval methods
+> **Adaptation, said out loud:** in a product design, A lists endpoints. Here A is **the platform contract**, and its design carries the adoption strategy: declarative, versioned, small, with the escape hatch defined *in* the contract.
 
-| Dimension | **Reference-based metrics** (exact-match/F1, BLEU/ROUGE) | **LLM-as-judge** (rubric / pairwise) | **Human evaluation** |
-|---|---|---|---|
-| Cost per case | lowest (deterministic compute) | low–moderate (a model call per grade) | highest (human time) |
-| Scalability | very high (CI on every PR, free) | high (CI-friendly at scale) | low (sample only) |
-| Fidelity to "real quality" | low for open text (rewards surface overlap); high for constrained tasks | moderate–high *if calibrated*; carries position/verbosity/self-preference bias | highest — the ground truth |
-| Needs a reference answer | yes | no (pairwise/rubric works referenceless) | no |
-| Main risk | passes fluent-wrong answers that share words | uncalibrated judge gives false confidence | doesn't scale; rater inconsistency |
-| **Use when…** | extraction/classification/JSON where overlap *is* correctness | open-ended generation, RAG faithfulness, win-rate gating — the workhorse | the calibration anchor; a small labeled set to validate the judge and settle high-stakes calls |
+```yaml
+# platform.yaml — the whole contract a team writes
+apiVersion: platform/v1
+service: checkout
+owner: team-payments        # catalog + paging route
+tier: golden                # golden | hatch (support level differs)
+runtime:
+  type: web                 # web | worker | cron
+  size: m                   # t-shirt sizes, not CPU/mem tuning
+  autoscale: { min: 2, max: 20 }
+deploy:
+  strategy: canary          # canary | rolling
+  rollback: auto            # on SLO breach during rollout
+resources:
+  - kind: postgres          # the 3-4 blessed kinds, v1
+    name: orders-db
+  - kind: queue
+    name: order-events
+observability: default      # logs + metrics + dashboard + paging, free
+```
 
-The pattern in one line: **automated metrics gate every change; LLM-as-judge does the open-ended grading; humans are the small, expensive anchor that keeps the judge honest.**
+```
+# CLI verbs — thin wrappers over the same platform API
+platform create --template service-go     # scaffold, < 1 min
+platform deploy | rollback | status | logs
+```
 
-### What interviewers probe here
-- **"How do you know a prompt change didn't regress quality?"** — *Strong signal:* eval as a **CI gate** on a versioned golden set, pairwise win-rate vs the production baseline, hard gates on safety/faithfulness, past incidents folded in as permanent cases. Names "looked fine in a demo" as the failure mode the gate exists to kill. *Red flag:* "we test it in the playground" / manual spot-checks / no fixed eval set — quality erodes invisibly.
-- **"LLM-as-judge — what's wrong with it, and how do you trust it?"** — *Strong:* names **position, verbosity, and self-preference** bias and the mitigations (pairwise, both orders averaged, explicit rubric, different judge family), and — the key move — **calibrates the judge against a human-labeled set** and tracks agreement. *Red flag:* "ask GPT to rate it 1–10" with no awareness of bias or calibration.
-- **"Measure RAG retrieval failures vs generation failures separately — why and how?"** — *Strong:* the two fail independently and the fixes differ; *retrieval* = context recall/precision (right chunk fetched and ranked?), *generation* = faithfulness/answer-relevance (did it stick to the chunk?). A confident-wrong answer is a retrieval failure if the chunk was missing, a faithfulness failure if it was present and ignored — one number can't tell you which. *Red flag:* one blended "accuracy" number with no idea which half to fix.
-- **"What do you trace, and why?"** — *Strong:* the full chain — prompt, retrieved chunks + scores, tool calls, tokens in/out, latency, **cost** — as both debugger and the mine that grows the eval set. *Red flag:* logs only the final answer.
+**Design notes (each with its rejected alternative):**
+- **Declarative manifest, not imperative pipelines.** Teams state *what*; the platform owns *how*. *Rejected: exposed pipelines-as-code for everyone*, that's Jenkins with better fonts; 200 bespoke Jenkinsfiles was the disease.
+- **T-shirt sizes and a blessed resource list.** Every exposed knob is a knob you support forever. *Rejected: pass-through to raw Kubernetes/Terraform*, leaky-by-design means teams still need the expertise the platform was funded to remove.
+- **`tier: hatch` is in the schema.** The hatch is *contracted*: raw IaC allowed, security baseline still enforced, support drops to best-effort, catalog shows it honestly. *Rejected: no hatch*, the GPU and mobile teams defect covertly and you lose visibility and trust. *Rejected: a fully supported hatch*, then the hatch is free and the golden path has no gravity.
+- **`apiVersion` from day one; breaking changes only by major version with platform-run codemods.** Breaking your customers' deploys twice is how adoption dies, treat the manifest like a public API, internal edition.
 
-The through-line at Director altitude: **you cannot responsibly ship or scale an LLM feature without an eval harness — it is simultaneously your regression suite and the gate that lets the team move fast safely.** Own the **quality bar and the gate** (what "good enough" means, what blocks a ship, that the judge is calibrated to humans); **delegate building the harness** with that bar stated: "I want every prompt/model/RAG change gated on a golden set with calibrated LLM-as-judge, faithfulness as a hard gate, cost in the guardrails — have the platform team stand up the harness on Langfuse; my prior is that the gate buys back more velocity than it costs within a quarter."
+---
 
-### Common mistakes / misconceptions
-- **No eval at all — "the demo looked fine."** The default failure. A non-deterministic, open-ended system with no harness regresses silently; you find out from customers.
-- **One blended "accuracy" number.** It hides whether retrieval or generation broke, and whether you traded faithfulness for warmth. Measure the dimensions separately.
-- **Trusting an uncalibrated judge.** LLM-as-judge has position/verbosity/self-preference bias; without pairwise comparison, an explicit rubric, and periodic human calibration, you're gating on a biased, noisy signal.
-- **Eval as a report, not a gate.** A dashboard nobody must pass before shipping changes nothing. The value is in *blocking the merge* on a regression.
-- **Pinning to "latest" and ignoring drift.** The provider updates the model under your stable endpoint; pin versions and re-run eval on a schedule, or your tuned prompt silently changes behavior.
+## D: Data model
 
-### Practice questions
+> **Adaptation, said out loud:** the data model is the **service catalog**, small, relational, operationally load-bearing: it answers "who owns this," measures the platform's own adoption, and turns production-readiness into a glanceable score.
 
-**Q1.** Your team ships LLM prompt changes weekly and quality "feels" like it's slowly getting worse, but no one can point to a cause. What's the root problem and how do you fix it structurally?
-> *Model:* No **regression gate**. Each weekly change is eyeballed on a few cases; each quietly breaks cases nobody checked, and the damage compounds. Fix: build a **versioned golden set** (seed it from production traces and every past incident) and run it as a **CI gate** — pairwise win-rate vs the current production version via a calibrated LLM-as-judge, with hard gates on faithfulness/safety. No prompt/model/RAG change merges without passing. Now regressions are blocked at PR time instead of discovered in aggregate weeks later, and the gate *speeds up* shipping because changes are safe to make.
+Four entities: **Component** (service: repo, runtime type, `tier`, lifecycle), **Team** (owner, paging route), **Resource** (a provisioned Postgres/queue/bucket linked to its component, the edge that answers "what breaks if this DB dies"), **Scorecard** (per-component readiness checks). Adoption rate and time-to-first-deploy are *queries over the catalog*, not a separate analytics project, the success metrics fall out of the system of record.
 
-**Q2.** You're using GPT-4-class as an LLM-judge to grade your GPT-4-based assistant. What's suspect, and what would you change?
-> *Model:* Several biases. **Self-preference** — a judge tends to favor text from its own family, so grading your own model's output with the same family inflates scores; use a **different judge family** where possible. **Position bias** — pairwise comparisons favor order; run **both orders and average**. **Verbosity bias** — reward length unless the rubric scores concision. And it's likely **uncalibrated** — validate it against a **small human-labeled set** (measure agreement) before trusting it to gate, and re-check periodically since the judge model drifts. Without that, you have a confident, biased grader giving false green lights.
+<details>
+<summary>Go deeper, catalog schema and scorecard checks (IC depth, optional)</summary>
 
-**Q3.** A RAG answer is fluent, well-cited, and wrong. How do your metrics tell you whether to fix retrieval or generation?
-> *Model:* Split the metrics. Check **context recall** — was the answer-bearing chunk retrieved at all? If **no**, it's a *retrieval* failure: fix chunking/hybrid/reranking, the model never had a chance. If **yes** (the right chunk *was* in context) but the answer contradicts or invents beyond it, that's a **faithfulness** failure: the model ignored its grounding — tighten the grounding instruction, lower temperature, or check the chunk was buried mid-context. The trace settles it: read the retrieved chunks for that case. One blended accuracy number can't distinguish these, and the two fixes are completely different.
+**`components`**: `name` (pk), `repo_url`, `owner_team` (fk), `runtime_type` (web/worker/cron), `tier` (golden/hatch), `manifest_version`, `created_at`, `first_deploy_at` (with `created_at`, yields time-to-first-deploy per service), `lifecycle` (experimental/production/deprecated).
 
-**Q4.** The model provider pushes a silent update to the endpoint you call. How would you have known, and how do you prevent surprises?
-> *Model:* You'd know if you **re-run the eval set on a schedule** (not just on PRs) — a faithfulness/win-rate dip with no deploy of your own is the signature of provider-side drift. Prevention: **pin to a dated/versioned model endpoint** rather than the floating "latest" alias, so upgrades are a deliberate, eval-gated choice; **version everything** (prompt, model ID, RAG config) so results are reproducible and you can bisect; and treat a provider upgrade like any other change — run it through the gate before adopting it. Same harness, now defending against a change *you* didn't make.
+**`teams`**: `name` (pk), `pager_route`, `slack_channel`, `org_unit`.
+
+**`resources`**: `id` (pk), `component` (fk), `kind` (postgres/redis/queue/bucket), `size`, `state` (requested/ready/failed), the reconciliation target for the infra orchestrator.
+
+**`scorecard_results`**: `component` (fk), `check_id`, `status`, `checked_at`. Typical v1 checks: manifest on current `apiVersion`; SLO + dashboard exist; paging route verified; rollback exercised in last 90 days; no direct-to-prod side-door deploys detected (the fake-adoption detector, compare platform-API deploy events against running image digests).
+
+Adoption rate = `count(tier='golden' AND no side-door flag) / count(*)` over production-lifecycle components. Publish weekly, per team, *to the platform team first*, public per-team shaming dashboards are a mandate in disguise and poison the customer relationship.
+
+</details>
+
+---
+
+## E: Evaluation
+
+> **Adaptation, said out loud:** Evaluation here is a **pre-mortem: the five ways internal platforms actually fail**, every one organizational, none a scaling bottleneck, each with its countermeasure designed in.
+
+**Failure 1, the mandate.** Leadership decrees migration by Q3; teams comply on paper, keep side-door deploy scripts, the catalog fills with fake-golden services; the adoption metric corrupts and the CFO case collapses. *Countermeasure:* voluntary adoption + the side-door detector + selling teams on *their* metrics (TTFD, flake rate). The only mandate is the security baseline, enforced equally on the hatch tier, so it never reads as platform protectionism.
+
+**Failure 2, the golden cage.** No hatch; the GPU workload genuinely doesn't fit; the team forks infrastructure covertly; six months later security finds an unmanaged AWS account. *Countermeasure:* `tier: hatch` as a contracted, visible, baseline-compliant state, supported less (or it drains golden-path gravity) but sanctioned fully (or it goes underground).
+
+**Failure 3, platform-as-project.** The team ships v1 and is reassigned; templates rot, the manifest breaks on an upgrade, tickets sit a week; customers churn back to hand-rolled, and the second attempt pays an institutional-distrust tax. *Countermeasure:* fund a **product line with permanent headcount** ($2M/yr defended annually with the toil ledger), a roadmap, the support SLA. A platform you won't staff forever is a platform you shouldn't build (the maintenance-tail rule, applied internally).
+
+**Failure 4, building for the architect, not the customer.** The team ships multi-cloud abstraction and a service mesh while TTFD is still two days, because infra engineers build what's interesting. *Countermeasure:* the R-step interviews set the roadmap; adoption and TTFD, not feature count, set the goals; quarterly developer-NPS keeps it honest.
+
+**Failure 5, the migration blocks a release.** One cutover slips a launch; the story metastasizes ("the platform cost us Q3"); the next four teams refuse their windows. *Countermeasure:* the dual-run rule and team-chosen windows below, the single most important operational policy in the design.
+
+**Closing re-check vs NFRs:** adoption voluntary and honestly measured; no release gated on migration; metrics pinned; platform funded as product. The design survives its own pre-mortem.
+
+---
+
+## D: Design evolution
+
+> **Adaptation, said out loud:** evolution isn't 10× traffic, it's the **8-team migration sequencing**, the part of the prompt that actually gets asked. Principle: **diffusion, not decree**, pilots prove value, the middle adopts self-serve, the front door closes before any pressure, and the deadline arrives *last*.
+
+**Phase 0 (months 0-2), build the wedge, not the platform.** The thinnest golden path that fully serves *one* common shape (stateless web + Postgres). Two teams delighted by a narrow path beats two teams waiting on a complete one.
+
+**Phase 1 (months 2-4), two pilots, chosen deliberately.** Criteria: **high Jenkins pain + mainstream workload + an enthusiastic tech lead**, not the hardest team (visible failure), not the easiest (proves nothing). The platform team migrates the first service *with* them, enabling-team mode, paving by doing, and the pipeline **dual-runs**: Jenkins stays the release path until the team itself flips the switch. *Rejected: hard cutovers*, they convert every platform bug into a release blocker, violating the prime NFR; dual-run costs a few weeks of duplicate CI (~$2-3K/team), the cheapest insurance in the program. Exit criteria: both pilots shipping through the platform, TTFD < 1 hour demonstrated, and **a pilot tech lead willing to demo to the other six**, peer testimony converts; platform-team demos market.
+
+**Phase 2 (months 4-8), close the front door, serve the middle.** Announce: **all *new* services scaffold on the platform**, a cheap, defensible mandate (no existing workflow touched; new services get 1-hour TTFD as pure gift). Teams 3-6 migrate self-serve with office hours and a guide, each in its own window between releases. The platform team's job this phase is **support latency**, the < 4h SLA separates "product" from "abandonware." Watch tickets-per-migrated-service: if it isn't falling by the third migration, the templates have a gap, fix the product, don't blame the customer.
+
+**Phase 3 (months 8-12), holdouts, with air cover and a date.** Two remain: the GPU team (legitimately different, lands on `tier: hatch` with a compliant CI shell, *counted as success*; the goal was never 100% golden) and a team that's simply busy. Now, at >70% adoption, with the $600K/yr Jenkins carrying cost and CVE exposure documented, announce the **decommission date 6 months out**, with pairing offered for the final migration. *Rejected: announcing the deadline in month 0*, a date before demonstrated value is a mandate, and you'd spend political capital buying resistance. The deadline comes last because by then it formalizes a fait accompli.
+
+**Phase 4, decommission Jenkins; redeploy the 1.5 informal FTE; report the ledger** (adoption %, TTFD delta, ticket trend, toil-dollars returned vs $2M) to the CFO. Then the next wedge, preview environments or cost visibility, chosen the same way: by interviewing the customers.
+
+**Where I'd delegate (the explicit Director move):**
+- **Portal chassis bake-off:** *"Platform lead runs a 2-week Backstage-vs-SaaS spike; my prior is Backstage at our size because $300-400K/yr of operating cost buys template control we'll use, but I'll take the data."*
+- **Pipeline/runtime internals:** *"The platform team owns the CI engine and rollout mechanics behind the manifest contract; my prior is managed runners + canary-by-default; I hold them to TTFD and deploy success rate, not implementation choices."*
+- **Security baseline on the hatch tier:** *"AppSec defines the non-negotiable floor for both tiers; my prior is image signing + centralized secrets, applied evenly so the baseline never reads as platform politics."*
+
+What I keep: the metrics, the voluntary-adoption posture, the hatch contract, the sequencing, and the budget defense. That's the altitude.
+
+---
+
+## Trade-offs table: the pivotal decisions
+
+| Decision | Option A | Option B | Option C | Use when... |
+|---|---|---|---|---|
+| **Adoption model** | **Voluntary golden path** + new-services mandate + late deadline | **Top-down mandate, date first** | Laissez-faire, no platform | **A**, adoption is the metric and mandates corrupt it (our choice). **B** only under an acute forcing function (security incident, audit), expect compliance theater. **C** is the $15M/yr toil status quo. |
+| **Portal & chassis** | **Backstage + in-house paths** (~$300-400K/yr to operate) | **SaaS portal** (~$50-100K/yr, less control) | **Full in-house** (~$2.5M to build) | **A** at 300+ engineers wanting template control (our choice). **B** below ~200 engineers or no platform headcount. **C** ~never, the chassis is undifferentiated (the build-vs-buy rule). |
+| **Abstraction level** | **Declarative manifest, t-shirt sizes, blessed resources** | Raw pipelines + IaC pass-through | Full PaaS, zero knobs | **A**, hides toil, keeps a hatch (our choice). **B** reproduces Jenkins sprawl. **C** only for truly homogeneous workloads; at 8 diverse teams it forces defections. |
+| **Migration cutover** | **Dual-run, team-chosen window** | Hard cutover on a schedule | Indefinite parallel operation | **A**, never blocks a release; ~$2-3K/team of duplicate CI (our choice). **B** turns platform bugs into release blockers. **C** never realizes the $600K/yr savings, set the date once adoption passes ~70%. |
+
+---
+
+## What interviewers probe here (Director altitude)
+
+- **"Why would teams adopt this at all?"**, *Strong:* it wins on their metrics, TTFD days → < 1 hour, flake rate down, observability free, proven by pilots whose tech leads evangelize peer-to-peer. *Red flag:* "leadership will mandate it" as the opening move.
+- **"A team refuses. What do you do?"**, *Strong:* segment the refusal, genuinely different workload → `tier: hatch`, sanctioned and counted as success; merely busy → wait, keep shipping value, bring the deadline only after ~70% adoption with the $600K/yr carrying cost documented. *Red flag:* escalate to their VP in week one, or let them run an invisible stack.
+- **"How do you know it's working?"**, *Strong:* adoption % (side-door-verified), time-to-first-deploy, tickets per service trending down, DORA deploy frequency up, developer-NPS, reported against the $2M/yr spend as toil-dollars returned. *Red flag:* features shipped, "Jenkins turned off."
+- **"Build or buy the platform?"**, *Strong:* split the question, buy/adopt the undifferentiated chassis (~$300K/yr vs ~$2.5M to rebuild), build the golden-path templates that encode our opinions; cites the 8.6 rule, delegates the bake-off with a prior. *Red flag:* monolithic "build it all" (résumé-driven) or "just buy Humanitec and we're done" (no vendor ships your opinions).
+- **"Walk me through the Jenkins migration."**, *Strong:* wedge → 2 pilots dual-running, paved by doing → new-services-only mandate → self-serve middle on a support SLA → holdouts with air cover and a 6-month deadline announced *after* 70% adoption → decommission and report the ledger. *Red flag:* a Gantt chart of simultaneous hard cutovers with a date chosen before the first pilot.
+
+---
+
+## Common mistakes
+
+- **Treating it as a pure infrastructure problem.** The prompt is change management in a technical costume; a beautiful Kubernetes abstraction with no adoption strategy answers the wrong question.
+- **Mandate-first migration.** A decreed date before demonstrated value produces compliance theater, side-door deploys, and a corrupted adoption metric, the only number that justifies the spend.
+- **No escape hatch (or a free one).** Without a sanctioned hatch, outliers defect covertly; with a *fully supported* hatch, the golden path has no gravity. Sanctioned *and* second-tier.
+- **Measuring feature count instead of adoption and TTFD.** Ship 5 things 8 teams use, not 25 things 2 teams use.
+- **Funding it as a project.** A platform team that disbands after v1 leaves rotting templates and institutional distrust that taxes the next attempt. Permanent headcount or don't start.
+
+---
+
+## Interviewer follow-up questions (with model answers)
+
+**Q1. Your CEO says "just mandate it, we're not a democracy." Respond.**
+> *Model:* Agree on the goal, push back on the mechanism with the metric: the business case is **linear in real adoption**, $5M/yr returned at full adoption, underwater below ~40%, and mandates produce *fake* adoption: services flagged golden that still deploy through side doors. I'd offer the two cheap, legitimate mandates, **all new services on the platform** (touches no existing workflow) and the **security baseline on every tier**, and commit to a decommission date *once pilots prove the path and adoption passes ~70%*. Same destination, with the teams' trust and an honest number. An acute forcing function (an active Jenkins CVE, an audit) compresses the sequence; absent that, the decree costs more than it buys.
+
+**Q2. Six months in: adoption is 35% against a 50% target, tickets rising. Diagnose.**
+> *Model:* Rising tickets per migrated service plus stalled adoption almost always means **product gaps, not customer resistance**, the path fits the pilots' shape but not the middle teams'. Read the ticket corpus as customer research, re-interview the stalled teams; expect a missing blessed resource or a manifest limitation forcing workarounds. Fixes in order: redirect the roadmap to the top gap (pause new features), audit support-SLA compliance (slow support kills platforms faster than missing features), verify the pilots are still healthy, a regretful pilot is anti-marketing. What I would *not* do: escalate for a mandate, pushing a product with known gaps converts quiet skeptics into vocal enemies. Adoption is a *thermometer for product quality*; treat the fever, not the reading.
+
+**Q3. The GPU/ML team says the golden path will never fit them. Are they right?**
+> *Model:* Probably yes, for training, GPU scheduling, giant artifacts, experiment-shaped pipelines are a different product, and stretching v1 to cover them slows the path for the seven teams it fits. They land on **`tier: hatch`**: raw IaC freedom, the security baseline still enforced, catalog-visible, best-effort support, sanctioned, not exiled. I count that as *success*: the goal was never 100% golden, it's an honest catalog and zero shadow infrastructure. Two follow-ons: their *serving* services are often plain web services, migrate those; and recurring hatch usage with a common shape is exactly how the roadmap learns what to pave next. The hatch is the platform's product-discovery channel, not its failure log.
+
+**Q4. How is your platform team measured, and what does it cost?**
+> *Model:* Cost: ~7 engineers + infra ≈ **$2M/yr**, sized at the 5-8%-of-engineering heuristic for 400 engineers. Measured on four numbers, none of which is feature count: **adoption rate** (side-door-verified, target 70% by month 12), **time-to-first-deploy** (2-3 days → < 1 hour), **tickets per service** (the product-quality proxy), and the org's **DORA deploy frequency**, the platform exists to make *other teams* faster, so their delivery metrics are its outcomes. Annually I defend the budget with the toil ledger: ~$15M/yr of org toil, a third removed at current adoption ≈ $3-5M/yr returned against $2M spent, plus Jenkins's $600K/yr retired. If the numbers stop clearing the bar, the platform shrinks, product lines earn their headcount.
+
+---
 
 ### Key takeaways
-- **Eval is hard because the system is non-deterministic, open-ended, has no single ground truth, and quality is multi-dimensional** (correct? grounded? safe? on-tone?). It's an essay exam, not multiple-choice — you build and calibrate a *grader*, you don't get pass/fail for free.
-- **Offline eval = a versioned golden set + the right grader:** reference metrics where a right answer exists, **LLM-as-judge** for open-ended quality (calibrated against a small human-labeled set), with humans as the expensive anchor. Measure RAG **retrieval** (context recall/precision) and **generation** (faithfulness/relevance) *separately* — they fail independently.
-- **LLM-as-judge is biased** (position, verbosity, self-preference). Trust it only via **pairwise comparison, both orders averaged, an explicit rubric, a different judge family, and periodic human calibration.**
-- **Eval as a CI gate is the single most important LLMOps practice** — every prompt/model/RAG change must pass the golden set before shipping. "Looked fine in a demo" is how quality silently regresses; the gate also lets the team move fast safely.
-- **Trace the full chain** (prompt, chunks, tool calls, tokens, latency, **cost**) — it's your debugger *and* the mine that grows the eval set. Plan for **drift** (pin model versions, re-eval on a schedule), and treat **cost per request** as a first-class gated metric.
+- **Internal developers are customers; adoption is voluntary**, the golden path must beat the status quo on *their* metrics, because the business case ($5M/yr toil returned vs $2M/yr team cost at 400 engineers) is **linear in honest adoption**.
+- **The platform contract is the product:** a small, declarative, versioned manifest (t-shirt sizes, blessed resources) with **`tier: hatch` in the schema**, sanctioned escape at a lower support tier, so outliers stay visible instead of going underground.
+- **Buy the chassis, build the paths:** Backstage/SaaS for the undifferentiated portal (~$300K/yr vs ~$2.5M in-house); the golden-path templates encoding your opinions are the differentiation.
+- **Migration is diffusion, not decree:** two well-chosen pilots, paved by doing and dual-running → new-services-only mandate → self-serve middle on a support SLA → deadline announced *last*, after ~70% adoption, and **no team's release is ever blocked**.
+- **Measure adoption, time-to-first-deploy, tickets/service, DORA trend, never feature count**, and fund the platform as a permanent product line (a Team Topologies platform team), not a project that ships and disbands.
 
-> **Spaced-repetition recap:** LLM eval = essay exam, not multiple-choice — non-deterministic, open-ended, no answer key, multi-dimensional quality, so "looked fine in the demo" is the failure mode. **Offline:** versioned golden set + reference metrics where a right answer exists + **LLM-as-judge** (pairwise, both orders, explicit rubric, different family, **calibrated to a small human set**) for open-ended quality. Split RAG into **retrieval** (context recall/precision) vs **generation** (faithfulness/relevance) — they break independently. **The gate is everything:** every prompt/model/RAG change must pass the golden set in CI before it ships, and that gate is what lets you move fast. **Trace** the whole chain (prompt · chunks · tools · tokens · latency · **cost**) as debugger and eval-data mine; fold production failures back into the golden set. Defend against **drift** (pin versions, re-eval on a schedule). Own the bar + the gate, delegate the harness with the bar stated.
+> **Spaced-repetition recap:** IDP = **a product whose customers can refuse it**. Golden path over mandate (mandates → compliance theater + shadow infra); escape hatch contracted in the manifest (`tier: hatch`, sanctioned, baseline-compliant, second-tier support). Buy the chassis (Backstage ~$300K/yr), build the paths. Migrate 8 teams by diffusion: 2 pilots dual-run → new-services-only mandate → self-serve middle → deadline *after* 70% adoption; never block a release. Success = **adoption % + TTFD** (days → < 1 hr), defended yearly as toil-dollars returned (~$5M vs $2M), never feature count.
+
+---
+
+*End of Lesson 11.7. The IDP problem inverts the product-design instincts: the load is trivial (200 deploys/day), and the entire difficulty is product-market fit with internal customers plus the change management of migration, the build-vs-buy rule applied to your own tooling, executed by the platform-team shape that org design makes precise. Next: org design and Conway's law, where the team boundaries themselves become the architecture.*

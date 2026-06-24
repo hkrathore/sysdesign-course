@@ -1,327 +1,292 @@
 ---
-title: "5.8 - Dropbox / Google Drive"
-description: File sync at exabyte scale - 4MB content-addressed chunking, SHA-256 dedup, a metadata service split from a dumb block store, a per-namespace journal/cursor for sync, conflicted-copy resolution, and delta upload - reasoned through RESHADED at Director altitude.
+title: "5.8 — Top-K / Trending / Leaderboard"
+description: The pure altitude test, top-K heavy hitters and real-time leaderboards are the same precision-vs-cost-vs-freshness problem, and a Director frames exact-Redis vs approximate-sketch vs batch in five minutes instead of drowning in sketch math.
 sidebar:
   order: 8
 ---
 
-> This is a **sync-and-conflict** problem - that is what makes it different from every storage problem before it. The metadata-vs-blob split is **table stakes** here (Pastebin, 5.1, owned it). The genuinely new crux: **keep N devices byte-identical with a server source of truth, cheaply, while concurrent edits land from anywhere.** The blob-store building block (blob store), 3.4/2.5 (KV + partitioning), and 2.4/2.8 (replication, quorum) built the parts; this walkthrough assembles them around the one idea that ties sharing, sync, sharding, and ACLs together: the **namespace**.
+> **Why this gets asked at Director level:** Top-K and leaderboards look like two unrelated problems and are really one, *who are the heavy hitters, ranked, right now?*, under three knobs: precision, cost, freshness. The trap is that the math is seductive. An IC dives into Count-Min Sketch row/column tuning or sorted-set memory layout and never makes a decision; a Director interrogates whether **exact rank is even a requirement**, frames three options in five minutes, and picks one against the numbers. Meta asks the "top-10 songs in the last hour" variant; YouTube's "top-K most-viewed" is on Meta's most-asked list; gaming leaderboards show up at Riot, Blizzard, Strava, and Duolingo. The canonical failure is computing a sketch the question didn't need, or quoting "just use a Redis sorted set" without the memory bill.
 
 ### Learning objectives
-- Run the full **RESHADED** spine on a *sync-dominated* problem and recognize why the headline number is not one QPS but **"~120K durable metadata commits/s behind ~200M cheap idle connections"** - two planes, not one.
-- **Estimate** users, storage (to exabytes), block count, and the **commit rate**, with the per-user basis stated and the chain internally consistent.
-- Justify **fixed 4MB content-addressed chunking** + **SHA-256 dedup** + a **metadata service split from a dumb block store**, each against its rejected alternative.
-- Design the **journal/cursor sync feed** and **conflicted-copy** resolution, then stress the design for the hot shared namespace, dedup-store deletion, and the far-behind client.
-- Operate at **Director altitude**: split the cheap notification plane from the expensive commit plane, quantify the delta/dedup bandwidth win, make the **build-vs-buy** call on the block plane (S3 vs Magic Pocket), and delegate the chunking algorithm with a stated prior.
+
+1. See **trending/top-K and the leaderboard as one problem**, *ranked heavy hitters over a window*, whose only real axes are **precision, cost, and freshness**, all set in the Requirements step.
+2. Interrogate whether **exact global rank is a requirement** at all; default to **exact top-N + percentile buckets** for the tail, and carry the memory math (~1 GB per 10M members in a sorted set).
+3. Pick between **exact (Redis sorted sets)**, **approximate (Count-Min Sketch + heap)**, and **batch (MapReduce/stream)** from window size, cardinality, and lag tolerance, not from taste.
+4. Apply **CMS** here as a building block (mechanics stay in the count-min-sketch building block); reuse sharded-counter reasoning for the write-hot score path.
+5. Operate at Director altitude: quantify the memory/compute bill, name where you'd delegate sketch tuning, and defend the freshness/cost dial.
 
 ### Intuition first
-Sync is a **shared notebook that many people each keep a copy of in their own bag**, kept identical to a master copy on a shelf while several people scribble at once. Three moves do it. **Re-copy only the pages that changed** - edit one paragraph on page 40, copy page 40, not the notebook (**delta sync**). **Never re-copy a page the shelf already holds an identical copy of** - just write "my page 40 = that existing page" (**content-hash dedup**). **When two people scribble on the same page at once, keep both** - label one "page 40 (Alice's conflicted copy)" rather than silently discarding it (**conflict resolution - never lose a write**). And so nobody flips through the whole notebook to find what's new, the shelf keeps a **running ordered list of every changed page**; each person remembers "I've copied up to entry #812" and asks "what changed after 812?" (the **journal / cursor**).
 
-The shelf itself is two separate things, and keeping them separate is the load-bearing decision: a small, perfectly-accurate **logbook** (which pages each file is made of, who can see it, what changed when - pointers, never contents) in front of a vast, dumb **page rack** that holds pages addressed by their content and knows nothing about files or owners. Everything below is a literal feature of that notebook-and-shelf.
+Picture two scoreboards. The first is a **stadium leaderboard**: a few thousand named athletes, ranked exactly top to bottom, updating as scores come in. The second is the **trending board at a news kiosk**, "the 10 hottest stories right now?", out of *millions* of articles, almost all of which nobody is reading. Same shape: *rank the heavy hitters over a recent window.* But the second board has a tell most people miss: **you do not need to rank article #4,000,000.** Nobody asks for the exact rank of a story with three views. You need the **top 10 dead-on**, and for everything else a rough bucket ("popular / niche / cold") is plenty.
+
+That is the entire lesson. When the population is small and bounded, a game's ranked players, keep an exact sorted structure and pay for it. When the population is huge and the tail is worthless, trending hashtags, hot URLs, top songs, keep an **exact small head and an approximate tail**: a tiny sketch counts frequencies cheaply, a small heap holds the current top-K. The IC mistake is treating "rank everything exactly" as the requirement, then heroically scaling a structure that costs ~1 GB per 10M members. The Director move is asking, *out loud, in the first two minutes:* "Exact rank for the whole population, or exact top-N and buckets for the rest?" The answer collapses the design.
+
+Hold three ideas: **trending and leaderboard are the same ranked-heavy-hitters problem; the requirement is rarely "exact rank for everyone"; and precision, cost, and freshness are one coupled dial you set in R, not three.**
 
 ---
 
-## R - Requirements
+## R: Requirements
 
-**Clarifying questions that change the design:**
-- *Sync client (Dropbox: a mirrored folder) or web-first drive (Google Drive)?* **Assume sync-first** - that's the hard, distinctive part, and it makes the journal/cursor feed the centerpiece.
-- *How big can a file get, and how does it change?* *The* question. **Assume files up to multi-GB, frequently mutated in place** (you re-save a 50MB deck) - which is what forces chunking + delta sync.
-- *Real-time collaborative editing inside a file?* **No - explicitly cut.** That's Google **Docs** (OT/CRDT on structured text), a different problem. Drive/Dropbox treats a file as an **opaque blob**; conflicts resolve at file granularity with a conflicted copy. Making that cut *is* a strong-signal move.
-- *Consistency bar?* **Strong, read-your-writes, ordered consistency on metadata** (after my commit, every device converges to it, in order); the *bytes* are immutable and content-addressed, so block reads are trivially consistent.
+> Pin the scope, and, because this is an altitude test, spend R interrogating **how exact** and **how fresh** the ranking must be. That question, not any data structure, decides the architecture.
 
-**Functional requirements (the defensible core):**
-1. **Upload / update a file** from any device - only changed data crosses the wire, and bytes the server already has are never re-stored.
-2. **Download / sync** - a device learns *what changed* since it last synced and pulls only the deltas.
-3. **Metadata service** - the file tree, **versions** (history, restore), and **sharing / ACLs**.
-4. **Conflict resolution** - concurrent edits from two offline devices must **never silently lose a write**.
+**The merge, stated up front (the framing that earns the level):** "Trending / top-K heavy hitters" and "real-time leaderboard" are the **same problem**, a ranked list of the highest-scoring entities over a window. They differ on exactly two requirement numbers, and I drive the whole design off them: **cardinality** (a game ranks ~10-50M players, bounded; trending spans ~billions of hashtags/URLs/songs, almost all cold) and **precision of rank** (exact total order, or exact top-N plus coarse buckets for the tail).
 
-**Explicitly CUT from v1:** in-file co-editing (above), full-text content search (we index metadata only), previews/transcoding, comments/activity feeds, trash/retention beyond basic versioning. Each is a real adjacent subsystem; I scope to **chunk → dedup → store → commit → journal → sync → resolve conflicts** and say so.
+**Clarifying questions I'd ask (with assumed answers):**
+
+- *Exact rank for every entity, or exact top-K and approximate tail?* → **Top-K exact; tail bucketed.** The load-bearing answer. "Player #4,000,001 vs #4,000,002" almost never matters; "top 100 / top 1%?" does.
+- *Window, all-time, or rolling?* → **Both exist.** Leaderboard is all-time or per-season; trending is a **rolling 1-hour / 24-hour window**, and the window is what makes trending hard, since old events must age out.
+- *How fresh?* → **Seconds of lag is fine** for trending; near-real-time for live ranked play. A dial, not a constant.
+- *Read:write shape?* → **Write-heavy ingest, read-heavy board.**
+
+**Functional requirements:**
+
+1. **Ingest** score/score-delta or count events at high rate.
+2. **Top-K query:** return the K highest-ranked entities over the window.
+3. **Rank/score lookup:** "what's my rank and score?" (leaderboard case).
+4. **Window roll:** trending must reflect a *recent* window, aging out old events.
+5. **Around-me / percentile:** "the 10 players around me," or "you're in the top 2%."
+
+**Explicitly CUT (scoping is the signal):** anti-cheat/score validation (delegated to trust-and-safety), social graph, notifications, historical replay of past leaderboards, cross-game federation. I scope to **ingest → rank → top-K + rank/percentile lookup → window roll.**
 
 **Non-functional requirements:**
-- **Bandwidth efficiency** - the headline NFR. Re-uploading whole files on every save kills this product; delta + dedup are mandatory.
-- **Durability** - people's only copy of their data; **eleven nines** on stored bytes. Losing a file is the unforgivable failure.
-- **Strong, ordered consistency on metadata** - sync must converge, never out of order.
-- **High availability** on the sync/notification path; clients retry, so brief blips are tolerable.
-- **Scale:** ~exabytes of bytes, trillions of files, hundreds of millions of always-connected devices; **$/GB on the block plane dominates the bill** - a budget the Director owns.
 
-**Read:write skew - and why a single ratio is the wrong answer.** Two planes with opposite profiles: the **block plane** is **write-once, read-by-your-own-devices**, heavily write-deduplicated; the **metadata/notification plane** is **read-amplified by device + member fan-out** - one commit is read by every one of my devices *and* every member of a shared folder. The honest framing: **one expensive ordered commit, fanned out to many cheap reads over many idle connections.** That fan-out, not raw QPS, is what we engineer.
+- **Tunable precision**, exact top-K, with a requirement-driven choice of how exact the tail is. The single most important NFR here.
+- **Freshness within a stated budget**, seconds for trending; near-real-time for live ranked play.
+- **Write-throughput tolerance**, absorb a hot key (a viral hashtag, a streamed top song) without a single-row write wall.
+- **Bounded memory/cost**, must not silently grow to "~1 GB per 10M × every window × every shard."
+- **Availability**, the board is AP; a stale-by-seconds top-K is fine. *Not* a strong-consistency problem (contrast the strong-consistency problems).
 
-**Assumptions carried forward:** **500M registered, 100M DAU, ~2 devices/active user → ~200M sync connections**; **~10GB/user blended**; **avg file ~1MB**; **~100 changes/user/day**.
-
----
-
-## E - Estimation
-
-Enough math to make a defensible call. The single most important honesty move: **declare the per-user basis.**
-
-**Users and connections.** 500M registered, 100M DAU × ~2 devices → **~200M concurrent sync connections** - mostly **idle long-lived connections** (long-poll/WebSocket) that exist to say "wake up, something changed."
-
-**Storage.** Basis: **blended across all 500M registered at ~10GB/user** - deliberately not 50GB, because the near-empty free tier dominates the average (if the brief were paying users only, ~50GB is fine; the formula is what matters). Raw: `500M × 10 GB = 5 EB`. **Dedup + compression recover ~30-40%** (shared org files, identical attachments, repeated installers) → **~3 EB effective**. That order-of-exabytes number is what makes the byte plane a *cost* problem and sets up the build-vs-buy call.
-
-**File and block counts.** At ~1MB average, `5 EB / 1 MB ≈` **~5 trillion files**; at **4MB blocks** (Dropbox's actual size) most files are one block, so **~5 trillion blocks**. The chain ties out, and the block *index* is itself a few hundred TB - a sharded store in its own right, not a side table.
-
-<details>
-<summary>Go deeper - verifying the estimation chain (IC depth, optional)</summary>
-
-- Identity check: `files_per_user = 5T / 500M = 10K`, consistent with `10 GB / 1 MB = 10K files` per user. If `avg_file_size × file_count ≠ total_storage`, the whole number set is suspect.
-- Block count: most files are <4MB → at least one block per file → block count ≈ file count ≈ 5T. Dividing `5 EB / 4 MB` *undercounts* - that only holds if every block were a full 4MB, but the average file is 1MB. Large files dominate the *byte* total but not the *count*.
-- Block-index sizing: one entry = `hash(32B SHA-256) + location pointer + refcount + size ≈ 50 B`; `5T × 50 B ≈ 250 TB`, call it hundreds of TB with replication - a sharded, cached KV store in its own right.
-
-</details>
-
-**Change / commit rate (the headline write number).** ~100 changes/user/day (a worker saving every few minutes - the soft knob) × 100M DAU = 10B/day → **~120K metadata commits/s average, ~300-500K/s peak**. This is a **durable, ordered, transactional** write rate - genuinely expensive, and the thing to scale. Behind it sit the ~200M cheap connections that merely *read* the resulting journal.
-
-**Bandwidth - quantify the win, the product *is* bandwidth efficiency.** A user edits 2 slides in a **50MB deck**: naive whole-file upload = 50MB; **delta** (changed 4MB blocks only) = ~4-8MB, a **~7-10× saving**; **dedup** (the client first asks which block hashes the server already has) = often **~0 bytes** if the blocks already exist anywhere - the famous "instant upload," **up to ~100×+**. Aggregate ingest is therefore dominated by genuinely-new blocks, not re-uploads.
-
-**Cache / working set.** The hot set is **metadata and the journal tail** - a Redis-class tens of GB, tiny against ~3 EB of cold immutable blocks (served from the block store/CDN, no hot byte-cache needed).
-
-**Instance count (order-of-magnitude).** Notification fleet: ~200M idle connections at ~100K-500K/node → **hundreds of connection-bound edge nodes**. Metadata commits: **order tens of shards**, sized for write throughput + ordered journal. Block store: managed S3-class - you size **spend and durability**, not boxes; this is the budget line item.
-
-**The one-line takeaway from E:** **~120K durable, ordered metadata commits/s fanned out over ~200M idle connections, against ~3 EB of write-once content-addressed blocks** - optimize the commit + journal + fan-out path and the $/GB of the byte plane, and let dedup/delta keep the wire cheap.
+**The load-bearing tension, named:** **exact-and-expensive vs 99%-accurate-and-cheap.** Exact rank for a bounded population is a solved problem (a sorted set) at linear memory. Exact rank for a billion-key trending stream is *not* worth its cost, the requirement was never "rank the tail." The whole design hinges on refusing to over-specify precision.
 
 ---
 
-## S - Storage
+## E: Estimation
 
-The two-plane split is assumed (Pastebin proved it); the S-step job is picking the store *type* for the **three** data classes this problem actually has.
+> **RESHADED adaptation:** Estimation is the *decision driver* here, not background sizing. The three numbers from R, **window size, cardinality, lag tolerance**, pick the approach directly. I compute the memory cost of "exact everything" and let it disqualify itself.
 
-**1. File content - the blocks (write-once, immutable, content-addressed, ~exabytes).**
-- *Choice:* a **blob/object store** - **S3** (or GCS/Azure) keyed by **content hash**, erasure-coded for eleven-nines durability at sane $/GB. At the extreme top end, in-house (**Magic Pocket** - the Design-evolution call).
-- *Rejected:* blocks **in a database** - multi-MB blobs in transactional rows waste the buffer pool, blow up replication, and pay 10× the $/GB; ruinous at exabytes. *Also rejected:* a POSIX filesystem - we want a flat content-addressed key space so dedup is a hash lookup, not a directory tree.
+**Leaderboard (bounded cardinality), the sorted-set bill.** A Redis sorted set stores, per member, the ID + score + skiplist/hash overhead, ~100 B. So `10M × 100 B ≈ 1 GB` per leaderboard. **The number to carry: ~1 GB per 10M members.** At 50M, ~5 GB, one beefy node or a few shards. **Bounded and cheap; exact rank is affordable here.** Writes: 1M concurrent players posting every ~10 s ≈ **100K updates/s**, which exceeds one `ZADD` key's ceiling under a hot board, so writes shard (below), but the *data* fits trivially in memory.
 
-**2. Metadata - file tree, versions, namespaces, ACLs (the system of record).**
-- *Choice:* a **sharded relational / NewSQL store** - sharded **MySQL** (Dropbox's historical path) or **Spanner/CockroachDB**. Relational fits because a commit is a **multi-row transaction** (file row + version row + journal row, atomically).
-- *Rejected:* a leaderless eventually-consistent store (Cassandra/Dynamo) as the tree's system of record - sync **requires ordered, read-your-writes consistency**; a device reading a half-applied or out-of-order tree corrupts the user's folder. AP is fine for the immutable *bytes*, not for the *order of changes*.
+**Trending (huge cardinality), why exact disqualifies itself.** Keep an **exact** count per key over a 1-hour window across **1B distinct keys**: `1B × ~50 B ≈ 50 GB` *per window*, write-hot and rolling, times replicas. The kicker: **you discard ~99.9999% of it**, you only return the top ~100. Paying 50 GB to compute a list of 100 is the IC trap. A **Count-Min Sketch** holds frequency estimates in **fixed sub-linear space, tens of MB regardless of cardinality**, paired with a **min-heap of size K**. `~MBs + a 100-entry heap` replaces 50 GB, and the one-sided error (overestimates only) means a false-high on a *cold* key still can't crack the top-100.
 
-**3. The block index + journal (the glue - itself at scale).**
-- *Choice:* the **hash → location + refcount** map is a **sharded KV store**, hash-partitioned by block hash (naturally uniform); the **per-namespace ordered journal** is an append-only log in the metadata store (a monotonic cursor), or a partitioned Kafka-style log at high fan-out.
-- *Rejected:* folding the block index into the metadata DB - ~5T rows with a completely different (hash-uniform point-lookup) access pattern. *Also rejected:* one global journal table - it must be **partitioned by namespace** so one user's sync never scans another's changes.
+**Ingest rate.** A global trending firehose peaks at `~1M events/s`. The CMS update is O(d) hashes, the heap touch O(log K), both cheap, both shardable. A single hot key (one viral hashtag) is a **write-hot counter**, the exact sharded-counter problem; shard it or let per-shard sketches absorb it, then merge.
+
+**What estimation decided:** bounded cardinality → **exact sorted set at ~1 GB/10M**. Huge cardinality, worthless tail → **exact is 50 GB discarded**, so **CMS + heap (MBs)**. Window and lag tolerance decide **live** vs **micro-batch**. The numbers, not preference, draw every line.
 
 ---
 
-## H - High-level design
+## S: Storage
 
-The unifying abstraction is the **namespace**: a logical container of files with **one ordered change journal (a cursor)** and **one ACL**. A user's private root is a namespace; **a shared folder is a namespace mounted into multiple users' trees.** This single idea collapses sharing, sync, sharding, and ACLs into one concept.
+> Two regimes, picked by cardinality. Same query, different store, that *is* the lesson.
+
+
+**1. Bounded leaderboard → in-memory sorted set (exact).** A **Redis sorted set** (skiplist + hash), sharded for write throughput: `ZADD` on update, `ZREVRANGE 0 K` for top-K, `ZREVRANK` for "my rank," `ZRANGEBYSCORE` for "around me", all O(log N) or better, exact, ~1 GB/10M. The requirement (bounded population, exact rank) and the store match perfectly. *Rejected, relational `ORDER BY score LIMIT K`:* every write churns the index and top-K hammers the DB under read load; the sorted set is purpose-built and in-memory. *Rejected, Cassandra/wide-column:* no native ranked-range read.
+
+**2. Huge-cardinality trending → sketch + heap (approximate).** A **Count-Min Sketch** for frequency estimates + a **min-heap of size K** for the current leaders (both standard tools); per-shard sketches **merge** by cell-wise add at query time. *Rejected, an exact per-key counter map:* 50 GB/window for a discarded list of 100, the over-engineering this question screens for.
+
+**3. The durable event log (truth, for reconciliation).** **Kafka** holds the raw stream. The live board is a fast, loss-tolerant projection; a board that must be *exactly* reconciled (tournament payout) is recomputed from the log in **batch**, the same display-vs-billing split as the YouTube view count. Fast board for display; slow exact pipeline for money.
+
+**Window state** (rolling trending) lives as **bucketed sub-sketches**, one CMS per minute, summed over the window and dropped as they age (Data model, below).
+
+---
+
+## H: High-level design
+
+> The shape to make visible: a **streaming ingest tier** fanning events into **per-shard rankers**, and a **query/merge tier** assembling the top-K, exact via sorted sets for bounded populations, approximate via sketch+heap for huge ones.
 
 ```mermaid
 flowchart TB
-    subgraph CLIENT["Client device (sync engine)"]
-      WATCH["File watcher<br/>chunk + SHA-256 hash"]
-      CUR["Local cursor<br/>'synced to N'"]
-    end
+    SRC["Event source<br/>scores or views"] --> ING["Ingest gateway"]
+    ING --> BUS["Kafka event log"]
 
-    WATCH -->|"1. POST /blocks/check (hashes)"| META["Metadata service<br/>(sharded by namespace_id)"]
-    META -->|"missing hashes"| WATCH
-    WATCH -->|"2. PUT /blocks/{hash} (only missing)"| BLK[("Block store<br/>S3 / Magic Pocket<br/>content-addressed, immutable")]
-    WATCH -->|"3. POST /commit (path + hash list)"| META
+    BUS --> RANK["Per shard ranker"]
+    RANK --> EXACT[("Redis sorted set<br/>bounded leaderboard")]
+    RANK --> APPROX[("Sketch plus heap<br/>huge cardinality trending")]
 
-    META -->|"refcount++"| BIDX[("Block index<br/>hash -> location, refcount<br/>(sharded KV)")]
-    META -->|"atomic: file + version + bump cursor"| MDB[("Metadata DB<br/>tree, versions, ACLs<br/>+ per-namespace journal")]
-    META -->|"namespace N advanced"| PUB["Notification service<br/>pub/sub fan-out"]
+    QRY["Top K query"] --> MERGE["Query and merge tier"]
+    MERGE --> EXACT
+    MERGE --> APPROX
 
-    PUB -->|"poke: cursor moved"| NOTIF["Long-poll / WS fleet<br/>~200M idle connections"]
-    NOTIF -.->|"wake"| CUR
-    CUR -->|"4. GET /delta?ns=&cursor=N"| META
-    META -->|"changes since N + new cursor"| CUR
-    CUR -->|"5. GET missing blocks"| BLK
+    BUS -.->|"batch recompute"| BATCH["Batch exact recompute<br/>for reconciliation"]
+    BATCH -.-> EXACT
 
-    style MDB fill:#1f6f5c,color:#fff
-    style META fill:#e8a13a,color:#000
-    style BLK fill:#7a1f1f,color:#fff
-    style NOTIF fill:#33506b,color:#fff
+    WIN["Window roller"] -.->|"age out old buckets"| APPROX
+
+    style EXACT fill:#1f6f5c,color:#fff
+    style APPROX fill:#e8a13a,color:#000
+    style MERGE fill:#2d6cb5,color:#fff
 ```
 
-**Upload - the two-phase, dedup-aware write.** The client chunks a changed file into **4MB blocks**, SHA-256-hashes each, and calls **`/blocks/check`** - "which of these do you already have?" It then `PUT`s **only the missing blocks** to the block store, and finally **`/commit`s** the new file state (`path + ordered hash list + baseVersion`) - one transaction that writes file/version rows, bumps refcounts, and **advances the namespace's cursor** with a journal entry. The check-first handshake *is* dedup and "instant upload" (server has every block → zero bytes uploaded); the commit is the moment of truth - bytes without a commit are orphan blocks, GC'd later. The metadata service then **pokes** every idle connection subscribed to that namespace via pub/sub.
+**Happy path, compressed.** Events land on the **ingest gateway**, append to **Kafka** (durable truth), and fan out to **per-shard rankers**. For a **bounded leaderboard**, each shard owns a slice of members in a **Redis sorted set**; a top-K query reads each shard's local top-K and the **merge tier** combines them (K from each of S shards → final K). For **huge-cardinality trending**, each shard keeps a **per-window CMS + local heap**; the merge tier sums the sketches and merges the heaps. The **window roller** drops expired buckets. When a board must be *exactly* right (payouts, audits), a **batch job** recomputes from the Kafka log, fast path approximate-and-fresh, slow path exact-and-reconciled.
 
-**Sync - the journal pull.** A device's cursor says "synced to N"; its long-poll connection sits idle until poked, then calls **`GET /delta?cursor=N`** → the changes since N plus the new cursor M. It fetches only blocks it doesn't already have, reassembles, and advances to M - now byte-identical to the server for that namespace.
-
-The asymmetry mirrors 5.7: the **thin, ubiquitous** edge is 200M idle connections; the **expensive, ordered** edge is the commit + journal write. Bytes flow client↔block-store and are deduplicated before they leave the client.
-
----
-
-## A - API design
-
-Kept small; the shape of the **two-phase upload** is the whole game.
-
-```
-# --- Upload: three steps, dedup-first ---
-
-# 1. Which of these block hashes do you already have? (the dedup handshake)
-POST /v1/blocks/check
-  body: { hashes: ["<sha256>", ...] }
-  -> 200 { missing: ["<sha256>", ...] }      # upload only these
-
-# 2. Upload a missing block (content-addressed; idempotent - hash IS the key)
-PUT  /v1/blocks/{sha256}
-  body: <up to 4MB of bytes>
-  -> 201 Created                              # or 200 if it raced and already exists
-
-# 3. Atomically commit the new file state (the ordered write that bumps the cursor)
-POST /v1/files/commit
-  body: { namespaceId, path, blocks:["<sha256>",...], baseVersion, mtime }
-  -> 200 { fileId, version, cursor }          # new namespace cursor
-  -> 409 Conflict { serverVersion }           # baseVersion stale -> client makes conflicted copy
-
-# --- Sync: long-poll + delta pull ---
-GET  /v1/namespaces/{namespaceId}/longpoll?cursor=N&timeout=30
-  -> 200 { changed: true, cursor: M } | { changed: false }
-GET  /v1/namespaces/{namespaceId}/delta?cursor=N
-  -> 200 { entries: [ { path, op, blocks:[...], version } ], cursor: M, has_more }
-
-# --- Metadata / sharing ---
-POST /v1/namespaces/{namespaceId}/members   { userId, role }   # role: viewer | editor
-GET  /v1/files/{fileId}/versions            -> [ {version, mtime, size} ]
-POST /v1/files/{fileId}/restore             { version }        # restore = new commit pointing at old blocks
-```
-
-**Design notes (each a choice with a rejected alternative):**
-- **`/blocks/check` before upload** is the keystone. We **reject** a single `PUT /files` streaming the whole file - it re-uploads bytes the server already has, killing the headline NFR. One extra round-trip buys up to 100× bytes.
-- **Content-addressed `PUT /blocks/{hash}`** makes uploads **idempotent and retry-safe**. We **reject** server-assigned block IDs - they lose idempotency and dedup.
-- **`/commit` is one atomic call** carrying `baseVersion`. We **reject** incremental tree mutation - the namespace must never expose a half-applied file, and `baseVersion` is what lets the server return a 409 instead of clobbering.
-- **`/delta` + `/longpoll`** rather than fetching the whole tree - full-tree polling is the bandwidth-death alternative this design exists to avoid (Evaluation).
-
----
-
-## D - Data model
-
-**The load-bearing decisions: shard the metadata by `namespace_id`, and give each namespace a per-namespace journal with a monotonic cursor.** Outline: `namespaces` (cursor, type), `files` (path, latest version), `file_versions` (ordered block-hash list - **versioning rides on dedup**: a version is just a different block list, so retention is a pure cost lever), `namespace_journal` (append-only change feed, range-scanned by `/delta`), `acls` (role per member - **the ACL lives on the namespace**, not per-file). The **block index** (`hash → location, refcount`) shards independently **by block hash** - deliberately decoupled, because a deduped block is shared across many namespaces and belongs to none.
-
-Sharding by `namespace_id` means a `/delta` pull hits **one shard**, a commit is a **single-shard transaction**, and the journal is naturally ordered on one node. We **reject sharding by `file_id` hash** - it scatters one user's tree across every shard, turning "what changed since N" into a fleet-wide scatter-gather and making the ordered journal impossible to maintain cheaply (the same shard-by-the-query's-scope-unit argument as the region sharding).
-
-A consequence worth saying out loud: **a shared folder is one namespace with N ACL entries and one journal**, mounted into N trees. Sharing isn't a special case - it's the namespace abstraction doing its job.
+**The shape to notice:** the same query routes to **one of two engines by cardinality**, both behind a merge tier combining per-shard partials. Sharding buys write throughput and memory; the merge step keeps the top-K correct across shards.
 
 <details>
-<summary>Go deeper - full table layouts (IC depth, optional)</summary>
+<summary>Go deeper, why merging local top-K per shard is correct (IC depth, optional)</summary>
 
-Metadata DB (sharded by `namespace_id`):
+For an **exact** sorted set sharded by member, a member lives on exactly one shard, so its score is complete on that shard. The global top-K is contained in the **union of each shard's local top-K**: any entity in the global top-K must be in its own shard's top-K (it can't be beaten by K others on its own shard without being beaten by K others globally). So reading top-K from each of S shards and merging yields an exact global top-K, at the cost of reading `S × K` candidates. This is a classic top-K merge and is exact for exact per-shard scores.
 
-| Table | Key | Notable columns | Notes |
-|---|---|---|---|
-| `namespaces` | `namespaceId` | `ownerId`, `cursor` (monotonic), `type` (root/shared) | the unit of sync + sharing + sharding |
-| `files` | `(namespaceId, fileId)` | `path`, `latestVersion`, `isDeleted` | one row per file; the tree |
-| `file_versions` | `(fileId, version)` | `blockList[]` (ordered hashes), `size`, `mtime` | a version = a different block list |
-| `namespace_journal` | `(namespaceId, cursor)` | `fileId`, `op` (add/mod/del), `version` | append-only; range-scanned by `/delta` |
-| `acls` | `(namespaceId, userId)` | `role` (viewer/editor) | ACL on the namespace, not per-file |
-
-Block index (separate, hash-sharded KV): `hash` (32B SHA-256, the key), `location` (block-store key), `refcount` (deletion safety), `size` (≤4MB). Journal tail cached hot for `/delta`; blocks erasure-coded in the object store; metadata replicated per 2.4.
+For an **approximate** CMS, the sketch itself is what's approximate, not the merge: CMS is linear, so the cell-wise sum of per-shard sketches equals the sketch you'd get from the combined stream. The per-shard heaps are a candidate cache; the merge re-queries the merged sketch for final frequencies. Error stays one-sided (overestimate only), so a true heavy hitter is never *under*counted out of the top-K.
 
 </details>
 
 ---
 
-## E - Evaluation
+## A: API design
 
-Re-check against the NFRs and break the design on purpose. Five bottlenecks, each fixed with a *named* trade-off.
+> A small surface; the meaningful choices are the **precision flag** and that score-write and board-read are separate paths.
 
-**Bottleneck 1 - full-tree-diff sync would be bandwidth death (why the journal exists).**
-The naive sync - periodically fetch the whole tree and diff - pulls a 10K-file listing repeatedly across **200M devices** for the common case where *nothing changed*, and can't convey *order*, breaking convergence.
-*Fix - the **per-namespace cursor/journal**:* the client stores "synced to N," long-polls until poked, pulls only entries after N. We pay an ordered-log write on every commit to turn **O(tree) sync into O(changes)** - the one mechanism the whole design is organized around.
+```
+# --- Ingest (write-heavy) ---
+POST /v1/boards/{boardId}/events
+  body: { entityId, delta }            # score delta or +1 count
+  -> 202 Accepted                       # async; logged, fanned to rankers
 
-**Bottleneck 2 - the hot shared namespace (fan-out amplification).**
-A 10,000-member company folder: one change must poke 10,000 connections, each triggering a `/delta` - a thundering herd onto one namespace's shard.
-*Fix:* **pub/sub fan-out with coalescing** (50 edits in a minute wake each member ~once - "cursor moved to M" supersedes M-1), **replicate the hot namespace's journal** for read scaling, and cap/split giant memberships. Trade: bounded extra sync latency (seconds) - acceptable for file sync, far cheaper than per-edit herds.
+# --- Top-K (read-heavy) ---
+GET  /v1/boards/{boardId}/top?k=100&window=1h
+  -> 200 { asOf, exact, entries:[{entityId, score, rank}] }
+                                        # exact=false for sketch-backed trending
 
-**Bottleneck 3 - deletion in a dedup'd store (the correctness trap).**
-A block referenced by many files cannot die because *one* of them was deleted - naive "delete file → delete its blocks" silently corrupts every other file sharing those bytes.
-*Fix:* **GC at trillion-block scale - lazy mark-and-sweep over refcount contention; reclaim late, never wrongly.** Refcounts reclaim promptly but the decrement contends on hot blocks (a popular installer referenced by millions - the 3.16 sharded-counter problem); at ~1T blocks, storage is cheaper than counter contention. *Rejected:* exact refcounts as the primary mechanism (or only with heavy batching/approximation). Details in the Design-evolution Go deeper.
+# --- Rank / percentile lookup (leaderboard) ---
+GET  /v1/boards/{boardId}/rank/{entityId}
+  -> 200 { rank, score, percentileBucket }   # exact rank if bounded
+  -> 200 { score, percentileBucket }          # tail: no exact rank, by design
 
-**Bottleneck 4 - the far-behind client (a week offline).**
-`/delta?cursor=N` with N thousands of entries stale would return a huge, fragile payload.
-*Fix:* **paginate `/delta`** (`has_more`), and past a compaction threshold **fall back to a snapshot reset** - send current state rather than replay every entry (a file edited 500 times offline should sync as its *final state*). Trade: the snapshot transfers more than a pure delta, but it bounds journal retention and avoids churn replay.
+# --- Around-me (bounded leaderboard only) ---
+GET  /v1/boards/{boardId}/around/{entityId}?n=10
+  -> 200 { entries:[...] }
+```
 
-**Bottleneck 5 - concurrent edits (never lose a write).**
-Two offline devices edit the same file from the same `baseVersion`; the second `/commit` is stale.
-*Fix:* the first commit wins the path; the second gets a **409** and commits its version as **`report (Alice's conflicted copy).pdf`** - both survive, the user reconciles. We **reject in-file merge (OT/CRDT)** - you cannot 3-way-merge an opaque PSD or XLSX byte-stream; that's the *Docs* problem on structured text, explicitly out of scope. We **reject bare last-write-wins** - silent data loss is the unforgivable failure for a backup product. Conflicted-copy is "ugly but never lies."
+**Design notes (each with its rejected alternative):**
 
-**Re-check vs NFRs:** bandwidth (delta + dedup + journal ✓); durability (eleven-nines erasure-coded immutable blocks ✓); ordered metadata consistency (single-shard transactional commit + per-namespace journal ✓); availability (idle long-poll fleet + retry ✓); scale (namespace-sharded metadata, hash-sharded index, exabyte object store ✓); cost (dedup ~35% + GC + object-store $/GB ✓).
+- **The response carries `exact: bool` and `asOf`.** A trending board is honest that it's a sketch-backed estimate as of a timestamp. *Rejected: pretending every board is exact*, a precision contract the system can't keep at a billion keys.
+- **Rank lookup degrades to a `percentileBucket` for the tail.** "Top 2%" needs no exact rank, avoiding storing exact rank for the long tail. *Rejected: exact rank for everyone*, the ~1 GB/10M (or 50 GB trending) bill the requirement never asked for.
+- **Ingest is `202` async, decoupled from the board read.** *Rejected: synchronous score-then-read*, couples the write-hot ingest path to board-read latency and serializes on the hot key.
 
 ---
 
-## D - Design evolution
+## D: Data model
 
-**At 10× (~10-30 EB, ~1-5M commits/s, ~2B connections):**
-- **Block plane: build-vs-buy becomes the defining cost decision.** S3-class is the right *v1* (durability and ops for free), but at tens of exabytes **$/GB on managed storage dominates the P&L** - this is where Dropbox built **Magic Pocket**, its in-house exabyte store. The Director call: *"S3 until the storage bill crosses the threshold where a dedicated storage org pays for itself in $/GB; then build - a multi-year program I staff and delegate, not whiteboard."* Trade: in-house means owning durability, hardware refresh, and on-call for the most unforgivable failure mode.
-- **Notification fleet scales by connection count, not data** - more edge nodes, with pub/sub fan-out pushed regional.
-- **Metadata plane:** more namespace shards; the rare **cross-namespace move** needs a 2-phase distributed transaction - accept it's slow and rare, keep the common single-namespace commit fast.
+> The decisions that matter: the **shard key** (write throughput), and the **window representation** (so trending can age out cheaply). Exact column schemas are IC detail.
+
+**Bounded leaderboard (exact).** Logical model `{entityId → score}` as a sorted set keyed by `boardId`, **sharded by `entityId`** so writes spread and each member's score is complete on one shard (making per-shard top-K merge exact). Hot single entities get the **sharded-counter treatment** if one entity's update rate exceeds a key's write ceiling.
+
+**Trending window (approximate).** A **ring of per-slice sub-sketches**, one CMS per time bucket (60 one-minute buckets for a 1-hour window). A query sums the in-window buckets; the **window roller** drops the oldest each tick, making "age out old events" an O(1) bucket drop, not a per-key expiry scan.
+
+<details>
+<summary>Go deeper, sliding-window sketches and the heap (IC depth, optional)</summary>
+
+**Bucketed (tumbling sub-windows):** maintain `W` sub-sketches, one per sub-interval. The window frequency of a key = sum of its estimate across the in-window buckets. To slide, drop the oldest bucket and start a fresh one. Trade-off: window granularity = bucket width (a 1-hour window in 1-minute buckets is accurate to ~1 minute at the edges). Memory = `W × sketch_size`, still tens of MB for W=60.
+
+**The top-K heap:** a min-heap of size K keyed by estimated frequency. On each event, update the sketch, read the key's new estimate, and if it exceeds the heap-min (or the key is already in the heap), update the heap. The heap is a *candidate cache*, it can drift, so the authoritative top-K is recomputed by re-querying the merged sketch for the heap's candidates at query time. CMS's one-sided error means a genuine heavy hitter is never undercounted below a cold key, so it won't be wrongly evicted.
+
+Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/width params) are legitimately IC-level and live with the implementing team; the Director-altitude decisions are: shard by entity for exact, bucket the window for approximate, and keep a size-K heap over the merged sketch.
+
+</details>
+
+**Shard key = `entityId` (exact case). The load-bearing write decision.** It spreads write-hot ingest across shards and keeps each member's score complete on one shard, so per-shard top-K merges to an exact global top-K. *Rejected, shard by score range:* a member's rank moves across shards as its score changes (a write becomes a cross-shard move), and the hot score band becomes a hot shard. Shard by identity, merge for rank.
+
+---
+
+## E: Evaluation
+
+> Re-check against the NFRs (tunable precision, freshness, write tolerance, bounded cost, AP availability) and hunt the bottlenecks, naming each trade-off.
+
+**Re-check vs NFRs:** precision, exact sorted set for bounded, CMS+heap for huge, by cardinality. ✓ Freshness, live for low lag, micro-batch where seconds are fine. Write tolerance, sharded writes + sharded counters on hot keys. Cost, CMS bounds trending to MBs; sorted set bounded by cardinality. AP, eventually consistent by design. Now the bottlenecks.
+
+**Bottleneck 1, the write-hot key (a viral hashtag, a top streamed song).** One entity takes a disproportionate share of events; its counter is the hottest write in the system. *Fix:* the **sharded-counter pattern**, fan its increments across N sub-counters (or let per-shard sketches each absorb 1/S of the stream), merged on read. *Trade-off:* write ÷ N for read × N, hidden behind the periodic merge, the exact deal. *Rejected:* a single atomic counter, a hard throughput wall.
+
+**Bottleneck 2, exact rank for a huge population is the cost wall.** Exact rank over a billion trending keys is 50 GB/window discarded down to 100. *Fix:* **don't.** Exact **top-K** (heap) + **approximate frequencies** (CMS) + **percentile buckets** for the tail, giving up exact rank for a long tail the requirement never asked for, to cut memory ~1000×. This *is* the central decision, surfaced as a bottleneck on purpose.
+
+**Bottleneck 3, top-K merge across shards (read cost).** Reading `S × K` candidates on every query is wasteful on a read-heavy board. *Fix:* **cache the merged top-K** with a short TTL (the freshness budget); reads serve it O(1), the merge runs on the TTL cadence, the same **freshness-vs-cost knob** as the counter rollup interval and the search-index refresh. *Rejected:* merging on every read.
+
+**Bottleneck 4, window aging (trending must forget).** Old events must stop counting or yesterday's news trends forever. *Fix:* **bucketed sub-sketches** dropped as they age (O(1) per roll), not per-key TTLs (a billion-key scan). *Trade-off:* window edges accurate to one bucket width (±1 min), invisible for a trending board.
+
+**Bottleneck 5, when the board pays out (exactness for money).** A tournament prize or ad-payout ranking can't ride a sketch. *Fix:* a **batch exact recompute** from the Kafka log, validated, deduped, anti-cheat-filtered, separate from the display board, which lags minutes/hours for exactness. The Director move: **two boards, two consistency contracts**, never let the cheap display board be the source of truth for money (the display-vs-billing split, applied).
+
+**Closing re-check:** precision set by cardinality and requirement, not taste; freshness is a TTL dial; hot keys sharded; memory bounded (MBs trending, ~1 GB/10M leaderboard); money reconciled offline. The AP display path and the exact batch path stay apart.
+
+---
+
+## D: Design evolution
+
+> Push each axis up an order of magnitude, find what breaks first, name what you'd hand to a specialist.
+
+**At 10× (global firehose, multi-region, ~10M events/s):**
+- **Ingest goes regional.** Per-region rankers maintain local boards; a global merge tier sums regional sketches / merges regional top-K. *Trade-off:* the global board lags regional ones by the merge interval, accepted for a horizontally scalable ingest tier.
+- **The exact sorted set sub-shards** further as the population grows (50M → 500M → many shards); "around-me" within a shard stays exact while deep global rank becomes a merged estimate. *Trade-off:* exact rank for the head, buckets for the deep tail, the same discipline, scaled.
 
 **Hardest trade-offs to defend:**
-- **Fixed 4MB blocks vs content-defined chunking (CDC):** **fixed-4MB for v1** - simple, uniform addressing, and dedup/delta work for in-place edits (most real saves); **CDC survives prepends/inserts but adds complexity - revisit if insert-heavy workloads appear in telemetry.** Naming fixed chunking's boundary-shift cost is what makes the rejection real, not hollow.
-- **Refcount vs GC for deletion** (Bottleneck 3): prompt-reclaim-with-contention vs simple-but-lazy. I lean GC at a trillion blocks.
-- **Sync latency vs fan-out cost:** coalesced pokes trade a few seconds of latency for surviving big shared folders - defensible because file sync isn't real-time.
+- **The precision boundary.** Exact top-K + bucketed tail is the whole bet. Too exact (rank everything) → the cost wall; too coarse (sketch the head too) → a wrong #1, the one thing this product can't get wrong. Keep the **exact surface as small as the product demands, the top-K, and no larger.**
+- **The freshness/cost dial.** The merge/cache TTL trades staleness for compute (esports wants sub-second; "trending this week" tolerates minutes).
+- **Sketch error vs the head.** CMS overestimates, so a cold key never displaces a true heavy hitter, but two *close* hitters near rank K can swap. If exact ordering at the bottom of the top-K matters, widen the sketch or keep an exact counter for just the heap's candidates.
 
-<details>
-<summary>Go deeper - chunking boundaries and dedup-store GC (IC depth, optional)</summary>
-
-**Why fixed chunking breaks on inserts.** With fixed 4MB boundaries, inserting bytes near the *start* of a file shifts every subsequent boundary, so *every* block's hash changes - dedup and delta break on that file and you re-upload the whole thing despite a one-byte insert. **Content-defined chunking** (rsync-style **rolling hash**) places boundaries based on *content*, not offset, so an insert dirties only the local chunk - boundaries "heal." Costs: variable-sized blocks, more CPU, more complex addressing. Fixed wins for v1 because most real edits are in-place overwrites at stable offsets; the bake-off metric is dedup ratio vs CPU cost on real file corpora.
-
-**Refcounts vs mark-and-sweep, mechanically.** Refcounts: `++` on commit, `--` on delete, free at 0 - exact and prompt, but the decrement is a write-hot counter on popular blocks (millions of references to one installer block - the 3.16 problem), and a miscounted decrement *wrongly deletes shared data*, the worst failure class. Mark-and-sweep: periodically scan which blocks any live version still references and delete orphans - contention-free and safe-by-construction (reclaim later, never wrongly), but dead bytes are paid for until the sweep, and the scan over ~1T blocks is itself a heavy distributed batch job (incremental/partitioned sweeps in practice). Middle ground: batched/approximate refcounts feeding a verifying sweep.
-
-</details>
-
-**What I'd revisit:** sharded MySQL (mature, operationally known) vs Spanner/CockroachDB (cleaner horizontal transactions) for the metadata store - an ops-and-integrity call I'd benchmark under the real commit mix.
-
-**Where I'd delegate (the Director move):**
-- **The chunking/diff algorithm:** *"the storage/sync team owns the chunker behind `chunk(file) → [blocks]`; my prior is fixed-4MB, moving to CDC if telemetry shows insert-heavy workloads - benchmarked on dedup ratio and CPU, not asserted."*
-- **The exabyte object store (Magic Pocket-class):** an entire storage org - erasure coding, hardware, placement. *"I scope and fund it; I don't design the coding scheme on the whiteboard."*
-- **Real-time co-editing (Docs/OT):** explicitly scoped out and handed to a collaboration team - same files, fundamentally different problem.
+**Where I'd delegate (the explicit Director move):**
+- **Sketch tuning:** *"Data-platform owns CMS width/depth and HLL precision to hit our error target; my prior is a CMS sized for <1% error on the top-K with per-minute buckets, they benchmark it against our key distribution."* (Mechanics in the count-min-sketch building block.)
+- **Anti-cheat / score validation:** *"Trust-and-safety owns score validation and bot filtering before events count; my prior is server-authoritative scoring with anomaly detection on ingest."*
+- **The exact reconciliation pipeline:** *"Data-eng owns the batch recompute from the event log for any board that pays out; my prior is a dedup-and-validate job, sketch board for display only."* What I keep, the exact-vs-approximate decision, the shard/merge shape, the freshness dial, and what I hand off with priors, is the altitude.
 
 ---
 
-## Trade-offs table - the pivotal decisions
+## Trade-offs: the pivotal decisions
 
 | Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
-| **Chunking strategy** | **Whole-file** | **Fixed-size 4MB blocks** (content-addressed) | **Content-defined chunking (CDC)** | Whole-file: tiny immutable files only. **Fixed-4MB: the right v1 - simple, dedup + delta work for in-place edits (Dropbox's choice).** CDC: prepend/insert-heavy workloads where fixed boundaries shift. |
-| **Sync mechanism** | **Full-tree diff / polling** | **Per-namespace cursor + journal** |, | Full-tree: never at this scale - O(tree) across 200M devices. **Cursor/journal: O(changes), ordered, long-poll-driven - the right call.** |
-| **Conflict resolution** | **Silent last-write-wins** | **LWW + conflicted copy** | **In-file merge (OT/CRDT)** | Silent LWW: never - silent loss is unforgivable. **Conflicted-copy: the right call for opaque blobs (Dropbox's choice).** OT/CRDT: structured text with real-time co-editing - that's *Docs*, out of scope. |
+| **Ranking engine** | **Exact, Redis sorted sets** | **Approximate, Count-Min Sketch + size-K heap** | **Batch, MapReduce / stream aggregation** | **A** for bounded, known cardinality needing exact rank (game leaderboard, ~1 GB/10M). **B** for huge cardinality where only top-K matters and the tail is worthless (trending), MBs, one-sided error. **C** for exact-and-reconciled boards that pay out, where minutes of lag are fine. |
+| **Tail precision** | **Exact rank for all** | **Exact top-K + percentile buckets** (our default) | **Top-K only, no per-entity rank** | **A** only when the population is small *and* exact rank of everyone is a real requirement. **B** the default, exact head, cheap buckets. **C** when nobody needs "my rank." |
+| **Freshness** | **Live board** (per event) | **Micro-batch / cached merge with TTL** (our default) | **Periodic batch** | **A** for sub-second live ranked play. **B** for seconds-tolerant boards, TTL is the freshness/cost dial. **C** for "trending this week," where minutes are fine. |
 
 ---
 
 ## What interviewers probe here (Director altitude)
 
-- **"What's the read:write skew, and why is a single ratio the wrong answer?"** - *Strong signal:* names **two planes** - write-once/dedup'd blocks vs a metadata plane **read-amplified by device + member fan-out** - and designs the cheap-connection / expensive-commit split. *Red flag:* "read-heavy like every app" and a byte read-cache the immutable block store already obviates.
-- **"How does a device know what changed without re-downloading everything?"** - *Strong:* the **per-namespace cursor + journal**, contrasted with full-tree-diff death. *Red flag:* periodic tree fetch-and-compare, or no notion of *order*.
-- **"You dedup blocks across users. How do you delete safely?"** - *Strong:* refcount-or-GC with the trade named (prompt-but-contended vs lazy-but-safe), leaning GC at ~1T blocks. *Red flag:* "delete the file's blocks" - corrupts every other file sharing them.
-- **"Two offline devices edit the same file. What happens - and why not merge?"** - *Strong:* **conflicted copy, never lose a write**, and why OT/CRDT is the *Docs* problem on structured text, a deliberate scope cut. *Red flag:* bare last-write-wins, or merging binary blobs.
-- **"Where's the spend?"** - *Strong:* **$/GB of the exabyte block plane**; dedup and GC are the levers, and at the top end it's a **build-vs-buy** call (S3 → Magic Pocket) - a staffed multi-year program. *Red flag:* obsessing over compute while storage $/GB is the P&L.
+- **"Is exact rank actually a requirement?"**, *Strong:* asks it in the first two minutes, splits into **exact top-K + bucketed tail**, notes "rank #4,000,001" is never asked, frames precision/cost/freshness as the three knobs set in R. *Red flag:* assumes "rank everyone exactly" and heroically scales to fit it.
+- **"Trending and a leaderboard, same or different?"**, *Strong:* "Same problem, ranked heavy hitters over a window, differing only on cardinality and tail precision; the engine (sorted set vs sketch+heap) falls out of those two numbers." *Red flag:* two unrelated systems, or a sketch on a 10M-player board that fits exactly in ~1 GB.
+- **"A billion distinct trending keys, what's the memory bill, and how do you cut it?"**, *Strong:* exact ≈ 50 GB/window *discarded down to 100*, replaced with **CMS (MBs) + a size-K heap**, one-sided error making a cold-key false-high harmless. *Red flag:* a giant exact counter map, or HLL (cardinality, wrong tool) for a frequency/top-K question.
+- **"How does the board forget old events for a rolling window?"**, *Strong:* **bucketed sub-sketches** dropped as they age (O(1)). *Red flag:* per-key TTL scan over a billion keys.
+- **"What does this cost, and what would you delegate?"**, *Strong:* trending is **MBs of sketch**, leaderboard **~1 GB/10M**; delegates sketch tuning and anti-cheat with priors; keeps a separate **exact batch board for payouts**. *Red flag:* hand-tunes CMS rows in the room, or lets the display board pay creators.
 
 ---
 
 ## Common mistakes
 
-- **Re-treading the metadata/blob split as the headline.** It's table stakes (Pastebin). The new crux is **sync** - cursor/journal, dedup, conflict.
-- **Full-tree-diff sync.** O(tree) per poll across 200M devices. The per-namespace cursor + journal makes it O(changes).
-- **Uploading whole files.** Skips the `/blocks/check` handshake - the headline bandwidth NFR dies. Chunk, hash, ask-what's-missing, upload only the new.
-- **Deleting a dedup'd block on single-file delete.** Corrupts every other file sharing it. Refcounts or GC - and name the trade.
-- **Merging conflicts on binary blobs.** That's *Docs* on structured text. For opaque files: **conflicted copy** - ugly but never loses a write.
+- **Assuming exact rank for the whole population is the requirement.** It rarely is, exact top-K + percentile buckets for the tail collapse the cost. Interrogate precision in R; it's the whole problem.
+- **Treating trending and leaderboard as different problems.** Same ranked-heavy-hitters query; only cardinality and tail precision differ. Pick the engine from those two numbers.
+- **Exact counting a billion-key stream.** ~50 GB/window to return a list of 100, use CMS + a size-K heap (MBs, one-sided error).
+- **Wrong sketch for the question.** HLL counts *distinct* (cardinality); CMS counts *frequency* (top-K). HLL for "top hashtags" is a category error.
+- **Letting the fast display board be the source of truth for money.** Payout/tournament rankings need an exact batch recompute from the event log; the sketch board is display-only.
 
 ---
 
-## Interviewer follow-up questions (with model answers)
+## Practice questions (with model answers)
 
-**Q1. Estimate storage and the commit rate, and defend your per-user basis.**
-> *Model:* Basis stated first: **blended across all 500M registered at ~10GB/user** - free tier dominates, so a blended 50GB would be indefensible. Raw `= 5 EB`; dedup+compression ~35% → **~3 EB effective**. At ~1MB/file that's **~5T files ≈ ~5T blocks** (most files are one sub-4MB block), and the chain ties out (`10GB/1MB = 10K files/user`). Writes: ~100 changes/user/day × 100M DAU → **~120K commits/s avg, ~300-500K peak**. The headline is the pairing: **~120K durable ordered commits/s fanned out over ~200M idle connections.** The soft knob is changes/user/day - I'd anchor it and let the interviewer dial it.
+**Q1. Top-10 trending hashtags over the last hour, out of a billion distinct tags. Walk the design.**
 
-**Q2. Walk me through the upload path. Why the `/blocks/check` round-trip before uploading?**
-> *Model:* Chunk into **4MB blocks**, SHA-256 each locally, call **`/blocks/check`** → the server says which hashes it's missing; `PUT` **only those** (content-addressed, idempotent); then **`/commit`** the path + ordered hash list + `baseVersion` in one transaction that bumps refcounts and advances the namespace cursor. The check-first round-trip *is* dedup and instant upload: edit 2 slides in a 50MB deck → upload ~4-8MB (**~10×**); the file already exists server-side → **~0 bytes**. One extra RTT buys up to 100× bandwidth - rejecting it means re-uploading bytes the server already has.
+> *Model answer:* I don't keep exact counts for a billion keys, ~50 GB/window to return 10 items, almost all discarded. I use a **Count-Min Sketch** for per-key frequency in fixed sub-linear space (tens of MB) plus a **min-heap of size K** for the current top-10. The 1-hour window is a **ring of per-minute sub-sketches**; the roller drops the oldest each tick (O(1), not a per-key scan). Ingest shards by key region; per-shard sketches **merge** by cell-wise add at query time, and CMS's one-sided error means a true heavy hitter is never undercounted out of the top-10. The board is AP, `exact:false`, fresh to ≤ the merge TTL. If it ever pays out, recompute exactly in batch from the Kafka log, display approximate, payout reconciled.
 
-**Q3. Design the sync feed. What about a device offline for a week?**
-> *Model:* Each **namespace** has a monotonic **cursor** and an ordered **journal**. A device stores "synced to N," holds an idle long-poll, and on a poke calls `/delta?cursor=N` → entries since N + new cursor, fetching only blocks it lacks. **O(changes), not O(tree)** - full-tree diff across 200M devices is bandwidth death for the no-change common case. Far-behind client: **paginate `/delta`**, and past the journal's compaction threshold **fall back to a snapshot reset** - a file edited 500 times offline syncs as its final state, not 500 deltas. Trade: snapshot transfers more, but bounds journal retention.
+**Q2. A game leaderboard with 20M ranked players. Sorted set or sketch?**
 
-**Q4. Two devices edit the same file offline, both reconnect. What happens? Why not merge?**
-> *Model:* Both committed from the same `baseVersion`; the first wins the path, the second gets a **409** and writes a **conflicted copy** (`report (Bob's conflicted copy).pdf`) - both versions survive, the user reconciles. I deliberately don't merge inside the file: it's an **opaque binary blob** with no meaningful 3-way merge. OT/CRDT merge is for structured text with real-time co-editing - **Google Docs**, which I scoped out. **Silent last-write-wins is the unforgivable failure** for a backup product, so I reject it explicitly.
+> *Model answer:* **Sorted set, exact.** Cardinality is bounded and known, so cost is bounded: ~100 B × 20M ≈ **~2 GB**, a couple of Redis nodes. I get exact rank, `ZREVRANGE`, `ZREVRANK`, `ZRANGEBYSCORE`, all O(log N). A sketch would *throw away* exactness I can cheaply afford and can't even answer "my exact rank." Shard by `playerId` for write throughput, merge per-shard top-K for the global head; hot single players get the sharded-counter treatment. The sketch is right only when cardinality is huge and the tail is worthless, not here.
+
+**Q3. The leaderboard write path is melting on a hot player during a streamed event. What's happening and what's the fix?**
+
+> *Model answer:* That player's score key is the hottest **write** in the system, every update serializes on one key (the hot-key write-contention wall). Replicas don't help; replication adds read capacity, not write throughput to one key. **Shard the counter:** fan the increments across N sub-counters, sum on read; size N from peak rate ÷ per-key ceiling. The sorted-set entry updates from the rolled-up total. Trade-off: write ÷ N for read × N behind the rollup, and the displayed score trails by ≤ the rollup interval, fine for a leaderboard.
+
+**Q4. Why is "exact rank for everyone" the wrong default, and when is it right?**
+
+> *Model answer:* It's wrong when the population is huge and the tail is worthless: nobody asks the exact rank of the four-millionth entity, so paying linear memory (50 GB/window for trending) to compute it is cost with no requirement behind it. The right default is **exact top-K + percentile buckets** ("top 2%") for the tail. It *is* right when the population is **bounded and small enough that exact is cheap**, a ~10-50M-player leaderboard at ~1 GB/10M, *and* the product genuinely needs "my exact rank." Keep the exact surface as small as the requirement demands.
 
 ---
 
 ### Key takeaways
-- This is a **sync-and-conflict** problem; the metadata/blob split is table stakes. The crux: keep **N devices byte-identical, cheaply, under concurrent edits** - via **delta sync + content-hash dedup + a journal/cursor + conflicted-copy**.
-- The headline is **two planes, not one QPS**: **~120K durable ordered commits/s** fanned out over **~200M idle connections**, against **~3 EB** of write-once blocks. State the per-user basis and make the chain tie out.
-- **Fixed 4MB content-addressed blocks + SHA-256 dedup**; the **two-phase upload** (`check → PUT → commit`) *is* dedup and instant upload. Fixed chunking's cost is boundary shift on inserts - CDC fixes it at the price of complexity; revisit on telemetry.
-- The **per-namespace cursor + journal** is the load-bearing sync mechanism (O(changes), not O(tree)); the **namespace** unifies sync, sharing, sharding, and ACLs - **shard by `namespace_id`** (reject file-id hash: scatter-gather).
-- **Director moves:** dedup'd deletion = **lazy GC over refcount contention** (reclaim late, never wrongly); hot shared namespaces need **coalesced pub/sub fan-out**; the byte plane is a **build-vs-buy** call (S3 → Magic Pocket); **delegate the chunker** with a stated prior.
 
-> **Spaced-repetition recap:** Dropbox/Drive = **sync**, not storage. Three moves: **delta** (only changed 4MB blocks), **dedup** (SHA-256 content addressing; the `/blocks/check` handshake = instant upload), **conflicted-copy** (never lose a write; merge is for *Docs*). A **per-namespace cursor + journal** drives sync - O(changes) - and the **namespace** ties sync+sharing+sharding+ACLs together → **shard by namespace_id**. Headline: **~120K ordered commits/s behind ~200M idle connections**, against **~3 EB** of immutable blocks. Deletion needs **GC (or refcounts)**; the byte plane's **$/GB** is the budget (S3 → Magic Pocket).
+1. **Trending/top-K and the leaderboard are one problem**, ranked heavy hitters over a window, separated only by **cardinality** and **tail precision**. Pick the engine from those two numbers, not from taste.
+2. **Interrogate whether exact rank is even a requirement.** The default is **exact top-K + percentile buckets** for the tail; "rank #4,000,001" is never asked. Asked in R, this collapses the design.
+3. **Bounded cardinality → exact Redis sorted set at ~1 GB per 10M members.** **Huge cardinality → CMS + size-K heap** in MBs, since exact is ~50 GB/window discarded down to 100. **Batch recompute** for boards that pay out.
+4. **Apply the building-block tools:** CMS (frequency/top-K, one-sided error), sharded counters for hot keys, and the **display-vs-billing split**, fast approximate board for display, exact batch board for money. Mechanics live in the count-min-sketch building block.
+5. **Precision, cost, and freshness are one coupled dial.** Set precision in R; cap cost with sketches and bounded sorted sets; tune freshness with the merge/cache TTL. Window aging is an O(1) bucketed-sketch drop.
+
+> **Spaced-repetition recap:** Top-K / trending / leaderboard = **one problem, ranked heavy hitters over a window**, under three knobs (precision, cost, freshness) set in R. Ask first: *exact rank for everyone, or exact top-K + buckets?*, the answer collapses the design. **Bounded cardinality → exact Redis sorted set (~1 GB/10M); huge cardinality → CMS + size-K heap (MBs, one-sided error), since exact is ~50 GB/window thrown away; payouts → batch exact recompute.** Shard by entity, merge per-shard top-K or sum sketches; roll the window with O(1) bucketed sub-sketches. Reuse the building-block tools (CMS, sharded counters, display-vs-billing); board is AP, never the source of truth for money.
 
 ---
 
-*End of Lesson 5.8. Dropbox/Drive reuses the metadata/blob split, shard-by-the-query's-scope-unit, the journal/log discipline, and sharded-counter contention - but its distinctive crux is **sync**: a cursor/journal feed plus dedup'd delta upload, where RESHADED's R-step consistency bar and E-step fan-out math decide the architecture before any box is drawn. Next: 5.9 YouTube/Netflix - the video upload, transcode-ladder, and CDN-delivery problem.*
+*End of Lesson 5.8. Top-K / trending / leaderboard is the course's pure altitude test: the IC drowns in sketch math; the Director frames exact (sorted set) vs approximate (CMS + heap) vs batch in five minutes and decides against the numbers, applying the heavy-hitter and sharded-counter tools rather than re-deriving them, and inheriting its display-vs-billing split. Related: the ad-click aggregator and the count-min-sketch building block this lesson applies.*

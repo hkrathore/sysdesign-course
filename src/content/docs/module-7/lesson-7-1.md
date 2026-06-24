@@ -1,283 +1,150 @@
 ---
-title: "7.1 — Parking Lot"
-description: The #1 LLD curveball as a restraint test, lock scope to three entities, apply Strategy only where a requirement demands it, and volunteer the last-spot race with an atomic claim before the interviewer asks.
+title: "7.1 — Data Platforms for System Designers"
+description: What an analytical data platform actually is from an architecture POV — a continuously-rebuilt, append-mostly, scan-optimized projection of operational truth on decoupled storage and compute — and the freshness, scan-cost, volume, and trust model you must design around.
 sidebar:
   order: 1
 ---
 
-> **This is the most-asked low-level design problem in the industry, Amazon, Google, Microsoft, Uber all use it, and every OOD course opens with it, precisely because it is small.** A junior candidate fills the whiteboard with an inheritance tree and four design patterns before asking a single question. A Director answer locks scope to 2-3 clean entities, builds the boring v1 the stated requirements paid for, **volunteers the one real correctness problem (two cars racing for the last spot) unprompted**, and shows where the design would flex, without building that flexibility on spec. The interviewer is not scoring UML vocabulary. They are scoring **restraint**, a question about how you'll run an org, asked through a parking lot.
-
 ### Learning objectives
-- Adapt the **RESHADED** spine to an LLD problem, say out loud which letters shrink (E becomes capacity math, not QPS) and which transform (A = class interfaces, H = class/state diagram, D = entity model).
-- Practice the Director meta-skill this problem exists to test: **lock scope first**, name what you're cutting, and resist anticipatory abstraction (gold-plating) until a requirement demands it.
-- Apply the **Strategy pattern exactly once, where a requirement varies** (pricing), and defend why nothing else in v1 deserves a pattern.
-- Handle the **multi-threaded variant**: make spot assignment atomic so two cars racing for the last spot cannot both win, the same `AVAILABLE → HELD → OCCUPIED` shape as Ticketmaster's seat claim, at micro scale.
-- Evolve the design under new constraints (multi-floor, dynamic pricing, gate hardware, a city-wide chain) and name the point where LLD turns back into system design.
+- State the **OLTP ↔ OLAP divide** as the foundational split: an operational store answers *"what is the state of this one entity right now?"*, an analytical platform answers *"what happened across all entities over time?"*, and the two access patterns force different storage, engines, and cost models.
+- Describe a data platform at **architecture altitude**: a **continuously-rebuilt, append-mostly, scan-optimized, decoupled storage/compute projection of operational data** you reshape for questions, not a database of record.
+- Reason in the platform's four governing quantities, **freshness, scan-cost, volume, and trust**, the way you reasoned in QPS and storage for OLTP, and know that pushing freshness costs money and complexity.
+- Build the **analytical cost model**, *bytes scanned × $/TB* (or *compute-hours × cluster*), and know the lever is **how much data each query touches** (partition pruning, columnar projection), not "add a cache."
+- Name the **failure modes** a data-platform designer engineers around, stale-presented-as-fresh, silently-wrong numbers, runaway cost, painful backfills, schema drift, before reaching for any tool.
 
 ### Intuition first
-Picture the lot attendant who ran parking before software: a clipboard with one row per spot, a pad of numbered tickets, and a price card taped to the booth window. Park a car → cross off a spot, tear off a ticket, write the time. Car leaves → look up the ticket, check the price card, collect, un-cross the spot. That clipboard **is** the design: spots, tickets, a pricing rule. Three things.
+A data platform is the machinery between the **cash registers** and the **analyst's desk**. Every operational database in your company is a cash register: it records one transaction at a time, instantly and exactly, and answers *"what does this customer owe right now?"* It is tuned for a million tiny, precise, present-tense questions. The analyst upstairs has the opposite job: she wants *"revenue by region by month for the last two years,"* a question no single register can answer because it spans every register and all of time. So someone has to **continuously copy every receipt off every register, reshape the pile into something you can sweep through fast, and lay it on her desk fresh enough to be useful.** That copying-and-reshaping machine is the data platform.
 
-Everything a weak answer adds, `AbstractVehicleFactory`, a `Car`/`Truck`/`Motorcycle` hierarchy with no differing behavior, an observer bus for a lot with no observers, is something the attendant never needed. The question is deliberately undersized so the interviewer can watch what you do with the empty space. **Filling it is the failure.** The strong move is to keep the clipboard, then point at the one place it genuinely breaks: two entry gates, one spot left, two attendants crossing off the same line at the same moment. *That*, atomic assignment under contention, is the real engineering here, and you raise it before they do.
+That single image carries the design consequences. **You are working on a copy, not the original**, the platform never owns the source of truth, so it must be *rebuildable* from the registers when it drifts or breaks. **The analyst sweeps, she doesn't look up**, her queries scan millions of rows to return one number, which is the opposite of the cash register's point lookup and demands a completely different storage layout. **"Fresh enough" is a dial with a price tag**, getting last night's receipts onto her desk by morning is cheap; getting each receipt there within a second of the swipe is a different, far more expensive machine. And **the pile is only as trustworthy as the copying**, if a register quietly starts mislabeling receipts, her beautiful chart is confidently, precisely wrong, and nobody notices for a week. Get this picture right and the rest of the module is detail.
 
----
+### Deep explanation
 
-## R: Requirements
+**The OLTP ↔ OLAP divide is the foundational fact, and everything else falls out of it.** the earlier modules of this course live in the **OLTP** world, *online transaction processing*: serve a user, read or write one entity (a user, an order, a message) with millisecond latency, keep it normalized and consistent, optimize for high-concurrency point access. A data platform lives in the **OLAP** world, *online analytical processing*: scan billions of rows, group and aggregate across time and dimensions, return a comparatively tiny result, optimize for throughput-over-volume rather than latency-per-row. The Director-altitude statement: *OLTP answers questions about one entity now; OLAP answers questions about all entities over time, and trying to serve one with the other's machinery is the most common and most expensive mistake on this whole topic.* You **reject** "just run the analytics query against the production Postgres" because a full-table aggregate scan competes with, and starves, the point-lookup traffic that pays the bills, and the row-oriented layout reads every column to use one. The divide is why analytical systems exist as a separate discipline.
 
-> Identical to HLD: scope is the first signal. In LLD the cut list matters even more, because every uncut requirement becomes a class, and classes are where gold-plating hides.
+**A data platform is a projection, not a database of record, and that word governs its architecture.** The operational stores are the source of truth; the platform holds a **derived, reshaped, denormalized copy** of their data, continuously rebuilt and optimized for questions. Four consequences a designer must internalize:
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *One facility or a chain?* → **One lot, single facility.** (A chain changes S and E entirely, see Design evolution.)
-- *Vehicle types?* → **Motorcycle, car, truck**, mapping to spot sizes (small/regular/large); a car may take regular or large, a truck only large.
-- *Floors?* → Assume **4 floors**, but model a flat pool of spots first; add `Floor` only if a requirement (per-floor displays, nearest-to-elevator) demands it.
-- *Payment?* → **Pay at exit**, fee = f(duration, vehicle type). Hourly now; "pricing may change", noted, that phrase is what will justify a Strategy later.
-- *Multiple entry/exit gates?* → **Yes, 2 entry + 2 exit.** The question that smuggles in the concurrency requirement, ask it yourself.
+- **It is read-optimized for scans, not point lookups.** Analytical queries touch huge row counts and few columns, so the storage is **columnar** and the engines are built to stream gigabytes through aggregation, not to fetch one row fast.
+- **It is append-mostly and time-partitioned.** Data arrives as a flow of events or periodic loads and is rarely updated in place; history is retained and sliced by time. The instinct "delete the old rows" is replaced by "partition by day and tier the cold partitions to cheap storage."
+- **Storage and compute are decoupled.** The defining architectural shift of the modern era: data sits in cheap object storage (S3/GCS) and **elastic, ephemeral compute** is pointed at it on demand. You pay for scan and for the hours a cluster runs, not for an always-on box sized to peak. This is the opposite of the OLTP server you keep hot 24/7.
+- **It must be rebuildable.** Because it is a copy, every table should be reproducible from retained raw inputs by re-running a transformation. That single property, *idempotent recomputation over retained raw*, is what makes backfills, bug fixes, and schema changes survivable.
 
-**Functional requirements:**
-1. **Park:** assign a free, size-compatible spot at entry; issue a ticket.
-2. **Unpark:** accept the ticket at exit, compute the fee, free the spot.
-3. **Availability:** report free spots per spot type (for the entry display).
+**You design in four quantities, not in QPS alone: freshness, scan-cost, volume, and trust.** OLTP design reasons in requests/sec, latency, and storage. Analytical design adds and reweights:
 
-**Explicitly CUT (say the list out loud):** reservations, valet, EV charging, monthly passes, loyalty, license-plate recognition, a mobile app, multi-lot administration. Each cut gets one sentence, *"Reservations turn spot assignment from a queue-pop into a time-indexed search, different problem; out of v1"*, so the interviewer hears you cut **knowingly**, not lazily.
+- **Freshness** is how stale the served data is, the lag from an event happening to it being queryable. It is a *requirement you extract*, not a default, and every rung up the ladder (hours → minutes → seconds) costs more money and operational complexity (the batch-vs-stream trade).
+- **Scan-cost** is the dominant cost axis: analytical cost scales with **bytes scanned**, not rows returned or requests served. A query that returns one number can cost dollars if it scans a terabyte.
+- **Volume** grows effectively without bound, you retain history, so the design must assume TB→PB and lean on storage/compute separation, partitioning, and tiering rather than a bigger box.
+- **Trust** is whether the number is *right*, the analytical analog of correctness. It is engineered with data-quality tests, contracts, and lineage, and its absence is the failure mode nobody sees until a decision is made on a wrong figure.
 
-**Non-functional requirements:**
-- **Correctness under concurrency:** with multiple gates, the same spot must never be issued twice, even for the last spot. This is the invariant of the problem.
-- **Simplicity / evolvability:** smallest model that satisfies the above; documented seams where known-likely changes (pricing, floors) would attach.
-- **Auditability of money:** every ticket and payment durable, fee disputes are the operational reality of parking.
+**The cost model is bytes-scanned, and the lever is how much data each query touches.** Two pricing shapes dominate, and you design the model, not this month's price (the same discipline you apply to LLMs):
 
----
+> **On-demand / serverless** (e.g. BigQuery): cost ≈ **bytes scanned × \$/TB**. A 1 TB scan at ~\$5/TB is **~\$5 per query**; 10,000 such queries a day is **~\$50k/day** if you let every query read the whole table.
+> **Provisioned compute** (e.g. Snowflake/Spark clusters): cost ≈ **cluster size × hours running**, plus **\$/TB-month** for storage, decoupled.
 
-## E: Estimation
+The headline a Director carries: **analytical cost is controlled by data layout, not by caching.** You cut the bill by making each query scan less, **partition pruning** (skip whole days/regions the query doesn't ask for), **columnar projection** (read only the columns selected), **clustering/sorting**, and **pre-aggregation**. A well-partitioned table turns that \$5 scan into a \$0.05 scan by reading 1% of the bytes. "It scales" is banned here exactly as everywhere else: you quantify the scan.
 
-> Here is the first loud adaptation: **E nearly drops.** There is no QPS story, there is capacity sizing and an arrival rate, and the honest conclusion is that the numbers are tiny. Saying "the numbers are tiny, so the design is driven by correctness and maintainability, not throughput" *is* the Director estimation answer.
+**Freshness is a lag budget you assemble from three hops.** Served freshness ≈ **ingestion lag + processing lag + serving lag**. Batch loads give hours; micro-batch gives minutes; true streaming gives seconds; a real-time OLAP store gives sub-second *queries* over seconds-fresh *data*. Each rung is a real engineering and cost step, so you set the freshness contract from the requirement, "finance reports tolerate a day, the ops dashboard needs a minute, the fraud signal needs a second", and pay only for the rung you need. This is the batch-vs-stream decision, now made per data product.
 
-- **Capacity:** 4 floors × 250 spots = **1,000 spots** (say 100 small / 700 regular / 200 large).
-- **Arrival rate:** 2 entry gates × ~1 car per 15 s at rush ≈ **0.13 cars/s**, about *four orders of magnitude* below anything we'd call a throughput problem.
-- **State size:** 1,000 spots × ~100 B + ~1,000 active tickets × ~200 B ≈ **0.3 MB**. The whole live state fits in L2 cache, never mind memory.
-- **Persistence volume:** ~2,000 tickets/day × 365 × ~300 B ≈ **0.2 GB/year**. A single small relational instance yawns at this.
+**The failure modes you design around (before any tool).** These are properties of the discipline, not edge cases:
 
-**What estimation decided:** nothing scales here, so build nothing that scales, no sharding, no cache tier, no queue. The contention that matters is not rate but **occupancy**: at 99% full, every arriving car at every gate competes for the same handful of spots. Concurrency correctness is driven by *fullness*, not traffic, the bridge to the Evaluation step.
+- **Stale presented as fresh.** A pipeline silently falls hours behind and the dashboard still renders a confident, wrong-because-old number. Freshness must be *monitored and surfaced*, not assumed.
+- **Silently wrong numbers (the analytical hallucination).** An upstream schema change nulls a column, a join fans out, a timezone is mishandled, and the metric is precise, beautifully charted, and wrong. This is why data quality, tests, and contracts are first-class, not polish.
+- **Runaway cost.** One unpartitioned table, one accidental cross join, one `SELECT *` over a petabyte, and you get a surprise five-figure bill. Cost guards (partitioning, quotas, query limits) are a design concern.
+- **Backfill and reprocessing pain.** A logic bug means recomputing months of history; if the platform isn't built to replay from retained raw idempotently, this is an outage-grade event instead of a re-run.
+- **Schema and data drift.** Operational teams change a field and break every downstream consumer who didn't know. Contracts and lineage turn a silent break into a caught one.
 
----
+<details>
+<summary>Go deeper, why the same query is fast in an OLAP store and slow in Postgres (IC depth, optional)</summary>
 
-## S: Storage
+- **Row vs column on disk.** A row store (Postgres, MySQL) lays out all of row 1's columns, then all of row 2's. `SELECT SUM(amount) FROM orders` must read every row's *every* column off disk just to touch `amount`. A columnar store stores all `amount` values contiguously, so the same query reads ~1/N of the bytes (N = column count) and the values compress far better because they're homogeneous.
+- **Vectorized execution.** OLAP engines process columns in batches through SIMD-friendly loops rather than a tuple-at-a-time iterator, often 10–100× the per-core throughput on aggregation.
+- **Pruning and zone maps.** Columnar files (Parquet/ORC) carry per-block min/max statistics, so a `WHERE day = '2026-06-01'` skips blocks whose range can't match, reading only relevant data without an index. Combined with partitioning, this is how a petabyte table answers a query by scanning gigabytes.
+- **Why not just index Postgres?** Indexes accelerate selective point/range lookups; an analytical aggregate is *unselective* (it touches most rows), so the planner ignores the index and table-scans anyway, now competing with your OLTP traffic for the same buffer pool and IOPS. The fix isn't a better index; it's a different storage paradigm.
 
-> Adapted: "what persists" rather than "which distributed store." The LLD trap is dragging distributed machinery into a 0.3 MB problem.
+</details>
 
-- **Live spot state: in-memory, inside the process.** It's 0.3 MB, mutated under the assignment claim, rebuildable. *Rejected: Redis or a DB as live truth*, a network hop and a failure mode on every gate operation, buying nothing at 0.13 arrivals/s.
-- **Tickets and payments: one small Postgres/MySQL instance.** Money needs durability and audit (NFR 3); a ticket row written at entry, finalized at exit, is the whole schema. *Rejected: in-memory only*, a restart that loses open tickets means free parking and fee disputes; *rejected: an event-sourced ledger*, gold-plating for 2,000 rows/day.
-- **Restart story (volunteer it):** on boot, rebuild spot occupancy from open tickets, one scan, sub-second at this size. This is why tickets, not spots, are the durable record; the spot map is derivable.
-
----
-
-## H: High-level design
-
-> Adapted: the "box diagram" becomes a **class-collaboration sketch plus the spot's state machine**, in LLD, the state diagram is the architecture.
-
-**The entities, locked to three, plus one value object:**
-- **`ParkingLot`**, the facade and sole mutator of spot state: owns the free-spot pools, assigns and releases spots, issues tickets.
-- **`ParkingSpot`**, id, size, status (lifecycle below).
-- **`Ticket`**, spot id, vehicle plate + type, entry time; finalized with exit time and fee.
-- **`Vehicle`**, a value object: plate + `VehicleType` enum. *Deliberately not a class hierarchy*, `Car`/`Truck`/`Motorcycle` subclasses would differ by zero methods; an enum mapping to allowed spot sizes carries all the behavior that exists. Inheritance with no behavioral variation is the canonical gold-plate.
+### Diagram: the modern data platform reference architecture
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Available
-    Available --> Held: gate assigns spot
-    Held --> Occupied: car parks and ticket issued
-    Held --> Available: assignment abandoned
-    Occupied --> Available: exit paid and spot freed
-    Available --> OutOfService: maintenance
-    OutOfService --> Available: restored
+flowchart LR
+    subgraph SRC["Sources (truth)"]
+      OLTP[("OLTP DBs<br/>Postgres / DynamoDB")]
+      EVT["Event streams<br/>clicks / logs"]
+      SAAS["SaaS APIs<br/>Salesforce / Stripe"]
+    end
+    SRC --> ING["Ingestion<br/>CDC · ELT · streaming"]
+    ING --> STORE[("Storage layer<br/>lake / warehouse / lakehouse<br/>columnar · decoupled")]
+    STORE --> PROC["Processing<br/>batch (Spark) + stream (Flink)"]
+    PROC --> MODEL["Modeling / transform<br/>dbt · medallion"]
+    MODEL --> SERVE["Serving<br/>BI · real-time OLAP<br/>reverse-ETL · ML features"]
+    GOV["Cross-cutting: orchestration · catalog · lineage · quality · governance · cost"]
+    GOV -.-> ING
+    GOV -.-> STORE
+    GOV -.-> PROC
+    GOV -.-> MODEL
+    GOV -.-> SERVE
+    style STORE fill:#1f6f5c,color:#fff
+    style PROC fill:#e8a13a,color:#000
+    style GOV fill:#2d6cb5,color:#fff
 ```
 
-Two things to narrate on this diagram. First, **`Held` exists for the same reason Ticketmaster's `HELD` does**: assignment at the gate and the car physically occupying the spot are separate moments, and the spot must belong to exactly one car for that window, with a timeout so an abandoned assignment self-heals. Second, **`OutOfService`** is the cheap, real-world state juniors forget; one enum value now, or a display-board outage later.
+### Worked example: serving "daily active users by region," end to end
+A product team wants a dashboard of **DAU by region**, plus the same number in the monthly board deck. One metric, and the platform's whole shape shows up in serving it.
 
----
+- **Path.** App click events land in a stream (Kafka), operational user/region data lives in Postgres. **Ingestion** streams the events into the **lake** and **CDC-replicates** the Postgres `users` table alongside it. A **batch job** each hour joins events to users, rolls up distinct users per region per day, and writes a small **aggregate table**; **dbt** models it into a clean `dau_by_region` mart. BI reads the mart.
+- **Freshness.** The board deck tolerates day-old data, so the hourly batch is plenty, *rejected: a streaming pipeline*, which would buy minute-freshness nobody asked for at multiples of the cost. If the team later needs a live ops view, that's a *second*, real-time path, not a rebuild of this one.
+- **Scan-cost.** The raw events are ~2 TB/day. A naive dashboard query scanning raw events at \$5/TB is ~\$10 *per refresh*; partitioning by day and pre-aggregating to a daily rollup means the dashboard scans **megabytes**, well under a cent. The cost win came from **layout and pre-aggregation**, not a cache, which is the lesson.
+- **Trust.** A freshness test ("the mart has today's partition by 7am") and a volume test ("row count within ±20% of yesterday") catch the silent breaks; lineage tells the analyst the number traces to those events and that table when finance asks "where does this come from?"
 
-## A: API design
+The number a Director brings out of this isn't "we built a pipeline"; it's *"day-fresh, traces to source, costs cents, and here's the second path if you need it live."*
 
-> Adapted: A = **class interfaces**, not REST endpoints. One short sketch, and the discipline is the same as HLD APIs: only the calls the requirements demand.
-
-```text
-interface ParkingLot
-    Ticket   park(Vehicle v)                 // assigns spot atomically
-                                             // throws LotFullForType
-    Receipt  unpark(TicketId id)             // fee = pricing.calculate(ticket)
-                                             // frees the spot
-    int      available(SpotType t)           // for the entry display
-
-interface PricingStrategy
-    Money    calculate(Ticket t)             // duration + vehicle type in,
-                                             // money out
-
-// v1 ships exactly one implementation: HourlyPricing.
-```
-
-**Design notes (each with its rejected alternative):**
-- **`PricingStrategy` is the only abstraction in v1, because R surfaced a requirement that varies** ("pricing may change"; weekend rates, lost-ticket flat fee are known-likely). The seam costs one interface. *Rejected: hardcoding the fee inside `unpark`*, the one change we're told is coming would then edit core flow logic.
-- **No `SpotAssignmentStrategy`.** No requirement says assignment policy varies, "first free compatible spot" is the spec. *Rejected: a pluggable assigner interface*, that's the same Strategy pattern, but applied to a requirement nobody stated. **Same pattern, opposite verdict, and the difference is the requirement.** That sentence is the lesson.
-- **`park` throws on full rather than returning a nullable spot**, a full lot is a normal business outcome the gate must handle explicitly, not a null to forget to check.
-- **`unpark` takes the ticket, not the spot**, the ticket is the durable record and the unit of payment audit; the spot is derivable from it.
-
-<details>
-<summary>Go deeper, fuller class listing with the concurrent free-list (IC depth, optional)</summary>
-
-```java
-enum SpotType { SMALL, REGULAR, LARGE }
-enum VehicleType {
-    MOTORCYCLE(EnumSet.of(SMALL, REGULAR, LARGE)),
-    CAR(EnumSet.of(REGULAR, LARGE)),
-    TRUCK(EnumSet.of(LARGE));
-    final EnumSet<SpotType> fits;
-}
-
-final class ParkingSpot {
-    final String id; final SpotType type;
-    final AtomicReference<SpotStatus> status =
-        new AtomicReference<>(AVAILABLE);     // CAS target
-}
-
-final class ParkingLotImpl implements ParkingLot {
-    // one lock-free pool per spot type; poll() is atomic
-    private final Map<SpotType, ConcurrentLinkedQueue<ParkingSpot>> free;
-    private final PricingStrategy pricing;
-    private final TicketStore tickets;        // backed by Postgres
-
-    public Ticket park(Vehicle v) {
-        for (SpotType t : v.type.fits) {      // smallest-fit first
-            ParkingSpot s = free.get(t).poll();   // atomic claim
-            if (s != null) {
-                s.status.set(HELD);
-                Ticket tk = tickets.open(v, s, now());
-                s.status.set(OCCUPIED);
-                return tk;
-            }
-        }
-        throw new LotFullForType(v.type);
-    }
-
-    public Receipt unpark(TicketId id) {
-        Ticket t = tickets.close(id, now());
-        Money fee = pricing.calculate(t);
-        ParkingSpot s = t.spot();
-        s.status.set(AVAILABLE);
-        free.get(s.type).offer(s);            // return to pool
-        return new Receipt(t, fee);
-    }
-}
-```
-
-The correctness hinges on one line: `poll()` on `ConcurrentLinkedQueue` is an atomic dequeue (Michael-Scott CAS loop internally), two gate threads polling the last element get one spot and one `null`; no spot is ever handed out twice. The `Held` window between `poll()` and ticket persistence is bounded by a timeout sweep that `offer`s abandoned spots back. Note what's *absent*: no `synchronized` on the happy path, no global lock, no per-spot mutex map.
-
-</details>
-
----
-
-## D: Data model
-
-> Adapted: the **entity model**, fields, relationships, and which record is authoritative.
-
-- **`spots`**, `spot_id`, `floor`, `type`, `status`. In-memory live; persisted only as static layout (status rebuilt from open tickets on restart).
-- **`tickets`**, `ticket_id`, `plate`, `vehicle_type`, `spot_id`, `entry_time`, `exit_time?`, `fee?`, `paid?`. **The authoritative, durable record.** Open ticket ⇒ spot occupied; that single derivation rule is the whole consistency model.
-- **Relationships:** Ticket → Spot is many-to-one over time, one-to-one while open. A partial unique index on `spot_id WHERE exit_time IS NULL` makes "one open ticket per spot" database-enforced, the persistence-layer twin of the in-memory atomic claim. Say it out loud: **the invariant is enforced twice, in memory for speed and in the store for truth**, defense in depth for the only correctness rule the system has.
-
----
-
-## E: Evaluation
-
-> Adapted, and this is where the Director answer is won: stress your own design **unprompted**. The bottleneck here isn't load, it's a race. Volunteering it is the single strongest signal in the interview.
-
-**The race, stated before they ask:** *"Two cars at two entry gates, one regular spot left. Both gate threads read 'one available,' both assign it, two tickets, one spot, an argument in lane 3. Two gates make this physically concurrent, so assignment must be atomic."*
-
-**Three viable fixes, name all three, pick one, defend it:**
-
-1. **Coarse lock:** one mutex around `park`/`unpark`. Trivially correct, fully serialized. *Quantify before sneering:* at 0.13 arrivals/s with a ~10 µs critical section, contention is ~0.0001%, a coarse lock is **not wrong here**, and saying so is itself a restraint signal.
-2. **Per-spot CAS:** `status.compareAndSet(AVAILABLE, HELD)`; loser retries the next spot. Maximal concurrency, but near-full, losers scan many spots retrying: O(n) under exactly the contention you built it for.
-3. **Concurrent free-list per spot type**, a lock-free queue of available spots; atomic `poll()` to claim, `offer()` to release. The claim **is** the dequeue: one winner by construction, losers get `null` in O(1) and fall through to the next size or "full."
-
-**Decision: the concurrent free-list (option 3).** It makes the invariant structural, a spot is claimable *because* it's in the pool, rather than guarded. *Rejected: the coarse lock*, not on throughput (the math says it survives) but because the free-list is the same line count with no shared bottleneck to reason about; *rejected: per-spot CAS*, because it degrades precisely at high occupancy, the only contention regime this system has. The `Held` window between claim and ticket persistence gets a timeout sweep, so a gate crash mid-assignment self-heals, lazy reclaim, exactly as Ticketmaster's holds.
-
-**Re-check the other NFRs:** money durable (tickets in Postgres, fee computed at close); restart rebuilds spot state from open tickets; the DB partial index backstops the in-memory claim. The design holds.
-
-<details>
-<summary>Go deeper, why the lock-free queue wins at high occupancy (IC depth, optional)</summary>
-
-The failure mode of per-spot CAS is the **retry storm at 99% full**: a gate thread scans the spot array CAS-ing each `AVAILABLE` it sees; with 5 free spots in 1,000 and 4 competing threads, most CAS attempts hit spots another thread just took, and each loser rescans. Expected work per park approaches O(n) exactly when the lot is nearly full, the regime the system lives in at rush hour.
-
-The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head pointer is the single CAS target, and a failed CAS means another thread *succeeded*, the loser's very next `poll()` attempt sees the new head. Claims are O(1) amortized regardless of occupancy, and "empty queue" is an immediate, definitive "no spots of this type" rather than the end of a scan. The structural point generalizes: **when contenders should fail fast and fall back (next size up, "lot full"), put the contended resource in a pool with an atomic take, rather than guarding each resource and making contenders hunt.** Compare Ticketmaster's seat CAS, where contenders *want* a specific seat and per-row CAS is right, the access pattern, not fashion, picks the primitive.
-
-</details>
-
----
-
-## D: Design evolution
-
-> The gold-plating test, inverted: everything you correctly refused to build in v1, you now show you knew how to build. Restraint is only credible if the evolution is crisp.
-
-- **Multi-floor with per-floor displays and nearest-to-elevator assignment:** *now* `Floor` earns existence (it owns per-floor pools and a display), and *now* assignment policy varies by requirement, so `SpotAssignmentStrategy` appears, justified by the same rule that excluded it from v1. The seam was foreseen; the abstraction waited for its requirement.
-- **Pricing changes (weekend rates, lost ticket, EV surcharge):** new `PricingStrategy` implementations behind the existing interface, **zero core changes**, the payoff of the one abstraction v1 did buy.
-- **Gate/sensor hardware:** wrap it behind thin ports (`GateController`, `SpotSensor`) so vendor SDKs never leak into domain logic. *Delegate it:* "the embedded team owns gate firmware behind those two interfaces; my prior is dumb hardware + smart server, sensors report, the server decides, because pushing decisions into firmware makes every pricing change a fleet update."
-- **From one lot to a 50-lot city chain:** the moment **LLD turns back into HLD**, say so explicitly. S grows back (a multi-tenant store, lots as partitions), E grows back (consumer-app occupancy polling is a read-QPS story), availability gets a cache tier, cross-lot search is a new product. The free-list remains correct *per lot*, concurrency was always per-facility, but the system around it becomes a system-design-shaped problem.
-
-**Cost/ops dimension (own it even in LLD):** v1 is one service instance + one small Postgres, **tens of dollars a month; on-call is "is the process up."** The gold-plated version costs the same to *run* but more to *change*, carried forever in maintenance, onboarding, and test surface, and change-cost is the budget a Director actually protects.
-
----
-
-## Trade-offs table: the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
+### Trade-offs table: the first analytical decision, where does this query run?
+| Decision | OLTP store (Postgres/Dynamo) | Cloud warehouse (Snowflake/BigQuery) | Lake + query engine (S3 + Spark/Trino) | Real-time OLAP (Druid/Pinot) |
 |---|---|---|---|---|
-| **Last-spot concurrency** | **Coarse lock on park/unpark** | **Per-spot CAS with scan-retry** | **Concurrent free-list per type, atomic poll** | **A** is defensible at gate-scale arrival rates (quantify it!). **B** when contenders want one *specific* resource (Ticketmaster seats). **C** (our choice) when any resource of a type will do and losers should fail fast in O(1). |
-| **Where patterns go** | **No abstractions, hardcode all policy** | **Strategy only where a requirement varies, pricing** | **Strategy/Factory/Observer everywhere "for flexibility"** | **A** for a true throwaway. **B** (our choice), each abstraction names the requirement that bought it. **C** is the over-engineering failure this interview exists to catch. |
-| **Vehicle modeling** | **Enum + size-compatibility map** | **Class hierarchy Car/Truck/Motorcycle** | **Full type registry with metadata config** | **A** (our choice) while types differ only by data. **B** only when behavior genuinely diverges per type. **C** only for a platform where operators define vehicle types at runtime. |
+| **Best at** | point reads/writes, ms latency | governed SQL analytics, scans | cheap PB-scale, open formats, ML | sub-second aggregates on fresh data |
+| **Freshness** | real-time (it *is* the source) | minutes–hours (loads) | hours (batch) | seconds |
+| **Cost shape** | always-on server | \$/TB scanned or cluster-hours | cheapest storage; compute on demand | always-on, memory-heavy |
+| **Use when…** | serving the app | the default analytical store | huge volume, open/ML, cost-sensitive | live dashboards, user-facing analytics |
 
----
+The Director move is matching the **query's access pattern and freshness need** to the store, and never serving analytics from the OLTP source of truth.
 
-## What interviewers probe here (Director altitude)
+### What interviewers probe here
+- **"They ask for analytics on your operational data, what's your first move?"**, *Strong signal:* separate OLTP from OLAP immediately, get the data into an analytical store via ingestion/CDC, and never run scan-heavy aggregates against the production DB (it starves point traffic and reads row-oriented data the wrong way). *Red flag:* "add a read replica and query it", which just moves the row-oriented full-scan problem one box over.
+- **"What does this cost, and what's your lever?"**, *Strong:* cost ≈ bytes scanned × \$/TB (or cluster-hours); the lever is partition pruning + columnar projection + pre-aggregation so each query touches less data; quantify a scan. *Red flag:* "we'll cache it", with no notion that the bill is set by scan volume and data layout.
+- **"How fresh does it need to be?"**, *Strong:* treats freshness as an extracted requirement with a price, picks the cheapest rung that meets it (batch vs micro-batch vs stream), and is willing to run two paths for two needs. *Red flag:* defaults to "real-time" with no requirement and no awareness of the operational tax.
+- **"The dashboard number is wrong. How would you even know?"**, *Strong:* data-quality tests (freshness/volume/schema), contracts at the source boundary, and lineage to trace it, trust is engineered. *Red flag:* treats correctness as given and has no detection story, the silent-wrong-number trap.
 
-- **"Walk me through your classes."**, *Strong:* three entities + one value object, each justified by a requirement; cuts stated out loud. *Red flag:* ten classes in five minutes, `AbstractSpotFactory` before any clarifying question.
-- **"Two cars, one spot left, two gates, what happens?"**, *Strong:* already covered it unprompted; names the atomic claim, the `Held` window, timeout reclaim, the DB partial index backstop. *Red flag:* "I'd add synchronized everywhere," or surprise that concurrency exists in an OOD question.
-- **"Why is pricing an interface but spot assignment isn't?"**, *Strong:* "Pricing variation is a stated requirement; assignment variation isn't. Same pattern, opposite verdict, the requirement decides, not the pattern catalog." *Red flag:* can't articulate why one abstraction lives and the other doesn't; "Strategy is best practice."
-- **"Would a global lock be wrong?"**, *Strong:* quantifies, ~0.13 arrivals/s vs a microsecond critical section, contention ~zero, "not wrong, but the free-list is no more code and has no shared bottleneck; I'd take it." *Red flag:* reflexive "locks don't scale" with no numbers (the unquantified-scaling tell, in miniature).
-- **"What would you delegate?"**, *Strong:* hardware integration behind ports with a stated prior (dumb hardware, smart server); payments to the vendor; keeps the invariant and the seams. *Red flag:* wants to personally design the gate firmware protocol.
+The through-line at Director altitude: reason in **freshness, scan-cost, volume, and trust**; set those contracts per data product; and delegate the engine bake-off with a stated prior ("data platform benchmarks Snowflake vs a Trino-on-S3 lakehouse on our scan and concurrency profile; my prior is the lakehouse for our volume and open-format needs").
 
----
+### Common mistakes / misconceptions
+- **Running analytics on the OLTP database.** A full-scan aggregate starves point traffic and reads a row-oriented layout column-by-column; the fix is a separate analytical store, not a replica.
+- **Reasoning in QPS instead of bytes scanned and freshness.** The analytical cost and latency are set by scan volume and the freshness rung, not by request rate; a request-based estimate misleads.
+- **Treating a bigger context… bigger box as the answer to volume.** Volume grows unbounded; the answer is decoupled storage/compute, partitioning, and tiering, not vertical scaling.
+- **Assuming the numbers are right.** Without freshness/volume/schema tests and lineage, a silent upstream change yields a confident wrong metric, the analytical hallucination.
+- **Defaulting to streaming.** Most analytics tolerate hours of lag; streaming's windowing/state/exactly-once cost is only worth it where a real requirement demands seconds.
 
-## Common mistakes
+### Practice questions
 
-- **Class explosion before scope lock**, modeling valet, EV charging, and reservations nobody asked for. Scope-cutting is the first scored behavior; skipping it loses the interview in minute two.
-- **Pattern-first design**, Singleton/Factory/Observer named before requirements are. Every abstraction must point at the requirement that bought it; pricing earns Strategy here, nothing else does.
-- **A `Vehicle` inheritance tree with no behavioral difference**, subclasses that differ only by data are an enum wearing a costume.
-- **Ignoring concurrency until prompted**, two gates make the race physical; the last-spot double-assignment is the problem's one real invariant, and volunteering it is the strongest signal available.
-- **No durable ticket record**, in-memory-only tickets mean a restart loses open sessions and every fee becomes a dispute; money always gets a durable, auditable row.
+**Q1.** Stakeholders ask you to "just add a dashboard" on top of the production orders database. Walk through your response.
+> *Model:* I'd push back on querying production directly: an analytical dashboard runs unselective aggregate scans (`SUM`, `GROUP BY` over all orders), which on a row-oriented OLTP store reads every column of every row and competes with the point-lookup traffic that serves customers, risking latency regressions on the paying path. Instead I'd land the data in an analytical store, CDC-replicate `orders` into a columnar warehouse or lake, pre-aggregate to the dashboard's grain, and serve from there. Freshness: if a day old is fine, an hourly batch; if they need live, a separate real-time path, not this one. The cost is set by bytes scanned, so I partition by day and project only needed columns. Net: the dashboard is fast and cheap, and production is untouched.
 
----
+**Q2.** Estimate the monthly cost of a dashboard that scans a 3 TB events table on every refresh, refreshed 200×/day, on serverless \$5/TB pricing. Then name the cheapest fix.
+> *Model:* Per refresh: 3 TB × \$5/TB = **\$15**. Per day: 200 × \$15 = **\$3,000**. Per month: ~**\$90,000**, for one dashboard, the runaway-cost failure mode. The cheapest fix is **not** a bigger cluster or a cache; it's cutting bytes scanned: **pre-aggregate** the events into a daily rollup table the dashboard reads (megabytes, not terabytes) and **partition by day** so even ad-hoc queries prune. That turns ~\$90k/mo into tens of dollars. Layout and pre-aggregation are the lever; this is the core analytical cost discipline.
 
-## Interviewer follow-up questions (with model answers)
+**Q3.** A VP says "the revenue dashboard and the finance report disagree by 3%, which is right?" What's actually going on and how is it prevented?
+> *Model:* Almost certainly two paths computing "revenue" with slightly different logic, definitions (gross vs net, timezone of "day," late-arriving refunds), or freshness (the dashboard is a fast approximate stream; finance is the settled batch), the same speed-vs-truth split as the billing-batch problem. Neither is "wrong"; they answer subtly different questions. Prevention: a **single governed definition** of the metric (one dbt model both consume), explicit handling of late events and timezone, and **lineage** so each number's source and logic are inspectable. The Director point: this is a *governance and modeling* problem, not a query bug, and it's why a semantic layer and metric ownership exist.
 
-**Q1. Two cars hit two entry gates simultaneously; one compatible spot remains. Walk me through exactly why only one gets it.**
-> *Model:* Spot assignment is an atomic dequeue from a lock-free free-list per spot type, both gate threads call `poll()`; the queue's internal CAS guarantees one gets the spot and the other gets `null`, falling through to the next compatible size, then "lot full." There is no check-then-act window because the claim *is* the removal. The claimed spot sits `Held` until the ticket persists, with timeout reclaim if the gate crashes mid-assignment, the `AVAILABLE → HELD → OCCUPIED` shape of a Ticketmaster seat, shrunk to one process. Defense in depth: a partial unique index on open tickets per spot makes the database reject a double-issue even if the in-memory layer ever regressed.
-
-**Q2. Product adds weekend rates and a lost-ticket flat fee. How much of your design changes?**
-> *Model:* Two new `PricingStrategy` implementations and a selector, zero changes to `ParkingLot`, spots, or tickets. That's deliberate: R surfaced "pricing may change" as the one axis of stated variability, so v1 spent its single abstraction there. The contrast: had you asked me to change *assignment* policy, I'd be editing core code, because no requirement justified that seam, and I'd rather pay one small refactor later than carry speculative interfaces on every axis forever. Restraint plus one cheap refactor beats ten abstractions, nine never used.
-
-**Q3. We're now a 50-lot city-wide operator with a consumer app showing live availability. What breaks?**
-> *Model:* The moment the problem crosses the facility boundary it stops being LLD, and I'd say that out loud before redesigning. Per-lot concurrency is unchanged (the free-list was always per-facility). The letters that nearly dropped grow back: S becomes a multi-tenant store partitioned by lot; E becomes a read-QPS estimate, 50 lots, ~200K app users polling, ~100-500 reads/s, so availability gets a cache/push tier fed by occupancy events, eventual by design since a 5-second-stale count is harmless. Money and tickets stay strongly consistent per lot; cross-lot search is a new product surface I'd scope separately. The Director point: know which layer you're in, and rerun the spine when you change layers.
-
-**Q4. You used one design pattern. Defend not using more.**
-> *Model:* Patterns are amortized over requirement variation, and this problem states exactly one varying axis: pricing. Strategy there costs one interface and pays on the first rate change. A `SpotAssignmentStrategy`, vehicle factories, or an observer bus would each add a seam with no requirement behind it, pure carrying cost in tests, onboarding, and indirection. My rule, and what I hold design reviews to: **every abstraction names the requirement that bought it.** When floors and display boards arrive, assignment policy becomes a stated requirement and the strategy appears then, foreseen is not the same as built.
-
----
+**Q4.** Why is "decoupled storage and compute" the defining feature of modern data platforms, and what does it let you do that an old on-prem Hadoop cluster couldn't?
+> *Model:* In the old model, storage and compute were bolted together on the same nodes (HDFS + MapReduce), so to store more you bought compute you didn't need, and to compute more you bought storage you didn't need, and the cluster ran 24/7 sized to peak. Decoupling puts data in cheap object storage (S3, pennies/GB-month) and points **elastic, ephemeral compute** at it: you scale them independently, run ten isolated warehouses on one copy of the data, spin compute to zero when idle, and pay per scan or per cluster-hour. The consequences a Director cares about: cost tracks usage not peak provisioning, teams don't contend for one cluster, and storage growth is nearly free. It's the same "pay for usage, not provisioned capacity" shift that makes serverless attractive elsewhere.
 
 ### Key takeaways
-- **Parking Lot is a restraint test wearing an OOD costume.** Lock scope to ~3 entities (Lot, Spot, Ticket + a Vehicle value object), state the cut list, and let the interviewer watch you *not* build the airport.
-- **Narrating the RESHADED adaptation is itself teaching:** E collapses to capacity math (1,000 spots, 0.13 arrivals/s, 0.3 MB state, nothing scales, so build nothing that scales); A = class interfaces; H = the spot state machine; D = the entity model with the ticket as durable truth.
-- **One pattern, one requirement:** pricing varies by stated requirement → `PricingStrategy`; assignment doesn't → no strategy. Same pattern, opposite verdicts; the requirement decides.
-- **Volunteer the last-spot race.** Atomic claim via a concurrent free-list (`poll()` is the claim), a `Held` window with timeout reclaim, a DB partial index as backstop, Ticketmaster's seat machine at micro scale. Quantify why even a coarse lock survives before rejecting it.
-- **Evolution proves the restraint was judgment, not ignorance:** floors bring `Floor` + assignment strategy *with* their requirements; hardware hides behind ports (delegate firmware; prior: dumb hardware, smart server); 50 lots turns the problem back into system design, say so and rerun the spine.
+- **OLTP vs OLAP is the foundational divide:** operational stores answer "this entity now" with point access; a data platform answers "all entities over time" with scans, and serving one from the other is the classic, costly mistake. Get the data into a separate analytical store.
+- **A data platform is a projection, not a database of record:** a continuously-rebuilt, append-mostly, scan-optimized, **decoupled storage/compute** copy of operational truth, and it must be **rebuildable** from retained raw (idempotent recompute) to survive bugs, backfills, and schema changes.
+- **Design in freshness, scan-cost, volume, and trust**, not QPS alone. Freshness is a priced dial (pick the cheapest rung that meets the requirement); volume grows unbounded (separate storage/compute, partition, tier).
+- **Analytical cost ≈ bytes scanned × \$/TB; the lever is data layout**, partition pruning, columnar projection, clustering, pre-aggregation, **not** caching. Always quantify the scan.
+- **Engineer trust and surface freshness:** the signature failure is a precise, confident, *wrong-or-stale* number, so data-quality tests, contracts, and lineage are first-class, and runaway cost is guarded by design.
 
-> **Spaced-repetition recap:** Parking Lot = the #1 LLD curveball, scored on **restraint**. Three entities (Lot/Spot/Ticket), enum not vehicle hierarchy, cuts stated aloud. E drops to capacity math, nothing scales. One Strategy (pricing, requirement varies), no others. Volunteer the race: two gates, last spot → atomic free-list claim, `Held` + timeout, partial-index backstop. Evolution: floors → `Floor` + assignment strategy *then*; chain of lots → it's system design again.
+> **Spaced-repetition recap:** A data platform is the machine between the **cash registers** (OLTP, "this entity now," point access, row store) and the **analyst's desk** (OLAP, "all entities over time," scans, column store). It's a **projection, not a source of truth**, append-mostly, time-partitioned, **decoupled storage/compute**, and **rebuildable** from retained raw. Design in **freshness** (a priced ladder, pick the rung the requirement needs), **scan-cost** (≈ bytes scanned × \$/TB; lever is layout/pruning/pre-aggregation, not caching), **volume** (unbounded → separate storage/compute, partition, tier), and **trust** (tests + contracts + lineage; the failure is the confident wrong number). Never run analytics on the OLTP store.
 
 ---
 
-*End of Lesson 7.1. The parking lot inverts the HLD instinct: there the danger was designing too small for the load; here, too big for the requirement. The atomic claim carries over from Ticketmaster at process scale, knowing which RESHADED letters grow and which collapse is the transferable skill.*
+*End of Lesson 7.1. This is the mental model the whole Data Platforms track rests on: an analytical platform is a continuously-rebuilt, scan-optimized projection of operational truth, designed in freshness, scan-cost, volume, and trust.*

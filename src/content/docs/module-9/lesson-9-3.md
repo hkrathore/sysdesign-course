@@ -1,393 +1,151 @@
 ---
-title: "9.3 — Hotel Reservation System"
-description: How fungible room inventory, count decrements, not seat locks, forces a different consistency split than Ticketmaster, with overbooking as a deliberate business knob and a 1000:1 search-to-book ratio demanding strongly-consistent booking behind an eventually-consistent search tier.
+title: "9.3 — Retrieval-Augmented Generation (RAG)"
+description: The default architecture for grounding an LLM in private, fresh, citable facts — the ingest/chunk/embed/index and retrieve/rerank/assemble/generate pipeline, why retrieval (not the model) is the quality bottleneck, and how eval gates it.
 sidebar:
   order: 3
 ---
 
-> **Why this gets asked and what separates a Director answer.** Hotel reservation is in the top tier of business-domain HLD problems precisely because it looks like Ticketmaster but isn't. Seats are unique and indivisible, one CAS per row. Hotel rooms are **fungible inventory**: you don't care *which* room 312 you get, only that the property has a king non-smoking available on your dates. That fungibility drives a **count-decrement model** rather than a seat-lock model, and it opens the door to a deliberate business decision that Ticketmaster never makes: **controlled overbooking**. A Director answer recognises the structural difference immediately, names the two-tier consistency split (eventual search / strong booking), and treats overbooking as a policy knob rather than a correctness bug.
-
----
-
 ### Learning objectives
-
-1. Distinguish **fungible-inventory count decrements** from per-seat row locks and explain when each model applies.
-2. Design the **search-vs-booking consistency split**: eventually-consistent availability index for ~1,000 QPS reads; strongly-consistent booking path for ~1 QPS writes per property, without serialising read traffic through the write path.
-3. Model a **reservation-hold TTL** and argue the right duration against abandonment rate and competitive re-availability.
-4. Articulate **overbooking as a deliberate policy knob**, the math that makes airlines and hotels set it above 100% on purpose, and design the system hook for it.
-5. Know where the Director delegates depth: rate-plan pricing, payment PCI, and fraud, and state credible priors for each.
-
----
+- Explain **why RAG exists** — grounding a stateless, knowledge-frozen model in private, fresh, citable data — and when it beats the two alternatives (long-context stuffing, fine-tuning), each rejected for a stated reason.
+- Draw the **two pipelines** that every RAG system is: an **ingest** path (connect → parse → chunk → embed → index) and a **query** path (embed → retrieve → rerank → assemble → generate-with-citations), and name the decision that lives at each stage.
+- Locate the **quality bottleneck** correctly: in production RAG, the model is rarely the problem — **retrieval is** — so chunking, hybrid retrieval, and reranking carry more of the score than model choice.
+- Treat **evaluation as the gate**, separating *retrieval* metrics (did we fetch the right context?) from *generation* metrics (did the answer stay faithful to it?), because the two fail independently and the fix differs.
+- Name the operational failure modes a Director owns: **stale indexes, permission leakage, and confidently-wrong-but-well-cited answers.**
 
 ### Intuition first
+A RAG system is a **closed-book exam turned into an open-book one.** A frozen LLM walking into your domain is a brilliant generalist sitting a closed-book exam on a subject it last studied months ago and never on *your* private material — so it bluffs fluently, which is the dangerous part. RAG hands it the **open book, turned to the right page**, just before it answers.
 
-Picture a hotel front desk clerk in 1985. A guest calls and asks "do you have a double room on the 14th?" The clerk glances at a paper ledger, sees 3 doubles marked open, says yes, pencils in the name, and drops the count to 2. Another call arrives, same answer, now 1. A third, count hits 0, clerk says "sold out." If the first guest calls back to cancel, the clerk erases the pencil mark and the count goes back up.
+The whole game is therefore not "how smart is the student" but **"how good is the librarian."** A librarian who fetches the wrong three pages turns a brilliant student into a brilliant, confident, wrong one — and because the student now cites the (wrong) pages, the error looks *more* authoritative, not less. So the work that decides RAG quality is the unglamorous half: how you cut the books into pages (chunking), how you find the right pages fast (retrieval), and how you double-check the shortlist before handing it over (reranking). The model is the last and usually least decisive link.
 
-That is the entire booking model: **a counter per room-type per date**. Nobody cares which physical room 312 is, they care that the count is positive before it's decremented. The modern problem is doing that at booking.com scale: **500M property-date-roomtype cells** in the search index, **~3,000 booking writes/s** globally, and **~3M search reads/s**, a 1,000:1 ratio that makes it catastrophic to serve searches from the booking store.
+Keep that image — *brilliant student, fallible librarian* — because it predicts where every RAG system actually breaks.
 
-The second wrinkle: the front desk clerk might sell the last room knowing a 10% no-show rate will keep a physical room available. **Overbooking is not a bug.** It is a revenue-optimisation decision with a contractual obligation (walk the guest with compensation). The system must support it as a configurable knob, not fight it.
+### Deep explanation
 
----
+**Why RAG at all — and why not just a bigger prompt or a fine-tune.** An LLM has three hard limits a designer must respect: its knowledge is **frozen at a training cutoff**, it has **never seen your private data**, and it **cannot tell you where an answer came from**. RAG attacks all three by retrieving relevant text at query time and putting it *in the prompt* as grounding, so the model answers *from* supplied evidence and can **cite** it. The benefits are concrete: answers reflect data changed five minutes ago (freshness), they cover documents the model was never trained on (private knowledge), they carry citations (auditability), and — critically — grounding **reduces hallucination** because the model is summarizing supplied text rather than recalling from parameters. Note *reduces*, not *eliminates*: a model can still ignore or contradict its context.
 
-## R: Requirements
+The two alternatives, and why RAG is usually the default:
+- **Long-context stuffing** — paste the whole corpus into a 200K–1M-token window. Fine when the corpus is *small and bounded* (one contract, one codebase module). It fails on scale (you cannot fit 10M documents in any window), on **cost** (you pay for every input token on every call), and on the **"lost in the middle"** degradation where models attend poorly to the center of a long context. **Rejected as the general answer** because it doesn't scale and burns tokens re-reading the same corpus on every request.
+- **Fine-tuning** — bake knowledge into weights. Fine-tuning teaches **behavior, format, and tone**, not reliable facts; it's slow to update (retrain to add a document), it has **no citations**, and it can *increase* confident hallucination on facts it half-learned. **Rejected for fact-grounding** (covered fully in the adapt-the-model lesson); the two compose — fine-tune the *style*, RAG the *facts*.
 
-> Pin scope to the core booking flow; cut the long tail of hotel-management features that would dominate the design without teaching anything new.
+The Director-altitude statement: *RAG is how you give a frozen, private-data-blind model fresh, auditable knowledge without retraining it.* Reach for it whenever the answer depends on data that is large, private, frequently changing, or must be cited.
 
-**Clarifying questions (with assumed answers):**
+**RAG is two pipelines, not one — make both visible.** Candidates who draw only the query path miss half the system (and half the cost and most of the freshness problem).
 
-- *What's the unit of booking?* A **room type** (king non-smoking, double ocean view) at a property for a date range. Not a specific room number, that's assigned at check-in.
-- *Search traffic vs booking traffic?* Assume ~**3M search/read QPS**, ~**3K booking writes/s** globally, roughly the 1,000:1 ratio Booking.com has disclosed publicly.
-- *Is overbooking in scope?* Yes, as a configurable **overbooking buffer** per property per room type.
-- *Hold-before-pay?* Yes, a **TTL-based reservation hold** during checkout (assume 10-15 min); expired hold releases inventory.
-- *What's the latency bar?* Search results p99 < 200 ms; booking confirmation p99 < 1 s.
+- **Ingest (offline, write path):** *connect* to sources (wikis, tickets, PDFs, databases, code) → *parse and clean* (extract text, strip boilerplate, preserve structure/tables) → **chunk** into retrievable units → **embed** each chunk → **index** into a vector store with metadata. This runs continuously and **incrementally** — when a source doc changes, you re-chunk, re-embed, and upsert just that doc, and tombstone deletes. The freshness of your answers is exactly the freshness of this pipeline.
+- **Query (online, read path):** *embed* the user query → **retrieve** candidate chunks (vector + keyword + metadata filter) → **rerank** to a precise shortlist → **assemble** the prompt (instructions + ordered chunks + question) → **generate** an answer **with citations** back to the source chunks.
 
-**Functional requirements (scoped core):**
+**Chunking is where RAG quality is won or lost.** A chunk is the atomic unit you retrieve; get it wrong and no downstream cleverness recovers. Too **large** (a whole 20-page doc) and a single chunk dilutes the embedding across many topics, so retrieval is fuzzy and you waste context budget; too **small** (one sentence) and you shatter the context a passage needs to be meaningful. The practical band is **~256–1024 tokens** with **~10–20% overlap** so a fact straddling a boundary survives in at least one chunk. Strategies, escalating in cost and quality:
+- **Fixed-size** (N tokens, sliding window): trivial, fast, ignores structure — it will cut a table or a paragraph mid-thought. Fine as a baseline.
+- **Recursive / structure-aware**: split on natural boundaries (headings → paragraphs → sentences) so chunks align with document structure. The pragmatic default for most corpora.
+- **Semantic**: split where the topic shifts (embedding-distance breakpoints). Best coherence, highest preprocessing cost. Reserve it for high-value corpora where retrieval precision pays for the extra work.
 
-1. **Search** properties by location, dates, room type, guest count, price range.
-2. **View availability** and rates for a property across a date range.
-3. **Hold** a room type temporarily during checkout (TTL reservation).
-4. **Confirm** a booking (decrement inventory, write order, charge payment).
-5. **Cancel** a booking (increment inventory back, apply cancellation policy).
-6. **Overbooking policy**, support an `overbook_buffer` per property+room-type that allows bookings beyond physical count.
+Always attach **metadata** to each chunk (source ID, title, section, timestamp, and — load-bearing — **access-control tags**); you will filter and cite on it. **Rejected default:** one-size fixed chunking applied blindly to mixed content (prose + tables + code) — it's the most common cause of "the data is in there but it never retrieves."
 
-**Explicitly cut:** dynamic pricing / yield management engine, loyalty programs, hotel property-management system integration, room-number assignment, reviews, messaging. I scope to **search → hold → confirm → cancel**, with overbooking as a policy input.
+**Retrieval: dense alone is not enough — go hybrid.** Vector (dense) retrieval finds *semantically* similar text and is the backbone, but it is weak on **exact tokens** — error codes, SKUs, names, acronyms — where a keyword index shines. **Hybrid search** runs both **dense** (ANN over embeddings) and **sparse** (BM25/keyword) and fuses the rankings (e.g., Reciprocal Rank Fusion), recovering the precise-token matches dense retrieval drops while keeping semantic recall. Layer a **metadata filter** on top (date ranges, document type, and the ACL tags) so you only ever retrieve what this user is allowed to see. The standard shape is **retrieve wide, then narrow**: pull a generous candidate set (**top-k ≈ 20–50**) cheaply, because recall here caps everything downstream — a chunk not retrieved can never be cited.
 
-**Non-functional requirements:**
+**Reranking: cheap recall, then expensive precision.** Vector top-k optimizes for speed over precision; the top 20 will contain the right chunks *and* near-miss noise. A **cross-encoder reranker** (e.g., Cohere Rerank, `bge-reranker`) scores each (query, chunk) pair *jointly* — far more accurate than the bi-encoder cosine that produced the candidates — and reorders them so you can keep only the **top ~3–8** for the prompt. This two-stage **retrieve-then-rerank** pattern is the single highest-leverage precision win in RAG: it routinely turns a mediocre top-k into a clean shortlist. The cost is **latency** (a rerank pass adds tens-to-hundreds of ms and a model call) and money, so you rerank a *candidate set of dozens*, never the whole corpus. **Rejected alternative:** feeding all 20 raw vector hits straight into the prompt — you pay for the tokens, you trigger lost-in-the-middle, and you dilute the answer with near-misses.
 
-- **Strong consistency on booking path**, double-booking (two guests, one physical room, no overbooking buffer) is the cardinal sin.
-- **High availability on search**, 200 ms p99 with graceful degradation; stale by seconds is invisible.
-- **Flash-sale tolerance**, a property releasing a limited promotion block can hit 10-100× normal write rate for that property (small scope relative to Ticketmaster, but must not cascade).
-- **Overbooking as a configurable knob**, not a special-case hack.
+**Context assembly: the prompt is a curated exhibit, not a dump.** You now have ~3–8 high-precision chunks; how you arrange them matters. Models exhibit **"lost in the middle"** — strong attention to the **start and end** of the context, weaker in the center — so put the most relevant chunks at the edges, not buried. Keep within a deliberate **token budget** (more context is not free and not always better). And instruct the model to **answer only from the supplied context and cite chunk IDs**, refusing when the context doesn't contain the answer — this is what converts retrieval into an *auditable, grounded* answer instead of a vibe. The citation isn't decoration; it's how a user (and your eval) verifies the answer is real.
 
-**The RESHADED adaptation stated out loud:** the standard spine applies cleanly, but **S and E** carry the load-bearing work, Storage gets the search/booking split; Evaluation addresses overbooking, TTL races, and the hot-property write burst. Design evolution handles global scale and the cancellation storm.
+**The bottleneck is retrieval, not the model — internalize this.** The defining failure of production RAG is **"good model, bad retrieval"**: the LLM is handed the wrong chunks and produces a fluent, well-cited, *wrong* answer — worse than a refusal, because the citation makes it look trustworthy. Swapping to a bigger/better model barely moves this; fixing chunking, going hybrid, and adding a reranker moves it a lot. So when an interviewer says "answers are wrong," the Director instinct is to **inspect retrieval first** (is the right chunk even in the index? is it retrieved? is it ranked into the shortlist?) before touching the model.
 
----
+<details>
+<summary>Go deeper — advanced retrieval techniques (IC depth, optional)</summary>
 
-## E: Estimation
+- **Query rewriting / expansion:** the user's literal question is often a poor query. Rewrite it (resolve pronouns from chat history, expand acronyms, generate sub-queries) before embedding. Multi-query then fuses results.
+- **HyDE (Hypothetical Document Embeddings):** ask the LLM to *draft* a hypothetical answer, embed *that*, and retrieve against it — the draft is closer in embedding space to real answer-bearing chunks than the terse question is.
+- **Contextual retrieval:** prepend a short LLM-generated summary of the *whole document* to each chunk before embedding, so an out-of-context chunk ("it increased 3%") retains the subject ("Q3 EU revenue increased 3%"). Cuts retrieval-miss rate materially at modest ingest cost.
+- **Multi-hop / agentic RAG:** for questions needing several lookups ("compare the 2024 and 2025 policies"), let an agent issue retrieval as a *tool* iteratively rather than one shot. More capable, far more tokens and latency.
+- **GraphRAG:** build a knowledge graph from the corpus and retrieve over entities/relations for global "summarize across everything" questions that flat chunk retrieval can't answer. Heavy to build; reserve for corpora where relationship questions dominate.
 
-> Enough math to justify the search/booking split and right-size each tier.
+These are escalations: add them only when eval shows flat retrieve-rerank is the ceiling, not by default.
 
-**Assumptions:** 500K bookable properties × avg 10 room types × 365 date-offsets (1 year forward) = **~1.8B availability cells** in the search index; ~100M DAU browsing, ~1M bookings/day.
+</details>
 
-**Search QPS:** 100M users × ~30 searches/day ÷ 86,400 ≈ **35K reads/s** baseline; 3× peak → **~100K reads/s**. Even "3M QPS" (Booking.com cited) is a CDN+cache figure, the origin request rate after caching is closer to 100K-500K/s depending on cache-hit ratio. Either way, it must not touch the booking store.
-
-**Booking QPS:** 1M bookings/day ÷ 86,400 ≈ **12 writes/s** globally at average; 10× peak ≈ **120 writes/s**. Per property, this is typically < 1 write/s, a hot hotel in peak season might see 5-10/s.
-
-**The 1,000:1 ratio is the governing fact.** It rules out serving searches from the transactional booking store (would serialise read traffic through a CP core designed for 120 writes/s).
-
-**Storage, availability index:** 1.8B cells × ~100 B per cell ≈ **180 GB** raw. Fits in a distributed KV or wide-column store; replicated ×3 ≈ **~550 GB**. Search index (Elasticsearch/OpenSearch shards) of property metadata: ~50M documents × ~2 KB ≈ **100 GB** raw.
-
-**Booking store:** 1M bookings/day × 365 days × ~1 KB/record ≈ **365 GB/year**, small; a sharded relational store holds this comfortably with years of history.
-
-**Cache working set:** top 1% of properties (~5,000) × 10 room types × 365 days × ~100 B ≈ **1.8 GB**, fits in RAM, single Redis cluster.
-
-**What estimation decided:** the search tier must be an independent, read-scaled, eventually-consistent layer; the booking store is a small, strongly-consistent shard; the hot-property spike (5-10 writes/s on one property) is manageable with per-property sharding without a waiting room (unlike Ticketmaster's 33K/s per event).
-
----
-
-## S: Storage
-
-> Three data tiers with different consistency requirements; match store to access pattern.
-
-**1. Availability index (read-heavy, eventually consistent, the search tier).**
-
-- *Access pattern:* ~100K reads/s for searches across property × room-type × date-range; acceptable staleness of seconds to minutes; writes are asynchronous fan-out from the booking store.
-- *Choice:* **Apache Cassandra** (or DynamoDB) with partition key `(property_id, room_type_id)` and clustering key `date`. A row per (property, room-type, date) holds `available_count` and `price`. Wide-column gives fast range reads by date and high write throughput for async updates.
-- *Rejected, Elasticsearch as the availability store:* Elasticsearch excels at full-text and geo search for property discovery but is not designed for high-frequency count updates on hundreds of millions of cells. Use Elasticsearch for the **property catalog** (name, location, amenities, ratings); use Cassandra for **availability counts**.
-- *Rejected, serving availability from the booking store:* couples the 100K reads/s browse firehose to a CP core sized for 120 writes/s. Wrong store for the job.
-
-**2. Booking store (strongly consistent, write path).**
-
-- *Access pattern:* atomic decrement (or conditional insert) on `inventory` row; transactional order write; ~120 writes/s peak, strong consistency required.
-- *Choice:* **PostgreSQL sharded by `property_id`** (or CockroachDB for geo-distributed strong consistency). Row-level transactions, conditional inventory decrements, and foreign-key integrity between `reservations` and `inventory` are natural here.
-- *Rejected, Cassandra for bookings:* LWW semantics can permit two concurrent writes to both succeed and converge to an oversold state. Bookings demand linearisability per (property, room-type, date).
-
-**3. Property catalog + search (AP, Elasticsearch).**
-
-- *Access pattern:* geo search, full-text on amenity/name, faceted filters (star rating, price range, free wifi). Staleness of minutes acceptable, a property adding a new room type is not time-critical.
-- *Choice:* **Elasticsearch/OpenSearch**. Front with Redis and CDN for hot property pages.
-
-**Reservation hold state:** a **Redis hash** keyed by `hold_id` holding (user, property, room-type, dates, expiry). TTL set on the key; expiry events trigger inventory release. Low-state, fast, near the API layer.
-
----
-
-## H: High-level design
-
-> An eventually-consistent search/browse front protecting a small strongly-consistent booking core; async fan-out keeps the two layers decoupled.
+### Diagram: the two RAG pipelines
 
 ```mermaid
-flowchart TB
-    USER["Guest browser / app"] --> CDN["CDN / edge cache"]
-    CDN --> GW["API Gateway"]
+flowchart LR
+    subgraph INGEST["Ingest pipeline — offline, continuous, incremental"]
+        SRC[Sources<br/>wiki / tickets / PDFs / DB / code] --> PARSE[Parse + clean<br/>extract text, keep structure]
+        PARSE --> CHUNK[Chunk<br/>~256-1024 tok, 10-20% overlap<br/>+ metadata + ACL tags]
+        CHUNK --> EMB1[Embed each chunk]
+        EMB1 --> IDX[(Vector + keyword index)]
+    end
 
-    GW -->|"search properties"| SRCH["Search service"]
-    SRCH --> ES[("Elasticsearch<br/>property catalog")]
-    SRCH --> AVAIL[("Cassandra<br/>availability index<br/>(eventual)")]
-    SRCH -.-> RC[("Redis<br/>hot-property cache")]
+    subgraph QUERY["Query pipeline — online"]
+        Q[User question] --> EMB2[Embed query]
+        EMB2 --> RET["Retrieve top-k ≈ 20-50<br/>dense + BM25 + metadata/ACL filter"]
+        IDX -.-> RET
+        RET --> RERANK["Rerank cross-encoder<br/>→ top 3-8"]
+        RERANK --> ASM["Assemble prompt<br/>instructions + ordered chunks + Q"]
+        ASM --> LLM[LLM generate]
+        LLM --> ANS["Answer + citations<br/>answer only from context, else refuse"]
+    end
 
-    GW -->|"hold room"| HOLD["Hold service"]
-    HOLD --> REDIS[("Redis<br/>hold TTL store")]
-    HOLD --> BK["Booking service"]
-
-    GW -->|"confirm or cancel"| BK
-    BK -->|"atomic decrement<br/>or increment"| PG[("PostgreSQL<br/>inventory + reservations<br/>(STRONG CP)<br/>sharded by property_id")]
-    BK --> PAY["Payment service<br/>(PCI delegated)"]
-    PAY -.-> PSP["External PSP"]
-
-    BK -.->|"inventory changed"| BUS["Event bus<br/>Kafka"]
-    BUS -.-> AVAIL
-    BUS -.-> ES
-    BUS -.-> RC
-
-    style PG fill:#7a1f1f,color:#fff
-    style BK fill:#e8a13a,color:#000
-    style AVAIL fill:#1f6f5c,color:#fff
-    style REDIS fill:#2d6cb5,color:#fff
+    style CHUNK fill:#e8a13a,color:#000
+    style RET fill:#e8a13a,color:#000
+    style RERANK fill:#1f6f5c,color:#fff
+    style ANS fill:#2d6cb5,color:#fff
 ```
 
-**Happy path, search to booking:**
+### Worked example: an enterprise knowledge assistant
 
-1. Guest searches "Paris, 2 adults, June 14-17" → **Search service** queries Elasticsearch for matching properties, joins with Cassandra availability counts (all three dates must have `available_count > 0`), returns results with prices. Redis caches hot properties.
-2. Guest selects a property → **Hold service** writes a hold record to Redis (TTL 10 min) and tentatively reserves via the Booking service (decrements a `held_count` in Postgres, not the confirmed count). The availability index is not yet updated, holds are optimistic.
-3. Guest completes checkout → **Booking service** runs an atomic transaction: confirm the held_count → `confirmed_count` decrement, write the `reservations` row, call payment, commit. On success, emits a Kafka event.
-4. **Kafka fan-out** asynchronously updates Cassandra availability counts and the Elasticsearch index, eventual update within seconds.
-5. If the hold expires (Redis TTL fires), the `held_count` is returned to `available_count` in Postgres, and a Kafka event re-increments the Cassandra index.
+Take a 50,000-person company: "answer any employee's question from our wikis, HR policies, engineering docs, and support tickets, **with citations**, and **never** show someone a document they can't access."
 
-**The shape to notice:** the read firehose (search, browse) never touches Postgres. The eventual/strong boundary is drawn at the Booking service, the only path that crosses into the CP core.
+- **Corpus & ingest:** ~10M documents across five connectors. **Recursive/structure-aware chunking** at ~512 tokens, 15% overlap — rejected fixed-size because HR policy PDFs and engineering Markdown have structure (headings, tables) that fixed windows shred. Ingest is **incremental**: a webhook on each source upserts only changed docs, so a policy edited at 9am is answerable by 9:05. Rejected nightly full re-index: too stale for HR/policy questions and wasteful at 10M docs.
+- **Critical metadata:** every chunk carries the **ACL** of its source doc. This is non-negotiable and seeds the scariest failure mode.
+- **Retrieve:** **hybrid** (dense + BM25) — rejected pure-vector because employees search exact strings (error codes, policy numbers, system names) that dense retrieval fumbles. Filter by the requesting user's **access tags at query time** so retrieval can only return permitted chunks. Pull top-30 candidates.
+- **Rerank:** a cross-encoder narrows 30 → top-5. Rejected "feed all 30": it'd cost ~6× the context tokens, trigger lost-in-the-middle, and lower answer precision.
+- **Generate:** instruct "answer only from the five chunks, cite each claim's source, say 'I don't have that' if unsupported." Rejected free-form generation: without the grounding instruction the model fills gaps from parametric memory and hallucinates a plausible-but-fake policy.
+- **Eval gates ship:** a golden set of ~300 real Q&A pairs measures **retrieval recall** (is the right chunk in the top-30?) and **faithfulness** (does the answer stick to retrieved text?) on every prompt/chunking/model change. Rejected "ship and watch": you can't eyeball faithfulness at scale, and a chunking regression silently tanks recall.
 
----
+Every decision traces to a requirement: citations and "no leakage" (the ACL filter), freshness (incremental ingest), exact-string questions (hybrid), and precision under a token budget (rerank).
 
-## A: API design
+### Trade-offs table
 
-> Cover the booking lifecycle; status codes and idempotency are the correctness story.
-
-```
-# --- Search (eventual, cached) ---
-GET /v1/properties?city=Paris&checkin=2026-06-14&checkout=2026-06-17
-    &guests=2&room_type=KING                  -> 200 { properties: [...] }
-
-GET /v1/properties/{propertyId}/availability
-    ?checkin=&checkout=&room_type=            -> 200 { available: true,
-                                                       count: 3,
-                                                       price_per_night: 189,
-                                                       asOf: <ts> }
-                                                # count is from the eventual index — a hint
-
-# --- Hold (tentative reservation, TTL-gated) ---
-POST /v1/holds
-  body: { propertyId, roomType, checkin, checkout, guestCount, userId }
-  -> 201 { holdId, expiresAt, totalPrice }
-  -> 409  # no availability (count hit 0 in the booking store)
-
-# --- Confirm booking (convert hold to reservation, charge payment) ---
-POST /v1/bookings
-  headers: { Idempotency-Key: <uuid> }
-  body: { holdId, paymentToken }
-  -> 201 { bookingId, confirmationCode, roomType, checkin, checkout }
-  -> 410  # hold expired — guest must restart search
-  -> 402  # payment declined — hold released
-  -> 409  # overbooking limit exceeded (rare; policy-controlled)
-
-# --- Cancel ---
-DELETE /v1/bookings/{bookingId}
-  -> 200 { refundAmount, cancellationFee }   # policy-applied
-
-# --- Admin: set overbooking policy ---
-PUT /v1/properties/{propertyId}/inventory
-  body: { roomType, date, physicalCount, overbookBuffer }
-  -> 200
-```
-
-**Design notes (each with its rejected alternative):**
-
-- **Hold before confirm, two calls.** *Rejected: single "book" call.* Humans need time to review totals and enter payment, you cannot hold a DB transaction open for 30 seconds. Split tentative hold (instant) from confirmation (involves PSP).
-- **`availability` count is explicitly a hint** (`asOf` timestamp). The authoritative check is in the booking store at confirm time, the 409 on confirm is the real arbiter, not the search result.
-- **`Idempotency-Key` on confirm is mandatory.** Network retries otherwise double-charge and potentially double-book. *Rejected: trusting clients not to retry*, they always do.
-- **Overbooking 409 is a policy response, not a bug.** The API exposes it so clients can distinguish "truly sold out" from "overbooking cap reached" and display appropriate messaging.
-
----
-
-## D: Data model
-
-> The partition key for the booking store and the availability cell schema are the two load-bearing decisions.
-
-**Booking store (Postgres, sharded by `property_id`):**
-
-- **`inventory`**, primary key `(property_id, room_type_id, date)`. Columns: `physical_count`, `overbook_buffer`, `confirmed_count`, `held_count`. The invariant: `confirmed_count + held_count <= physical_count + overbook_buffer`. All updates run as `UPDATE ... WHERE confirmed_count + held_count + 1 <= physical_count + overbook_buffer`, the overbooking policy is encoded directly in the constraint.
-- **`reservations`**, primary key `reservation_id`; foreign key `property_id` (colocation with inventory on the same shard). Columns: user, room_type, checkin, checkout, status (`HELD`/`CONFIRMED`/`CANCELLED`), `idempotency_key` (unique index), `created_at`, `expires_at`.
-
-**Partition key = `property_id`. The load-bearing decision:**
-
-- *Why it's right:* a booking transaction touches inventory rows for each night of the stay (checkin to checkout-1 dates) and writes one reservations row, all scoped to one property. Sharding by `property_id` colocates those rows on one shard, enabling a multi-row transaction with no cross-shard coordination.
-- *Rejected: shard by `reservation_id` hash.* Spreads reservations evenly but scatters a property's inventory across shards → cross-shard 2PC on the hottest booking path. Wrong trade.
-- *Hot property concern:* a popular city-centre hotel might see 5-10 writes/s at peak, manageable on one shard. Unlike Ticketmaster's 33K/s per event, hotel bookings are distributed across dates and room types, diluting the per-row contention significantly.
-
-**Availability index (Cassandra):**
-
-- Partition key `(property_id, room_type_id)`, clustering key `date`. Row: `available_count`, `price`, `updated_at`. Updated asynchronously from Kafka. A full date-range availability check is a single partition scan, fast.
-
-<details>
-<summary>Go deeper, multi-night atomicity and the inventory constraint (IC depth, optional)</summary>
-
-A 3-night stay requires decrementing inventory for 3 separate date rows. In Postgres on the same shard, this is a single transaction across those rows. The conditional update pattern:
-
-```sql
-UPDATE inventory
-SET confirmed_count = confirmed_count + 1
-WHERE property_id = $1
-  AND room_type_id = $2
-  AND date = ANY($dates)
-  AND confirmed_count + held_count + 1 <= physical_count + overbook_buffer;
-```
-
-Run inside a transaction that touches all dates; if any date row fails the WHERE predicate the whole transaction rolls back. This is exactly the multi-row atomicity that makes a transactional relational store worth its sharding complexity. A DynamoDB-style approach would need application-level compensation or DynamoDB Transactions (limited to 25 items, but adequate for typical stay lengths of 1-14 nights).
-
-The `held_count` column prevents a race where two users both hold the last room simultaneously and both proceed to confirm. The hold endpoint increments `held_count` (conditional), the confirm converts `held_count - 1, confirmed_count + 1`, and a TTL expiry runs `held_count - 1`. This three-state accounting (`physical + overbook_buffer >= confirmed + held`) is the overbooking-aware generalisation of Ticketmaster's binary `AVAILABLE/HELD/SOLD`.
-
-</details>
-
----
-
-## E: Evaluation
-
-> Re-check against NFRs, name bottlenecks, and fix each while stating the trade-off.
-
-**Re-check vs NFRs:** no double-booking (conditional atomic decrement); overbooking policy (buffer column in invariant); search availability (AP, eventual); booking strong (CP, Postgres shard). Now the bottlenecks.
-
-**Bottleneck 1, search serving stale data that leads to a 409 storm.**
-
-If the Cassandra availability index lags the booking store by more than a few seconds, guests see rooms that are already taken, click "book," hit 409 at confirm, and abandon. At steady state, Kafka lag is sub-second, acceptable. Under a flash sale (a property releasing a limited promotional block), Kafka consumer lag could spike.
-
-*Fix:* the Search service hedges: for properties flagged as "high-contention" (detected via booking velocity from the event bus), it reads `available_count` directly from Postgres (bypassing Cassandra) for the final availability check before presenting the hold option. This adds ~5-10 ms latency for that property's search response, not for the full search result page. *Trade-off:* we increase load on the booking shard for that property during a flash event, acceptable given it's a hot-path hedge, not the steady-state path.
-
-*Rejected: always read availability from Postgres.* Kills the read/write separation that the architecture is built on.
-
-**Bottleneck 2, hold expiry and inventory leakage.**
-
-A guest holds a room and closes the browser tab. The `held_count` is incremented but the hold was never confirmed. If Redis TTL fires but the Booking service never processes the expiry event (service restart, missed event), `held_count` stays elevated, effectively leaked inventory.
-
-*Fix, two-layer expiry.* (1) Redis TTL fires → publishes an expiry event to Kafka → Booking service decrements `held_count` and marks the reservation `EXPIRED`. (2) A background reconciliation job scans `reservations WHERE status='HELD' AND expires_at < now() - 5min` every minute and force-expires stragglers, the sweeper handles the Redis/Kafka failure case. The invariant is checked at confirm time regardless: `confirmed_count + held_count + 1 <= physical_count + overbook_buffer`. *Rejected: sweeper-only.* A crashed Redis loses all TTL state, leaving held_count inflated until the sweeper catches up, unacceptable during peak booking.
-
-**Bottleneck 3, the overbooking policy under-/over-shoot.**
-
-Set `overbook_buffer` too low and the property loses revenue; too high and guests get walked. The buffer is a **live property-management knob**, not a deploy-time constant.
-
-*The system hook:* the `PUT /v1/properties/{propertyId}/inventory` endpoint (admin-only) updates `overbook_buffer` in Postgres and the change takes effect on the next booking attempt. A separate **yield-management service** (out of scope, delegated to revenue-management team) reads historical no-show rates per property × season × day-of-week and recommends buffer values. *Trade-off:* the system supports overbooking as a first-class knob; whether to use it is a business and legal decision, not a technical one.
-
-**Bottleneck 4, cross-date consistency on a multi-night cancellation.**
-
-A guest cancels a 5-night stay. The system must atomically increment `inventory.confirmed_count` for 5 date rows, write the cancellation record, compute refund (cancellation policy), and initiate payment reversal.
-
-*Fix:* cancellation runs as a single Postgres transaction on the `property_id` shard (all 5 date rows colocated). Refund policy is applied in-transaction via a policy function (no external call in the hot path); actual payment reversal is async via the payment service with an idempotency key. *Trade-off:* async refund means the guest sees "cancelled, refund in 3-5 days" rather than instant credit, standard industry behaviour, avoids blocking the cancel path on PSP latency.
-
-<details>
-<summary>Go deeper, cancellation policy enforcement (IC depth, optional)</summary>
-
-Cancellation policy (free until 48 hours before, 1-night penalty within 48 hours, no refund within 24 hours) is modelled as a policy rule applied at cancellation time:
-
-```
-refund_amount = total_price - cancellation_fee(policy, checkin, cancelled_at)
-```
-
-The function is pure and deterministic given policy + timestamps, safe to run in the transaction. The policy itself is stored in a `cancellation_policies` table keyed by `property_id` + `room_type_id` (or a `policy_id` FK). Storing policy in the DB rather than code means property managers can update it without a deploy, and historical reservations always reference the policy that was in effect at booking time (the reservation row stores a `policy_snapshot` JSONB column).
-
-</details>
-
-**Closing re-check:** double-booking prevented (conditional decrement, property-shard transactions); overbooking supported (buffer column, no invariant violation); search decoupled (Cassandra + ES, async Kafka fan-out); hold leakage bounded (two-layer expiry); cancellation atomic (same-shard transaction). The CP surface stays confined to the Booking service + Postgres shards.
-
----
-
-## D: Design evolution
-
-> Push each dimension up and name what breaks first.
-
-**At 10× global scale (10M bookings/day, global properties, ~1M search QPS):**
-
-- **Search tier** scales horizontally, Elasticsearch and Cassandra add shards; the read path is stateless services behind a load balancer. The CDN + Redis cache absorbs the long tail of popular-city searches.
-- **Booking store** at 1,200 writes/s globally is still small, the shard count grows linearly with property count. **Geo-partitioning** (all European properties on EU shards, US properties on US shards) reduces cross-region latency for most bookings; cross-region reservations (US guest booking EU hotel) route to the EU shard, adding ~80-120 ms, acceptable for a synchronous booking confirmation.
-- **The flash-sale problem becomes relevant** at 10× when a single large hotel group (Marriott, Hilton) drops a flash promotion: potentially thousands of properties, each with 10-50× normal booking rate for ~30 min. A per-property queue (lightweight compared to Ticketmaster's event queue, hotel booking peaks at ~50 writes/s per property, not 33K/s) can be added to the Booking service to shed burst write pressure without rebuilding the architecture.
-
-**Hardest trade-offs to defend:**
-
-- **The search/booking consistency split.** Drawn at the Booking service, eventual everywhere the read firehose goes, strong only on the booking path. The discipline is resisting requests to "just make search real-time", it would re-couple 100K reads/s to a store sized for 120 writes/s.
-- **Overbooking as a first-class system capability.** Some interviewers will push "just make it a hard constraint." The Director answer: the hotel industry runs on overbooking for valid revenue reasons; the system's job is to enforce the *chosen* constraint, not to choose it. Design the knob, let the business turn it.
-- **Property-id sharding vs. date sharding.** Property-id buys transaction locality for a stay; date-sharding would enable a demand-calendar view more easily but shatters multi-night transactions. The right call depends on query patterns; for a booking-first system, property-id wins.
-
-**What I'd revisit:** if the product adds **group bookings** (blocking 20 rooms across 30 dates for a conference), the inventory model needs a reservation-block primitive that the current row-per-date model doesn't express elegantly. I'd have the storage team design a `blocks` table with a separate decrement path. **Dynamic pricing / yield management** is a separate service reading from the inventory event stream, I delegate that to the revenue-management team with the constraint that it writes back via the `PUT /inventory` admin endpoint, not directly to the booking store.
-
-**Where I'd delegate:**
-
-- **Payment / PCI:** *"The payments team owns the PSP integration behind `charge(idempotencyKey, amount, token)`, my prior is tokenised cards, async capture on confirm, and automatic reversal on cancellation. They own SLA and compliance."*
-- **Yield management / overbooking calibration:** *"The revenue-management team owns the model that sets `overbook_buffer`; the system provides the knob and a stream of booking velocity events. I'd ask them to define acceptable walk rates as a contractual SLA."*
-- **Fraud:** *"Trust-and-safety owns bot-driven fake-booking detection (holds as inventory lock attacks). My prior is rate-limiting holds per user + IP and flagging anomalous hold patterns, they own the scoring model."*
-
----
-
-## Trade-offs table: the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
+| Decision | Option A | Option B | Option C | Use when… |
 |---|---|---|---|---|
-| **Availability read tier** | **Cassandra (eventual, async fan-out)**, decouples 100K reads/s from booking store | **Read replica of Postgres**, strong-enough, but scales only ~10× before replica lag under load | **Serve from Postgres directly**, correct but serialises reads through the CP core | **A** as default: the 1,000:1 ratio is the governing constraint (our choice). **B** for smaller scale where operational simplicity wins. **C** never at this scale. |
-| **Booking store** | **Postgres sharded by property_id**, transactions, conditional decrements, property-colocation | **CockroachDB/Spanner**, geo-distributed strong consistency, higher cost | **DynamoDB with conditional writes**, single-item atomic, no multi-row txn | **A** for most deployments: strong consistency + multi-night atomicity, known ops model. **B** for global active-active writes required. **C** only if all stays are single-night or you model each night as independent. |
-| **Overbooking enforcement** | **Buffer column in inventory invariant**, flexible, tunable per property | **Hard cap at physical_count**, simpler, but forces business to fight the system | **Application-layer guard**, flexible but race-prone without DB-level enforcement | **A**: overbooking is a real business need; encode it at the DB constraint level so it can't be bypassed (our choice). **B** only if overbooking is contractually forbidden. **C** rejected: race window between check and write. |
-| **Hold expiry** | **Redis TTL + Kafka event + background sweeper**, defence-in-depth | **Sweeper-only**, simpler, ~1 min lag in returning inventory | **Redis TTL only**, no sweeper fallback | **A**: inventory leakage is a revenue problem during peak (our choice). **B** for low-stakes systems. **C** rejected: single point of failure on Redis. |
+| **Chunking strategy** | **Fixed-size window** | **Recursive / structure-aware** | **Semantic (topic-shift) split** | **A** as a quick baseline / uniform prose. **B** is the default for mixed structured docs (the right call most of the time). **C** for high-value corpora where retrieval precision justifies the preprocessing cost. |
+| **Retrieval** | **Dense (vector) only** | **Hybrid (dense + BM25 + filter)** | Keyword (BM25) only | **B** as the default — recovers exact-token matches dense drops. **A** when queries are purely semantic/paraphrase. **C** only for legacy exact-match search; loses semantic recall. |
+| **Rerank** | **None (use raw top-k)** | **Cross-encoder rerank top-N → 3-8** | LLM-as-reranker | **B** is the high-leverage default for precision. **A** only when latency budget is brutal and recall is already clean. **C** when you need nuanced relevance and can pay the latency. |
+| **Grounding strategy** | **RAG (retrieve at query time)** | **Long-context stuffing** | **Fine-tune the facts in** | **A** for large/private/fresh/citable knowledge (most cases). **B** for a small, bounded, static doc set. **C** never for facts — fine-tune *behavior/format*, RAG the facts; they compose. |
 
----
+### What interviewers probe here
+- **"The model is great, but the answers are wrong. Where do you look first?"** — *Strong signal:* goes to **retrieval/eval before the model** — is the right chunk indexed, retrieved, and ranked into the shortlist? Names "good model, bad retrieval" as the dominant failure and separates retrieval recall from generation faithfulness. *Red flag:* "swap to a bigger model" — treats a retrieval problem as a model problem.
+- **"How do you keep the index fresh?"** — *Strong:* incremental, event-driven upserts on source change with delete tombstones; states the freshness SLA as the ingest-pipeline latency. *Red flag:* "re-index nightly" with no awareness of the staleness window or the re-embed cost at scale.
+- **"How do you stop it surfacing a document the user isn't allowed to see?"** — *Strong:* ACL tags on every chunk, **filtered at retrieval time**, so forbidden chunks never enter the context. Notes that post-hoc output filtering is too late (the model already saw it). *Red flag:* "filter the answer afterward" or no notion of permissions in retrieval — a data-leak waiting to happen.
+- **"Why not just fine-tune the docs into the model / paste them all in the prompt?"** — *Strong:* fine-tuning teaches behavior not citable facts and can't update cheaply; long-context doesn't scale past a bounded set and is expensive per call. *Red flag:* treats fine-tuning as the way to add knowledge.
+- **"Do you even need a reranker?"** — *Strong:* yes when raw top-k carries near-miss noise; quantifies the precision lift vs the latency cost and reranks only a candidate set. *Red flag:* unaware of the retrieve-then-rerank pattern.
 
-## What interviewers probe here (Director altitude)
+The through-line at Director altitude: **the model is the cheap, swappable part; the retrieval pipeline and its eval are the asset.** "I'd have the team benchmark hybrid + a cross-encoder reranker against our golden set; my prior is that fixes most of our wrong answers before we touch the model."
 
-- **"What prevents two guests from booking the last room simultaneously?"** *Strong:* the conditional atomic decrement in Postgres, `UPDATE inventory SET confirmed_count = confirmed_count + 1 WHERE ... AND confirmed_count + held_count + 1 <= physical_count + overbook_buffer`, one winner; loser sees 0 rows updated and returns 409. This is a deliberate CP choice on the booking path. *Red flag:* "the cache prevents it" or an eventually-consistent store as the booking truth.
+### Common mistakes / misconceptions
+- **Blaming the model for a retrieval failure.** The fluent wrong answer almost always traces to chunking/retrieval, not the LLM. Fix the librarian, not the student.
+- **One blind chunking strategy for everything.** Fixed-size windows applied to tables, code, and prose alike is the #1 reason "the data is in there but won't retrieve." Match chunking to structure.
+- **Pure vector retrieval.** Dense embeddings miss exact tokens (codes, names, SKUs). Go hybrid; fuse dense + keyword.
+- **Permissions as an afterthought.** Filtering the *output* is too late — the model already consumed forbidden text and may paraphrase it. Filter at **retrieval** with per-chunk ACLs.
+- **No separation of eval.** Tracking one "accuracy" number hides whether retrieval or generation broke. Measure retrieval recall/precision and generation faithfulness/relevance **separately** — the fixes are different.
 
-- **"How is this different from Ticketmaster?"** *Strong:* seats are unique (per-seat row, CAS on one row); hotel rooms are fungible (count decrement on a room-type × date cell). Ticketmaster needs a waiting room because 33K/s hits one event's inventory shard; hotel booking peaks at ~50 writes/s per property, diluted across dates and room types, no waiting room needed. Overbooking is a legitimate hotel knob, not an option for Ticketmaster (seat oversell is fraud). *Red flag:* treating them as the same problem, or missing the fungibility distinction.
+### Practice questions
 
-- **"Why not serve search directly from the booking store?"** *Strong:* the 1,000:1 read-to-write ratio; the booking store is a CP core sized for ~120 writes/s, attaching 100K reads/s to it either serialises those reads or requires massive over-provisioning of the transactional tier. *Red flag:* "we can add read replicas" without acknowledging that replica lag reintroduces the stale-data problem at the one place you need freshness.
+**Q1.** Your RAG assistant gives a confident, well-cited answer that is flatly wrong. Walk me through how you diagnose it.
+> *Model:* Separate the two stages. **Retrieval:** is the correct chunk even in the index (ingest/chunking gap)? If indexed, is it in the top-k (recall — try hybrid, raise k, query rewriting)? If retrieved, is it ranked into the shortlist (add/tune the reranker)? **Generation:** if the right chunk *was* in context but the answer contradicts it, that's a **faithfulness** failure — tighten the grounding instruction, lower temperature, or the chunk was buried mid-context (lost-in-the-middle — reorder). The citation being wrong is the tell: it cited what it retrieved, and what it retrieved was wrong. Bigger model is the *last* lever, not the first.
 
-- **"What is your overbooking model, and is it a bug or a feature?"** *Strong:* it's a deliberate policy stored as `overbook_buffer` per property × room-type, enforced at the DB constraint level, tunable by a yield-management service. The Director delegates calibration to revenue management with a stated SLA on walk rate. *Red flag:* "overbooking shouldn't happen" or ignoring it entirely.
+**Q2.** Freshness requirement: a policy edited at 9:00am must be answerable by 9:05. How do you design ingest?
+> *Model:* **Event-driven incremental ingest** — a change webhook on the source enqueues just that document; a worker re-parses, re-chunks, re-embeds, and **upserts** the affected chunks (and tombstones deleted ones) into the index. The freshness SLA *is* this pipeline's end-to-end latency, so size the queue/workers for it. Rejected: nightly full re-index (up to 24h stale, and re-embedding 10M docs daily is pure waste). Keep a periodic full reconcile as a backstop for missed events, not as the primary path.
 
-- **"What happens if the hold expires while payment is in flight?"** *Strong:* the confirm step re-asserts the hold inside the Postgres transaction, `WHERE reservation_id = $holdId AND status = 'HELD' AND expires_at > now()`. If it expired and inventory was resold, the confirm fails gracefully and triggers an async refund. TTL is sized (10-15 min) far above worst-case PSP latency. *Red flag:* no re-assertion, or relying only on the TTL being "long enough."
+**Q3.** When would you *not* use RAG, and use long context or fine-tuning instead?
+> *Model:* **Long-context** when the corpus is small and bounded and fits a window (one contract, one runbook) and you'll accept the per-call token cost — no retrieval infra to maintain. **Fine-tuning** when the need is *behavior/format/tone* (always answer as JSON, adopt our support voice, classify into our taxonomy), not facts. **RAG** whenever knowledge is large, private, frequently changing, or must be cited — which is most enterprise cases. They compose: fine-tune the style, RAG the facts.
 
----
-
-## Common mistakes
-
-- **Serving availability from the booking store.** The 1,000:1 search-to-book ratio makes this fatal at scale. The search tier must be an independent, eventually-consistent layer.
-- **Treating overbooking as a correctness bug.** It is a revenue policy. The system enforces *whatever invariant the business sets* via the buffer column, the architecture should not presuppose that buffer = 0.
-- **Forgetting multi-night atomicity.** A 5-night booking must decrement 5 inventory rows in a single transaction. Shard key choice (property_id) is what makes this possible without cross-shard 2PC.
-- **Hold-only expiry via sweeper.** A sweeper with 1-min lag during peak inventory scarcity is a revenue problem. Two-layer expiry (Redis TTL + sweeper fallback) is the right defence-in-depth.
-- **Conflating this with Ticketmaster.** The flash-crowd scale is different by 3 orders of magnitude per property; the overbooking semantics are opposite; the fungibility model changes the core data structure. Name the differences early.
-
----
-
-## Practice questions (with model answers)
-
-**Q1. A property has 5 king rooms. Two guests simultaneously try to book the last available room for June 14. How does the system handle it?**
-
-> *Model:* Both guests arrive at the Booking service concurrently. Each attempts `UPDATE inventory SET confirmed_count = confirmed_count + 1 WHERE property_id = $p AND room_type = 'KING' AND date = '2026-06-14' AND confirmed_count + held_count + 1 <= physical_count + overbook_buffer`. Postgres serialises writes to the row; one update lands first, setting `confirmed_count` to the buffer limit. The second update finds the WHERE predicate false (count exceeded), returns 0 rows updated, and the Booking service returns a 409 to that guest. No lock held after the first commit; no oversell. The Cassandra availability index is updated asynchronously via Kafka, the second guest may have seen "1 available" from search but the 409 at confirm is the truth.
-
-**Q2. The CTO asks: "Can we set overbooking to 110% for premium hotels during peak season?" How do you handle this without a code change?**
-
-> *Model:* `overbook_buffer` is a first-class column in the `inventory` table, set per (property_id, room_type_id, date). The admin API `PUT /v1/properties/{propertyId}/inventory` accepts `physicalCount` and `overbookBuffer`. Setting `overbook_buffer = 2` on a 20-room property allows up to 22 bookings (110%). The DB constraint (`confirmed_count + held_count <= physical_count + overbook_buffer`) enforces it atomically. A yield-management service, delegated to the revenue team, reads booking velocity and no-show history to recommend and apply buffer values via that admin API. The business decision is theirs; the system enforces whatever they set. Walk-rate SLA is the revenue team's contractual obligation to manage.
-
-**Q3. Design the cancellation flow for a 7-night booking, including the partial-refund case.**
-
-> *Model:* Cancellation is a Postgres transaction on the `property_id` shard: decrement `confirmed_count` for each of the 7 date rows, update `reservation.status = 'CANCELLED'`, compute `refund_amount = total_price - cancellation_fee(policy, checkin, now())` using the stored policy. All 7 date rows are colocated on the same shard, no cross-shard coordination. Payment reversal is async: emit a `CancellationInitiated` event to Kafka; the Payment service handles the PSP reversal with an idempotency key and emits `RefundCompleted`. The reservation status updates to `REFUNDED` on that event. The guest sees "cancelled, refund in 3-5 days", standard. We don't block the cancel path on PSP latency.
-
-**Q4. A popular hotel flash-sale drops 50 discounted rooms. Suddenly your Cassandra availability index is wrong for 10 minutes while Kafka processes the backlog. What's your mitigation?**
-
-> *Model:* Three levers. First, a **Kafka consumer-lag alert**: if lag on the availability-update consumer exceeds 30 s, the Booking service sets a `high_contention` flag for that property (stored in Redis, expires in 5 min). Second, for properties with that flag, the Search service **hedges by reading available_count from Postgres** instead of Cassandra for the final "can I book this?" check shown to users, adds ~10 ms to that property's search response, avoids showing availability that's already gone. Third, the Search API includes `asOf` in the response so clients can surface a "prices may be updating" disclaimer. The key is that the eventual tier is *always* a hint; the 409 at confirm is the authoritative answer. We accept a slightly elevated 409 rate during the flash window rather than re-architecting the read path.
-
----
+**Q4.** Your corpus is 10M docs and pure vector search keeps missing questions that contain exact error codes. What changes?
+> *Model:* Go **hybrid**: add a BM25/keyword index and fuse it with dense results (RRF), so exact-token queries hit the keyword path while paraphrase queries hit the dense path. Also check **chunking** — if codes live in tables being shredded by fixed-size windows, switch to structure-aware chunking and consider **contextual retrieval** (prepend a doc summary to each chunk) so a lone code keeps its subject. Verify with retrieval-recall on a golden set containing those code queries before/after.
 
 ### Key takeaways
+- **RAG grounds a frozen, private-data-blind model in fresh, citable knowledge** without retraining — the default for any feature whose answer depends on large/private/changing data. It *reduces* hallucination; it doesn't eliminate it.
+- **RAG is two pipelines:** an incremental **ingest** path (connect → parse → chunk → embed → index) whose latency *is* your freshness, and a **query** path (embed → retrieve → rerank → assemble → generate-with-citations).
+- **Retrieval, not the model, is the bottleneck.** Chunking (structure-aware, ~512 tokens, overlap), **hybrid** retrieval (dense + BM25 + metadata filter), and a **cross-encoder reranker** (retrieve wide ~20–50, rerank to ~3–8) carry the quality. "Good model, bad retrieval → confident, well-cited, wrong" is the signature failure.
+- **Permissions belong in retrieval, not output.** Tag every chunk with ACLs and filter at query time so forbidden text never enters the context.
+- **Eval is the gate, and it's two metrics.** Retrieval recall/precision (right context fetched?) and generation faithfulness/relevance (answer stuck to it?) fail independently — measure them separately and gate every change on a golden set.
 
-1. **Fungibility changes the model.** Hotel rooms are a count per (room-type, date), a decrement, not a per-seat row lock. This makes overbooking a natural, configurable buffer rather than a correctness violation.
-2. **The 1,000:1 search-to-book ratio is the architectural driver.** It mandates an eventually-consistent search/availability tier (Cassandra + ES) decoupled from the strongly-consistent booking store (Postgres), connected by an async Kafka fan-out.
-3. **Property-id sharding buys multi-night atomicity.** A 7-night stay decrements 7 inventory rows on one shard in one transaction, no cross-shard 2PC. The hot-property concern is manageable at hotel booking rates (< 50 writes/s per property) without a waiting room.
-4. **Overbooking is a policy knob, not a bug.** Model it as `overbook_buffer` in the inventory constraint; delegate calibration to revenue management with a walk-rate SLA; the system enforces whatever the business sets.
-5. **Defence-in-depth on hold expiry.** Redis TTL + Kafka event is the fast path; a background sweeper covers Redis failures. The booking-store confirm always re-asserts the hold in the same transaction, correctness never depends solely on a timer.
-
-> **Spaced-repetition recap:** Hotel reservation = **fungible inventory** (count decrement, not seat lock) + **1,000:1 search-to-book** ratio demanding an eventual Cassandra availability index decoupled from a strongly-consistent Postgres booking store (sharded by `property_id` for multi-night atomicity). Overbooking = `overbook_buffer` column in the DB constraint, calibrated by the revenue team. Hold expiry = Redis TTL + sweeper fallback + in-transaction re-assertion at confirm. Contrast with Ticketmaster: unique seats vs. fungible rooms, 33K/s event spike vs. < 50 writes/s per property, no overbooking vs. overbooking as standard practice.
-
----
-
-*End of Lesson 9.3. Hotel reservation vs. Ticketmaster is a canonical "same surface, different model" pair, fungibility, the 1,000:1 ratio, and overbooking as a policy knob are the three ideas the question is testing.*
+> **Spaced-repetition recap:** RAG = brilliant student, fallible librarian — give the frozen model the open book turned to the right page. Two pipelines: **ingest** (chunk → embed → index, incrementally — this is your freshness) and **query** (embed → retrieve hybrid + ACL filter → **rerank** → assemble → generate **with citations**). The bottleneck is **retrieval, not the model** (fix chunking/hybrid/rerank before swapping models); the signature failure is *confident, well-cited, wrong*. Permissions filter at **retrieval**, never on output. Gate every change on **separate** retrieval and faithfulness eval. RAG for facts, fine-tune for behavior, long-context for small bounded sets — they compose. Cross-ref: vector search, the adapt-the-model decision, eval, and the enterprise-RAG walkthrough.

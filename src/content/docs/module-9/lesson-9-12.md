@@ -1,315 +1,134 @@
 ---
-title: "9.12 — Metrics & Monitoring Platform"
-description: A write-heavy time-series platform where cardinality is the cost function, hosts × series × samples drives the ingest math, retention tiers are budget decisions, and the build-vs-buy crossover is the design's center of gravity, reasoned through RESHADED at Director altitude.
+title: "9.12 — Multi-Agent Orchestration"
+description: When and how to split work across multiple cooperating agents — orchestrator-worker, hierarchical, and handoff patterns — and the hard Director truth that multi-agent multiplies cost and failure surface, so most problems are better served by a single agent or a plain workflow.
 sidebar:
   order: 12
 ---
 
-> **This gets asked because Directors own the two things this system is: the observability budget and the on-call rotation.** It's the most Director-authentic problem in the set, you are the customer of the thing you're designing. A Staff answer designs a clean ingest path and a TSDB. A Director answer treats **cardinality as the cost function of the entire system**, every label is a line item, and frames retention, downsampling, and sampling as **budget decisions with stated trade-offs**, then closes with the build-vs-buy crossover that decides whether this platform team should exist at all. This is the full-system assembly of the pillars and burn-rate alerting, plus the economics; the build-vs-buy memo is the worked example. The tell interviewers listen for: do you design for write volume, or do you design for *cardinality*, because they are not the same number.
-
 ### Learning objectives
-- Run the **RESHADED** spine on a **write-heavy time-series** system whose dominant cost is not QPS but **cardinality**, and make the Estimation step the centerpiece: hosts × series/host × bytes/sample × resolution.
-- Derive the **write-amplification math** out loud (a 10K-host fleet emitting at 10 s resolution is millions of samples/sec and tens of millions of active series) and show why the ingest rate and the active-series count are two different budgets.
-- Treat **downsampling and retention tiers** as explicit budget decisions, raw at 10 s for days, rolled up to 1-minute and 1-hour for months and years, each stated as a trade-off, not a default.
-- Decide **push vs pull at fleet scale** as an operational call, and place the **alerting/query path** as a separate read system from the ingest firehose.
-- Own the **build-vs-buy crossover**: when the Datadog bill durably clears ~2× the loaded cost of the platform team that would replace it, make this the closing Director move, with a written trigger.
+- Name the **real reasons** to split work across multiple agents — parallelism, role specialization, and **context isolation** — and distinguish them from the cargo-cult reason ("more agents = smarter").
+- Draw the core **orchestration patterns** (orchestrator-worker, hierarchical, pipeline, parallel fan-out/reduce, debate-critic) and pick one from the *shape of the task*, not by reflex.
+- Quantify the **cost and reliability tax** of multi-agent — a large token multiplier plus coordination overhead plus compounding error — so you can defend or reject it in dollars.
+- State the **decision rule**: multi-agent earns its keep only when subtasks are genuinely **parallel and independently verifiable**; tightly-coupled, single-thread-of-control work belongs to one agent or a deterministic workflow.
+- Reason about **shared state vs message passing** between agents and the consistency hazard each carries.
 
 ### Intuition first
-A metrics platform is a **utility company's smart-meter grid**, and the trap is thinking the hard part is the electricity.
+A single agent is a **brilliant generalist working alone**: one head, one notepad, one train of thought. Multi-agent is **hiring a team and a manager**. The instinct that a team is automatically better is the same instinct that makes under-pressure managers throw bodies at a late project — and it fails for the same reason Brooks named fifty years ago: **a team only beats a soloist when the work genuinely splits into independent parts, and even then you pay for coordination.**
 
-Every house (host) has a few hundred meters (series), each sending a reading (sample) every few seconds. With ten thousand houses you aren't reading "a lot of power", you're reading **millions of meters, ticking forever**. The cost of the grid isn't the wattage; it's the **number of distinct meters you've agreed to read and remember**. And a utility goes bankrupt not from a heat wave but from a billing bug that registers a *new meter per kilowatt-hour*, a thousand houses become a billion meters overnight. That is **cardinality explosion**: someone adds a `user_id` label and your meter count jumps from tens of millions to tens of billions in an afternoon, OOMing storage *and*, if a vendor bills per meter, detonating the invoice.
+Picture a research report. If the question is "profile these eight competitors," a manager can hand one competitor to each of eight researchers, they work in parallel, and the manager staples the results together — a clean win, because the subtasks barely interact. Now picture editing a single contract clause by committee: eight people with eight pens on one paragraph, each overwriting the others, arguing about a sentence that has to read as one voice. That's slower and worse than one careful editor. **Same team, opposite outcome — and the only thing that changed is whether the work was actually parallel.** That distinction, not the number of agents, is the whole lesson.
 
-So the design splits cleanly. The **readings flowing in** are an append-only firehose, write-optimized, compressed hard, never updated. The **questions asked of them** are a separate, read-optimized system, because you can't serve dashboards off the raw firehose any more than a utility reads ten million live meters to answer one billing question, you **pre-aggregate** (downsample) and **forget old detail on a schedule** (retention tiers). Hold the picture: a compressed write firehose, a separate query/alert layer on pre-rolled aggregates, and one number, **cardinality**, governing the cost of all of it.
+### Deep explanation
 
-That asymmetry inverts the read-heavy, cache-everything social-feed problems: here the writes are the hard part, and cost is counted in *series*, not requests.
+**The legitimate reasons to go multi-agent — and the fake one.** There are exactly three reasons that hold up under questioning:
+- **Parallelism.** Independent subtasks run concurrently, cutting wall-clock time. Eight competitor profiles in the time of one.
+- **Role specialization.** A focused agent with a narrow system prompt, a curated toolset, and domain framing outperforms one generalist juggling everything. A "SQL analyst" agent and a "chart designer" agent each beat a single agent told to do both.
+- **Context isolation** — the most underrated. Each sub-agent gets its **own clean context window** scoped to its subtask, instead of one agent's window filling with the debris of five concerns until it overflows and degrades. Splitting the work splits the context, and a focused context is a higher-quality context.
 
----
+The fake reason is **"more agents reason better."** Adding agents does not add intelligence; it adds *parallel capacity and separation*. If the task isn't parallel and doesn't benefit from separation, more agents make it **slower, costlier, and less reliable** — never smarter. The Director-altitude statement: *multi-agent is a concurrency-and-separation tool, not an intelligence amplifier.*
 
-## R: Requirements
+**The patterns, and the task shape each fits.**
+- **Orchestrator-worker** (the workhorse): a lead agent decomposes the goal into subtasks, dispatches them to worker agents, and **synthesizes** the results into one answer. Fits open-ended work that splits into independent pieces (research, broad search, multi-file analysis). The lead is the single point of planning and aggregation.
+- **Hierarchical** (managers of managers): orchestrators that themselves orchestrate, for deep task trees. Powerful and rarely necessary — each layer multiplies cost and latency. Reach for it only when a flat orchestrator-worker can't express the decomposition.
+- **Sequential pipeline**: specialists hand off in a fixed order (extract → transform → validate → format). This is barely "multi-agent" — it's a **workflow** with LLM stages, and that's a feature: when the steps are known and ordered, a deterministic pipeline beats a free-roaming agent on reliability and cost.
+- **Parallel fan-out / reduce**: dispatch the *same* query to N agents (or one query split N ways), then merge — map-reduce for language. The reduce step is where quality is won or lost.
+- **Debate / critic** (generator + critic): one agent proposes, another adversarially reviews, loop. Lifts quality on hard reasoning and catches errors a single pass misses — at the cost of multiple full passes per answer.
+- **Handoff / "swarm"**: an agent **transfers control** to a specialist when it hits something outside its lane — a triage agent hands a billing question to the billing agent, which now owns the conversation. Great for routing within a known set of specialties; the trap is **handoff loops** (A→B→A) and losing the thread of who's in charge, so bound the handoffs and keep one clear owner.
 
-> Pin down what the platform ingests and serves, cut scope to a defensible core, and state the load-bearing fact out loud: this is a **write-heavy time-series** system whose cost is **cardinality**, not request rate.
+There is no "best" topology. The signal an interviewer wants is the **match**: parallel-and-independent → orchestrator-worker or fan-out; known-and-ordered → pipeline (workflow); quality-critical-and-checkable → debate-critic; route-to-a-specialist → handoff/swarm; deep decomposition → hierarchical, reluctantly.
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *Metrics only, or all three pillars?* → **Metrics is the design driver** (the write-heavy TSDB). Logs and traces are sibling systems with their own cost models, volume and sampling; I scope to metrics.
-- *Fleet size and emission rate?* → **~10,000 hosts × ~1,000 series at 10-second resolution**, the numbers that set the whole design.
-- *Self-serve platform, or one team's monitoring?* → **A multi-tenant platform**, which is exactly why cardinality governance is a *platform* problem, not a per-team one.
-- *Retention?* → **Raw for ~2 weeks; downsampled for 13 months** (year-over-year). The tiering is a budget decision I'll defend.
-- *Latency bar?* → Ingest keeps up with the firehose with **no sample loss**; alert freshness **< a few seconds**; dashboard queries **p99 < ~2 s**.
+**Communication: shared state vs message passing — and the consistency trap.** Agents coordinate one of two ways. **Message passing** (the worker returns a result to the orchestrator, period) is the safe default: no shared mutable state, so no races. **Shared state / blackboard** (agents read and write a common store) is more flexible but reintroduces every distributed-systems hazard you know — two agents writing the same key, reading stale values, clobbering each other's work. If you must share state, you need the same discipline as any concurrent system: a single writer per key, or conditional writes, or an append-only log the orchestrator reconciles (the standard distributed-systems patterns apply unchanged). The Director instinct: **prefer message passing and a single aggregating orchestrator; treat shared mutable agent state as the thing most likely to corrupt your run.**
 
-**Functional requirements:**
-1. **Ingest** metrics from a large fleet, counters, gauges, histograms.
-2. **Store** time series durably with high compression.
-3. **Query** for dashboards, aggregations, rate, percentiles over ranges.
-4. **Alert** continuously on **SLO burn-rate** rules.
-5. **Downsample and expire** by retention tier.
-6. **Govern cardinality**, drop/limit high-cardinality labels at ingest.
+**The cost and reliability tax — quantify it or get cut.** This is the point most candidates skip and every strong interviewer probes. Multi-agent is **not free parallelism**; it multiplies the two things that matter:
+- **Token cost.** Every agent re-reads its context every turn, the orchestrator pays for planning and synthesis, and workers duplicate shared framing. In practice an agentic multi-agent system burns on the order of **10–15× the tokens of a single chat turn** (Anthropic reported its multi-agent research system used ~15× the tokens of chat). So the economics only work when the **value per task is high** — research worth dollars, not a $0.002 FAQ lookup.
+- **Reliability.** Error compounds. If each agent succeeds independently with probability *p* over its run, a chain that needs all *N* to succeed lands near *pⁿ* — three agents at 90% each is ~73% end-to-end, and a deep tree decays fast. Add coordination failure modes a soloist never has: the orchestrator mis-decomposes, a worker misunderstands its slice, the synthesis drops a result, two agents duplicate or contradict each other.
 
-**Explicitly CUT (scoping *is* the signal):** logs and traces as full subsystems, dashboard UI/rendering, anomaly-detection ML, synthetic monitoring, the agent's host-level collection internals, and incident-management workflow. I scope to **ingest → store → downsample → query → alert**, governed by cardinality control.
+So the bar is high and explicit: **the parallelism/specialization gain must outrun the token multiplier and the compounding-error tax.** State that trade in numbers, or you're hand-waving.
 
-**Non-functional requirements:**
-- **Write-availability above all**, losing monitoring during an incident is a compounding failure; ingest must never block the fleet. A deliberate **AP** posture for ingest.
-- **Lossless ingest** at the firehose rate under load.
-- **Query freshness**, alerts evaluate on data seconds old, not minutes.
-- **Cost-bounded**, spend is itself an NFR, governed by cardinality and retention.
-- **Multi-tenancy**, per-team cardinality limits so one team can't blow the shared budget.
-
-**The skew, stated, and why the usual framing is a trap.** This looks like a write-heavy system (millions of samples/sec in, modest query rate out), and it is, but the *write rate* is not the cost driver. **Cardinality, the count of distinct active series, is.** Two fleets can ingest the same samples/sec and cost 100× differently if one smuggled a `user_id` label in. The architecture follows: a write-optimized firehose with cardinality enforced *at ingest*, a separate read/alert path on downsampled aggregates, and retention tiers that trade resolution for cost on a schedule.
-
----
-
-## E: Estimation
-
-> **Adaptation, said out loud:** in this problem E is the centerpiece, and it is not QPS, it's **cost-per-metric math**: hosts × series/host × bytes/sample × resolution. Two budgets fall out, the **ingest rate** (samples/sec) and the **active-series count**, and they are governed by different things. Get this section right and the rest of the design is bookkeeping.
-
-**Assumptions:** 10,000 hosts; ~1,000 active series/host; 10-second resolution; raw retention 14 days; downsampled 13 months; raw sample compresses to **~1.5 bytes**.
-
-**Active series (the cardinality budget, the headline):** `10,000 hosts × 1,000 = 10,000,000 active series.` Ten million series sizes memory, because each carries an in-memory index entry plus write buffer (low-KB of RAM each). **This, not samples/sec, is what makes a TSDB node fall over**, and it's the number a careless label multiplies.
-
-**Ingest rate (the write budget):** `10M ÷ 10 s = 1,000,000 samples/sec`, sustained, forever. At ~1.5 B that's only ~1.5 MB/s of bytes, but a million append-*ops*/sec is the firehose the engine must absorb without backpressuring the fleet. Note the two budgets are different: write rate and active-series count are governed by different things.
-
-**Raw storage (14 days):** `1M/s × 86,400 × 14 × 1.5 B ≈ 1.8 TB`, **×3 ≈ 5.4 TB** hot. Dominated by *sample count* = `series × resolution × time`, every retention lever pulls on that product.
-
-**The downsampling win (why tiers exist):** 10-second resolution for 13 months would be `1M/s × 86,400 × 395 × 1.5 B ≈ 51 TB ×3 ≈ 150 TB`, and nobody queries year-old data at 10-second granularity. **Roll up to 1-minute after 14 days (6× fewer samples), 1-hour after 60 days (360× fewer).** The 13-month tier collapses to **single-digit TB**, a **30-360× reduction**, losing only sub-minute detail on old data, which is for trends, not forensics.
-
-**The cardinality bomb:** add one unbounded label, `user_id`, ~1,000 distinct users seen per host, and active series jumps to `10M × 1,000 = 10 billion`, ingest to 1B/s, the index to **terabytes of RAM you don't have**. The system doesn't degrade, it dies. **This is why cardinality is the cost function and why governing it is a Director responsibility, not the on-call engineer's**.
-
-**The SaaS framing (sets up build-vs-buy):** Datadog/New Relic bill **per custom metric = per unique series**, plus per-host. Ten million series is a **multi-million/yr** bill; a `user_id` blowup makes it nine figures overnight. **The same cardinality number that sizes our RAM sizes the vendor's invoice**, which is why the build-vs-buy crossover turns on it.
-
-**Instance count:** ~a **handful of sharded TSDB nodes** (a single node strains in the low tens of millions of series, so shard by series); query/alert tier separate and read-sized; collector tier edge-scaled. **The spend is the active-series count and retention tiers, not raw compute.**
-
-**What estimation decided:** active-series count (10M) *is* the cost; ingest rate (1M/s) sizes the write path; downsampling buys 30-360× on old data; an unbounded label is an extinction event; and the cardinality number is simultaneously our RAM budget and the vendor's invoice, making build-vs-buy a cardinality-economics question.
-
----
-
-## S: Storage
-
-> Three data classes with different access patterns; pick stores by what each is read for, not by fashion. The firehose and the questions asked of it are different systems.
-
-**1. Raw + downsampled time series (write-heavy, append-only, compressed).**
-- *Access pattern:* a million append-ops/sec in; range scans by `(series, time-window)` out; never an in-place update; massively compressible because consecutive samples are near-identical.
-- *Choice:* a purpose-built **TSDB**, **Prometheus + a horizontally-scaled backend (Mimir/Cortex/Thanos)**, or a columnar TSDB (VictoriaMetrics, InfluxDB), sharded by series. These exploit time-series regularity to hit ~1.5 B/sample.
-- *Rejected, Postgres as the TSDB:* a row per sample is 16+ bytes uncompressed with no delta-of-delta compression; it falls over an order of magnitude below the firehose rate. *Rejected, Cassandra as primary:* a wide-column store *can* hold time series, but you'd reimplement compression and downsampling on top.
-
-**2. Series index / metadata (the cardinality map).**
-- *Access pattern:* given label matchers (`{service="checkout", status="500"}`), find matching series, an inverted index over label→series. **This index is where cardinality cost concentrates** (one entry per active series); the 10M-series budget is *its* size.
-- *Choice:* an **inverted index** native to the TSDB (Prometheus's postings index), held largely in memory. *Rejected, unbounded growth:* without a per-tenant cap enforced here, one team's blowup evicts everyone's working set.
-
-**3. Alerting rules + SLO state (small, strongly-consistent).**
-- *Choice:* a small **relational/KV store** for rule definitions, SLO targets, and error-budget state, tiny, but correct and durable (a lost burn-rate rule is a missed page). *Rejected, co-locating in the TSDB:* couples slow-changing config to the firehose; keep control plane and data plane separate.
-
-**Cardinality enforcement** lives at the **ingest collector** (an OTel tier you own): drop/aggregate high-cardinality labels *before* they reach the index, the cheapest series is the one you never stored.
-
----
-
-## H: High-level design
-
-> The shape to make visible: a **write-optimized ingest firehose** (collector → sharded TSDB) feeding two separate read systems, a **query path** (dashboards) and an **alert path** (burn-rate rules), with downsampling and retention running as background tiers. The collector is the cardinality choke point.
-
-```mermaid
-flowchart TB
-    FLEET["Fleet of hosts<br/>agents + exporters"] --> COL["Collector tier<br/>OTel - cardinality control"]
-    COL -->|"pull or push samples"| ING["Ingest service<br/>write path"]
-    ING --> TSDB[("Sharded TSDB<br/>raw series - hot tier")]
-    ING --> IDX[("Series index<br/>label to series - in memory")]
-
-    TSDB --> DS["Downsample + retention<br/>background rollups"]
-    DS --> COLD[("Object storage<br/>downsampled - long tier")]
-
-    TSDB --> Q["Query service<br/>read path"]
-    COLD --> Q
-    IDX --> Q
-    Q --> DASH["Dashboards<br/>Grafana"]
-
-    TSDB --> ALERT["Alert evaluator<br/>burn-rate rules"]
-    ALERT --> RULES[("Rule + SLO store<br/>strong")]
-    ALERT --> PAGE["Pager + ticket<br/>fast burn pages"]
-
-    style ING fill:#e8a13a,color:#000
-    style TSDB fill:#1f6f5c,color:#fff
-    style COL fill:#2d6cb5,color:#fff
-    style ALERT fill:#7a1f1f,color:#fff
-```
-
-**Happy path, compressed:** each host's agent emits ~1,000 series; the **collector tier** (one we own) is where **cardinality control** happens, dropping unbounded labels and enforcing per-tenant caps *before* anything is stored. Samples flow to the **ingest service** and the **sharded TSDB** (sharded by series), updating the **in-memory series index**. Background **downsample jobs** roll raw 10-second data into 1-minute and 1-hour aggregates and push old tiers to **object storage**, expiring per retention. Two independent reads sit on top: the **query service** serves dashboards (picking the resolution tier by range), and the **alert evaluator** runs **burn-rate rules** continuously, paging on fast burn, ticketing on slow burn. Rule/SLO state lives in a small strong store.
-
-**The shape to notice:** the **write path and the two read paths are separate systems**. Ingest is sized for a million append-ops/sec and must never block the fleet (AP); the read paths serve dashboards and rules off downsampled tiers. Conflating them, serving dashboards off the raw firehose, is the classic failure.
-
----
-
-## A: API design
-
-> Keep to the calls the requirements demand; the ingest contract and the *cardinality limits enforced at it* are the correctness-and-cost story.
-
-```
-# --- Ingest (write firehose; pull or push) ---
-# PULL model: the platform scrapes each target on an interval
-GET  http://<host>:<port>/metrics            -> 200 (exposition format)
-                                                # platform-initiated; failed scrape = up==0 (liveness)
-
-# PUSH model: agent/collector sends a batch
-POST /v1/ingest
-  body: { samples: [ {series_id|labels, value, ts}, ... ] }
-  -> 202 Accepted                              # async, never blocks the fleet
-  -> 429 Too Many Requests                     # tenant over its cardinality/rate budget
-  -> 200 { dropped: ["user_id"] }              # high-cardinality labels stripped at collector
-
-# --- Query (read path; dashboards) ---
-GET  /v1/query_range?expr=<promql>&start=&end=&step=
-  -> 200 { series: [ {labels, points:[[ts,val],...]} ], resolution: "1m" }
-                                                # resolution auto-selected by time range
-
-# --- Alerting rules (control plane) ---
-PUT  /v1/rules/{ruleId}
-  body: { slo: "...", burnRate: 14.4, window: "1h", page: true }
-  -> 200
-GET  /v1/budget/{sloId}                        -> 200 { consumed: 0.42, remaining: "25m" }
-```
-
-**Design notes (each with its rejected alternative):**
-- **Ingest is async, returns 202, never blocks.** *Rejected: synchronous, durable-before-ack ingest.* The monitoring system must never backpressure the fleet during an incident, a few seconds of buffered loss tolerance beats stalling the apps it watches. Write-availability over write-durability.
-- **Cardinality limits are enforced *at the API*** (429 / dropped labels). *Rejected: accept everything, clean up later*, by "later" the index has OOMed. The limit is a hard gate, not a dashboard warning.
-- **Query resolution auto-selects by range**, a 13-month query reads the 1-hour tier, not raw. *Rejected: always query raw*, scans 360× the data for a trend nobody needs at second-granularity.
-- **Pull gives liveness for free** (`up==0` on a failed scrape); push is the exception for short-lived/NAT'd jobs. The API supports both, defaulting to pull.
-
----
-
-## D: Data model
-
-> The series key and the label set are the most consequential decisions, because **the label set *is* the cardinality**, the data model is the cost model.
-
-**Series**, **metric name + sorted label set**, hashed to a `series_id`; sharded by `series_id` so 10M series spread across nodes; each a compressed stream of `(timestamp, value)` samples. **The label set is the cardinality unit:** cardinality = the product of distinct values across all labels, so the decision that matters most is *which labels are allowed*.
-
-**Samples**, `(series_id, timestamp, value)`, delta-of-delta-compressed per series per time chunk; never updated in place.
-
-**Rollups**, per series, per tier (10 s raw, 1 m, 1 h): a downsampled stream with `min/max/avg/count` so percentiles and rates stay queryable at coarse resolution.
+**The decision rule.** Multi-agent earns its place when subtasks are **(a) genuinely parallel** (they don't depend on each other's intermediate state) **and (b) independently verifiable** (you can check each worker's output on its own). Research, broad multi-source gathering, and fan-out evaluation fit cleanly. The anti-pattern is **tightly-coupled, single-thread-of-control work** — editing one document, executing a transaction, a tight reasoning chain where step *k+1* needs step *k*'s exact state. There, splitting across agents adds coordination cost and consistency risk for no parallelism benefit, and a **single agent or a deterministic workflow wins**. This echoes the agent-loop lesson prime directive: *use the least autonomy and the fewest moving parts that solve the problem.*
 
 <details>
-<summary>Go deeper, TSDB internals: compression, chunks, and the index (IC depth, optional)</summary>
+<summary>Go deeper — orchestrator decomposition, aggregation, and failure handling (IC depth, optional)</summary>
 
-**Sample compression.** Consecutive samples in a series are near-identical: timestamps advance by a fixed scrape interval, values change little. TSDBs (Gorilla-style, as in Prometheus/InfluxDB) use **delta-of-delta on timestamps** (the *change* in the interval, usually zero → 1 bit) and **XOR on values** (store only the differing bits). A 16-byte `(int64 ts, float64 val)` sample compresses to **~1.3-2 bytes** amortized, the order-of-magnitude win that makes 1M samples/sec storable. This is *why* you use a TSDB, not a row store.
-
-**Chunks and the head block.** Recent samples accumulate in an in-memory **head block** per series; when a chunk fills (e.g. ~120 samples) it's compressed and flushed; periodically the head is written to an immutable on-disk **block** (e.g. 2-hour blocks in Prometheus) with its own index. This append-only, immutable-block design is what gives high write throughput and cheap compaction.
-
-**The inverted index (postings).** To resolve `{service="checkout", status="500"}` to series IDs, the TSDB keeps an **inverted index**: for each label-value pair, a posting list of matching series IDs; a query intersects posting lists. This index is in memory and is **where cardinality cost lives**, 10M series means 10M index entries plus posting lists per label value. An unbounded label explodes the *number of label values*, which explodes posting-list count and index memory. This is the mechanical reason cardinality kills.
-
-**Sharding for scale.** A single TSDB node tops out in the low tens of millions of active series. Horizontal backends (**Mimir/Cortex/Thanos**) shard series across ingesters by hash, replicate for durability, and run a separate query layer that scatter-gathers and merges, the read/write split made physical.
+- **Decomposition quality is the ceiling.** The orchestrator's plan caps the whole system: a bad split (overlapping subtasks, a missed slice, uneven sizing) can't be recovered by good workers. Make the orchestrator state its plan explicitly and, for high-value runs, validate the decomposition before dispatching.
+- **Aggregation/reduce is a real step, not a concatenation.** Merging worker outputs needs dedup, conflict resolution (two workers disagree), and synthesis into one voice. Budget tokens and a capable model for the reduce; a weak synthesis wastes strong workers.
+- **Partial failure.** Decide per-system: does one worker's failure fail the task, or does the orchestrator proceed with N-1 results and flag the gap? Bound workers with per-worker step/token/time budgets so one runaway can't sink the run.
+- **Fan-out caps.** Unbounded dynamic fan-out ("spawn an agent per item" over thousands of items) is how token bills explode; cap concurrency and total agents, and log what you dropped.
+- **Determinism.** More agents = more nondeterminism. For anything auditable, prefer fixed topologies (pipeline/workflow) over a free-roaming orchestrator that decides its own structure each run.
 
 </details>
 
-**The label set is the load-bearing decision, and it cuts both ways.**
-- *Why bounded labels are right:* labels are for **dimensions you'll group or filter by**, `service` (~50), `method` (~5), `status` (~10), `instance` (10K), `region` (~5). Bounded products stay tractable; index size and cost stay predictable.
-- *Why one bad label is catastrophic:* a single **unbounded** label, `user_id`, `request_id`, raw URL, `email`, multiplies series by its cardinality, exploding the index into terabytes and the bill into nine figures. **Per-event identifiers belong in logs and traces, never in metric labels**.
-- *Rejected: trusting teams to self-govern labels.* In a multi-tenant platform, one team's `user_id` evicts everyone's working set. Limits and label-drop rules are enforced **at the collector**, per tenant, as a hard gate, not advice.
+### Diagram: orchestrator-worker with a verify step
 
----
+```mermaid
+flowchart TD
+    GOAL[Goal / query] --> ORCH["Orchestrator (lead agent)<br/>plan + decompose into independent subtasks"]
+    ORCH -->|subtask A| W1["Worker A<br/>own context + tools"]
+    ORCH -->|subtask B| W2["Worker B<br/>own context + tools"]
+    ORCH -->|subtask C| W3["Worker C<br/>own context + tools"]
+    W1 --> SYNTH
+    W2 --> SYNTH
+    W3 --> SYNTH["Synthesize / reduce<br/>dedup + resolve conflicts"]
+    SYNTH --> CRITIC{"Critic / verify<br/>complete? consistent?"}
+    CRITIC -->|gaps| ORCH
+    CRITIC -->|ok| OUT[Final answer]
+    style ORCH fill:#e8a13a,color:#000
+    style SYNTH fill:#1f6f5c,color:#fff
+    style CRITIC fill:#7a1f1f,color:#fff
+    style OUT fill:#2d6cb5,color:#fff
+```
 
-## E: Evaluation
+### Worked example: when to fan out, and when not to
 
-> Re-check against the NFRs and hunt the bottlenecks, fixing each while naming its trade-off.
+**Case A — a competitive-research assistant (multi-agent wins).** The task: "produce a briefing on eight competitors across pricing, hiring, and product launches." This is **embarrassingly parallel and independently verifiable**: each competitor (or each competitor×dimension) is its own lookup, checkable on its own. Design: an **orchestrator** plans the matrix and dispatches **worker agents** in parallel, each with a clean context scoped to one competitor and a search/retrieval tool; a **reduce** step merges and de-duplicates; a **critic** checks coverage ("did we cover all eight and all three dimensions?") and sends gaps back. The token multiplier (~10×+) is justified because the briefing is high-value and the wall-clock saving is large — eight lookups in the time of one. Rejected alternative: one agent doing all 24 lookups serially in a single bloating context — slower, and its context degrades as it fills.
 
-**Re-check vs NFRs:** write-availability, async 202 ingest that never blocks the fleet; lossless-enough, buffered collectors absorb spikes; freshness, alert evaluator reads the hot tier; cost-bounded, cardinality gate + retention tiers; multi-tenancy, per-tenant series caps. Now the bottlenecks.
+**Case B — refactor a function across one file (single agent / workflow wins).** The task: "rename a symbol and update every call site in this module." This is **tightly coupled and single-thread-of-control** — every edit shares the same file state, and ordering matters (an edit invalidates another agent's view of the file). Splitting it across agents introduces write conflicts on shared state and coordination overhead for **zero** parallelism benefit, and the compounding-error tax makes it *less* reliable than one agent (or a deterministic find-replace-then-verify workflow) doing it in order. Rejected alternative: an "agent per call site" — pure coordination cost, real corruption risk.
 
-**Bottleneck 1, cardinality explosion (the cardinal cost risk).**
-A team ships a `user_id` label; active series jumps 1,000× and the index OOMs.
-*Fix:* **enforce cardinality at the collector**, drop/aggregate disallowed labels before storage, plus a **per-tenant active-series cap** (e.g. 1M/team) returning 429 when breached, isolating the blast radius to the offending tenant. *Rejected:* accept-then-alert, by the time the alert fires the index is gone. *Trade-off:* a hard cap can drop legitimately-needed series, so it's per-tenant and raisable on review, the explicit cost of multi-tenancy.
+The two cases differ only in whether the work is parallel and independently verifiable. That test, applied first, pre-decides the architecture.
 
-**Bottleneck 2, the write firehose saturating a TSDB node.**
-A million append-ops/sec, concentrated on hot series, melts one node.
-*Fix:* **shard by series across ingesters** (hash of `series_id`), replicate for durability, front with buffered collectors that batch and absorb spikes. *Trade-off:* a query spanning many series now scatter-gathers across nodes (merged at the query layer), query complexity traded for write scalability.
+### Trade-offs table
 
-**Bottleneck 3, long-retention storage cost.**
-13 months of 10-second raw is ~150 TB and nobody queries it at that resolution.
-*Fix, **downsampling tiers as the budget mechanism**:* roll raw → 1-minute after 14 days, → 1-hour after 60 days, expire raw, cold tiers to object storage, **a 30-360× reduction** for data older than a fortnight. *Rejected:* keep everything raw "in case", pays 360× for unused resolution. *Trade-off:* you permanently lose sub-minute detail on old data, accepted because old data answers trend questions, not forensics.
+| Pattern | Parallelism | Token cost | Coordination overhead | Reliability | Use when… |
+|---|---|---|---|---|---|
+| **Single agent** | none | **lowest (1×)** | none | best for coupled tasks (no coordination to fail) | the task is coupled, sequential, or small — the default |
+| **Pipeline / workflow** | staged | low | low (fixed order) | **high (deterministic)** | steps are known and ordered — prefer over a free agent |
+| **Orchestrator-worker** | **high** | high (~10×+) | moderate (plan + synth) | gated by decomposition + synthesis | independent, parallel, verifiable subtasks (research, broad gather) |
+| **Hierarchical** | high | **highest** | high (every layer) | decays with depth | deep decomposition a flat orchestrator can't express — reluctantly |
+| **Debate / critic** | low | high (N passes) | low | **highest quality** on hard reasoning | quality-critical, checkable answers worth multiple passes |
 
-**Bottleneck 4, alerting on stale or noisy data (on-call health).**
-The evaluator either lags the firehose (misses a fast burn) or pages on causes and drowns on-call.
-*Fixes:* (a) the alert evaluator reads the **hot tier directly** so burn-rate rules see seconds-old data; (b) **alert on SLO burn-rate symptoms, not causes**, fast burn (~14.4×/1h) pages, slow burn (~1×/3d) tickets, CPU/disk to dashboards. *Trade-off:* symptom-based alerting localizes the *cause* slower than a cause-level alert, accepted, because the managed metric is **pages/shift and % actionable**, and a muted pager is a worse reliability risk.
+### What interviewers probe here
+- **"Why not just split this into ten agents and go faster?"** — *Strong signal:* names the **token multiplier (~10–15×)** and **compounding error (pⁿ)**, and asks whether the subtasks are actually parallel; concludes multi-agent only pays when value-per-task is high and the work is independent. *Red flag:* "more agents = better/faster" with no cost or coupling analysis.
+- **"How do the agents share state without stepping on each other?"** — *Strong:* prefers **message passing to a single aggregating orchestrator**; if shared state is required, applies single-writer / conditional-write / append-log discipline. *Red flag:* a free-for-all shared scratchpad with no concurrency control — races and clobbered work.
+- **"When is multi-agent the *wrong* call?"** — *Strong:* tightly-coupled, single-thread-of-control tasks (one document, a transaction, a tight reasoning chain) — use one agent or a deterministic workflow. *Red flag:* "multi-agent is always more capable."
+- **"Your multi-agent research system gives inconsistent, partial answers. Diagnose."** — *Strong:* looks at **decomposition** (did the orchestrator split cleanly?), **synthesis** (did reduce drop/contradict results?), and **partial failure** handling, before blaming the model. *Red flag:* swaps the model first.
 
-**Bottleneck 5, query path competing with ingest.**
-A heavy dashboard query scans hot data and starves the write path.
-*Fix:* **separate the read path from the write path**, a distinct query service reading replicas/cold tiers, ingest isolated; auto-select downsampled resolution by range so big queries hit small tiers. *Trade-off:* added components and seconds of read-replica lag, fine for dashboards, and the alert path keeps its own hot-tier read.
+The through-line at Director altitude: **multi-agent is a cost-and-risk decision, not a sophistication flex.** "I'd default to a single agent or a workflow, and only fan out where the subtasks are independently verifiable and the task value clears the ~10× token tax — and I'd cap concurrency and budget each worker so one run can't blow the bill."
 
-**Closing re-check:** cardinality bounded (collector gate + per-tenant cap); write firehose survivable (series-sharded, buffered); storage cost governed (downsampling tiers); alerts fresh and symptom-based; query isolated from ingest. The write path stays write-optimized; the read paths are separate; cost stays a function of cardinality and retention, both governed.
+### Common mistakes / misconceptions
+- **Treating agents as free intelligence.** More agents add parallelism and separation, not reasoning power. If the task isn't parallel, you've made it slower, costlier, and less reliable.
+- **Ignoring the token multiplier.** Multi-agent commonly costs ~10–15× a single turn. Defend it with value-per-task math or don't propose it.
+- **Splitting coupled work.** Single-thread-of-control tasks (one doc, one transaction, a tight chain) across agents = coordination cost and consistency risk for zero gain. One agent or a workflow wins.
+- **Unbounded shared state.** A common scratchpad with no single-writer/conditional-write discipline races and corrupts. Prefer message passing.
+- **Forgetting the reduce step.** Aggregation is real work (dedup, conflict resolution, synthesis); a weak reduce wastes strong workers and is where inconsistency leaks in.
 
----
+### Practice questions
 
-## D: Design evolution
+**Q1.** You're asked to design an agent that audits a 200-page contract clause-by-clause and flags risky terms. One agent or many — and why?
+> *Model:* Clause-flagging is **parallel and independently verifiable** — each clause is judged on its own — so an **orchestrator-worker fan-out** (chunks of clauses to parallel workers, each with a clean context and a risk rubric) fits, with a reduce step that merges flags and a critic that checks coverage. *But* if the task were "rewrite the contract into one coherent voice," that's **coupled** (clauses reference each other, the whole must read consistently) and belongs to a single agent or a tightly-ordered workflow. Same document, opposite answer, decided by parallel-and-verifiable.
 
-> **Adaptation, said out loud:** evolution here is the **build-vs-buy crossover**, the design's center of gravity. Whether this platform team should exist *at all* is a capital-allocation decision, and the cardinality math from E is exactly the input that decides it. This is the closing Director move.
+**Q2.** A team proposes a 4-level hierarchical agent system for a customer-support bot. Critique it.
+> *Model:* Almost certainly over-built. Each hierarchy layer multiplies token cost and latency and adds a decomposition/synthesis point that can fail (reliability decays with depth). Support is mostly **retrieve-and-answer with a few tool actions** — a single agent with RAG and a small toolset, or a constrained workflow, handles the bulk; escalate to a human for the tail. I'd push for the flattest thing that meets the quality bar and reserve any fan-out for genuinely parallel sub-questions, naming the ~10× cost if we add it.
 
-**At 10× (a 100,000-host fleet, ~100M active series, ~10M samples/sec):** the collector tier and sharding scale; the model doesn't change. Push collection to a regional collector mesh, shard the TSDB across many ingesters per region, tier retention more aggressively (raw for days, not weeks). The cardinality gate becomes *more* central, at 100M series, one bad label is a multi-region outage. *Trade-off:* cross-region queries scatter-gather and global aggregations lag, accepted for horizontal write scale.
+**Q3.** How do you stop a multi-agent run from exploding your token bill?
+> *Model:* **Bound everything:** cap concurrent workers and total agent count; give each worker a step/token/time budget with a kill switch; cap dynamic fan-out and log what was dropped (no silent truncation); prefer fixed topologies over an orchestrator that invents its own structure each run; and gate the whole pattern behind a value-per-task threshold so cheap tasks never trigger it. Track $/task in tracing and alert on regressions.
 
-**The build-vs-buy crossover, the worked example:**
-The decision a Director actually owns, and it turns on the cardinality math from E. The vendor bills **per host × per custom metric (= per unique series)**: at 10K hosts and 10M series, **multi-million/yr**, a `user_id` blowup spikes it to nine figures. Run it both ways:
-- **Buy:** capability **live today**, zero engineers consumed, bill a *negotiable trajectory*, a 3-year commit lands ~25-30% off, and an **OTel collector tier you own** (dropping unqueried series) cuts **30-50%**. Realistic governed 3-year TCO: **single-digit millions**.
-- **Build:** a credible Prometheus/Mimir + Grafana platform team is **~6 engineers × ~$250K loaded ≈ $1.5M/yr forever**, plus ~$0.5-0.7M/yr infra and a ~$1.5M v1 year, with a never-ending maintenance tail (agents break on every runtime upgrade). 3-year build TCO ≈ **$7-8M**, *plus* an on-call rotation for the tool that supports on-call.
-
-**The crossover, written down (the Director move):** build wins only when **governed vendor spend durably clears ~2× the loaded cost of the replacing team** (~$4-5M/yr here). Below it, **buy and govern the pipe**; the deciding number is opportunity cost, six platform engineers are two product teams not shipping a commodity that wins zero customers. The trigger goes in the memo: *"if governed observability spend exceeds $4.5M/yr after negotiation and pipeline controls, we commission the build."* The **cardinality lever governs cost on both paths**, drop unqueried series whether you build or buy, which is precisely why it's a Director's problem, not the on-call engineer's.
-
-**Where I'd delegate (the explicit Director move):**
-- **TSDB bake-off:** *"Platform benchmarks Mimir vs VictoriaMetrics vs Thanos on our cardinality and query-shape; my prior is the Prometheus ecosystem for operational familiarity, escalating only if active-series counts exceed what it shards cleanly."*
-- **Collector/contract terms:** *"The observability team owns the OTel collector and label-drop rules, my prior is aggressive drop of unqueried series, where 30-50% of the bill hides; procurement and counsel own the paper, with per-series egress rights, a renewal price cap, and a wind-down clause as non-negotiables so the crossover trigger stays exercisable"*.
-
-What I keep, the cardinality-as-cost-function framing, the retention budget, the crossover number and its written trigger, and what I hand off, with stated priors, is the altitude.
-
----
-
-## Trade-offs table: the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
-|---|---|---|---|---|
-| **Collection model** | **Pull** (scrape `/metrics`), free liveness `up==0`, server-side discovery | **Push** (agent/OTel sends), works for short-lived & NAT'd jobs | **Hybrid** (pull default + push-gateway exception) | **C** in practice, **A** default for the free liveness signal, **B** only for ephemeral/firewalled jobs (push-gateway as exception). |
-| **Cardinality control** | **Hard cap + label-drop at collector** (per-tenant) | **Alert-and-clean-up after ingest** | **Unbounded, scale storage** | **A**, the only safe choice on a multi-tenant platform; **B** OOMs before cleanup; **C** is the extinction event. |
-| **Long-term retention** | **Downsampling tiers** (10 s → 1 m → 1 h, expire raw) | **Keep all raw forever** | **Drop old data entirely** | **A**, 30-360× cheaper, loses only sub-minute detail nobody queries; **B** pays 360× for unused resolution; **C** kills year-over-year trends. |
-| **Store choice** | **Purpose-built TSDB** (Prometheus/Mimir, VictoriaMetrics) | **Wide-column** (Cassandra) | **Relational** (Postgres) | **A**, delta-of-delta compression + downsampling built in; **B** reimplements the TSDB; **C** falls over far below the firehose rate. |
-
----
-
-## What interviewers probe here (Director altitude)
-
-- **"What actually drives the cost of this system?"**, *Strong:* **cardinality, the active-series count** (hosts × series/host), not the request rate; it sizes the index memory *and* the per-series SaaS bill; an unbounded label (`user_id`, raw URL) is an extinction event; governed at the collector. *Red flag:* "it's a write-heavy system, so we scale writes", designs for samples/sec and misses that two fleets at the same write rate cost 100× differently on cardinality.
-- **"How do you store 13 months without going broke?"**, *Strong:* **downsampling tiers**, raw 10 s for ~2 weeks, roll to 1 m then 1 h, expire raw, cold tiers to object storage; a 30-360× reduction; you lose only sub-minute detail on old data nobody queries at that resolution. *Red flag:* "keep it all in the TSDB", pays 360× for unused resolution.
-- **"Pull or push at 10,000 hosts, and why?"**, *Strong:* **pull by default** for free liveness (`up==0`) and server-side discovery, push-gateway for short-lived/NAT'd jobs as an exception; ingest is async 202 so it never backpressures the fleet. *Red flag:* "push, it's simpler" with no mention of losing dead-vs-silent detection.
-- **"Build or buy this platform?"**, *Strong:* a **cardinality-driven crossover**, buy and govern the pipe until governed vendor spend durably clears ~2× the loaded team cost (~$4-5M/yr here), with a written trigger and the opportunity-cost framing (six engineers = two product teams). *Red flag:* "build, it's cheaper" with no TCO, or quoting a hyperscaler's in-house build at mid-size scale.
-- **"How do you alert so on-call doesn't drown?"**, *Strong:* **SLO burn-rate on symptoms**, fast burn pages, slow burn tickets, causes to dashboards; the managed metric is pages/shift and % actionable. *Red flag:* "alert on CPU > 80% and every error", the pager-muting machine.
-
----
-
-## Common mistakes
-
-- **Designing for write rate instead of cardinality.** Samples/sec sizes the write path; **active-series count** sizes the cost and the memory. Two fleets at the same ingest rate cost 100× differently, cardinality is the cost function.
-- **Letting an unbounded label in.** `user_id`, `request_id`, raw URL paths, `email` as metric labels multiply series into the billions, OOMing the index *and* detonating per-series SaaS bills. Per-event IDs go in logs/traces; enforce the drop at the collector.
-- **Keeping everything raw forever.** No downsampling means paying 30-360× for old-data resolution nobody queries. Retention tiers are a budget decision, not an afterthought.
-- **Serving dashboards off the raw firehose.** The write path and the read/alert paths are separate systems; conflating them lets a heavy query starve ingest. Separate them and auto-select downsampled tiers by range.
-- **Quoting a hyperscaler's in-house build at mid-size scale.** Netflix builds observability because its crossover is behind it; at 10K hosts yours is likely ahead of you. Run the cardinality-driven TCO, don't import the verdict.
-
----
-
-## Interviewer follow-up questions (with model answers)
-
-**Q1. What's the single number that drives this system's cost, and why?**
-> *Model:* **Cardinality, the count of distinct active series**, which is `hosts × series-per-host`, here 10K × 1K = **10M series**. It's the cost driver because each active series carries an in-memory index entry (low-KB of RAM), so 10M series sizes the TSDB memory, and on a SaaS billed per unique series it sizes the invoice too. Crucially it's *not* the same as the write rate: two fleets emitting the same 1M samples/sec cost 100× differently if one smuggled a `user_id` label in. That's why I govern cardinality at the collector with a hard per-tenant cap, the cheapest series is the one I never admit.
-
-**Q2. A team adds `user_id` to their main counter. Walk me through what happens.**
-> *Model:* **Cardinality explosion.** `user_id` is unbounded, ~1,000 distinct users per host, so active series goes from 10M to **10 billion**, ingest from 1M/s to 1B/s, and the index alone is terabytes I don't have. It doesn't degrade; it OOMs. On a per-series SaaS bill, the same blowup turns a multi-million bill into nine figures overnight. The fix is structural: the collector drops the label before storage, and a per-tenant series cap returns 429 so the blast radius is one team, not the platform. `user_id` belongs in a trace span attribute or log field, never a metric label.
-
-**Q3. Justify your retention design. Why not just keep everything?**
-> *Model:* 13 months of 10-second raw is `1M/s × 86,400 × 395 × 1.5 B ≈ 150 TB ×3`, and nobody queries year-old data at second granularity. So I tier: raw 10 s for ~14 days (forensics), roll to **1-minute after 14 days, 1-hour after 60 days**, expire raw, cold tiers to object storage, the 13-month tier collapses to single-digit TB, a 30-360× reduction. The explicit trade: I permanently lose sub-minute detail on old data, acceptable because old data answers *trend* questions ("is p99 worse than last quarter?"), not forensics, and the query layer auto-selects the tier by range, so a 13-month dashboard reads the 1-hour rollup, not the firehose.
-
-**Q4. Build this in-house or buy Datadog? Walk me through the decision.**
-> *Model:* A cardinality-driven capital-allocation call, not a tech preference. The vendor bills per host × per unique series, so at 10K hosts and 10M series the bill is multi-million/yr, but it's a *negotiable trajectory*: a 3-year commit is 25-30% off, and an OTel collector I own (dropping unqueried series) cuts 30-50%, landing governed spend in the low-single-digit millions. Build is ~6 engineers × $250K loaded = $1.5M/yr *forever*, plus infra and a $1.5M v1 year and a maintenance tail, ~$7-8M over 3 years, plus on-call for the monitoring tool itself. So the crossover: build only when governed spend durably clears ~2× the team cost (~$4-5M/yr). We're below it, so I **buy, govern the pipe, and write the trigger into the memo**. The deciding number is opportunity cost, six platform engineers are two product teams not shipping a commodity that wins zero customers. Cardinality governance pays off either way, which is why I own it regardless of the verdict.
-
----
+**Q4.** When is a "multi-agent system" really just a workflow, and why does the distinction matter?
+> *Model:* When the steps are **known and ordered** (extract → validate → format), it's a **pipeline/workflow** with LLM stages, not a free-roaming agent system — and that's better: deterministic order, lower cost, easier to test and audit. The distinction matters because calling it "multi-agent" invites unnecessary autonomy and nondeterminism. Reserve true agentic orchestration for open-ended decomposition you can't script in advance.
 
 ### Key takeaways
-- **Cardinality is the cost function**, active series = hosts × series/host (10K × 1K = **10M**), sizing both index memory *and* the per-series SaaS bill. It is **not** the write rate: two fleets at the same samples/sec cost 100× differently. Govern it at the collector with a hard per-tenant cap; an unbounded label (`user_id`, raw URL) is an extinction event.
-- **The write firehose and the read/alert paths are separate systems.** Ingest is async, write-optimized, AP, ~1M append-ops/sec, never backpressuring the fleet; dashboards and burn-rate alerts read separately off downsampled tiers (and the hot tier for alert freshness).
-- **Retention tiers are a budget decision:** raw 10 s for ~2 weeks, roll to 1 m then 1 h, expire raw, a **30-360× storage reduction**, losing only sub-minute detail on old data nobody queries at that resolution.
-- **Pull by default** for free liveness (`up==0`); push-gateway is the exception for short-lived/NAT'd jobs. Use a **purpose-built TSDB** (Prometheus/Mimir, VictoriaMetrics), delta-of-delta compression and downsampling are why it's not Postgres.
-- **Build-vs-buy is a cardinality-driven crossover**: buy and govern the pipe until governed vendor spend durably clears **~2× the loaded team cost** (~$4-5M/yr here); the deciding number is opportunity cost (six engineers = two product teams), and the trigger goes in the memo in writing.
+- **Multi-agent is a concurrency-and-separation tool, not an intelligence amplifier.** The three real reasons to use it: parallelism, role specialization, and context isolation. "More agents reason better" is false.
+- **Pick the pattern from the task shape:** orchestrator-worker / fan-out for independent parallel work, pipeline (workflow) for known ordered steps, debate-critic for checkable quality-critical answers, hierarchical only when a flat orchestrator can't decompose it.
+- **Price it.** Multi-agent burns ~10–15× the tokens of a single turn and decays reliability as ~pⁿ across the chain. The parallelism/specialization gain must outrun that tax, in numbers.
+- **Decision rule:** multi-agent only when subtasks are genuinely **parallel and independently verifiable**; tightly-coupled, single-thread-of-control work goes to one agent or a deterministic workflow.
+- **Prefer message passing and a single aggregating orchestrator.** Shared mutable agent state reintroduces races and clobbering — apply single-writer/conditional-write discipline or avoid it.
 
-> **Spaced-repetition recap:** Metrics platform = **write-heavy time-series where cardinality is the cost function**. The meter-grid: cost is the *number of meters (series)*, not the wattage (write rate), active series = hosts × series/host (10K×1K = **10M**), sizing both RAM and the per-series bill; one unbounded label (`user_id`) explodes it to billions (extinction). Write firehose (async, AP, ~1M samples/s, sharded TSDB) is **separate** from the read/alert paths. **Retention tiers** (10 s → 1 m → 1 h, expire raw) buy a 30-360× storage cut. **Pull** by default (free liveness); **purpose-built TSDB** (delta-of-delta compression). Alert on **SLO burn-rate symptoms**, not causes. Close on the **build-vs-buy crossover**: buy + govern the pipe until spend clears ~2× team cost (~$4-5M/yr), trigger written down, and cardinality governs cost on both paths.
-
----
-
-*End of Lesson 9.12. The metrics platform is the full-system assembly of the pillars and burn-rate alerting plus the economics that make it a Director problem: a write-heavy compressed firehose where **cardinality is the cost function**, retention tiers are budget decisions, and the build-vs-buy crossover, decided by that same cardinality math, determines whether this platform team should exist. You own the observability budget and the on-call rotation; this question asks you to design the thing you're the customer of, at the altitude of someone who pays for it.*
+> **Spaced-repetition recap:** Multi-agent = hiring a team + a manager. Win only when the work is **parallel and independently verifiable** (eight competitor profiles), lose when it's **coupled / single-thread-of-control** (edit one clause) — there one agent or a workflow wins. Patterns: orchestrator-worker (workhorse), pipeline (= workflow, prefer when ordered), fan-out/reduce, debate-critic, handoff/swarm (route to a specialist), hierarchical (reluctantly). It is **not free parallelism**: ~10–15× tokens and reliability ~pⁿ — defend with value-per-task math, bound concurrency/budgets, prefer message passing over shared state. Cross-ref: 11.9 (agent loop, least-autonomy rule), 11.11 (context isolation), 11.13 (durable runtime + budgets), 11.14 (safety / HITL on irreversible actions), 12.6 (multi-agent walkthrough).
