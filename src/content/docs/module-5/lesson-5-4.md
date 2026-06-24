@@ -29,19 +29,19 @@ We will reference **RESHADED** by name at each step.
 
 **Explicitly CUT from the core (state the cut, defend it):**
 - **ML relevance ranking / "For You"**, cut to keep the fan-out problem the centerpiece; reverse-chron is the honest v1 and ranking is a re-scoring layer bolted on later (noted in the D step). Pretending to design the ranker burns the whiteboard on the wrong thing.
-- **Replies/threads, retweets, likes counts, DMs, notifications**, acknowledged as edges; the like/retweet *counters* are a sharded-counter problem (Lesson 3.16), notifications are their own system (Lesson 5.13). We mention them, we don't build them.
-- **Search & trends**, a **side path**, sketched in the H/D steps, delegated to Distributed Search (Lesson 3.12). Not the core.
+- **Replies/threads, retweets, likes counts, DMs, notifications**, acknowledged as edges; the like/retweet *counters* are a sharded-counter problem, notifications are their own system. We mention them, we don't build them.
+- **Search & trends**, a **side path**, sketched in the H/D steps, delegated to Distributed Search. Not the core.
 
 **Non-functional (these drive every later decision):**
 - **Timeline read latency:** p99 < ~200 ms. This is the product; it's why push exists.
-- **Availability over consistency** for the timeline: a few seconds of staleness (your follower sees your tweet 5 s late) is fine; the timeline being *down* is not. **AP-leaning** (recall CAP, Lesson 2.7).
+- **Availability over consistency** for the timeline: a few seconds of staleness (your follower sees your tweet 5 s late) is fine; the timeline being *down* is not. **AP-leaning** (recall CAP, the CAP/PACELC lesson).
 - **Eventual timeline consistency** is acceptable; **tweet durability** is not, a posted tweet must never be lost.
 - **Read-heavy at the request level, ~5:1.** This is the single most important number in the room, and it has a twist (below).
 
 **The read:write skew and the inversion, say this out loud:**
 At the *user-facing* level the system is **read-heavy, ~5:1** (people refresh far more than they post). But the design choice we are about to make, **push**, *inverts* that on the backend: every write fans out to ~200 timelines, so the backend becomes overwhelmingly **write-heavy** (~925K timeline inserts/s vs ~25K timeline cache reads/s ≈ **~37:1 the other way**). **That tension is the problem.** We choose to pay a large write-amplification cost precisely *because* reads are more frequent and more latency-sensitive than writes, but that bargain breaks for celebrities, where one write fans out to millions. Holding both halves of that sentence is the strong signal here.
 
-**Clarifying questions a Director asks first** (each changes the design): How skewed is the follower distribution, is there a power-law tail of celebrities? (Yes, it forces hybrid.) Reverse-chron or ranked? (Reverse-chron v1.) How stale can a timeline be? (Seconds.) DAU and average followers? (Below.) Do we own media storage or offload to a blob store? (Offload, Lesson 3.11.)
+**Clarifying questions a Director asks first** (each changes the design): How skewed is the follower distribution, is there a power-law tail of celebrities? (Yes, it forces hybrid.) Reverse-chron or ranked? (Reverse-chron v1.) How stale can a timeline be? (Seconds.) DAU and average followers? (Below.) Do we own media storage or offload to a blob store? (Offload, the blob-store building block.)
 
 ---
 
@@ -69,7 +69,7 @@ At the *user-facing* level the system is **read-heavy, ~5:1** (people refresh fa
 
 **Storage (tweets, 5-year horizon):**
 - Per tweet ~**1 KB** (id, author_id, 280-char text, timestamps, counts, media pointer, text is ~300 B, round up for overhead/indexes).
-- 400M/day × 1 KB = **~400 GB/day** → **~150 TB/year** of tweet metadata → **sub-PB at 5 years (~0.75 PB)**. **Media bytes (images/video) are far larger but live in a blob store** (Lesson 3.11), not here, we store only pointers.
+- 400M/day × 1 KB = **~400 GB/day** → **~150 TB/year** of tweet metadata → **sub-PB at 5 years (~0.75 PB)**. **Media bytes (images/video) are far larger but live in a blob store**, not here, we store only pointers.
 
 **Timeline cache working set (the precomputed timelines):**
 - Store **tweet IDs only**, not full tweets, and **cap each materialized timeline at ~800 IDs** (nobody scrolls further; older pages fall back to pull).
@@ -96,10 +96,10 @@ These numbers are the evidence base for every decision below.
 | **Tweets** (the durable record) | Write-once, read-by-id, huge volume (~925K writes/s fan-out reads), never updated except counters | **Wide-column / distributed KV** (LSM-backed) | **Cassandra** / **Manhattan** (Twitter's own) / DynamoDB | Write-optimized LSM absorbs the firehose; key-by-`tweet_id` reads are O(1). *Rejected:* a single Postgres, can't take 925K reads/s of hydration or shard a PB cleanly. |
 | **Home timelines** (precomputed ID lists) | Per-user list of recent tweet IDs, read on every app-open, p99 < 200 ms | **In-memory cache / KV** | **Redis** (cluster) | RAM-speed reads are the entire point; data is **regenerable** from tweets + graph, so it can live in a cache, not durable storage. *Rejected:* serving timelines from the tweet store, too slow, and re-does the merge every read. |
 | **Follow graph** (who follows whom) | `followers(u)` for push; `following(u)` for pull/merge; both hot | **Sharded relational / KV / graph** | **Sharded MySQL** (Twitter's FlockDB lineage), or a KV with two indexes | Simple adjacency, but needs **both directions** indexed. *Rejected:* a general graph DB (Neo4j), we don't traverse multi-hop; we need two fast adjacency lookups, not graph algorithms. |
-| **Media** (images/video) | Write-once, read-heavy, large objects, served via CDN | **Blob/object store + CDN** | **S3** + CloudFront (Lesson 3.11, 3.5) | Bytes don't belong in the tweet store; store a pointer, serve from edge. *Rejected:* BLOBs in the database, bloats it and kills cache density. |
-| **Search index & trends** (side path) | Full-text over recent tweets; top-K terms in a window | **Inverted index + stream heavy-hitters** | **Elasticsearch** (Lesson 3.12) + Count-Min/Flink for trends | Different access pattern entirely; a parallel pipeline off the same write. |
+| **Media** (images/video) | Write-once, read-heavy, large objects, served via CDN | **Blob/object store + CDN** | **S3** + CloudFront | Bytes don't belong in the tweet store; store a pointer, serve from edge. *Rejected:* BLOBs in the database, bloats it and kills cache density. |
+| **Search index & trends** (side path) | Full-text over recent tweets; top-K terms in a window | **Inverted index + stream heavy-hitters** | **Elasticsearch** + Count-Min/Flink for trends | Different access pattern entirely; a parallel pipeline off the same write. |
 
-The decision falls straight out of the access patterns established in R/E, write-heavy immutable tweets → LSM wide-column; regenerable hot lists → cache; two-directional adjacency → indexed KV. **tweet_id is generated by a Snowflake-style sequencer** (Lesson 3.6): a 64-bit, **time-sortable** ID, which we will exploit so that "merge timelines by recency" is just "sort by ID."
+The decision falls straight out of the access patterns established in R/E, write-heavy immutable tweets → LSM wide-column; regenerable hot lists → cache; two-directional adjacency → indexed KV. **tweet_id is generated by a Snowflake-style sequencer**: a 64-bit, **time-sortable** ID, which we will exploit so that "merge timelines by recency" is just "sort by ID."
 
 ---
 
@@ -129,7 +129,7 @@ flowchart LR
 
 **Happy path, posting (the write fan-out):**
 1. Client `POST`s a tweet → **Write API** assigns a **Snowflake `tweet_id`**, writes the durable record to the **Tweet store**, and returns ~immediately (the user's post is confirmed before fan-out finishes, fan-out is async).
-2. Write API enqueues a **fan-out job** onto a queue (Lesson 3.8, durable, decoupled, load-leveled). This is the seam that keeps a celebrity's fan-out from stalling the author's `POST`.
+2. Write API enqueues a **fan-out job** onto a queue (the messaging-queue building block, durable, decoupled, load-leveled). This is the seam that keeps a celebrity's fan-out from stalling the author's `POST`.
 3. **Fan-out workers** look up the author's **followers** in the graph store and **prepend `tweet_id`** to each follower's list in the **Timeline cache**, *but skip celebrities (pull instead) and skip inactive users* (the two big optimizations, justified in E/Evaluation).
 
 **Happy path, reading (the read merge):**
@@ -157,7 +157,7 @@ GET    /v1/timeline/user/{user_id}?cursor=<tweet_id>&limit=20
 POST   /v1/follows   body: { followee_id }   → 204
 DELETE /v1/follows/{followee_id}             → 204
 
-GET    /v1/search?q=<query>&cursor=...        # side path → Distributed Search (3.12)
+GET    /v1/search?q=<query>&cursor=...        # side path → Distributed Search
 ```
 
 Two API decisions worth defending:
@@ -174,7 +174,7 @@ tweets
   PARTITION KEY: tweet_id        # Snowflake: 64-bit, time-sortable
   author_id, text, media_ids, created_at, reply_to, like_count, retweet_count
 ```
-- **Partition/shard key: `tweet_id`.** Point reads by id (hydration) are O(1) and evenly spread. Counters (`like_count`) are updated via the sharded-counter pattern (3.16), not in-place hot writes.
+- **Partition/shard key: `tweet_id`.** Point reads by id (hydration) are O(1) and evenly spread. Counters (`like_count`) are updated via the sharded-counter pattern, not in-place hot writes.
 
 **User timeline** (a user's own tweets), query-shaped table:
 ```
@@ -223,9 +223,9 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 - **Fix:** **replicate + cache hot celebrity timelines** behind the read service (a small "hot tweets" cache), and rely on `tweet_id`-keyed hydration being uniformly distributed across the Tweet store. The trade: extra cache and replicas for the long tail of fame. *Rejected:* a single partition per author with no hot-key handling, the viral case melts one node.
 
 **Bottleneck 5, fan-out egress/compute cost (the Director line item).**
-925K inserts/s across a Redis cluster is real cross-AZ traffic and CPU, the **fan-out amplification** cost from **Lesson 3.9**. We don't re-derive it; we **govern** it: skip-inactive and the celebrity threshold are themselves the two biggest amplification controls, and we watch **fan-out lag** and **per-node insert rate** as SLOs.
+925K inserts/s across a Redis cluster is real cross-AZ traffic and CPU, the **fan-out amplification** cost from **The publish-subscribe building block**. We don't re-derive it; we **govern** it: skip-inactive and the celebrity threshold are themselves the two biggest amplification controls, and we watch **fan-out lag** and **per-node insert rate** as SLOs.
 
-**Re-check against NFRs:** timeline read = one cache lookup + a small bounded merge + batch hydrate → **p99 < 200 ms holds**. Tweet durability → synchronous write to the LSM store before ack, replicated (2.4). Availability → cache and tweet store are AP-leaning; a fan-out worker dying just **delays** delivery (the queue holds the backlog), it doesn't lose tweets. The skew inversion is now *managed*, not just acknowledged.
+**Re-check against NFRs:** timeline read = one cache lookup + a small bounded merge + batch hydrate → **p99 < 200 ms holds**. Tweet durability → synchronous write to the LSM store before ack, replicated. Availability → cache and tweet store are AP-leaning; a fan-out worker dying just **delays** delivery (the queue holds the backlog), it doesn't lose tweets. The skew inversion is now *managed*, not just acknowledged.
 
 ---
 
@@ -235,7 +235,7 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 
 **At 10× (2B DAU, ~50K tweets/s, ~9M timeline inserts/s):**
 - **Shard the fan-out fleet and the timeline cache by `user_id`** and scale horizontally, fan-out is embarrassingly parallel per follower. The cache grows from ~1.3 TB to ~13 TB of RAM; still a (bigger) Redis cluster, now multi-region.
-- **Multi-region** introduces the real new cost: do you replicate timelines cross-region (egress, 3.9) or **pull cross-region for the rare follow that spans regions**? Prior: keep a user's timeline in their home region, accept that a cross-region followee's tweets arrive via pull. **Delegate** the cross-region replication-vs-pull benchmark to the infra team.
+- **Multi-region** introduces the real new cost: do you replicate timelines cross-region (egress) or **pull cross-region for the rare follow that spans regions**? Prior: keep a user's timeline in their home region, accept that a cross-region followee's tweets arrive via pull. **Delegate** the cross-region replication-vs-pull benchmark to the infra team.
 - **Lower the celebrity threshold** as the follower distribution fattens, more accounts cross "celebrity," shifting load from write to read; re-tune from data, not intuition.
 
 **New constraint, ranked "For You" feed (the likely follow-up):**
@@ -256,7 +256,7 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 |---|---|---|---|---|
 | **Timeline assembly** | **Push** (fan-out-on-write): precompute timelines; reads are a cache hit | **Pull** (fan-out-on-read): compute on every read | **Hybrid**: push for normal accounts, pull for celebrities, merge | **Hybrid** at any real Twitter scale. Pure **push** only if no celebrity tail (corporate/internal feed). Pure **pull** only if writes ≫ reads or graph is tiny. |
 | **Celebrity threshold** | High (≈10M followers): few accounts pulled | Low (≈100K): many accounts pulled | Tuned from the follower histogram | **Low** when write spikes hurt (favor read merge); **high** when read latency is tight (favor precompute). Tune from data. |
-| **Tweet store engine** | **LSM wide-column** (Cassandra/Manhattan) | **B-tree relational** (Postgres) | NewSQL (Spanner) | **LSM** for the immutable, write-heavy firehose + by-id reads (2.3). Relational only at small scale or where multi-row transactions dominate. |
+| **Tweet store engine** | **LSM wide-column** (Cassandra/Manhattan) | **B-tree relational** (Postgres) | NewSQL (Spanner) | **LSM** for the immutable, write-heavy firehose + by-id reads. Relational only at small scale or where multi-row transactions dominate. |
 | **Pagination** | **`tweet_id` cursor** (time-sortable, stable) | Offset / page number | Timestamp cursor | **Cursor** always for a live mutating feed; offset is broken under head inserts and O(n) deep. |
 
 ---
@@ -266,7 +266,7 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 - **"Push, pull, or hybrid, and defend it with numbers."** *Strong:* push is default because the workload is **5:1 read-heavy**, so pay fan-out on the rarer write (~925K inserts/s) not the read (~4.6M fetches/s); **but** push makes a celebrity tweet a 100M-write bomb, so **pull celebrities and merge**, hybrid. *Red flag:* "use push, it's faster" with no celebrity case, or "pull, simpler" ignoring the read-amplification cost.
 - **"Walk me through the read-time merge."** *Strong:* fetch precomputed IDs + pull a session-cached set of celebrity tweets, **k-way merge by time-sortable `tweet_id`**, batch-hydrate, paginate by `tweet_id` cursor so the boundary stays coherent. *Red flag:* re-pulling every celebrity on every page, or no answer for ordering across the push/pull seam.
 - **"You're fanning out to followers, what about the 300M inactive ones?"** *Strong:* **skip inactive on push, recompute on login**, a large fraction of inserts are for timelines nobody reads. *Red flag:* fanning out to all 500M followers and treating the write amplification as fixed.
-- **"What does this cost to run, and what would you cut first?"** (the Director probe) *Strong:* names **fan-out amplification** (3.9) as the line item, cites inactive-skip + celebrity threshold as the two biggest levers, watches fan-out lag and cache insert rate as SLOs, owns the latency budget. *Red flag:* no cost dimension; "scale it horizontally."
+- **"What does this cost to run, and what would you cut first?"** (the Director probe) *Strong:* names **fan-out amplification** as the line item, cites inactive-skip + celebrity threshold as the two biggest levers, watches fan-out lag and cache insert rate as SLOs, owns the latency budget. *Red flag:* no cost dimension; "scale it horizontally."
 - **"Where would you delegate?"** *Strong:* the **merge/pagination deep-dive** and the **cross-region replicate-vs-pull benchmark**, "my prior is keep timelines region-local and pull the rare cross-region followee; I'd have infra benchmark it." *Red flag:* claiming to personally tune every layer (operating below level) or hand-waving everything (above level).
 
 ---
@@ -279,7 +279,7 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 - **One follow-graph index.** You need **both** `followers` (push) and `following` (pull/merge); forgetting one breaks half the design.
 - **Offset pagination on a live feed.** Items shift under head inserts; use a **`tweet_id` cursor**.
 - **Synchronous fan-out.** Blocks the author's `POST` for minutes on a celebrity; fan-out must be async behind a queue.
-- **Forgetting fan-out is a recurring cost, not a one-time build** (the 3.9 lesson), every active follower is ongoing insert + egress spend.
+- **Forgetting fan-out is a recurring cost, not a one-time build**, every active follower is ongoing insert + egress spend.
 
 ---
 

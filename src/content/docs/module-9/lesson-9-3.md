@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-> **Why this gets asked and what separates a Director answer.** Hotel reservation is in the top tier of business-domain HLD problems precisely because it looks like Ticketmaster (Lesson 5.13) but isn't. Seats are unique and indivisible, one CAS per row. Hotel rooms are **fungible inventory**: you don't care *which* room 312 you get, only that the property has a king non-smoking available on your dates. That fungibility drives a **count-decrement model** rather than a seat-lock model, and it opens the door to a deliberate business decision that Ticketmaster never makes: **controlled overbooking**. A Director answer recognises the structural difference immediately, names the two-tier consistency split (eventual search / strong booking), and treats overbooking as a policy knob rather than a correctness bug.
+> **Why this gets asked and what separates a Director answer.** Hotel reservation is in the top tier of business-domain HLD problems precisely because it looks like Ticketmaster but isn't. Seats are unique and indivisible, one CAS per row. Hotel rooms are **fungible inventory**: you don't care *which* room 312 you get, only that the property has a king non-smoking available on your dates. That fungibility drives a **count-decrement model** rather than a seat-lock model, and it opens the door to a deliberate business decision that Ticketmaster never makes: **controlled overbooking**. A Director answer recognises the structural difference immediately, names the two-tier consistency split (eventual search / strong booking), and treats overbooking as a policy knob rather than a correctness bug.
 
 ---
 
@@ -105,7 +105,7 @@ The second wrinkle: the front desk clerk might sell the last room knowing a 10% 
 **3. Property catalog + search (AP, Elasticsearch).**
 
 - *Access pattern:* geo search, full-text on amenity/name, faceted filters (star rating, price range, free wifi). Staleness of minutes acceptable, a property adding a new room type is not time-critical.
-- *Choice:* **Elasticsearch/OpenSearch** (Lesson 3.13). Front with Redis and CDN for hot property pages.
+- *Choice:* **Elasticsearch/OpenSearch**. Front with Redis and CDN for hot property pages.
 
 **Reservation hold state:** a **Redis hash** keyed by `hold_id` holding (user, property, room-type, dates, expiry). TTL set on the key; expiry events trigger inventory release. Low-state, fast, near the API layer.
 
@@ -386,8 +386,8 @@ The function is pure and deterministic given policy + timestamps, safe to run in
 4. **Overbooking is a policy knob, not a bug.** Model it as `overbook_buffer` in the inventory constraint; delegate calibration to revenue management with a walk-rate SLA; the system enforces whatever the business sets.
 5. **Defence-in-depth on hold expiry.** Redis TTL + Kafka event is the fast path; a background sweeper covers Redis failures. The booking-store confirm always re-asserts the hold in the same transaction, correctness never depends solely on a timer.
 
-> **Spaced-repetition recap:** Hotel reservation = **fungible inventory** (count decrement, not seat lock) + **1,000:1 search-to-book** ratio demanding an eventual Cassandra availability index decoupled from a strongly-consistent Postgres booking store (sharded by `property_id` for multi-night atomicity). Overbooking = `overbook_buffer` column in the DB constraint, calibrated by the revenue team. Hold expiry = Redis TTL + sweeper fallback + in-transaction re-assertion at confirm. Contrast with Ticketmaster (Lesson 5.13): unique seats vs. fungible rooms, 33K/s event spike vs. < 50 writes/s per property, no overbooking vs. overbooking as standard practice.
+> **Spaced-repetition recap:** Hotel reservation = **fungible inventory** (count decrement, not seat lock) + **1,000:1 search-to-book** ratio demanding an eventual Cassandra availability index decoupled from a strongly-consistent Postgres booking store (sharded by `property_id` for multi-night atomicity). Overbooking = `overbook_buffer` column in the DB constraint, calibrated by the revenue team. Hold expiry = Redis TTL + sweeper fallback + in-transaction re-assertion at confirm. Contrast with Ticketmaster: unique seats vs. fungible rooms, 33K/s event spike vs. < 50 writes/s per property, no overbooking vs. overbooking as standard practice.
 
 ---
 
-*End of Lesson 9.3. Hotel reservation vs. Ticketmaster is a canonical "same surface, different model" pair, fungibility, the 1,000:1 ratio, and overbooking as a policy knob are the three ideas the question is testing. Next: Lesson 9.4, Flight Booking System, where the inventory model shifts again: seat-class buckets (fare classes), a global GDS distribution layer, and the saga pattern for multi-leg itinerary atomicity.*
+*End of Lesson 9.3. Hotel reservation vs. Ticketmaster is a canonical "same surface, different model" pair, fungibility, the 1,000:1 ratio, and overbooking as a policy knob are the three ideas the question is testing.*

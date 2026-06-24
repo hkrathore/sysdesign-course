@@ -12,7 +12,7 @@ sidebar:
 - Apply the 2024-26 expected vocabulary, **Team Topologies'** four team types and three interaction modes, in one tight table, and use it instead of inventing terms.
 - Draw ownership boundaries **on system seams, with at most one owning team per boundary** (two only during an explicit, dated handover), and predict where boundaries will leak.
 - Quantify the **human cost**: communication paths, reorg productivity dips, and **attrition risk as part of the architecture decision**, with dollar figures, not vibes.
-- Sequence a reorg **against migration milestones** (the Lesson 8.1 strangler-fig timeline), not against a calendar, and defend the sequencing against the big-bang alternative.
+- Sequence a reorg **against migration milestones** (the strangler-fig timeline), not against a calendar, and defend the sequencing against the big-bang alternative.
 
 ### Intuition first
 Four families share one big farmhouse kitchen and you ask them to cook four separate dinners. Whatever the recipe cards say, dinner will come out the way the *kitchen* is laid out: whoever stands next to the stove ends up stirring everyone's pots, the family nearest the fridge becomes the de-facto ingredients service, and every dish converges on the same spice profile because everyone reaches into the same rack. That is **Conway's law**: a system's structure copies the communication structure of the people building it, not because anyone decides this, but because designing across a chatty boundary is easy and designing across a silent one is hard. Now invert it. If you *want* four genuinely independent dinners, you don't write stricter recipes, **you build four kitchen stations**, each with its own stove, fridge shelf, and spice rack. The food follows the floor plan. That is the **inverse Conway maneuver**: choose the architecture you want, then shape the teams so that the easy communication paths are exactly the seams you intend, and the system grows into them.
@@ -25,11 +25,11 @@ The catch the analogy must also carry: families are people. Reassign the grandmo
 
 > **Adaptation, said out loud:** in a product design, R scopes features. Here R scopes the *organization*: what must this org be able to deliver, at what change rate, with what failure modes? The clarifying questions are about business flows, growth, and constraints on people, and they are exactly the questions a junior candidate forgets to ask before drawing boxes around names.
 
-**Anchor scenario (used throughout):** a **40-engineer e-commerce company**, ~$150M GMV, a modular monolith mid-decomposition (Lesson 8.1) into domain services, currently organized **by layer**: a frontend team (10), a backend team (16), a data/search team (6), an ops/DBA team (8). Classic Conway: a 3-tier org has produced a 3-tier system, and every feature, "add gift wrapping", crosses three team backlogs and two sprint boundaries.
+**Anchor scenario (used throughout):** a **40-engineer e-commerce company**, ~$150M GMV, a modular monolith mid-decomposition into domain services, currently organized **by layer**: a frontend team (10), a backend team (16), a data/search team (6), an ops/DBA team (8). Classic Conway: a 3-tier org has produced a 3-tier system, and every feature, "add gift wrapping", crosses three team backlogs and two sprint boundaries.
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *What does the business need the org to do faster?* → **Ship vertical features end-to-end.** Today a one-week feature takes 6-8 weeks of cross-team queuing. Flow, not raw output, is the complaint.
-- *What's the target architecture?* → The Lesson 8.1 end-state: domain services around **browse/search, cart/checkout, payments, orders/fulfilment, customer accounts**, on shared platform rails. Roughly **15-20 services**.
+- *What's the target architecture?* → The decomposition end-state: domain services around **browse/search, cart/checkout, payments, orders/fulfilment, customer accounts**, on shared platform rails. Roughly **15-20 services**.
 - *Growth plan?* → Headcount roughly flat this year; the 15→50 variant is treated in Design evolution.
 - *On-call model?* → You-build-it-you-run-it is the goal; today ops pages for everything (a Conway symptom: a separate ops team produces a system only ops can run).
 - *People constraints?* → Two irreplaceable domain experts (payments, search relevance); the frontend team has strong identity and a beloved manager. **These are design inputs**, the same way a legacy protocol you can't change is.
@@ -44,7 +44,7 @@ The catch the analogy must also carry: families are people. Reassign the grandmo
 - **Team cognitive load stays within budget**, no team owns more domains than it can hold; this is the org's equivalent of a latency SLO, and we quantify it in E.
 - **≤ 1 owning team per system boundary.** Two teams per boundary only during an explicit, end-dated handover; three or more is a design error, not a compromise.
 - **Regrettable attrition through the reorg < ~5%** (2 of 40). Above that, the reorg is destroying the asset it's reorganizing.
-- **No feature freeze.** The business doesn't stop; the reorg sequences around delivery, like the Lesson 8.3 migrations sequence around live traffic.
+- **No feature freeze.** The business doesn't stop; the reorg sequences around delivery, the way a zero-downtime migration sequences around live traffic.
 
 **Explicitly CUT (scoping is the signal):** compensation bands, performance management, hiring pipeline mechanics, and the manager-selection question, real, owned with the HR partner, but not this design. I scope to **team boundaries, ownership, interaction modes, and sequencing**, and say so.
 
@@ -52,7 +52,7 @@ The catch the analogy must also carry: families are people. Reassign the grandmo
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS. Estimation here is **communication-path math, cognitive-load budgets, headcount arithmetic, and the dollar cost of the reorg itself**, the same Lesson 1.3 discipline (round aggressively, state assumptions) applied to people.
+> **Adaptation, said out loud:** no QPS. Estimation here is **communication-path math, cognitive-load budgets, headcount arithmetic, and the dollar cost of the reorg itself**, the same estimation discipline (round aggressively, state assumptions) applied to people.
 
 **Communication paths, why team boundaries exist at all.** 40 people fully meshed is `40 × 39 ÷ 2 = 780` potential pairwise channels. Six teams of ~7 cuts that to ~21 high-bandwidth channels *inside* each team plus **15 inter-team channels**, and the entire design question is *which 15*. Conway's law says the system's seams will land on whichever channels stay chatty; inverse Conway means choosing them deliberately.
 
@@ -72,7 +72,7 @@ The catch the analogy must also carry: families are people. Reassign the grandmo
 
 > **Adaptation, said out loud:** "what persists, and who owns it" is the sharpest boundary-drawing tool in the problem. In Team Topologies language you choose **fracture planes**; the most reliable plane is **data ownership**, a team boundary that splits a database is a boundary that will leak.
 
-The rule, stated once: **each stream-aligned team owns its domain's data outright**, schema, store choice, migrations, and the only write path. Other teams get an API or an event stream, never a JDBC connection. This is the org-level restatement of Lesson 8.1's database-decomposition step, and it's where Conway bites hardest in reverse: if checkout and fulfilment share a table, the two teams *must* coordinate every schema change, the chatty channel persists, and the services never actually separate, the shared database silently reassembles the monolith regardless of what the service diagram claims.
+The rule, stated once: **each stream-aligned team owns its domain's data outright**, schema, store choice, migrations, and the only write path. Other teams get an API or an event stream, never a JDBC connection. This is the org-level restatement of the database-decomposition step, and it's where Conway bites hardest in reverse: if checkout and fulfilment share a table, the two teams *must* coordinate every schema change, the chatty channel persists, and the services never actually separate, the shared database silently reassembles the monolith regardless of what the service diagram claims.
 
 Applied to the anchor: the orders tables go to the fulfilment team, cart/session state to checkout, the catalog to shopper experience, payment instruments (PCI-scoped) to whichever team owns payments, and the migration is **not done** until each store has exactly one writing team. *Rejected, a central data team owning all schemas:* it recreates the layer org inside the data tier; every product change queues on one team, which is the 6-8-week feature lead time we were hired to kill. The data *platform* (warehouse, pipelines, tooling) is platform-team property; the domain *data* is not.
 
@@ -87,7 +87,7 @@ First, the expected vocabulary, the **four Team Topologies team types**, in one 
 | Type | Owns | Default interaction | In our 40-eng org |
 |---|---|---|---|
 | **Stream-aligned** | A slice of business flow, end to end, build, run, page | Consumes platform as a service | 4 teams, ~28 eng (~70-85% of the org, the load-bearing heuristic) |
-| **Platform** | Self-service internal services: deploy, observability, data rails (Lesson 8.7) | **X-as-a-service** to stream teams | 1 team, ~6 eng |
+| **Platform** | Self-service internal services: deploy, observability, data rails | **X-as-a-service** to stream teams | 1 team, ~6 eng |
 | **Enabling** | Capability uplift (testing, perf, migration patterns), visits, teaches, **leaves** | **Facilitating**, time-boxed | ~2 fractional senior ICs, not a department |
 | **Complicated-subsystem** | A deep-specialism component the stream teams shouldn't carry | X-as-a-service behind a narrow API | 0-1; search relevance is the only candidate here |
 
@@ -170,7 +170,7 @@ engage:
 
 ## D: Data model
 
-> **Adaptation, said out loud:** the data model is the **ownership map**, the org's authoritative table of *service → owning team → on-call → data owned*. It lives in the service catalog (Lesson 8.7), not a wiki, and the invariant it enforces is the one NFR worth a uniqueness constraint: **one owner per boundary.**
+> **Adaptation, said out loud:** the data model is the **ownership map**, the org's authoritative table of *service → owning team → on-call → data owned*. It lives in the service catalog, not a wiki, and the invariant it enforces is the one NFR worth a uniqueness constraint: **one owner per boundary.**
 
 | Boundary | Owner | Data owned | Consumers | Mode |
 |---|---|---|---|---|
@@ -182,7 +182,7 @@ engage:
 | Deploy / observability / data rails | Platform (6) | the rails | All teams | X-as-a-service |
 | Test + migration capability | Enabling (2, fractional) | none | rotating | Facilitating, time-boxed |
 
-Two structural notes. **Payments stays inside Checkout** rather than getting its own team: 40 engineers won't sustain a 7th team, the PSP integration is mostly bought (Lesson 8.6), and the PCI scope is contained behind a tokenization boundary, *revisit at 60+ engineers or if in-house risk/fraud is built.* **The 4-person search subsystem is deliberately under two-pizza size**, the price of carving out a specialism; mitigated by pairing it with the shopper team for on-call backup, an explicit, named exception rather than an accident.
+Two structural notes. **Payments stays inside Checkout** rather than getting its own team: 40 engineers won't sustain a 7th team, the PSP integration is mostly bought, and the PCI scope is contained behind a tokenization boundary, *revisit at 60+ engineers or if in-house risk/fraud is built.* **The 4-person search subsystem is deliberately under two-pizza size**, the price of carving out a specialism; mitigated by pairing it with the shopper team for on-call backup, an explicit, named exception rather than an accident.
 
 <details>
 <summary>Go deeper, fracture planes: where to cut when the seam isn't obvious (IC depth, optional)</summary>
@@ -197,13 +197,13 @@ Team Topologies' checklist of viable fracture planes, in rough order of preferen
 
 > **Adaptation, said out loud:** stress-test the org the way you'd stress-test a design: re-check against the NFRs, then hunt for **where the boundaries will leak**, because they will, and predicting the leak sites is the strongest signal in the question.
 
-**Re-check vs NFRs:** end-to-end flow, each business stream has one team (gift wrapping is now one backlog); one owner per boundary, by the ownership map; cognitive load, 2-3 services per stream team now, 4-5 at end-state, inside budget; self-service rails, the platform team per Lesson 8.7. Now the leaks.
+**Re-check vs NFRs:** end-to-end flow, each business stream has one team (gift wrapping is now one backlog); one owner per boundary, by the ownership map; cognitive load, 2-3 services per stream team now, 4-5 at end-state, inside budget; self-service rails, the platform team owns them. Now the leaks.
 
 **Leak 1, the cross-cutting feature that spans three teams.** "Buy online, return in store" touches shopper, checkout, and fulfilment. *The wrong fix is a standing cross-team committee* (a permanent chatty channel, the boundary dissolves). *Fix:* one team **leads** with the others consuming via their published APIs; if a feature class keeps recurring across the same three teams, that recurrence is **data telling you the seams are wrong**, redraw rather than coordinate harder. The Director instinct: treat repeated cross-team coordination as an architecture smell, not a process gap to be meeting'd away.
 
-**Leak 2, the platform team drifts into a gatekeeping ops team.** Symptom: ticket queues, "platform approval" steps, stream teams routing around it (shadow infra). *Fix:* hold platform to product metrics, adoption and time-to-first-deploy per Lesson 8.7, and keep its interaction mode X-as-a-service. *Trade-off:* self-service rails cost more to build than a ticket queue costs to staff; accepted, because the queue re-serializes every team's delivery through one team's sprint.
+**Leak 2, the platform team drifts into a gatekeeping ops team.** Symptom: ticket queues, "platform approval" steps, stream teams routing around it (shadow infra). *Fix:* hold platform to product metrics, adoption and time-to-first-deploy, and keep its interaction mode X-as-a-service. *Trade-off:* self-service rails cost more to build than a ticket queue costs to staff; accepted, because the queue re-serializes every team's delivery through one team's sprint.
 
-**Leak 3, the shared-table remnant.** Mid-migration, checkout and fulfilment still share `orders_db` for a quarter. This is a **two-owner boundary, legal only because it's end-dated**: named in the migration plan, with the Lesson 8.3 dual-write/backfill pattern retiring it. The leak becomes a failure only if the end date silently slips, so it's tracked like an SLO breach, not a TODO.
+**Leak 3, the shared-table remnant.** Mid-migration, checkout and fulfilment still share `orders_db` for a quarter. This is a **two-owner boundary, legal only because it's end-dated**: named in the migration plan, with the dual-write/backfill pattern retiring it. The leak becomes a failure only if the end date silently slips, so it's tracked like an SLO breach, not a TODO.
 
 **Leak 4, the hero dependency.** The payments expert is a one-person bus factor inside Checkout; the relevance expert *is* the search subsystem. *Fix:* enabling-mode pairing with an explicit knowledge-transfer goal, and the search team's on-call pairing with Shopper. *Rejected: promoting each hero into a one-person team*, it formalizes the bus factor and maximizes their attrition blast radius.
 
@@ -224,19 +224,19 @@ Conway's 1968 argument is structural, not sociological: for two modules to inter
 
 **Why sequenced, not big-bang (decide and defend):** a big-bang reorg moves all 40 people while the architecture is still the old one, so for months, teams own target domains that don't exist yet as services, every boundary is a two-owner boundary, and the productivity dip and attrition risk peak together (~$1-2M downside per the E math). *Rejected.* The alternative, reorganize *nothing* until the migration finishes, leaves layer teams running a domain migration they're shaped wrong for; Conway pressure actively fights the decomposition. *Also rejected.* **Chosen: wave the org with the architecture**, each wave forming a team as its seam becomes real:
 
-- **Wave 0 (month 0-1):** stand up the **platform team** first, rails before tenants (Lesson 8.7's sequencing, same logic). Publish the target diagram and the preference survey. *No ownership changes yet.*
+- **Wave 0 (month 0-1):** stand up the **platform team** first, rails before tenants (same logic as building the platform before its tenants). Publish the target diagram and the preference survey. *No ownership changes yet.*
 - **Wave 1 (month 1-3):** form **Fulfilment** around the first extracted seam (orders, typically the cleanest bounded context). It takes its monolith code, its data, its pager. One team learns the playbook; the org watches it work.
 - **Wave 2 (month 3-6):** form **Checkout** and **Shopper** as the cart and catalog seams extract; the search subsystem carves out behind its query API.
 - **Wave 3 (month 6-9):** **Accounts** forms; the layer teams are now empty by *graduation*, not decree; remaining shared monolith plumbing is platform-owned until retired.
 
 Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-leak symptoms reviewed before the next wave fires. **The reorg ships incrementally for the same reason the migration does**, reversibility and bounded blast radius.
 
-**The 15→50 growth variant (the other interview prompt).** Same principles, opposite direction: at 15 engineers you are 2 stream teams + a fractional platform *person*, **do not build the 6-team structure early**; cognitive-load budgets at 15 can't fund a platform team, and premature boundaries are as costly as late ones. The sequencing rule: **split a team when its cognitive load breaches budget** (services owned, on-call depth, roadmap sprawl), not when a headcount plan says so; **hire into the seams you intend** (inverse Conway via the hiring plan, staffing the future fulfilment team before formally creating it); and stand up the real platform team around **25-30 engineers**, when 3+ stream teams duplicating rails makes it pay (the Lesson 8.7 ROI math). From 15→50 expect to redraw boundaries **twice**, not once, and say so up front, so the second redraw is a plan, not a betrayal.
+**The 15→50 growth variant (the other interview prompt).** Same principles, opposite direction: at 15 engineers you are 2 stream teams + a fractional platform *person*, **do not build the 6-team structure early**; cognitive-load budgets at 15 can't fund a platform team, and premature boundaries are as costly as late ones. The sequencing rule: **split a team when its cognitive load breaches budget** (services owned, on-call depth, roadmap sprawl), not when a headcount plan says so; **hire into the seams you intend** (inverse Conway via the hiring plan, staffing the future fulfilment team before formally creating it); and stand up the real platform team around **25-30 engineers**, when 3+ stream teams duplicating rails makes it pay (the platform ROI math). From 15→50 expect to redraw boundaries **twice**, not once, and say so up front, so the second redraw is a plan, not a betrayal.
 
 **Where I'd delegate (the explicit Director move):**
 - **Domain seam validation:** *"I'd have the principal engineers run an event-storming pass over the order and catalog flows before Wave 1; my prior is the five domains above, and I'd change the team map if the bounded contexts genuinely disagree, the org follows the seams, not vice versa."*
 - **People risk:** *"The HR partner and the line managers own retention conversations with the flight-risk seniors before anything is announced; my prior is preference-based allocation plus keeping managers attached to teams, and I want a named retention plan for the two domain experts."*
-- **Platform scope:** *"The platform lead owns the Lesson 8.7 golden-path scope; my prior is deploy + observability + one database rail in v1, and adoption rate decides what's next."*
+- **Platform scope:** *"The platform lead owns the golden-path scope; my prior is deploy + observability + one database rail in v1, and adoption rate decides what's next."*
 
 ---
 
@@ -246,7 +246,7 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 |---|---|---|---|---|
 | **Org shape** | **Stream-aligned domain teams** + platform (inverse Conway) | Component/layer teams | Feature/matrix squads from a pool | **A** when the goal is flow and end-to-end ownership (our choice). **B** only for genuinely layer-shaped work (rare). **C** never as steady state, no ownership; acceptable only as a time-boxed tiger team. |
 | **Reorg rollout** | **Waves keyed to migration milestones** | Big-bang announcement | Reorg only after migration completes | **A**, bounded dip, checkpoints, attrition managed (our choice). **B** when the org is on fire and speed beats cost. **C** never, layer teams will fight the migration via Conway pressure. |
-| **Deep specialism (search, ML)** | **Complicated-subsystem team** behind a narrow API | Embed specialists in each stream team | Outsource/buy (Lesson 8.6) | **A** when the depth is real and the API can be narrow (our choice for relevance). **B** when the specialism is thin enough to commoditize. **C** when it isn't your differentiation. |
+| **Deep specialism (search, ML)** | **Complicated-subsystem team** behind a narrow API | Embed specialists in each stream team | Outsource/buy | **A** when the depth is real and the API can be narrow (our choice for relevance). **B** when the specialism is thin enough to commoditize. **C** when it isn't your differentiation. |
 | **Cross-team feature** | **One lead team**, others consumed via APIs | Standing cross-team committee | Redraw the seams | **A** for occasional features (our default). **B** never, a permanent chatty channel. **C** when the *same* teams keep colliding, recurrence is data. |
 
 ---
@@ -280,7 +280,7 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 > *Model:* Once is a feature; every quarter is data. Recurring cross-team coordination on the same seam means the boundary contradicts how the business actually changes, Conway is telling me where the real seam is. I'd resist the standing sync meeting (a permanent chatty channel that dissolves the boundary while keeping its costs) and instead run a short event-storming pass on that flow, then either move the contested service to one owner or redraw the two domains. The trade-off I accept: redrawing costs a mini-reorg (~weeks of dip for two teams); the committee costs forever. One caveat, if the collisions trace to one in-flight migration with an end date, hold the line and let the dual-ownership expire on schedule.
 
 **Q3. With 40 engineers, the payments expert wants a dedicated payments team with herself as lead. Yes or no?**
-> *Model:* No, at this size. A payments team would be 2-3 people (we can't fund 7 without starving a stream), which formalizes a bus factor and maximizes her attrition blast radius; and our PSP integration is mostly bought (Lesson 8.6), so the in-house surface is thin. Payments stays inside Checkout behind a tokenization boundary that contains the PCI scope. What I *would* give her: explicit tech-lead ownership of the payments domain within Checkout, an enabling-mode mandate to spread the knowledge, and a revisit trigger, at 60+ engineers or if we build in-house risk/fraud, a complicated-subsystem payments team becomes the right call. The decision is reversible; the retention conversation happens this week either way.
+> *Model:* No, at this size. A payments team would be 2-3 people (we can't fund 7 without starving a stream), which formalizes a bus factor and maximizes her attrition blast radius; and our PSP integration is mostly bought, so the in-house surface is thin. Payments stays inside Checkout behind a tokenization boundary that contains the PCI scope. What I *would* give her: explicit tech-lead ownership of the payments domain within Checkout, an enabling-mode mandate to spread the knowledge, and a revisit trigger, at 60+ engineers or if we build in-house risk/fraud, a complicated-subsystem payments team becomes the right call. The decision is reversible; the retention conversation happens this week either way.
 
 **Q4. How do you know, six months in, whether the inverse Conway maneuver is working?**
 > *Model:* Three measurable signals. First, **flow**: lead time for a vertical feature, the 6-8-week cross-team queue should be trending toward team-local weeks; I'd track what fraction of changes ship without a blocking dependency on another team (target: > 80%). Second, **boundary integrity**: contract-breaking changes between teams, shared-table count (must hit zero on the dated plan), and recurring cross-team collisions per quarter. Third, **the people NFR**: regrettable attrition against the < 5% budget and team-health surveys. The anti-signal I'd watch hardest: stream teams routing around the platform team, shadow infra means the platform drifted to gatekeeping, and the org is quietly reverting to the architecture of its old communication paths.
@@ -298,4 +298,4 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 
 ---
 
-*End of Lesson 8.8. The org-design case closes the strategy module's loop: 8.1's strangler-fig migration needs teams shaped for the target seams, 8.6's build-vs-buy decides which teams exist at all, 8.7's platform team is one of the four types deployed here, and Conway's law is the reason all of them are architecture decisions wearing org-chart clothes. No IC can fake this question; after this lesson, you shouldn't have to.*
+*End of Lesson 8.8. The org-design case closes the strategy module's loop: the strangler-fig migration needs teams shaped for the target seams, build-vs-buy decides which teams exist at all, the platform team is one of the four types deployed here, and Conway's law is the reason all of them are architecture decisions wearing org-chart clothes. No IC can fake this question; after this lesson, you shouldn't have to.*

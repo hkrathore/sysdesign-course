@@ -8,7 +8,7 @@ sidebar:
 > Most Director loops have a dedicated hiring round, Amazon maps it to *Hire & Develop the Best*, Meta scores "raising the bar" and talent density, Google probes how you'd staff a hiring-committee packet. They are not asking whether you can interview; an EM can do that. They're scoring whether you **design the hiring system**, the rubrics, the loop architecture, the debrief discipline, the funnel metrics you personally own, versus merely sitting in loops someone else built. And this is the category AI broke most concretely: take-homes are dead, ~71% of leaders say AI makes assessment harder, and Meta and Shopify now run AI-enabled rounds. A 2026 answer that is "a phone screen plus four algorithm rounds" is a fail before the probe even starts. This lesson is about owning hiring as an instrument with a feedback loop, and having a real position on the two questions every modern panel asks: *how did AI change your loop*, and *do you still hire juniors*.
 
 ### Learning objectives
-- Answer hiring in the **system-description shape** (Lesson 10.2): **Principles → Loop design → Metrics you own → AI-era redesign → one hard-call story in reserve**, describing the instrument, not your taste.
+- Answer hiring in the **system-description shape**: **Principles → Loop design → Metrics you own → AI-era redesign → one hard-call story in reserve**, describing the instrument, not your taste.
 - Name the **loop-architecture trade-offs**, bar-raiser vs hiring-committee vs HM-owned, and pick *per company stage* instead of importing one model everywhere.
 - State the **funnel metrics a Director owns** with real numbers: pass-through by stage, offer-accept, time-to-hire, and **quality-of-hire at 6/12 months against the original packet**.
 - Hold the mandatory **AI-era position**: you stopped assessing whether people can write code and started assessing whether they can **direct and verify** it, live human+AI rounds scored on judgment.
@@ -34,7 +34,7 @@ These look like eight separate questions; they're one system, probed from differ
 | "Tell me about a strong-on-paper candidate you rejected, or a hire you got wrong." | The hard-call story; whether your bar is real under pressure. |
 | "Generalists vs specialists? How do you grow and calibrate interviewers?" | Whether you build the interviewer *pipeline*, not just sit in loops. |
 
-The merge: all of these are **system-description-shape** questions (Lesson 10.2). They take **Principles → Loop design → Metrics → AI redesign → hard-call story**, and the strong answer threads a single instrument through every variant rather than treating them as eight opinions.
+The merge: all of these are **system-description-shape** questions. They take **Principles → Loop design → Metrics → AI redesign → hard-call story**, and the strong answer threads a single instrument through every variant rather than treating them as eight opinions.
 
 ---
 
@@ -42,11 +42,11 @@ The merge: all of these are **system-description-shape** questions (Lesson 10.2)
 
 The answer shape is the **system-description structure**: describe the instrument and the loop that maintains it, with a hard-call story held back for the probe.
 
-- **Principles (1-2, each with the trade-off it accepts).** Not a values list, two load-bearing commitments. "Structured signal over narrative" (accepts: slower, less room for a charismatic save). "The loop is an instrument I maintain, not a ritual I run" (accepts: I spend real time on retros instead of just filling slots). Each principle names what it costs, per the house rule from Lesson 10.1.
+- **Principles (1-2, each with the trade-off it accepts).** Not a values list, two load-bearing commitments. "Structured signal over narrative" (accepts: slower, less room for a charismatic save). "The loop is an instrument I maintain, not a ritual I run" (accepts: I spend real time on retros instead of just filling slots). Each principle names what it costs, per the house rule.
 - **Loop design.** One competency per round, written rubric, work-sample over trivia, and **debrief discipline: written feedback submitted before discussion** so the loudest voice doesn't anchor the room. This is the layer that separates designing a loop from participating in one.
 - **Metrics you personally own.** Pass-through by stage, offer-accept rate, time-to-hire, and the one most candidates skip, **quality-of-hire at 6 and 12 months scored against the original interview packet**, which is the only thing that tells you whether the instrument predicts. Plus loop retros when a number drifts.
 - **AI-era redesign.** What you assess *now* that AI writes the first draft: direction, verification, code review of AI output, system reasoning, and *when not to reach for it*. A position here is mandatory in 2026, not optional color.
-- **Hard-call story in reserve.** A strong-on-paper rejection, a killed req, or a non-obvious hire you defended, held back for the probe, because the probe is the real test (Lesson 10.2).
+- **Hard-call story in reserve.** A strong-on-paper rejection, a killed req, or a non-obvious hire you defended, held back for the probe, because the probe is the real test.
 
 ```mermaid
 flowchart TD
@@ -66,7 +66,7 @@ flowchart TD
 
 This category was re-scored harder than almost any other, because AI broke the assessment mechanics and the efficiency era broke the "just hire" reflex. Five shifts separate a current answer from a stale one.
 
-- **Every req now has to justify itself, headcount is the expensive option.** In 2015 the hiring question started at "how do you interview." In 2026 it starts one step earlier: *do we hire at all*, or can automation, a platform investment, or AI leverage absorb the work first (Lesson 10.11)? A philosophy that opens with "I'm always hiring great people" reads as ZIRP-era empire-building. The credible opener treats a new head as a budget line you have to defend, not a default.
+- **Every req now has to justify itself, headcount is the expensive option.** In 2015 the hiring question started at "how do you interview." In 2026 it starts one step earlier: *do we hire at all*, or can automation, a platform investment, or AI leverage absorb the work first? A philosophy that opens with "I'm always hiring great people" reads as ZIRP-era empire-building. The credible opener treats a new head as a budget line you have to defend, not a default.
 - **"Culture fit" is dead; "values/competency-add" replaced it.** Post-2020, "fit" reads as a bias vector, a license to hire people like yourself. The current language is **competency-add against a structured rubric**: what does this person add that the team lacks, scored against a written bar, not "would I get a beer with them." If you say "culture fit" unguarded in a 2026 loop, you've flagged yourself.
 - **A position on AI-era assessment is mandatory.** Take-homes are dead, a candidate with Claude or Copilot makes the unsupervised take-home pure noise. The modern loop runs **live human+AI sessions**: the candidate uses the tools and you score *direction, verification, and judgment*, what they catch in the AI's output, what they reject, how they reason about system behavior (Meta's AI-enabled CoderPad round, Shopify's BYO-AI interview). "Four algorithm rounds and a phone screen" is a fail; so is "we ban AI in interviews," which tests a world that no longer exists.
 - **A defensible junior-pipeline stance is expected.** ~18% of orgs expect fewer junior hires as AI absorbs entry-level work, and "I only hire seniors now" is a tempting, dangerous answer. The strong Director articulates *why they still hire some*, a senior-only org has no bench in three years and no one who grew up in *your* systems, and how onboarding is now designed **around** AI-assisted work, not despite it.
@@ -81,11 +81,11 @@ This category was re-scored harder than almost any other, because AI broke the a
 > *(Principles)* "Two principles. First, **structured signal over narrative**, every round measures one named competency against a written rubric, work-sample style, and feedback goes in *writing before the debrief* so the loudest voice in the room doesn't anchor everyone else. The cost I accept is that it's slower and a charismatic candidate can't talk their way out of a weak signal, which is the point. Second, **the loop is an instrument I maintain, not a ritual I run.** *(Loop design)* So I own four numbers: pass-through by stage, offer-accept, time-to-hire, and quality-of-hire at twelve months scored against the original packet. *(Metrics)* That last one is what makes it a loop, when our onsite-to-offer rate dropped to about 12%, I pulled the retro and found two rounds measuring the same problem-solving competency, so we collapsed one and added a systems-design round we were missing; offer rate came back to the low 20s and the false-negative complaints stopped. *(AI redesign)* The biggest change is AI. I stopped assessing whether people can *write* code and started assessing whether they can **direct and verify** it. We moved to a live session where the candidate uses AI tools on a real-ish problem and we score what they catch in the output, what they reject, and how they reason about the system's behavior under load. Source code is a liability now, not output, anyone can generate it; judgment about it is the scarce thing. *(Reserve)* And I hold a real position on the junior pipeline, which I'm sure you'll want to push on."
 
 **Why it scores:**
-- Opens with **principles that each name their cost** ("slower… charismatic candidate can't talk their way out"), the house rule from Lesson 10.1 applied to hiring, not a values poster.
+- Opens with **principles that each name their cost** ("slower… charismatic candidate can't talk their way out"), the house rule applied to hiring, not a values poster.
 - "The loop is an instrument I maintain" plus four owned numbers, including **quality-of-hire at 12 months against the original packet**, is the exact signal that separates *designing* a loop from *sitting in* one.
 - The 12%-offer-rate retro is a **real feedback-loop story with a number and a fix**: it proves the instrument framing is operated, not recited.
 - The AI redesign is concrete and current, "direct and verify, not write," "source code is a liability", and matches the Meta/Shopify reality rather than banning tools or ignoring them.
-- It **lands in ~90 seconds and tees up the junior-pipeline probe** instead of burning the reserve, inviting the drill (Lesson 10.2).
+- It **lands in ~90 seconds and tees up the junior-pipeline probe** instead of burning the reserve, inviting the drill.
 
 ### Answer 2: "Do you still hire juniors when AI absorbs entry-level work? And tell me about someone strong-on-paper you rejected."
 
@@ -94,7 +94,7 @@ This category was re-scored harder than almost any other, because AI broke the a
 **Why it scores:**
 - Gives a **specific number (15-20%) and defends it with a real downside of the alternative**, "no bench in three years," the senior-only failure mode, instead of a dodge in either direction.
 - Reframes the junior question as **how onboarding changed, not whether to hire**, the post-AI calibration stated precisely, with the apprenticeship-model shift made concrete.
-- Names the **trade-off of the stance itself** (slower payback, three quarters vs two) and justifies it as bench investment, quantified, with the cost owned (Lesson 10.1).
+- Names the **trade-off of the stance itself** (slower payback, three quarters vs two) and justifies it as bench investment, quantified, with the cost owned.
 - The rejection story is **AI-era-native** (the candidate failed *verification*, the exact thing the redesigned loop tests) and shows the **debrief discipline working**, three independent written flags, not a room talking itself into a no.
 - He **rejected over the HM's pedigree anchor and stands by it at six months**, the bar is real under pressure, which is the whole point of the hard-call question.
 
@@ -140,4 +140,4 @@ This category was re-scored harder than almost any other, because AI broke the a
 
 ---
 
-*End of Lesson 10.5. Hiring is the instrument that fills the org; Lesson 10.6 turns to the harder edge of the same bar, the people calls once someone is already inside: low performers, PIPs, the brilliant jerk, and the termination you have to run with dignity and decisiveness.*
+*End of Lesson 10.5. Hiring is the instrument that fills the org; the next lesson turns to the harder edge of the same bar, the people calls once someone is already inside: low performers, PIPs, the brilliant jerk, and the termination you have to run with dignity and decisiveness.*

@@ -127,7 +127,7 @@ flowchart LR
 ```
 
 ### Worked example: monitoring a checkout service at 1,000 req/s
-Take the order/checkout pipeline from Lesson 3.8 and put a monitoring stack around it. Checkout sustains **1,000 requests/sec**; the product SLO is **99.9% of checkout requests succeed (status < 500, latency < 300 ms) over 30 days.**
+Take the order/checkout pipeline from the messaging-queue building block and put a monitoring stack around it. Checkout sustains **1,000 requests/sec**; the product SLO is **99.9% of checkout requests succeed (status < 500, latency < 300 ms) over 30 days.**
 
 **The budget math, carried consistently.** At 1,000 req/s, a 30-day month is **~2.59 billion requests**; the error budget is 0.1% = **~2.6M allowed bad requests/30d**, and the even-pace **burn rate of 1 = exactly 1 bad request/sec**. Everything else falls out of that anchor.
 

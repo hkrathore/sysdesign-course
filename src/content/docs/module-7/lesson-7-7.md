@@ -8,7 +8,7 @@ sidebar:
 > **Why this gets asked:** Splitwise is the machine-coding staple of Flipkart/Uber/Swiggy/Ola loops and a common US "design a real product" LLD prompt - the cleanest vehicle for **invariant-first design**. A junior writes `User`, `Expense`, `Split` classes and mutates a balance map. A Director states the invariant first - **all balances sum to zero, always** - builds a structure where violating it is *impossible by construction*, handles money in integer cents with a deterministic remainder rule, and names the min-cash-flow rabbit hole only to **defer it as an optimization**. The separation happens in the first five minutes.
 
 ### Learning objectives
-- Lead with the **invariant**: every expense posts ledger entries summing to zero; balances are **derived views**, never mutable truth - Lesson 9.1's ledger thinking at LLD scale.
+- Lead with the **invariant**: every expense posts ledger entries summing to zero; balances are **derived views**, never mutable truth - the ledger thinking at LLD scale.
 - Handle money correctly: **integer cents**, no floats ever, and a **deterministic rule** for who eats the remainder in a 1/3 split.
 - Use the **Strategy pattern** for split types (equal / exact / percent), with validation owned by the strategy and a contract that *enforces* the invariant.
 - Stress the invariant under **concurrent expense adds**, and show why an append-only ledger makes the race disappear.
@@ -55,7 +55,7 @@ Two more traps frame the hour. Money: `$20.00 / 3` in floating point is `6.666�
 
 **Load:** ~10M MAU × ~5 expenses/month ≈ 50M/month ≈ **20 writes/s** average, ~100/s peak; balance reads ~10× → **~1K reads/s**. A single Postgres yawns at this.
 
-**Storage:** ~700 B/expense (header + ~4 ledger lines) → **~35 GB/year** with indexes. Years of headroom on one primary + replica; sharding (Lesson 2.5) is a someday-by-`group_id` footnote.
+**Storage:** ~700 B/expense (header + ~4 ledger lines) → **~35 GB/year** with indexes. Years of headroom on one primary + replica; sharding is a someday-by-`group_id` footnote.
 
 **The numbers that actually matter are money numbers.** ₹2,000.00 split 3 ways: as floats, `666.67 × 3 = 2000.01` - the books are off by a paisa and the invariant is dead. As integers: `200000 / 3 = 66666` remainder `2` → shares `[66667, 66667, 66666]`. **Two cents must be deliberately assigned by a stated rule.** That arithmetic - not QPS - is this problem's estimation step, and saying so out loud is the altitude signal.
 
@@ -73,9 +73,9 @@ Two more traps frame the hour. Money: `$20.00 / 3` in floating point is `6.666�
 
 - *Rejected - a mutable pairwise balance map as the truth:* every expense becomes a read-modify-write on N cells; a crash between updates corrupts silently; no audit trail; concurrent adds race. The design most candidates write first - and the one the interviewer is waiting to attack.
 - *Rejected - full event-sourcing/CQRS infrastructure:* Kafka, projections, snapshots - pure ceremony at 20 writes/s. The insight worth keeping: **the journal table already *is* event sourcing at table scale**. Take the idea, skip the infra.
-- *Store:* **Postgres** - the design leans on multi-row ACID transactions, exactly the workload relational stores exist for (Lesson 2.2). A KV store would make us hand-build the atomicity the invariant needs.
+- *Store:* **Postgres** - the design leans on multi-row ACID transactions, exactly the workload relational stores exist for. A KV store would make us hand-build the atomicity the invariant needs.
 
-This is Lesson 9.1's payment-ledger discipline at LLD scale: same invariant, same append-only posture, one process instead of a distributed system.
+This is the payment-ledger discipline at LLD scale: same invariant, same append-only posture, one process instead of a distributed system.
 
 ---
 
@@ -131,7 +131,7 @@ class ExpenseService {
 **Design notes (each with its rejected alternative):**
 - **`allocate` returns integer cents summing exactly to total - by contract.** The invariant is enforced once, at the seam. *Rejected: strategies returning fractions for the service to round* - rounding (the hard part) gets duplicated in callers and the contract is unenforceable.
 - **Validation lives in the strategy.** Percent-sums-to-100 is a fact about percent splits; the service shouldn't know it exists. *Rejected: a god-validator in the service* - every new split type reopens it.
-- **`idempotencyKey` on every write.** Mobile clients retry; a double-posted dinner corrupts balances exactly like a race would (same defense as 5.13's purchase path). *Rejected: trusting clients not to retry* - they always retry.
+- **`idempotencyKey` on every write.** Mobile clients retry; a double-posted dinner corrupts balances exactly like a race would (same defense as the purchase path). *Rejected: trusting clients not to retry* - they always retry.
 - **`reverseExpense`, not edit/delete.** Edit = reversal + repost; the journal stays append-only, the audit trail intact. *Rejected: in-place UPDATE* - destroys auditability and reintroduces the read-modify-write race we designed away.
 
 ---
@@ -238,7 +238,7 @@ Posting pseudocode: `BEGIN; INSERT expenses; INSERT entries (assert sum==0); UPD
 
 > **LLD adaptation:** evolve along the product axes - groups, settlement UX, currencies - and execute the deferral of the one famous algorithm.
 
-**Groups & scale-out (boring, say so fast):** `group_id` is already on every row. If the product 100×'s, shard by `group_id` (Lesson 2.5) - expenses never span groups, so transactions stay single-shard. Multi-currency: store `currency` per expense, **never convert inside the ledger** (a ledger holds facts, not exchange-rate opinions); convert at display. Reminders and feeds are read-side features off the journal.
+**Groups & scale-out (boring, say so fast):** `group_id` is already on every row. If the product 100×'s, shard by `group_id` - expenses never span groups, so transactions stay single-shard. Multi-currency: store `currency` per expense, **never convert inside the ledger** (a ledger holds facts, not exchange-rate opinions); convert at display. Reminders and feeds are read-side features off the journal.
 
 **The min-cash-flow deferral (the Director move, scripted).** The interviewer will ask: *"Six people, 14 pairwise debts - minimize the settlement payments?"* The trap is diving in. The answer:
 
@@ -306,7 +306,7 @@ Production wrinkle: simplification suggestions go stale the moment a new expense
 ---
 
 ### Key takeaways
-- **State the invariant first, then make it structural:** every posting is signed entries summing to zero; balances are derived views. No code path - buggy or not - can write unbalanced truth. Lesson 9.1's ledger discipline at LLD scale.
+- **State the invariant first, then make it structural:** every posting is signed entries summing to zero; balances are derived views. No code path - buggy or not - can write unbalanced truth. the ledger discipline at LLD scale.
 - **Money is integer cents with a stated, deterministic remainder rule** (sorted-order extra cents; largest-remainder for percents). Floats fail conservation; non-determinism breaks retries and reconciliation.
 - **Strategy is the seam:** split types validate and allocate behind one contract - shares sum exactly to total - so a new type is a new class and the invariant is enforced once.
 - **Concurrency is solved by the data model, not locks:** adds append disjoint rows; the balance cache is a commutative, rebuildable increment; idempotency keys make retries exactly-once; edits are reversals.
@@ -316,4 +316,4 @@ Production wrinkle: simplification suggestions go stale the moment a new expense
 
 ---
 
-*End of Lesson 7.7. Splitwise is Ticketmaster's (5.13) quiet sibling: there the invariant was one-seat-one-owner, held by an atomic CAS; here it's books-balance, held by making unbalanced writes structurally impossible. Same lesson at two scales - choose designs where the invariant cannot be violated, then spend a few cheap cycles verifying it anyway.*
+*End of Lesson 7.7. Splitwise is Ticketmaster's quiet sibling: there the invariant was one-seat-one-owner, held by an atomic CAS; here it's books-balance, held by making unbalanced writes structurally impossible. Same lesson at two scales - choose designs where the invariant cannot be violated, then spend a few cheap cycles verifying it anyway.*

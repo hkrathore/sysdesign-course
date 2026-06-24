@@ -10,7 +10,7 @@ sidebar:
 ### Learning objectives
 - Distinguish what the **Director leadership round scores** (altitude, currency, probe-survival) from what an **EM loop** scores (individual coaching, sprint mechanics).
 - Internalize the **six environmental shifts** since 2015 that silently re-grade every answer, and what each one rewards and penalizes *now*.
-- Use the **track map (10.2-10.14)** and a recommended path to sequence your prep.
+- Use the **track map** and a recommended path to sequence your prep.
 - Carry **altitude consistency** from the RESHADED track into behavioral answers: quantify, name the trade-off, name the rejected alternative.
 
 ### Intuition first
@@ -28,8 +28,8 @@ An **EM loop** scores you as a coach of individuals: do you give feedback, run a
 Three dimensions carry the score across every round:
 
 - **Altitude**, Director *mechanisms* (org design, operating system, span math, decision logs), not EM *rituals* (standups, 1:1 cadence). Too low reads as *not yet at level*; too high (pure vision, no hands-on depth) reads as *can't actually run it*. This is the exact two-sided failure from the system-design track (§2 of the course): hand-waving versus rat-holing.
-- **Currency**, does the answer sound like **2026** or like a re-run of a 2018 growth-era story? A "scaled 10→60" story told with no efficiency angle now codes as ZIRP empire-building (see Lesson 10.11). Currency is what this whole lesson arms.
-- **Probe-survival**, every story must hold **three levels of depth** below the headline: numbers, the rejected alternative, the stakeholders, the timeline. 2026 loops are sustained Socratic drilling (Amazon bar-raiser style) engineered to find the floor of a rehearsed answer. If level three is empty, the story wasn't yours. The answer-shape mechanics for surviving this live in Lesson 10.2.
+- **Currency**, does the answer sound like **2026** or like a re-run of a 2018 growth-era story? A "scaled 10→60" story told with no efficiency angle now codes as ZIRP empire-building (see the efficiency-era lesson). Currency is what this whole lesson arms.
+- **Probe-survival**, every story must hold **three levels of depth** below the headline: numbers, the rejected alternative, the stakeholders, the timeline. 2026 loops are sustained Socratic drilling (Amazon bar-raiser style) engineered to find the floor of a rehearsed answer. If level three is empty, the story wasn't yours. The answer-shape mechanics for surviving this live in the frameworks lesson.
 
 ```mermaid
 flowchart TB
@@ -60,27 +60,27 @@ These are the load-bearing change since 2015. Each one rewards a posture and pen
 
 **1. Post-ZIRP efficiency.** Capital got expensive in 2022; **output-per-dollar replaced headcount growth** as the proxy for good leadership. Business acumen, cloud cost per transaction, payback period, unit economics, is now scored *inside* behavioral answers, not quarantined to a case round.
 - *Rewards:* "I delivered the roadmap with a flat or shrinking team via platform leverage."
-- *Penalizes:* "I scaled the org from 10 to 60" with no efficiency angle → reads as empire-building. **Headcount is now the expensive option you must justify, not the default plan.** (Lessons 10.11, 10.9.)
+- *Penalizes:* "I scaled the org from 10 to 60" with no efficiency angle → reads as empire-building. **Headcount is now the expensive option you must justify, not the default plan.**
 
 **2. Founder-mode (Sept 2024).** Paul Graham's essay made **pure delegation near-disqualifying** in front of founders. "Hire great people and get out of the way" now reads as absenteeism; but the overcorrection, "I'm founder-mode, I'm in the details", reads as a micromanagement confession.
 - *Rewards:* **selective depth with standing mechanisms**, "I go deep on the two decisions that turn the architecture and the one underperforming team; everything else runs on a cadence I don't sit in."
-- *Penalizes:* either pole. The whole binary is the trap. (Lessons 10.4, 10.7.)
+- *Penalizes:* either pole. The whole binary is the trap.
 
 **3. AI as topic *and* format disruptor.** AI is asked directly *and* woven into hiring, org-design, and metrics, and it is **changing the interview format itself** (Meta's AI-enabled CoderPad round, Shopify's BYO-AI interview). It has no 2015 ancestor, so both ditches are well-mapped.
 - *Rewards:* the **accountable operator**, "I ran a rollout, here's the J-curve and the ROI I defend like a headcount ask."
-- *Penalizes:* "we're still evaluating / I let each team decide" (abdication) **and** "AI made us 10× faster" with no methodology (the Klarna/Salesforce overclaim). Context interviewers carry: 85%+ of engineers use assistants, Pichai's "~75% of new Google code is AI-generated," yet ~51% of leaders believe GenAI is currently net-negative, so **honest J-curve talk scores; breathlessness doesn't.** (Lesson 10.12.)
+- *Penalizes:* "we're still evaluating / I let each team decide" (abdication) **and** "AI made us 10× faster" with no methodology (the Klarna/Salesforce overclaim). Context interviewers carry: 85%+ of engineers use assistants, Pichai's "~75% of new Google code is AI-generated," yet ~51% of leaders believe GenAI is currently net-negative, so **honest J-curve talk scores; breathlessness doesn't.**
 
 **4. RTO / hybrid norms.** Remote-execution literacy is assumed, and the answer is scored on **separating personal preference from organizational stewardship**. The known data point: Amazon's 5-day RTO polled **1.4/5** internally with **91% unhappy**, and regretted attrition concentrated among strong engineers, candidates are expected to know that trade-off math.
 - *Rewards:* a written async operating system (RFCs, decision logs) and a **retention-risk plan for whatever policy the company sets**.
-- *Penalizes:* workplace ideology in *either* direction; "management by walking around." (Lessons 10.4, 10.8.)
+- *Penalizes:* workplace ideology in *either* direction; "management by walking around."
 
 **5. Psychological-safety-plus-accountability (post-backlash).** Naming Project Aristotle alone is now table stakes and slightly suspect. The current bar is **Edmondson's definition paired explicitly with accountability**.
 - *Rewards:* "Safety protects people who take interpersonal risks, it does **not** protect people *from* performance consequences."
-- *Penalizes:* safety as a synonym for *nice*, with no accountability mechanism attached. (Lessons 10.4, 10.6.)
+- *Penalizes:* safety as a synonym for *nice*, with no accountability mechanism attached.
 
 **6. Performance-management tightening.** The clock moved to **weeks, not quarters**. A real, well-run termination is now **table stakes** for Director (Meta's low-performer cuts, Microsoft's PIP-or-severance ultimatum, ~30% rise in formal performance procedures since 2020). And layoff experience moved from rare to near-assumed.
 - *Rewards:* decisiveness-with-dignity, early dated feedback, a real process, the call made on time, *and* a raised compassion bar (cold "easy call" answers score worse than they used to).
-- *Penalizes:* "I coach indefinitely; firing is a failure of my leadership" → now reads as **not operating at level**. (Lessons 10.6, 10.8.)
+- *Penalizes:* "I coach indefinitely; firing is a failure of my leadership" → now reads as **not operating at level**.
 
 <details>
 <summary>Go deeper, why "calibrate to 2026" is not the same as "chase the trend" (optional)</summary>
@@ -111,7 +111,7 @@ Twelve more lessons, in three layers. **Frameworks first, then your story portfo
 | 10.13 | Company calibration | The *same* story scored at Amazon vs Meta vs Google vs Netflix vs a founder-led startup. |
 | 10.14 | **Demonstrate-don't-describe capstone** | Modern loops replace "tell me your philosophy" with live exercises (critique an OKR, read an org-health survey, deliver hard feedback in roleplay, present a first-90-days plan), plus a self-scoring rubric. |
 
-**Recommended path.** Do **10.2 and 10.3 first, non-negotiable**, they are the RESHADED-spine analog; the nine category lessons are far weaker without an answer shape and a story bank behind them. Then take the category lessons (10.4-10.12) **in your weakest-first order**, not sequentially, most senior candidates are strong on philosophy and execution and thin on the hard people calls (10.6) and the efficiency/AI canon (10.11-10.12), which is exactly where the 2026 re-scoring bites hardest. Finish with 10.13 to tune for your target company and 10.14 to rehearse the live-exercise format under load. If you only have one evening: read this, 10.2, 10.3, and the cheat sheet.
+**Recommended path.** Do the **frameworks and the story portfolio first, non-negotiable**, they are the RESHADED-spine analog; the nine category lessons are far weaker without an answer shape and a story bank behind them. Then take the category lessons **in your weakest-first order**, not sequentially, most senior candidates are strong on philosophy and execution and thin on the hard people calls and the efficiency/AI canon, which is exactly where the 2026 re-scoring bites hardest. Finish with company calibration to tune for your target company and the capstone to rehearse the live-exercise format under load. If you only have one evening: read this, the frameworks, the story portfolio, and the cheat sheet.
 
 ---
 
@@ -122,7 +122,7 @@ The most under-appreciated fact in this whole module: **post-flattening, the sam
 - **Always quantify.** A behavioral answer with no number is hand-waving. "I turned the team around" is the "it scales" of the leadership round. Bring the metric: *"regretted attrition dropped from ~18% to ~7% over two quarters,"* *"shipped 80% of committed scope after I cut the bottom 20%,"* *"MTTR fell from 45 min to under 10."*
 - **Every position names its limit and the rejected alternative.** Just as no storage choice is presented without a critique, no leadership stance is presented without its downside and the path you didn't take. *"I chose to kill the project rather than push the date, the cost was three months of sunk work and a hard conversation with the VP who sponsored it; the alternative, a heroic crunch, would have shipped a fragile thing we'd pay for in on-call."*
 
-If you nail RESHADED and then give a vague, number-free, no-trade-off behavioral answer, you read as *inconsistent*, strong on the whiteboard, soft on judgment, and that inconsistency is itself a flag. The bar is one bar. (See Lesson 6.2 for the system-design rubric these axes mirror; Lessons 8.5 and 8.8 for the org-and-cost reasoning that shows up on both sides of the loop.)
+If you nail RESHADED and then give a vague, number-free, no-trade-off behavioral answer, you read as *inconsistent*, strong on the whiteboard, soft on judgment, and that inconsistency is itself a flag. The bar is one bar. (See the system-design rubric these axes mirror, and the org-and-cost reasoning that shows up on both sides of the loop.)
 
 ---
 
@@ -130,11 +130,11 @@ If you nail RESHADED and then give a vague, number-free, no-trade-off behavioral
 - The Director leadership round is a **graded judgment assessment**, not a vibe check, scored on **altitude** (mechanisms, not rituals), **currency** (sounds like 2026), and **probe-survival** (holds three levels deep). It is run by the same senior engineers who scored your system design.
 - **Six shifts since 2015 silently re-grade every answer:** post-ZIRP efficiency, founder-mode killing pure delegation, AI as topic *and* format, RTO/hybrid stewardship, psych-safety-*plus*-accountability, and performance-management tightening to weeks-not-quarters. Memorize each shift's **penalty**.
 - The fix for a stale story is usually a **reframe, not a new story**, add the efficiency angle, the tripwire, the "what I told my team," the missing number.
-- **Do 10.2 (frameworks) and 10.3 (story portfolio) first**, then take category lessons weakest-first; finish with 10.13 (company calibration) and 10.14 (live-exercise capstone).
+- **Do the frameworks and the story portfolio first**, then take category lessons weakest-first; finish with company calibration and the live-exercise capstone.
 - The **two course laws are one bar across both tracks**: quantify everything, and name the limit and the rejected alternative. The same interviewer calibrates your whiteboard and your behavioral answers against the same standard.
 
-> **Spaced-repetition recap:** The leadership loop scores **altitude · currency · probe-survival**, probed 3-4 levels deep. **Six shifts re-grade every answer**, efficiency over headcount, founder-mode over pure delegation, AI-as-operator, RTO-as-stewardship, safety-*with*-accountability, weeks-not-quarters performance management. A stale 2015 growth-era story throws warnings only the interviewer hears. Carry both course laws in: **quantify, and name the trade-off and the alternative rejected.** Frameworks (10.2) and the story portfolio (10.3) are the spine, build them first.
+> **Spaced-repetition recap:** The leadership loop scores **altitude · currency · probe-survival**, probed 3-4 levels deep. **Six shifts re-grade every answer**, efficiency over headcount, founder-mode over pure delegation, AI-as-operator, RTO-as-stewardship, safety-*with*-accountability, weeks-not-quarters performance management. A stale 2015 growth-era story throws warnings only the interviewer hears. Carry both course laws in: **quantify, and name the trade-off and the alternative rejected.** The frameworks and the story portfolio are the spine, build them first.
 
 ---
 
-*End of Lesson 10.1. The leadership track recompiles your experience against the world that exists now: same raw stories, re-graded by a tougher, more current rubric. Next: 10.2, the four answer shapes and probe-resistance, the behavioral analog of the RESHADED spine.*
+*End of Lesson 10.1. The leadership track recompiles your experience against the world that exists now: same raw stories, re-graded by a tougher, more current rubric. Next: the four answer shapes and probe-resistance, the behavioral analog of the RESHADED spine.*

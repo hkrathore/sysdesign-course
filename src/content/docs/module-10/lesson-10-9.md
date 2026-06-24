@@ -8,7 +8,7 @@ sidebar:
 > Every Director loop runs a Deliver-Results round, and at this level the scored unit is not the heroic sprint, it's the **system**: did you detect the slip early in the data, cost the options, renegotiate headline-first, recover with numbers, and change a mechanism so it doesn't recur. Post-flattening, they also assume you're a hands-on execution owner, "I brought in a strong tech lead" dies on the follow-up because they expect *you* to have inspected enough of the architecture to validate the recovery plan. This cluster carries the two most revealing questions in the whole loop, the incident you commanded, and the decision you got *wrong*, and a weak answer to either is disqualifying at L6+, because both read directly on self-awareness and decision-process quality. The round lives in the gap between the candidate who blames shifting requirements and the one who owns the chart.
 
 ### Learning objectives
-- Run the execution story on a **system spine**, early detection, options costed, headline-first renegotiation, quantified recovery, durable mechanism change, delivered as STAR-L (Lesson 10.2), not as a crunch-and-hope war story.
+- Run the execution story on a **system spine**, early detection, options costed, headline-first renegotiation, quantified recovery, durable mechanism change, delivered as STAR-L, not as a crunch-and-hope war story.
 - Command the **incident** answer on its own spine: severity classification, role separation (you coordinate, you don't type the fix), a comms cadence you wrote, a hard call under incomplete information with the risk reasoning shown, and a **blameless postmortem with verified action items**.
 - Answer the **wrong-decision** variant with decision-process maturity: a consequential Director-scale call, why it was reasonable *then*, reversal speed, and the **one-way / two-way-door guardrail** you built that later fired.
 - Make **"I recommended we kill it"** the default turnaround answer, cost discipline and portfolio thinking are what score in the post-ZIRP era, not the rescue.
@@ -21,7 +21,7 @@ A senior pilot is not judged by whether the flight hit turbulence, every flight 
 
 ## The questions
 
-These are nearly all past-event questions (STAR-L, Lesson 10.2). The unifying thread: at Director altitude the *system* is the answer, not the sprint, how you detected, decided, renegotiated, recovered, and what mechanism you changed.
+These are nearly all past-event questions (STAR-L). The unifying thread: at Director altitude the *system* is the answer, not the sprint, how you detected, decided, renegotiated, recovered, and what mechanism you changed.
 
 | Variant | What it's really testing |
 |---|---|
@@ -43,11 +43,11 @@ The general spine is five beats, in order, each doubles as the probe-defense, be
 
 - **Detection, how you saw it early.** Milestone burn-down, forecast *ranges* not point estimates, a skip-level signal. The load-bearing line of the whole cluster: *missing the deadline isn't the failure; letting someone be surprised by it is.* If your story starts at the crisis, you've lost the round, start at the instrument that flagged it.
 - **Options, each costed.** Kill / descope / re-staff / re-architect, and what each costs in time, money, and risk. The decision *tree* is the Director signal, not the heroics; a candidate who jumped straight to "we worked weekends" skipped the part being scored.
-- **Decision + headline-first renegotiation.** Take the revised range and a recommendation to stakeholders *before they hear it elsewhere*, impact first, then the new date/cost, then options-with-a-recommendation in the *same* conversation (SCQA, Lesson 10.2). No problem delivered without a recommendation.
+- **Decision + headline-first renegotiation.** Take the revised range and a recommendation to stakeholders *before they hear it elsewhere*, impact first, then the new date/cost, then options-with-a-recommendation in the *same* conversation (SCQA). No problem delivered without a recommendation.
 - **Quantified recovery, or a clean kill.** Percent of scope shipped, the new date hit, MTTR delta, or a well-executed kill with engineers redeployed to something that mattered. The kill is not the failure; the sunk-cost rescue often is.
 - **Durable mechanism change.** Pre-mortems, estimation-with-ranges, a program-health check, a one-way-door one-pager, *with evidence it held* (a later slip the mechanism caught early). The story ends in a mechanism, not a feeling.
 
-Then survive the probe: hold the numbers, the rejected options, the stakeholders, and the timeline three levels down (Lesson 10.2). Never announce the spine aloud.
+Then survive the probe: hold the numbers, the rejected options, the stakeholders, and the timeline three levels down. Never announce the spine aloud.
 
 ```mermaid
 flowchart TD
@@ -75,8 +75,8 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 - **The hands-on bar rose post-flattening.** You're expected to have personally inspected enough of the architecture to validate the recovery plan, read the burn-down, looked at the failing service, understood the dependency that broke. "I brought in a strong tech lead and trusted them" dies on the first follow-up. Directors are execution owners now, not high-level steerers.
 - **Blameless-postmortem vocabulary is table stakes; verified follow-through is the differentiator.** Everyone says "blameless" now. The probe that separates candidates is *"how did you confirm the action items actually shipped?"*, a re-review at 30 days, an owner and a date per item, reliability defended in business terms (SLO, error budget, cost of downtime). The postmortem-as-meeting, with no verification loop, reads as theater.
 - **One-way / two-way-door and reversal-speed vocabulary is expected in the wrong-decision answer.** The guardrail you built now carries more of the score than the confession itself. A consequential, recent, genuinely-wrong call, reversed fast, with a named-dissenter or kill-criterion mechanism that *later fired*, beats a low-stakes decade-old story dressed as humility.
-- **Every answer needs quantified impact.** 2025-26 rubrics demand numbers: percent of scope shipped, MTTR before and after, repeat-incident rate, dollars-per-hour of the outage. "We turned it around" with no number is the activity-not-outcome fail, and it transfers straight from the RESHADED house rule (Lesson 10.1), since the same Principal/Staff interviewer often scores both your system-design and leadership rounds.
-- **New probe: did you use AI as a timeline lever?** On an impossible deadline, the 2026 interviewer wants to know whether you reached for AI-assisted migration, test generation, or review compression *before* only cutting scope or adding bodies (Lesson 10.12), and whether you measured if it actually helped.
+- **Every answer needs quantified impact.** 2025-26 rubrics demand numbers: percent of scope shipped, MTTR before and after, repeat-incident rate, dollars-per-hour of the outage. "We turned it around" with no number is the activity-not-outcome fail, and it transfers straight from the RESHADED house rule, since the same Principal/Staff interviewer often scores both your system-design and leadership rounds.
+- **New probe: did you use AI as a timeline lever?** On an impossible deadline, the 2026 interviewer wants to know whether you reached for AI-assisted migration, test generation, or review compression *before* only cutting scope or adding bodies, and whether you measured if it actually helped.
 
 ---
 
@@ -88,7 +88,7 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 
 **Why it scores:**
 - **It establishes command, not heroics**, "I did not touch a keyboard" is the load-bearing line that distinguishes a Director from a senior IC who fixes it himself, the single most common way this answer fails at level.
-- **The hard call shows the risk reasoning, not just the outcome**, bounded-downside-beats-unbounded-gamble under incomplete information is decision quality on display, with the dollar figure making the trade-off concrete (the Lesson 10.1 quantify rule).
+- **The hard call shows the risk reasoning, not just the outcome**, bounded-downside-beats-unbounded-gamble under incomplete information is decision quality on display, with the dollar figure making the trade-off concrete (the quantify rule).
 - **It owns its own contribution first**, the approved migration without staged rollout, which is what earns the blameless postmortem its credibility instead of making it a blame-deflection ritual, and the 30-day re-review of all five action items is exactly the verified-follow-through the 2026 probe hunts for.
 - **It closes in business terms**, MTTR 4h→50m, repeat-incidents to zero, error budget funded as insurance, outcome over activity, and reliability defended to execs in the language they fund.
 
@@ -100,7 +100,7 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 - **It steel-mans the past decision before critiquing it**, defensible reasoning at the time ($400k quote, lock-in fear, two champions), proving genuine self-awareness over a humble-brag, and it's a real, consequential, recent call that was actually wrong (five engineer-years sunk), not the "I care too much" non-answer this question is built to catch.
 - **Reversal speed is the headline, and it was done in public**, week 34, in the same forum, because reversing quietly teaches the org to hide being wrong, a Director-altitude read on the *cultural* cost of how you reverse, not just the decision.
 - **The guardrail carries more weight than the confession**, the one-way-door one-pager with a kill criterion and a named dissenter is the 2026-expected mechanism, and naming it as the fix for "I lost the dissent when I got enthusiastic" shows real decision-process maturity.
-- **It proves the mechanism held**, the data-platform bet caught at week 6, the "evidence it held" beat that separates a learned lesson from a stated one (Lesson 10.2).
+- **It proves the mechanism held**, the data-platform bet caught at week 6, the "evidence it held" beat that separates a learned lesson from a stated one.
 
 ---
 
@@ -129,19 +129,19 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 1. **Run the incident on the IC command spine, with the dollar figure.** "Walk me through a Sev-1 you led." *(Sketch: declare severity in minutes, separate into named workstreams while you coordinate and don't type, a comms cadence you wrote, a hard call under two hypotheses with bounded-vs-unbounded risk reasoning and the cost-per-hour, then a blameless postmortem where you own your contribution first, action items verified at 30 days, MTTR before/after. Hold every figure for the probe.)*
 2. **Defend a kill as the turnaround.** "Tell me about a failing project you turned around." *(Sketch: lead with detection, then make the kill a live, costed option against the rescue; if you killed it, name the redeploy and reject sunk cost out loud; if you rescued it, say why the kill *lost* on the numbers. End with the program-health mechanism that would have flagged it sooner.)*
 3. **Own a real wrong decision with a guardrail.** "A consequential decision you got wrong, when did you know?" *(Sketch: reversibility spine, steel-man the past call, the recognition moment and fast public reversal, the one-way/two-way-door process fix with a kill criterion and a named dissenter, and a later decision the guardrail caught. Avoid the decade-old low-stakes humble-brag.)*
-4. **Make the tech-debt case in dollars.** "Justify a major refactor to a skeptical CFO." *(Sketch: debt in cost and risk terms, incident hours, velocity tax, cost-of-downtime, not morality; a tool other than the rewrite-quarter (strangler-fig, incremental paydown on the feature roadmap); what slips if it's funded, the owner's acceptance if it isn't. Lesson 8.5 for the cost-cut framing.)*
+4. **Make the tech-debt case in dollars.** "Justify a major refactor to a skeptical CFO." *(Sketch: debt in cost and risk terms, incident hours, velocity tax, cost-of-downtime, not morality; a tool other than the rewrite-quarter (strangler-fig, incremental paydown on the feature roadmap); what slips if it's funded, the owner's acceptance if it isn't. The cost-cut framing applies.)*
 
 ---
 
 ### Key takeaways
-- **Run the system spine, every time:** early detection, options each costed, headline-first renegotiation, quantified recovery (or a clean kill), and a durable mechanism change *with evidence it held*. The slip isn't the failure, the surprise is. The story *is* the system executed once (Lesson 10.2 STAR-L).
+- **Run the system spine, every time:** early detection, options each costed, headline-first renegotiation, quantified recovery (or a clean kill), and a durable mechanism change *with evidence it held*. The slip isn't the failure, the surprise is. The story *is* the system executed once (STAR-L).
 - **Incident = command, not keyboard.** Declare severity fast, separate roles while you coordinate, write the comms cadence yourself, make the hard call with risk reasoning shown, own your contribution first in a blameless postmortem, then *verify* the action items shipped at 30 days.
 - **"I recommended we kill it" is the 2026 default turnaround answer.** Portfolio thinking and cost discipline outscore the heroic rescue; sunk cost is the trap, and redeploying engineers to higher-value work is the win.
 - **Wrong-decision: the guardrail beats the confession.** Steel-man the past call, reverse fast and in public, and build a one-way/two-way-door mechanism (kill criterion, named dissenter) that *later fired*, decision-process maturity is what's scored at L6+.
-- **Quantify everything, validate hands-on, lever AI.** Numbers in every behavioral answer (scope shipped, MTTR, repeat-incident rate, $/hour); you inspected enough architecture to validate the recovery plan yourself; and you reached for AI/platform leverage before only cutting scope or adding bodies (Lesson 10.12).
+- **Quantify everything, validate hands-on, lever AI.** Numbers in every behavioral answer (scope shipped, MTTR, repeat-incident rate, $/hour); you inspected enough architecture to validate the recovery plan yourself; and you reached for AI/platform leverage before only cutting scope or adding bodies.
 
 > **Spaced-repetition recap:** Execution-under-pressure is the Deliver-Results cluster, scored on the **system**, not the sprint. **STAR-L on a system spine:** detection (the slip isn't the failure, the surprise is) → options each costed → headline-first renegotiation → quantified recovery or a clean kill → durable mechanism change with evidence it held. **Incident** = IC command spine: declare severity, separate roles (coordinate, don't type), comms cadence you wrote, a hard call with risk reasoning, blameless postmortem with *verified* action items. **Wrong decision** = reversibility spine: steel-man the past call, fast public reversal, a one-way/two-way-door guardrail that later fired. **2026:** "I recommended we kill it" is often the stronger turnaround; verified follow-through over postmortem-theater; numbers in every answer; AI as a timeline lever. Never start at the crisis, never blame shifting requirements, never be the fixer with no command structure.
 
 ---
 
-*End of Lesson 10.9. Execution under pressure is the system-not-sprint cluster; Lesson 10.10 carries the same instincts sideways to influence, disagreement, and executive communication, where the pressure isn't a deadline but a VP who outranks you and a decision you have to either change or commit to.*
+*End of Lesson 10.9. Execution under pressure is the system-not-sprint cluster; the next lesson carries the same instincts sideways to influence, disagreement, and executive communication, where the pressure isn't a deadline but a VP who outranks you and a decision you have to either change or commit to.*

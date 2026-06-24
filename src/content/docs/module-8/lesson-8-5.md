@@ -58,7 +58,7 @@ That is this lesson. Cloud bill = the books. Idle resources = the empty floor. C
 | Observability + logging | $0.7M | 7% | log ingest, metrics, APM |
 | Support plan + everything else | $1.0M | 10% | enterprise support ≈ 3-10% of bill |
 
-Two insights fall out: **compute + databases are 60% of the bill**, the program lives there; and nobody reaches 30% by optimizing the 7% line, though observability is usually the most bloated *proportionally* (Lesson 3.13 fixes the log-ingest default).
+Two insights fall out: **compute + databases are 60% of the bill**, the program lives there; and nobody reaches 30% by optimizing the 7% line, though observability is usually the most bloated *proportionally* (log-tiering fixes the log-ingest default).
 
 **The savings ladder, each rung with its number; the ordering is the design:**
 
@@ -70,7 +70,7 @@ Two insights fall out: **compute + databases are 60% of the bill**, the program 
 
 **30-day subtotal: ~32% (~$3.2M run-rate)**, the mandate's floor, met by configuration and procurement alone. Say that out loud.
 
-**Rung 4, Re-architect (6 months): another ~8-15%.** Spot for CI, batch, stateless workers (60-90% off that slice); ARM/Graviton (~15-20% price-perf); data-transfer surgery, CDN egress offload (Lesson 3.5), cross-AZ chatter, NAT; log tiering and sampling (the $0.7M line typically halves); caching to shrink the DB tier (Lesson 3.7). Lands at **~40-47%**, inside the band, honest about diminishing returns at the top.
+**Rung 4, Re-architect (6 months): another ~8-15%.** Spot for CI, batch, stateless workers (60-90% off that slice); ARM/Graviton (~15-20% price-perf); data-transfer surgery, CDN egress offload, cross-AZ chatter, NAT; log tiering and sampling (the $0.7M line typically halves); caching to shrink the DB tier. Lands at **~40-47%**, inside the band, honest about diminishing returns at the top.
 
 **What estimation decided:** the money is in compute + databases; 30 days delivers ~32% at near-zero risk via delete → rightsize → commit *in that order*; the last ~10-15% costs 6 months of real engineering; and the program reports unit cost, not the absolute bill.
 
@@ -92,7 +92,7 @@ Two insights fall out: **compute + databases are 60% of the bill**, the program 
 > Adaptation: S is **where the money sleeps**, the storage-shaped ~25% of the bill (storage, snapshots, logs, backups), plus the program's own storage problem: the cost-allocation data. You cannot run showback on an untagged bill.
 
 **The storage-shaped spend, three moves, each with its guardrail:**
-- **Lifecycle tiering** for blobs (hot → IA → archive by access age) and **log tiering** (Lesson 3.13: 7-14 day hot window, then cheap object storage, delete at the compliance floor, *not before it*). *Rejected: "shorten retention everywhere"*, retention is where cost programs commit compliance violations.
+- **Lifecycle tiering** for blobs (hot → IA → archive by access age) and **log tiering** (7-14 day hot window, then cheap object storage, delete at the compliance floor, *not before it*). *Rejected: "shorten retention everywhere"*, retention is where cost programs commit compliance violations.
 - **Snapshot hygiene as policy, not cleanup:** automated expiry, or the sprawl regrows in two quarters.
 - **Untouched:** backup frequency and the cross-region replica that honor RPO 5 min / RTO 1 hr, the insurance; more in Evaluation.
 
@@ -126,7 +126,7 @@ flowchart TD
 
 **6 months, re-architecture, funded by the quick wins.** The central team of 3-4 runs the structural moves (spot, ARM, egress and cross-AZ surgery, log tiering); product teams contribute ≤10% capacity from a ranked backlog. The quick wins fund this phase twice over: the banked $3.2M makes the engineering spend obviously positive-ROI, and the early credibility is why the CFO tolerates a 6-month tail at all.
 
-**The shape to notice:** the guardrail dashboard runs parallel to *every* phase, the load-bearing wall of this design, as the waiting room was in Lesson 5.13. And the diagram is a **loop**: without the governance edge, the bill regrows to fill the budget in 4-6 quarters.
+**The shape to notice:** the guardrail dashboard runs parallel to *every* phase, the load-bearing wall of this design, as the waiting room was for a hot-shard queue. And the diagram is a **loop**: without the governance edge, the bill regrows to fill the budget in 4-6 quarters.
 
 ---
 
@@ -185,7 +185,7 @@ One derived table outranks the rest: **`unit_cost(service, month)`**, allocated 
 <details>
 <summary>Go deeper, egress, NAT, and cross-AZ transfer surgery (IC depth, optional)</summary>
 
-Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cross-AZ ~$0.01-0.02/GB *each direction*, NAT gateways ~$0.045/GB *processing on top*, private-subnet traffic to S3 through a NAT pays triple for nothing (fix: VPC gateway endpoints, free for S3/DynamoDB). Cross-AZ microservice chatter is the silent one: topology-aware routing / zonal affinity in the mesh often cuts that line 50-70%, checked against the availability posture, since aggressive affinity concentrates failure domains. Internet egress is a CDN problem (Lesson 3.5): every edge cache hit is a gigabyte that never bills as origin egress; media-heavy products find the CDN pays for itself in egress before counting latency. Order of attack: gateway endpoints (free, hours) → NAT consolidation → zonal affinity → CDN offload ratio.
+Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cross-AZ ~$0.01-0.02/GB *each direction*, NAT gateways ~$0.045/GB *processing on top*, private-subnet traffic to S3 through a NAT pays triple for nothing (fix: VPC gateway endpoints, free for S3/DynamoDB). Cross-AZ microservice chatter is the silent one: topology-aware routing / zonal affinity in the mesh often cuts that line 50-70%, checked against the availability posture, since aggressive affinity concentrates failure domains. Internet egress is a CDN problem: every edge cache hit is a gigabyte that never bills as origin egress; media-heavy products find the CDN pays for itself in egress before counting latency. Order of attack: gateway endpoints (free, hours) → NAT consolidation → zonal affinity → CDN offload ratio.
 
 </details>
 
@@ -196,17 +196,17 @@ Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cr
 > Adaptation: evolution here is **governance, the machinery that makes savings stick**, plus absorbing the next constraint. A 30% cut that regrows in a year is a failed program with a good first quarter.
 
 **The governance loop (what survives the program team):**
-- **Unit-cost targets enter quarterly planning** beside latency and availability, cost becomes an NFR every design review states (as Module 5 treats it).
+- **Unit-cost targets enter quarterly planning** beside latency and availability, cost becomes an NFR every design review states.
 - **Showback monthly and automatic; chargeback stays the escalation tool**, the friction trade argued in A holds in steady state.
 - **The provision gate stays on; commitment coverage reviewed quarterly**, a portfolio to manage, not a purchase to forget.
 - **A standing FinOps function of 2-3** owns leverage. *Rejected: "every team owns cost" with no center*, diffuse ownership means commitment management, the highest-ROI lever, belongs to nobody.
 
 **Under new constraints:**
 - **Growth resumes at 40%/yr:** nothing breaks, because the metric was unit cost all along, the bill grows while unit cost falls.
-- **LLM/GPU spend arrives** (Lesson 5.15): a new top-3 line with inverted physics, GPU capacity is scarce, so the idle-capacity reflex flips (you hold reserved GPU you can't instantly rebuy), and the unit metric becomes cost per 1K tokens, driven by batching and serving efficiency, not rightsizing. The governance loop absorbs it; the rung-1 reflexes don't.
-- **Repatriation** ("would colo beat 50% cloud savings?"): a deliberate non-default. The math can work for stable workloads at this scale, but it trades elasticity and managed-service leverage for capex, a hardware-ops capability you'd have to build, and a 12-18 month migration (Lesson 8.3's playbook at maximum size). Exhaust the ladder first; revisit only for stable-floor workloads if the unit-cost curve flattens.
+- **LLM/GPU spend arrives:** a new top-3 line with inverted physics, GPU capacity is scarce, so the idle-capacity reflex flips (you hold reserved GPU you can't instantly rebuy), and the unit metric becomes cost per 1K tokens, driven by batching and serving efficiency, not rightsizing. The governance loop absorbs it; the rung-1 reflexes don't.
+- **Repatriation** ("would colo beat 50% cloud savings?"): a deliberate non-default. The math can work for stable workloads at this scale, but it trades elasticity and managed-service leverage for capex, a hardware-ops capability you'd have to build, and a 12-18 month migration (the live-migration playbook at maximum size). Exhaust the ladder first; revisit only for stable-floor workloads if the unit-cost curve flattens.
 
-**Where I'd delegate (the explicit Director move):** *"Platform benchmarks ARM on our top-10 services; my prior is 15-20% price-perf with two weeks of toolchain work, since the stack is JVM and Go with no native exotica. Data-platform owns log-tiering against the 3.13 pipeline; my prior is a 7-day hot window covers 95% of queries, they verify against query-age telemetry. Finance owns commitment mechanics; I own the coverage ceiling and the rung ordering."* I keep the guardrails, the ordering, the refusal, and the unit-cost definition; everything benchmarkable is delegated with a stated prior.
+**Where I'd delegate (the explicit Director move):** *"Platform benchmarks ARM on our top-10 services; my prior is 15-20% price-perf with two weeks of toolchain work, since the stack is JVM and Go with no native exotica. Data-platform owns log-tiering against the observability pipeline; my prior is a 7-day hot window covers 95% of queries, they verify against query-age telemetry. Finance owns commitment mechanics; I own the coverage ceiling and the rung ordering."* I keep the guardrails, the ordering, the refusal, and the unit-cost definition; everything benchmarkable is delegated with a stated prior.
 
 ---
 
@@ -267,4 +267,4 @@ Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cr
 
 ---
 
-*End of Lesson 8.5. The cost question inverts the usual design problem: instead of spending money to buy reliability and scale, you remove money while proving reliability and velocity never moved, the guardrail dashboard plays the role the waiting room played in 5.13, the rung ordering is as load-bearing as the expand-migrate-contract ladder in 8.3, and the refused cut is where the interviewer learns whether you know what the spend was buying.*
+*End of Lesson 8.5. The cost question inverts the usual design problem: instead of spending money to buy reliability and scale, you remove money while proving reliability and velocity never moved, the guardrail dashboard plays the role the waiting room played for a hot-shard queue, the rung ordering is as load-bearing as the expand-migrate-contract ladder of a live migration, and the refused cut is where the interviewer learns whether you know what the spend was buying.*

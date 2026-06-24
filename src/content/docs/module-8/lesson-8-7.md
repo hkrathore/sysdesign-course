@@ -10,9 +10,9 @@ sidebar:
 ### Learning objectives
 - Run an **adapted RESHADED** spine on a platform-strategy problem: R = **developer-customer discovery**, E = the **toil-removal and adoption math**, A = the **platform contract**, the golden-path API that *is* the product.
 - Frame the load-bearing tension, **golden path vs mandate**: adoption is voluntary, so the path must beat the status quo, with **escape hatches** so the paved road never becomes a cage.
-- Make the **Backstage/Humanitec vs in-house** call with the Lesson 8.6 build-vs-buy rule: buy the undifferentiated chassis, build the paths that encode *your* opinions.
+- Make the **Backstage/Humanitec vs in-house** call with the build-vs-buy rule: buy the undifferentiated chassis, build the paths that encode *your* opinions.
 - Sequence the **8-team Jenkins migration** so no release is ever blocked, pilots, dual-running, the deadline arriving last.
-- Operate the platform as a **Team Topologies platform team** (Lesson 8.8): a product org with a roadmap, support SLAs, and a budget defended in toil-hours returned.
+- Operate the platform as a **Team Topologies platform team**: a product org with a roadmap, support SLAs, and a budget defended in toil-hours returned.
 
 ### Intuition first
 A city wants people off a dangerous dirt road. Option one: barricade it by decree, drivers are furious, half cut through farm fields (shadow IT). Option two: **build a highway that is faster than the dirt road**, and watch traffic move on its own. The dirt road empties because the highway *wins*; only then do you decommission it. An IDP is the highway: the **golden path** is the paved, opinionated route from "I have code" to "running in production with logs, metrics, and rollback," so much faster than hand-rolled Jenkins-plus-Terraform that choosing it is self-interest, not obedience. And highways have **exits**: a team with a genuinely unusual workload (GPU training, an embedded toolchain) must be able to leave the paved road *without leaving the city*, a sanctioned escape hatch at a lower support tier. Platforms without exits don't get compliance; they get covert off-roading you can no longer see, secure, or budget.
@@ -25,7 +25,7 @@ The math that makes this real: in a 400-engineer org, infrastructure toil, pipel
 
 > **Adaptation, said out loud:** in a product design, R scopes user features. Here the users are **internal developers**, and R is literally **customer discovery, interview the 8 teams before drawing boxes**. Skip it and you build the platform the platform team wants. The artifact is a ranked pain inventory, not a feature list.
 
-**Anchor scenario:** ~400 engineers, ~50 services, 8 product teams (stream-aligned, in Team Topologies vocabulary, Lesson 8.8) on a self-hosted Jenkins: ~200 hand-written Jenkinsfiles, plugins two years behind on CVEs, **~1.5 FTE of informal labor** keeping it alive, and **2-3 days** from repo creation to first production deploy.
+**Anchor scenario:** ~400 engineers, ~50 services, 8 product teams (stream-aligned, in Team Topologies vocabulary) on a self-hosted Jenkins: ~200 hand-written Jenkinsfiles, plugins two years behind on CVEs, **~1.5 FTE of informal labor** keeping it alive, and **2-3 days** from repo creation to first production deploy.
 
 **What the team interviews surface (assumed answers):**
 - *Top pain?* → **Time-to-first-deploy** (days of yak-shaving) and **flakiness** (Jenkins stalls block releases ~2×/month).
@@ -37,7 +37,7 @@ The math that makes this real: in a 400-engineer org, infrastructure toil, pipel
 1. **Scaffold**: new service from a template, repo, pipeline, infra, observability wired, in minutes.
 2. **Build & deploy**: push-to-deploy CI/CD with staged rollout and one-command rollback.
 3. **Self-serve infrastructure**: the 3-4 most-requested resources (Postgres, Redis, queue, bucket), no tickets.
-4. **Golden observability**: logs, metrics, dashboards, alerts by default (Lessons 3.13-3.14 mechanics; here a *product feature*).
+4. **Golden observability**: logs, metrics, dashboards, alerts by default (the observability mechanics, here a *product feature*).
 5. **Service catalog**: who owns what, what's on the path, production-readiness at a glance.
 
 **Explicitly CUT from v1:** multi-cloud abstraction, a PaaS for every workload shape (GPU and mobile go to sanctioned hatches), cost dashboards, preview environments, all real, all behind adoption of the core path. **Five things 8 teams use beats 25 things 2 teams use.**
@@ -52,7 +52,7 @@ The math that makes this real: in a 400-engineer org, infrastructure toil, pipel
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS. Estimation is two ledgers, **platform-team cost vs toil removed**, plus the **adoption arithmetic** that decides whether they ever balance. Same Lesson 1.3 discipline: round aggressively, state assumptions.
+> **Adaptation, said out loud:** no QPS. Estimation is two ledgers, **platform-team cost vs toil removed**, plus the **adoption arithmetic** that decides whether they ever balance. Same estimation discipline: round aggressively, state assumptions.
 
 **Cost.** Heuristic: platform teams run **~5-8% of engineering**. At 400 engineers, 7 × $250K ≈ $1.75M/yr + ~$300K infra/tooling ≈ **$2M/yr all-in**.
 
@@ -70,7 +70,7 @@ The math that makes this real: in a 400-engineer org, infrastructure toil, pipel
 
 > **Adaptation, said out loud:** "what persists" is the **platform's sources of truth**, and the rule is **everything as code, in git**, the platform's own changes ride the discipline it sells.
 
-Three stores: **golden-path templates and infra modules** in git (the platform team's product code); each service's **`platform.yaml` manifest** (next section) in *that service's* repo, the team owns the declaration, the platform owns the machinery; and the **service catalog** in a small Postgres (Lesson 2.2 posture, tiny data, relational queries like "services owned by team X failing readiness check Y"), hydrated *from* git and org metadata. *Rejected, a hand-maintained catalog/wiki:* stale within a quarter; a catalog that ingests from the repos stays true because lying to it would require lying to your own deploy.
+Three stores: **golden-path templates and infra modules** in git (the platform team's product code); each service's **`platform.yaml` manifest** (next section) in *that service's* repo, the team owns the declaration, the platform owns the machinery; and the **service catalog** in a small Postgres (a relational store fits, tiny data, relational queries like "services owned by team X failing readiness check Y"), hydrated *from* git and org metadata. *Rejected, a hand-maintained catalog/wiki:* stale within a quarter; a catalog that ingests from the repos stays true because lying to it would require lying to your own deploy.
 
 ---
 
@@ -100,9 +100,9 @@ flowchart LR
 
 **The flow, compressed:** scaffold from a template (portal or CLI, same API) → a repo with code skeleton, `platform.yaml`, and a working pipeline. Daily loop is git-native: push → managed CI → staged deploy with canary and one-command rollback; declared infra is reconciled from the manifest; logs, metrics, dashboards, paging exist on day one. The **catalog** reads it all back: every service, owner, tier, readiness score.
 
-**The build-vs-buy call, quantified once (Lesson 8.6's rule: build only where you differentiate).** The portal/catalog/scaffolder chassis is **undifferentiated**, adopt **Backstage** (open source, ~1-1.5 engineers of ongoing operation ≈ $300-400K/yr) or a SaaS portal (Port/Cortex-class, ~$50-100K/yr, less control). Building an in-house portal is **~8-10 engineer-years ≈ $2.5M** to reproduce a commodity, rejected without ceremony. The **golden-path templates, pipeline opinions, and infra modules are the differentiation**, they encode *your* stack, compliance posture, and on-call model, built in-house. My prior: **Backstage chassis + in-house paths**; I'd have the platform lead spike one SaaS alternative for the operating-cost delta, but the buy-the-chassis/build-the-paths split survives either vendor.
+**The build-vs-buy call, quantified once (the rule: build only where you differentiate).** The portal/catalog/scaffolder chassis is **undifferentiated**, adopt **Backstage** (open source, ~1-1.5 engineers of ongoing operation ≈ $300-400K/yr) or a SaaS portal (Port/Cortex-class, ~$50-100K/yr, less control). Building an in-house portal is **~8-10 engineer-years ≈ $2.5M** to reproduce a commodity, rejected without ceremony. The **golden-path templates, pipeline opinions, and infra modules are the differentiation**, they encode *your* stack, compliance posture, and on-call model, built in-house. My prior: **Backstage chassis + in-house paths**; I'd have the platform lead spike one SaaS alternative for the operating-cost delta, but the buy-the-chassis/build-the-paths split survives either vendor.
 
-**Team shape (Lesson 8.8, one line):** a **platform team** serving stream-aligned teams via self-service, not a gatekeeping ops team, not a visiting enabling team, though during migrations it temporarily adds enabling-team mode (pairing on the first cutover).
+**Team shape (one line):** a **platform team** serving stream-aligned teams via self-service, not a gatekeeping ops team, not a visiting enabling team, though during migrations it temporarily adds enabling-team mode (pairing on the first cutover).
 
 ---
 
@@ -141,7 +141,7 @@ platform deploy | rollback | status | logs
 - **Declarative manifest, not imperative pipelines.** Teams state *what*; the platform owns *how*. *Rejected: exposed pipelines-as-code for everyone*, that's Jenkins with better fonts; 200 bespoke Jenkinsfiles was the disease.
 - **T-shirt sizes and a blessed resource list.** Every exposed knob is a knob you support forever. *Rejected: pass-through to raw Kubernetes/Terraform*, leaky-by-design means teams still need the expertise the platform was funded to remove.
 - **`tier: hatch` is in the schema.** The hatch is *contracted*: raw IaC allowed, security baseline still enforced, support drops to best-effort, catalog shows it honestly. *Rejected: no hatch*, the GPU and mobile teams defect covertly and you lose visibility and trust. *Rejected: a fully supported hatch*, then the hatch is free and the golden path has no gravity.
-- **`apiVersion` from day one; breaking changes only by major version with platform-run codemods.** Breaking your customers' deploys twice is how adoption dies, treat the manifest like a public API (Lesson 2.10, internal edition).
+- **`apiVersion` from day one; breaking changes only by major version with platform-run codemods.** Breaking your customers' deploys twice is how adoption dies, treat the manifest like a public API, internal edition.
 
 ---
 
@@ -176,7 +176,7 @@ Adoption rate = `count(tier='golden' AND no side-door flag) / count(*)` over pro
 
 **Failure 2, the golden cage.** No hatch; the GPU workload genuinely doesn't fit; the team forks infrastructure covertly; six months later security finds an unmanaged AWS account. *Countermeasure:* `tier: hatch` as a contracted, visible, baseline-compliant state, supported less (or it drains golden-path gravity) but sanctioned fully (or it goes underground).
 
-**Failure 3, platform-as-project.** The team ships v1 and is reassigned; templates rot, the manifest breaks on an upgrade, tickets sit a week; customers churn back to hand-rolled, and the second attempt pays an institutional-distrust tax. *Countermeasure:* fund a **product line with permanent headcount** ($2M/yr defended annually with the toil ledger), a roadmap, the support SLA. A platform you won't staff forever is a platform you shouldn't build (8.6's maintenance-tail rule, applied internally).
+**Failure 3, platform-as-project.** The team ships v1 and is reassigned; templates rot, the manifest breaks on an upgrade, tickets sit a week; customers churn back to hand-rolled, and the second attempt pays an institutional-distrust tax. *Countermeasure:* fund a **product line with permanent headcount** ($2M/yr defended annually with the toil ledger), a roadmap, the support SLA. A platform you won't staff forever is a platform you shouldn't build (the maintenance-tail rule, applied internally).
 
 **Failure 4, building for the architect, not the customer.** The team ships multi-cloud abstraction and a service mesh while TTFD is still two days, because infra engineers build what's interesting. *Countermeasure:* the R-step interviews set the roadmap; adoption and TTFD, not feature count, set the goals; quarterly developer-NPS keeps it honest.
 
@@ -214,7 +214,7 @@ What I keep: the metrics, the voluntary-adoption posture, the hatch contract, th
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
 | **Adoption model** | **Voluntary golden path** + new-services mandate + late deadline | **Top-down mandate, date first** | Laissez-faire, no platform | **A**, adoption is the metric and mandates corrupt it (our choice). **B** only under an acute forcing function (security incident, audit), expect compliance theater. **C** is the $15M/yr toil status quo. |
-| **Portal & chassis** | **Backstage + in-house paths** (~$300-400K/yr to operate) | **SaaS portal** (~$50-100K/yr, less control) | **Full in-house** (~$2.5M to build) | **A** at 300+ engineers wanting template control (our choice). **B** below ~200 engineers or no platform headcount. **C** ~never, the chassis is undifferentiated (8.6 rule). |
+| **Portal & chassis** | **Backstage + in-house paths** (~$300-400K/yr to operate) | **SaaS portal** (~$50-100K/yr, less control) | **Full in-house** (~$2.5M to build) | **A** at 300+ engineers wanting template control (our choice). **B** below ~200 engineers or no platform headcount. **C** ~never, the chassis is undifferentiated (the build-vs-buy rule). |
 | **Abstraction level** | **Declarative manifest, t-shirt sizes, blessed resources** | Raw pipelines + IaC pass-through | Full PaaS, zero knobs | **A**, hides toil, keeps a hatch (our choice). **B** reproduces Jenkins sprawl. **C** only for truly homogeneous workloads; at 8 diverse teams it forces defections. |
 | **Migration cutover** | **Dual-run, team-chosen window** | Hard cutover on a schedule | Indefinite parallel operation | **A**, never blocks a release; ~$2-3K/team of duplicate CI (our choice). **B** turns platform bugs into release blockers. **C** never realizes the $600K/yr savings, set the date once adoption passes ~70%. |
 
@@ -259,12 +259,12 @@ What I keep: the metrics, the voluntary-adoption posture, the hatch contract, th
 ### Key takeaways
 - **Internal developers are customers; adoption is voluntary**, the golden path must beat the status quo on *their* metrics, because the business case ($5M/yr toil returned vs $2M/yr team cost at 400 engineers) is **linear in honest adoption**.
 - **The platform contract is the product:** a small, declarative, versioned manifest (t-shirt sizes, blessed resources) with **`tier: hatch` in the schema**, sanctioned escape at a lower support tier, so outliers stay visible instead of going underground.
-- **Buy the chassis, build the paths** (Lesson 8.6): Backstage/SaaS for the undifferentiated portal (~$300K/yr vs ~$2.5M in-house); the golden-path templates encoding your opinions are the differentiation.
+- **Buy the chassis, build the paths:** Backstage/SaaS for the undifferentiated portal (~$300K/yr vs ~$2.5M in-house); the golden-path templates encoding your opinions are the differentiation.
 - **Migration is diffusion, not decree:** two well-chosen pilots, paved by doing and dual-running → new-services-only mandate → self-serve middle on a support SLA → deadline announced *last*, after ~70% adoption, and **no team's release is ever blocked**.
-- **Measure adoption, time-to-first-deploy, tickets/service, DORA trend, never feature count**, and fund the platform as a permanent product line (Team Topologies platform team, Lesson 8.8), not a project that ships and disbands.
+- **Measure adoption, time-to-first-deploy, tickets/service, DORA trend, never feature count**, and fund the platform as a permanent product line (a Team Topologies platform team), not a project that ships and disbands.
 
 > **Spaced-repetition recap:** IDP = **a product whose customers can refuse it**. Golden path over mandate (mandates → compliance theater + shadow infra); escape hatch contracted in the manifest (`tier: hatch`, sanctioned, baseline-compliant, second-tier support). Buy the chassis (Backstage ~$300K/yr), build the paths. Migrate 8 teams by diffusion: 2 pilots dual-run → new-services-only mandate → self-serve middle → deadline *after* 70% adoption; never block a release. Success = **adoption % + TTFD** (days → < 1 hr), defended yearly as toil-dollars returned (~$5M vs $2M), never feature count.
 
 ---
 
-*End of Lesson 8.7. The IDP problem inverts Module 5's instincts: the load is trivial (200 deploys/day), and the entire difficulty is product-market fit with internal customers plus the change management of migration, 8.6's build-vs-buy rule applied to your own tooling, executed by the platform-team shape that 8.8 makes precise. Next: 8.8, org design and Conway's law, where the team boundaries themselves become the architecture.*
+*End of Lesson 8.7. The IDP problem inverts the product-design instincts: the load is trivial (200 deploys/day), and the entire difficulty is product-market fit with internal customers plus the change management of migration, the build-vs-buy rule applied to your own tooling, executed by the platform-team shape that org design makes precise. Next: org design and Conway's law, where the team boundaries themselves become the architecture.*

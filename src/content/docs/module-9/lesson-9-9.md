@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-> **Why this gets asked at Director level:** This is the strongest single-company frequency signal in the course, Meta engineering managers attribute it across four independent sources. It looks like 5.5 (WhatsApp) but is its near-opposite: messaging fans out to a handful of recipients with a **durable per-person inbox**; Live comments fan out one stream to **millions of viewers with no inbox at all**, a comment seen late is worthless, so you drop it rather than store it. The Director signal is treating the **connection-server fleet as a cost line you defend with math**, not a box on a diagram, and treating **graceful degradation as a product spec**, knowing exactly which guarantee you sacrifice first (ordering, then completeness, never the stream). The canonical failure is reaching for WebSocket and Kafka-per-viewer by reflex and never costing the fleet.
+> **Why this gets asked at Director level:** This is the strongest single-company frequency signal in the course, Meta engineering managers attribute it across four independent sources. It looks like WhatsApp but is its near-opposite: messaging fans out to a handful of recipients with a **durable per-person inbox**; Live comments fan out one stream to **millions of viewers with no inbox at all**, a comment seen late is worthless, so you drop it rather than store it. The Director signal is treating the **connection-server fleet as a cost line you defend with math**, not a box on a diagram, and treating **graceful degradation as a product spec**, knowing exactly which guarantee you sacrifice first (ordering, then completeness, never the stream). The canonical failure is reaching for WebSocket and Kafka-per-viewer by reflex and never costing the fleet.
 
 ### Learning objectives
 
@@ -19,7 +19,7 @@ sidebar:
 
 Picture a **live stadium event** where the broadcaster wants every comment from the crowd shown on a giant screen. With 200 people that is easy. With **5 million** shouting at once, two things become obvious. First, you cannot show every comment, the screen would be an unreadable blur, so you **sample**: show a representative trickle, silently drop the rest, and nobody minds because it was always a firehose. Second, the cost is not the *content* (a comment is 100 bytes), it is **holding 5 million open phone lines at once** so each person hears the trickle in real time. That is the whole problem: **the expense is the connections, not the data.**
 
-Now the contrast that defines this lesson. WhatsApp (Lesson 5.5) is a **switchboard with mailboxes**: if Bob is offline, his message waits in a durable inbox and is delivered in order the instant he returns. Live comments have **no mailbox**, a comment seen 30 seconds late is noise. So you fan out **one stream to millions** with no per-viewer queue, **delete-by-default**, and protect only the open connection. Two consequences: the design is dominated by a **stateless connection-server fleet** you cost like a utility bill, and **degradation is a feature**, under load you ship a cheaper, lossier experience rather than dropping anyone off the stream.
+Now the contrast that defines this lesson. WhatsApp is a **switchboard with mailboxes**: if Bob is offline, his message waits in a durable inbox and is delivered in order the instant he returns. Live comments have **no mailbox**, a comment seen 30 seconds late is noise. So you fan out **one stream to millions** with no per-viewer queue, **delete-by-default**, and protect only the open connection. Two consequences: the design is dominated by a **stateless connection-server fleet** you cost like a utility bill, and **degradation is a feature**, under load you ship a cheaper, lossier experience rather than dropping anyone off the stream.
 
 ---
 
@@ -43,14 +43,14 @@ Now the contrast that defines this lesson. WhatsApp (Lesson 5.5) is a **switchbo
 4. **Join / leave** a stream's comment channel (connection lifecycle).
 5. **Light moderation hook**, drop blocked/abusive comments before fan-out.
 
-**Explicitly CUT (scoping is the signal):** the video pipeline (ingest/transcode/CDN, Lessons 5.9/5.10), durable chat history and search, threaded reply trees, reactions analytics, monetization. I scope to **post → moderate → fan out → display, sampled**. Notably I **do not** build a WhatsApp-style durable per-viewer inbox, wrong tool, and naming why is half the answer.
+**Explicitly CUT (scoping is the signal):** the video pipeline (ingest/transcode/CDN), durable chat history and search, threaded reply trees, reactions analytics, monetization. I scope to **post → moderate → fan out → display, sampled**. Notably I **do not** build a WhatsApp-style durable per-viewer inbox, wrong tool, and naming why is half the answer.
 
 **Non-functional requirements:**
 
 - **Fan-out latency**, a posted comment reaches connected viewers in **p99 < 2 s**. Live enough to feel real, loose enough to batch.
 - **Connection scalability**, sustain **millions of concurrent connections per stream**, tens of millions platform-wide, **at defensible cost**. The headline NFR.
 - **Graceful degradation**, under overload, shed *quality* (sampling, ordering) before *availability* (the stream stays up for everyone).
-- **Availability**, high but eventual; an **AP** system end-to-end, no correctness invariant to protect (unlike 5.13).
+- **Availability**, high but eventual; an **AP** system end-to-end, no correctness invariant to protect (unlike Ticketmaster).
 - **Cost-efficiency**, explicitly an NFR. A Director owns the fleet budget; "it scales" is banned when each connection costs money.
 
 **The skew, stated.** This is **fan-out-on-write to live connections**, but unlike WhatsApp the recipient count per write is **millions, not ~2.5**, with **no durable inbox**, an offline viewer simply misses comments. The architecture follows: a big, cheap, stateless **connection-server fleet** fed by a **tiered dispatch tree** spraying a sampled stream outward, the only durable component a small write archive off the hot path.
@@ -117,7 +117,7 @@ The 60K figure is a planning prior, not a law: it falls out of (connection memor
 **1. Live comment fan-out state (ephemeral, in-memory, AP).**
 - *Access pattern:* accept a comment, fan it to millions of live sockets within ~2 s, then forget it. No re-read, no history, no per-viewer queue.
 - *Choice:* an **in-memory pub/sub plane**, a topic per live stream (Redis pub/sub or a purpose-built tree) feeding the stateless connection servers. Nothing persisted; a dropped message is fine by design.
-- *Rejected, a durable per-viewer inbox (the 5.5 model):* messaging persists until the recipient pulls because **a missed message matters**. Here a missed comment is **worthless**, per-viewer queues across 5M viewers would be huge cost for negative value. **The absence of an inbox is the central design decision.**
+- *Rejected, a durable per-viewer inbox (the WhatsApp model):* messaging persists until the recipient pulls because **a missed message matters**. Here a missed comment is **worthless**, per-viewer queues across 5M viewers would be huge cost for negative value. **The absence of an inbox is the central design decision.**
 
 **2. Comment archive (durable, write-path only, AP).**
 - *Access pattern:* append every accepted comment for moderation, audit, and optional replay; never read on the real-time path.
@@ -205,7 +205,7 @@ GET /v1/streams/{streamId}/comments/live
 
 **`comments` (archive)**, primary key `(stream_id, comment_id)`, partitioned by **`stream_id`**, `comment_id` time-sortable (a single-partition scan yields chronological replay). Carries `user_id`, `text`, `ts`, `moderation_status`. Append-only, never updated, TTL'd after the replay window. The *only* durable table on the comment path.
 
-**Connection state is not a table**, it lives in memory on the connection servers, with a light **`stream_id → {server_id}`** registry in Redis. Intentionally coarse (stream-level, not user-level) because we route toward streams, the opposite of 5.5's per-user session registry.
+**Connection state is not a table**, it lives in memory on the connection servers, with a light **`stream_id → {server_id}`** registry in Redis. Intentionally coarse (stream-level, not user-level) because we route toward streams, the opposite of WhatsApp's per-user session registry.
 
 <details>
 <summary>Go deeper, archive schema and the time-sortable ID (IC depth, optional)</summary>
@@ -237,7 +237,7 @@ Partitioning by `stream_id` colocates a stream's comments on one partition so th
 
 **Bottleneck 1, the celebrity hot stream (5M concurrent on one topic).**
 A single stream is a **hot partition**: one dispatch root cannot push 5M sockets, nor fan to 84 servers if done flat.
-*Fix:* a **tiered dispatch tree**, root → ~10 tier-2 nodes → ~84 connection servers, each node fanning to a bounded set (tens), never millions; the stream spreads across many servers at ~60K viewers each. *Rejected:* flat fan-out from one node (melts) or 5M per-viewer queues (5.5's model, absurd here). *Trade-off:* ~tens of ms per tier, well within the 2 s budget.
+*Fix:* a **tiered dispatch tree**, root → ~10 tier-2 nodes → ~84 connection servers, each node fanning to a bounded set (tens), never millions; the stream spreads across many servers at ~60K viewers each. *Rejected:* flat fan-out from one node (melts) or 5M per-viewer queues (the WhatsApp model, absurd here). *Trade-off:* ~tens of ms per tier, well within the 2 s budget.
 
 **Bottleneck 2, raw comment volume exceeds what a human can read.**
 8.5B naive deliveries/s is impossible and useless, nobody reads 1,700/s.
@@ -271,10 +271,10 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 **At 10× (a global mega-event: 50M concurrent on one stream):**
 - **The connection fleet, not the database, scales, regionally.** Push connection servers to **edge POPs per region**; the tree gains a region tier (root → region → POP → connection server). Cross-region is thin replication of the *sampled* stream, not the raw firehose. *Trade-off:* regions may see slightly different subsets, fine, since sampling was always lossy with no global order to break.
 - **The fleet bill is the conversation.** 50M ÷ 60K ≈ **~840 connection servers** for one stream; at 30K/server, ~1,680. This is where the **per-connection memory number** (the SSE choice) compounds into real money, *the moment Estimation pays off in the room.*
-- **Sampling becomes adaptive**, displayed rate auto-tunes to fleet headroom via telemetry, the same "live knob" as 5.13's admission rate, governing display quality.
+- **Sampling becomes adaptive**, displayed rate auto-tunes to fleet headroom via telemetry, the same "live knob" as Ticketmaster's admission rate, governing display quality.
 
 **Hardest trade-offs to defend:**
-- **No durable inbox**, the most consequential decision, *why* this is cheap to run and recover and the opposite of 5.5. The discipline is resisting "don't lose comments"; here, losing them is correct.
+- **No durable inbox**, the most consequential decision, *why* this is cheap to run and recover and the opposite of WhatsApp. The discipline is resisting "don't lose comments"; here, losing them is correct.
 - **The transport (SSE)**, defended on cost: read-only push at half WebSocket's footprint roughly halves the fleet. Risk: needing bidirectional later (live reactions), mitigated by keeping posting on a separate cheap POST path.
 - **Sampling vs completeness**, a worse-but-cheaper experience defended with math, the most Director-flavored trade here. Completeness has *negative* marginal value past ~20/s yet *linear* marginal cost.
 
@@ -292,8 +292,8 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
 | **Fan-out transport** | **SSE**, one-way push, ~half the per-conn memory, auto-reconnect, plain HTTP | **WebSocket**, full-duplex, heavier per connection | **Long-poll**, request/respond, no persistent socket | **A** as default, read-mostly viewers at the lowest per-connection cost **halve the fleet** vs WebSocket (our choice). **B** when viewers need low-latency *bidirectional* (live games, collab). **C** only at small scale, it wastes connections and adds latency at millions of viewers. |
-| **Delivery model** | **Best-effort sampled fan-out, no inbox** | **Durable per-viewer inbox** (5.5 model) | **Hybrid**, durable for featured comments, ephemeral for the rest | **A** as default, a late comment is worthless, so per-viewer queues for 5M viewers are huge cost for negative value (our choice). **B** for messaging where a missed message matters. **C** when a small subset (pinned/creator) must be reliable. |
-| **Fan-out topology** | **Tiered dispatch tree**, root → tier → connection servers | **Flat fan-out**, one node pushes all servers | **Fan-out-on-write queues**, one per viewer | **A** as default, bounded fan-out per node survives the 5M hot stream (our choice). **B** fine for small streams, melts on the celebrity case. **C** is 5.5's model, right for messaging, ruinous here. |
+| **Delivery model** | **Best-effort sampled fan-out, no inbox** | **Durable per-viewer inbox** (WhatsApp model) | **Hybrid**, durable for featured comments, ephemeral for the rest | **A** as default, a late comment is worthless, so per-viewer queues for 5M viewers are huge cost for negative value (our choice). **B** for messaging where a missed message matters. **C** when a small subset (pinned/creator) must be reliable. |
+| **Fan-out topology** | **Tiered dispatch tree**, root → tier → connection servers | **Flat fan-out**, one node pushes all servers | **Fan-out-on-write queues**, one per viewer | **A** as default, bounded fan-out per node survives the 5M hot stream (our choice). **B** fine for small streams, melts on the celebrity case. **C** is the WhatsApp model, right for messaging, ruinous here. |
 
 *Per-connection cost footnote:* at ~60K conns/server (SSE) vs ~30K (WebSocket), a 5M stream needs ~84 vs ~168 servers, platform-wide, hundreds running 24/7. **The transport is a line item, which is why this is the core artifact.**
 
@@ -311,7 +311,7 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 
 ## Common mistakes
 
-- **Building a durable inbox by reflex**, WhatsApp (5.5) muscle memory on the wrong problem. A late comment is worthless; per-viewer queues for 5M viewers are huge cost for negative value. **No inbox is the central decision.**
+- **Building a durable inbox by reflex**, WhatsApp muscle memory on the wrong problem. A late comment is worthless; per-viewer queues for 5M viewers are huge cost for negative value. **No inbox is the central decision.**
 - **Reaching for WebSocket without costing it.** Viewers are read-mostly; WebSocket roughly doubles the per-connection footprint and the fleet, for duplex you don't use. SSE is cost-correct; defend it with the number.
 - **Never costing the connection fleet**, the dominant recurring spend and the entire scaling story. Drawing it as one box misses the whole point of the question.
 - **Trying to deliver every comment.** Raw fan-out is 8.5B/s and unreadable. Sampling isn't degradation, it's the baseline; completeness has negative marginal value past ~20/s.
@@ -339,14 +339,14 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 ---
 
 ### Key takeaways
-- The crux is **connection state at extreme fan-out with no durable inbox**, the near-opposite of WhatsApp (5.5). A late comment is worthless, so we **delete-by-default**, route toward *streams* not *users*, and recovery is trivial.
+- The crux is **connection state at extreme fan-out with no durable inbox**, the near-opposite of WhatsApp. A late comment is worthless, so we **delete-by-default**, route toward *streams* not *users*, and recovery is trivial.
 - **Estimation is the connection-fleet cost math.** Writes are trivial (~1,700/s); raw fan-out is 8.5B/s so we **sample** to ~20/s; the **~250-server fleet is the dominant cost**, bound by **per-connection memory**.
 - **The transport is a dollar decision: SSE over WebSocket**, read-mostly viewers at ~half the footprint **halves the fleet** (~84 vs ~168 servers for a 5M stream). Defend it with the number.
 - **The 5M hot stream is a hot partition** handled by a **tiered dispatch tree** (bounded fan-out per node), never flat fan-out and never per-viewer queues.
 - **Degradation is a designed ladder:** sample harder → drop ordering → coalesce → (last) refuse new connections; **never drop a connected viewer**. Quality before availability, a worse-but-cheaper experience defended with cost math is the Director signal.
 
-> **Spaced-repetition recap:** Facebook Live comments = **one-to-millions ephemeral fan-out with NO durable inbox**, the inverse of WhatsApp (5.5). Writes are trivial; raw fan-out (8.5B/s) is impossible so you **sample** to ~20/s. Dominant cost is the **~250-server, memory-bound connection fleet**, making **transport a cost decision → SSE over WebSocket** (halves the fleet). The 5M-viewer hot stream fans out via a **tiered dispatch tree**. **Degradation is a designed ladder**, sample harder, drop ordering, coalesce, then refuse *new* connections last; never drop a connected viewer. See 5.5 (durable inbox) and 5.12 (multi-channel fan-out).
+> **Spaced-repetition recap:** Facebook Live comments = **one-to-millions ephemeral fan-out with NO durable inbox**, the inverse of WhatsApp. Writes are trivial; raw fan-out (8.5B/s) is impossible so you **sample** to ~20/s. Dominant cost is the **~250-server, memory-bound connection fleet**, making **transport a cost decision → SSE over WebSocket** (halves the fleet). The 5M-viewer hot stream fans out via a **tiered dispatch tree**. **Degradation is a designed ladder**, sample harder, drop ordering, coalesce, then refuse *new* connections last; never drop a connected viewer. See WhatsApp (durable inbox) and the multi-channel fan-out lesson.
 
 ---
 
-*End of Lesson 9.9. Facebook Live comments inverts the messaging reflex of 5.5: there is no per-recipient inbox, the hard part is **connection state at extreme fan-out**, and the dominant cost is a **stateless SSE connection fleet** you size and defend with math, protected by a tiered dispatch tree and a deliberate degradation ladder that drops quality before availability. Reuses fan-out reasoning from 5.5 and 5.12, partition-by-key from Module 2, and the live-tuning-knob pattern from 5.13's admission rate.*
+*End of Lesson 9.9. Facebook Live comments inverts the messaging reflex of WhatsApp: there is no per-recipient inbox, the hard part is **connection state at extreme fan-out**, and the dominant cost is a **stateless SSE connection fleet** you size and defend with math, protected by a tiered dispatch tree and a deliberate degradation ladder that drops quality before availability. Reuses fan-out reasoning from WhatsApp and the multi-channel fan-out lesson, partition-by-key, and the live-tuning-knob pattern from Ticketmaster's admission rate.*

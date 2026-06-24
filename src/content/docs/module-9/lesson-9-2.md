@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-> **Why this appears in Director loops:** P2P money movement (Venmo, Cash App) is asked because it isolates the hardest distributed-systems problem in payments, **atomic debit + credit across two accounts that may live on different database shards**, with no external payment rail to hide behind. The junior answer draws a single-database transaction and calls it done. The Director answer **sizes TPS first, chooses the simplest consistency mechanism the number justifies, quantifies the failure cost of each approach, and names where money can go missing mid-transfer**. Unlike Lesson 9.1 (full payment platform: card rails, PSPs, global interchange), this problem is purely internal-ledger money movement. The cross-shard atomicity question is the load-bearing tension here; that is where the interview lives.
+> **Why this appears in Director loops:** P2P money movement (Venmo, Cash App) is asked because it isolates the hardest distributed-systems problem in payments, **atomic debit + credit across two accounts that may live on different database shards**, with no external payment rail to hide behind. The junior answer draws a single-database transaction and calls it done. The Director answer **sizes TPS first, chooses the simplest consistency mechanism the number justifies, quantifies the failure cost of each approach, and names where money can go missing mid-transfer**. Unlike the full payment platform (card rails, PSPs, global interchange), this problem is purely internal-ledger money movement. The cross-shard atomicity question is the load-bearing tension here; that is where the interview lives.
 
 ### Learning objectives
 
@@ -25,7 +25,7 @@ That is the cross-shard transfer problem. The three mechanisms, 2PC, saga, and e
 
 ## R: Requirements
 
-> **Adaptation:** Standard R step. The key scoping move is declaring what is **out of scope**: external bank rails, card processing, and fraud scoring (those live in 9.1). This lesson is pure internal-ledger.
+> **Adaptation:** Standard R step. The key scoping move is declaring what is **out of scope**: external bank rails, card processing, and fraud scoring (those live in the full payment platform). This lesson is pure internal-ledger.
 
 **Clarifying questions I'd ask (with assumed answers):**
 
@@ -44,7 +44,7 @@ That is the cross-shard transfer problem. The three mechanisms, 2PC, saga, and e
 4. **Transfer history**, queryable ledger per account.
 5. **Insufficient-funds check**, reject before debit, not after.
 
-**Explicitly out of scope:** card rails, ACH/wire, fraud scoring, KYC/AML, currency conversion, fee calculation, interest, reversals (beyond a compensating transfer). These belong to a broader payments platform (Lesson 9.1).
+**Explicitly out of scope:** card rails, ACH/wire, fraud scoring, KYC/AML, currency conversion, fee calculation, interest, reversals (beyond a compensating transfer). These belong to a broader payments platform.
 
 **Non-functional requirements:**
 
@@ -235,9 +235,9 @@ WHERE account_id = :sender_id
   AND version = :expected_version
 ```
 
-If 0 rows are affected, the balance check failed (concurrent transfer already debited), return INSUFFICIENT_FUNDS and abort. No lock held; the loser fails fast. This is the same CAS pattern as Lesson 5.13's seat claim, applied to account balances.
+If 0 rows are affected, the balance check failed (concurrent transfer already debited), return INSUFFICIENT_FUNDS and abort. No lock held; the loser fails fast. This is the same CAS pattern as the seat claim, applied to account balances.
 
-**The hot-account variant:** a celebrity account receiving 1,000 credits/second causes write serialization on one row. The mitigation is **balance sharding** (split the balance across N sub-rows, aggregate on read), the same counter-sharding pattern from Lesson 3.16. Trade-off: exact real-time balance becomes an aggregate read, tolerable for display but not for the debit check (which must sum all sub-rows in one transaction).
+**The hot-account variant:** a celebrity account receiving 1,000 credits/second causes write serialization on one row. The mitigation is **balance sharding** (split the balance across N sub-rows, aggregate on read), the same counter-sharding pattern. Trade-off: exact real-time balance becomes an aggregate read, tolerable for display but not for the debit check (which must sum all sub-rows in one transaction).
 
 </details>
 
@@ -272,7 +272,7 @@ Saga compensates; money returns to sender; transfer FAILED. Under 2PC the shards
 
 **Bottleneck, hot accounts at celebrity TPS.**
 
-At 500 system TPS, no single account is a problem. A business account at ~1,000 writes/s serializes CAS on one row and p99 climbs. Mitigation: balance sub-sharding (Lesson 3.16 counter pattern). Operational tuning per-account, not a re-architecture, I'd have the storage team instrument and apply above a threshold.
+At 500 system TPS, no single account is a problem. A business account at ~1,000 writes/s serializes CAS on one row and p99 climbs. Mitigation: balance sub-sharding (counter pattern). Operational tuning per-account, not a re-architecture, I'd have the storage team instrument and apply above a threshold.
 
 ---
 
@@ -340,7 +340,7 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 **Q1. Sender has $100. Two concurrent transfers of $80 each are submitted simultaneously. Walk through exactly what happens.**
 
-> *Model:* Both transfers start, both read balance $100 and pass the funds check (in the application layer). Both attempt the conditional UPDATE: `SET balance = balance - 80 WHERE account_id = :id AND balance >= 80 AND version = :v`. The DB serializes the row writes. One succeeds: balance becomes $20, version increments. The second sees 0 rows updated (balance is now $20, < $80, OR version mismatch) and returns INSUFFICIENT_FUNDS immediately, no lock held. The losing transfer is marked FAILED; the client returns a 400. The winning transfer proceeds to credit the receiver. Total debit: exactly $80. This is optimistic CAS on the account row, the same pattern as Lesson 5.13's seat claim.
+> *Model:* Both transfers start, both read balance $100 and pass the funds check (in the application layer). Both attempt the conditional UPDATE: `SET balance = balance - 80 WHERE account_id = :id AND balance >= 80 AND version = :v`. The DB serializes the row writes. One succeeds: balance becomes $20, version increments. The second sees 0 rows updated (balance is now $20, < $80, OR version mismatch) and returns INSUFFICIENT_FUNDS immediately, no lock held. The losing transfer is marked FAILED; the client returns a 400. The winning transfer proceeds to credit the receiver. Total debit: exactly $80. This is optimistic CAS on the account row, the same pattern as the seat claim.
 
 **Q2. Your saga's credit step fails permanently (receiver shard is down for 2 hours). What happens to the sender's money?**
 
@@ -360,12 +360,12 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 - **Size TPS before choosing an atomicity mechanism.** At 500 TPS, saga and CockroachDB 2PC are both viable; at 5,000 TPS, saga wins on availability; at 25,000 TPS, the event-sourced ledger earns its complexity. The mechanism choice is a quantitative decision.
 - **The in-flight window in a saga is not a bug, it is a bounded, recoverable state.** The sweeper closes it; the transfer state machine is the contract. "Money exists on neither shard" for at most one sweeper interval.
-- **Optimistic CAS on account balance is the double-spend defense:** `WHERE balance >= amount AND version = :v`, one winner, one instant INSUFFICIENT_FUNDS, no lock. The same pattern as seat-claim in Lesson 5.13.
+- **Optimistic CAS on account balance is the double-spend defense:** `WHERE balance >= amount AND version = :v`, one winner, one instant INSUFFICIENT_FUNDS, no lock. The same pattern as seat-claim.
 - **Idempotency requires two layers:** Redis for speed (TTL cache), DB unique constraint on `idempotency_key` for durability. Redis expiry cannot be the only guard.
 - **The reconciliation job is not optional.** A daily balance-sum check is the operational backstop that makes the business trust the ledger. Without it, drift accumulates silently until a journalist finds it.
 
-> **Spaced-repetition recap:** Digital wallet = **cross-shard atomic transfer** (debit A, credit B, different shards). Three mechanisms: **2PC** (distributed SQL, simple, blocks on coordinator failure, viable < 2k TPS), **saga** (local txns + compensation, high availability, in-flight window, default at 500 TPS), **event-sourced ledger** (append log + projection, best audit, most complex, justified at > 5k TPS or mandatory audit). Double-spend: **CAS conditional update** (`WHERE balance >= amount AND version = :v`). Idempotency: **Redis fast path + DB unique constraint backstop**. Always integers for money. Daily reconciliation job = required operational backstop. Cross-reference: Lesson 9.1 (full payment platform), Lesson 2.8 (quorum), Lesson 5.13 (CAS pattern), Lesson 3.16 (counter sharding for hot accounts).
+> **Spaced-repetition recap:** Digital wallet = **cross-shard atomic transfer** (debit A, credit B, different shards). Three mechanisms: **2PC** (distributed SQL, simple, blocks on coordinator failure, viable < 2k TPS), **saga** (local txns + compensation, high availability, in-flight window, default at 500 TPS), **event-sourced ledger** (append log + projection, best audit, most complex, justified at > 5k TPS or mandatory audit). Double-spend: **CAS conditional update** (`WHERE balance >= amount AND version = :v`). Idempotency: **Redis fast path + DB unique constraint backstop**. Always integers for money. Daily reconciliation job = required operational backstop. Related: the full payment platform, quorum, the CAS pattern, counter sharding for hot accounts.
 
 ---
 
-*End of Lesson 9.2. The cross-shard transfer problem isolates the distributed-transaction question that 9.1's full payment platform glosses over behind external rails. Next: the other business-domain problems in Module 9 apply similar trade-off reasoning to ride-sharing, food delivery, and hotel booking, each with a different load-bearing tension.*
+*End of Lesson 9.2. The cross-shard transfer problem isolates the distributed-transaction question that the full payment platform glosses over behind external rails.*

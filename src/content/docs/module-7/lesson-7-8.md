@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-> **You already designed this system, at the other altitude.** Lesson 5.13 (Ticketmaster) solved seat reservation as HLD: sharded stores, waiting rooms, CDN tiers. This is the *same domain dropped to LLD*, the form Flipkart/Swiggy/Paytm loops actually ask: "design BookMyShow, two users book the same seat concurrently; exactly one succeeds." The rubric flips: **entity model, seat state machine, hold TTL, and the exact concurrency mechanism**, pressed until it holds or leaks a double-booking. A junior answer reaches for `synchronized`. A Director answer names three locking strategies, **picks one by traffic shape** (opening night ≠ Tuesday matinee), makes the payment-failure and expiry paths race-proof, and **narrates the climb to 5.13's distributed form** when one database stops being enough. Same problem, two altitudes, two rubrics, learn the climb.
+> **You already designed this system, at the other altitude.** Ticketmaster (Ticketmaster) solved seat reservation as HLD: sharded stores, waiting rooms, CDN tiers. This is the *same domain dropped to LLD*, the form Flipkart/Swiggy/Paytm loops actually ask: "design BookMyShow, two users book the same seat concurrently; exactly one succeeds." The rubric flips: **entity model, seat state machine, hold TTL, and the exact concurrency mechanism**, pressed until it holds or leaks a double-booking. A junior answer reaches for `synchronized`. A Director answer names three locking strategies, **picks one by traffic shape** (opening night ≠ Tuesday matinee), makes the payment-failure and expiry paths race-proof, and **narrates the climb to the distributed form** when one database stops being enough. Same problem, two altitudes, two rubrics, learn the climb.
 
 ### Learning objectives
 
@@ -35,7 +35,7 @@ Picture a cinema with a paper seating chart at the box office. Point at seat F14
 
 **Cut (and say so):** pricing/offers, recommendations, food & beverage, refunds UX, search ranking. Scope is **seat map → hold → pay → confirm/release**.
 
-**Non-functional requirements:** correctness over availability on the claim path (a deliberate CP posture, Lesson 2.7, a 409 is fine, a double-booking is not); claim p99 < ~300 ms; hold expiry **guaranteed**, not best-effort; correct on **N app instances** from the first line of code.
+**Non-functional requirements:** correctness over availability on the claim path (a deliberate CP posture, the CAP/PACELC lesson, a 409 is fine, a double-booking is not); claim p99 < ~300 ms; hold expiry **guaranteed**, not best-effort; correct on **N app instances** from the first line of code.
 
 ---
 
@@ -50,7 +50,7 @@ Picture a cinema with a paper seating chart at the box office. Point at seat F14
 
 **The decision number is contenders-per-seat at claim instant: ~1 at matinee, ~10-50 on opening night.** That asymmetry, most days boring, some days brutal, is what the lock-strategy argument turns on in §S and §Evaluation.
 
-**Supporting math, rounded hard:** ~10M tickets/month ≈ `10M ÷ 2.6M s ≈ 4 bookings/s` average, **~100/s at peak** platform-wide, trivial for one Postgres (Lesson 3.3). At ~25% hold abandonment that's **~25 expiries/s**, also trivial, but it must be *guaranteed*. Payment gateways run 2-30 s with multi-minute worst cases → **TTL 10 min ≫ worst case**, so the expiry-vs-payment race (§Evaluation) is rare by construction. Storage: tens of GB/year, irrelevant. **Verdict: volume is a non-problem; per-seat contention on hot shows is the entire problem**, the same inversion 5.13 taught at scale.
+**Supporting math, rounded hard:** ~10M tickets/month ≈ `10M ÷ 2.6M s ≈ 4 bookings/s` average, **~100/s at peak** platform-wide, trivial for one Postgres. At ~25% hold abandonment that's **~25 expiries/s**, also trivial, but it must be *guaranteed*. Payment gateways run 2-30 s with multi-minute worst cases → **TTL 10 min ≫ worst case**, so the expiry-vs-payment race (§Evaluation) is rare by construction. Storage: tens of GB/year, irrelevant. **Verdict: volume is a non-problem; per-seat contention on hot shows is the entire problem**, the same inversion Ticketmaster taught at scale.
 
 ---
 
@@ -62,7 +62,7 @@ Picture a cinema with a paper seating chart at the box office. Point at seat F14
 
 - *Rejected, in-process locks (`synchronized`, `ConcurrentHashMap<SeatId, Lock>`):* correct only on **one** JVM that never restarts; the second app instance silently breaks the invariant. Fine as a *fast-fail filter*, never as truth.
 - *Rejected, a distributed lock service (Redis SETNX/ZooKeeper) as the arbiter:* a second stateful system whose lock lifetime must be reconciled with the DB transaction, two sources of truth plus a famous class of expiry-race bugs, bought to solve contention one database already handles. Wrong tool *at this scale*.
-- *Seat-map reads* come from a short-TTL cache (Lesson 3.7), the map is a hint; the claim transaction is the truth, exactly as in 5.13.
+- *Seat-map reads* come from a short-TTL cache, the map is a hint; the claim transaction is the truth, exactly as in 5.13.
 
 ---
 
@@ -120,7 +120,7 @@ class BookingService {
 
 **Design notes, each with the rejected alternative:**
 - **`hold` and `confirm` are separate calls.** *Rejected: a single `book()` spanning payment*, a human plus an external gateway sits between claim and money; fusing them either holds locks across I/O or gives up the claim. The TTL hold lets checkout be slow while the claim stays atomic.
-- **`confirm` carries an idempotency key, enforced by a unique index.** *Rejected: trusting clients not to retry*, double-clicks and gateway timeouts always retry; without the key they double-charge or double-book (Lesson 2.10).
+- **`confirm` carries an idempotency key, enforced by a unique index.** *Rejected: trusting clients not to retry*, double-clicks and gateway timeouts always retry; without the key they double-charge or double-book.
 - **`acquire` is all-or-nothing with the losing seats named**, partial holds strand users with two of four seats; naming conflicts lets the UI re-offer instantly.
 - **`SeatLockProvider` is an interface** so the locking strategy is configuration, not a rewrite, exactly how you'd run the bake-off in §Evaluation.
 
@@ -175,7 +175,7 @@ The TTL lives in **two places on purpose**: on `seat_holds.expires_at` (the enti
 **Race 1, two users claim F14 in the same instant.** Three viable mechanisms; the argument is the contention number from §E:
 
 - **Pessimistic (`SELECT ... FOR UPDATE` in the claim transaction).** Simple, obviously correct. Ideal at **matinee shape (~1 contender)**. At **opening-night shape (10-50 contenders/seat)** losers *queue on the row lock*, a convoy: waiting in line to learn a seat is gone, pinning DB connections, when they should bounce instantly.
-- **Optimistic conditional update**, a single `UPDATE ... WHERE status='AVAILABLE'`; the DB serializes the row; **exactly one statement reports 1 row**, every loser sees 0 rows and fails in microseconds, no lock held. Under 20:1 demand the loser's correct behavior is *fail fast and re-pick*, optimistic makes failure cheap exactly where failure is the common case (convoy mechanics: 5.13's Go-deeper).
+- **Optimistic conditional update**, a single `UPDATE ... WHERE status='AVAILABLE'`; the DB serializes the row; **exactly one statement reports 1 row**, every loser sees 0 rows and fails in microseconds, no lock held. Under 20:1 demand the loser's correct behavior is *fail fast and re-pick*, optimistic makes failure cheap exactly where failure is the common case (convoy mechanics: the Go-deeper).
 - **Hold table, `INSERT` with a unique constraint on `(show_id, seat_id)`.** The unique index is the arbiter; duplicate-key *is* the lost race. Same fail-fast property, and the hold is born a sweepable row. Cost: a second table to keep consistent with `show_seats`, plus delete-churn on a hot index.
 
 **My call: optimistic conditional update on `show_seats`, hold modeled as a `seat_holds` row**, fail-fast under the shape that matters, no convoy, no second arbiter. Pessimistic is *fine for the matinee*, and the wrong default: design locks for the worst shape you must survive, not the average. I'd have the persistence team **benchmark optimistic vs hold-table on a simulated opening-night claim storm (p99 claim latency, pool occupancy)**; my prior is optimistic, one table holding both state and arbiter is one fewer consistency seam.
@@ -192,21 +192,21 @@ The TTL lives in **two places on purpose**: on `seat_holds.expires_at` (the enti
 
 ## D: Design evolution
 
-> Per spec, evolution here means one thing: **the climb to Lesson 5.13.** Push opening night up an order of magnitude and watch each LLD element grow its distributed counterpart.
+> Per spec, evolution here means one thing: **the climb to Ticketmaster.** Push opening night up an order of magnitude and watch each LLD element grow its distributed counterpart.
 
 A single Postgres serves a cinema chain comfortably. Now make it a Coldplay on-sale, 2M users, one event, one instant:
 
-| This lesson (LLD, one DB) | Breaks when... | Lesson 5.13 (distributed) |
+| This lesson (LLD, one DB) | Breaks when... | Ticketmaster (distributed) |
 |---|---|---|
 | One Postgres holds all `show_seats` | One show's claim storm exceeds a single primary's write budget | **Shard by `event_id`**, transaction locality preserved, hot-shard risk accepted |
-| Anyone may call `hold()` anytime | The unthrottled spike (~33K req/s in 5.13's numbers) would melt even the *right* shard | **Virtual waiting room** caps admission (~2K/s), the queue and the shard key are co-designed |
+| Anyone may call `hold()` anytime | The unthrottled spike (~33K req/s in the numbers) would melt even the *right* shard | **Virtual waiting room** caps admission (~2K/s), the queue and the shard key are co-designed |
 | Optimistic conditional update | Never, it survives the climb intact | The **same CAS**, now on the event shard; the mechanism is altitude-invariant |
 | `seat_holds` row + TTL + lazy reclaim | Never, survives intact | Identical: TTL holds, lazy reclaim, sweeper for repaint |
 | Seat map read from the DB/short cache | Read volume swamps the core | Redis seat-map cache fed by a change stream, **map becomes a hint; claim stays the truth** |
 
 That table is the interview move: **the atomic claim and the TTL hold are the invariant core that never changes; everything that changes is protection around it.** When the interviewer says "now it's a Coldplay concert," you don't redesign, you climb: shard for locality, queue for rate, cache for reads, keep the CAS. (The full distributed argument lives in 5.13.)
 
-**The flash-sale / general-admission variant, in one line:** unreserved inventory collapses per-seat rows into a **bounded counter**, claim = a conditional decrement that can't go negative (`SET avail = avail - 1 WHERE avail > 0`), and at extreme contention you shard the counter (Lesson 3.16) trading an exact live count for N× write throughput.
+**The flash-sale / general-admission variant, in one line:** unreserved inventory collapses per-seat rows into a **bounded counter**, claim = a conditional decrement that can't go negative (`SET avail = avail - 1 WHERE avail > 0`), and at extreme contention you shard the counter trading an exact live count for N× write throughput.
 
 **Where I'd delegate (the explicit Director move):** payments/PCI behind `charge(idempotencyKey, amount, token)`, the payments team owns gateway SLAs and the compliance surface; the lock-strategy bake-off to the persistence team with my stated prior (optimistic CAS); bot throttling on hot on-sales to platform security, my prior being per-account claim caps enforced *inside the claim transaction*, the only place a cap can't be raced.
 
@@ -254,7 +254,7 @@ That table is the interview move: **the atomic claim and the TTL hold are the in
 > *Model:* Because "one service" is a deployment accident, not an invariant. Run two instances behind a load balancer, any production booking flow does, for availability alone, and two JVMs each hold their own monitor for F14; both claims succeed. It also evaporates on restart mid-checkout. In-process locks are fine as a fast-fail filter to shed hopeless contention cheaply, but the arbiter must be the transactional store, the only component every instance shares and the only one whose state survives a crash.
 
 **Q4. Bookings open for the year's biggest release and one show's traffic goes 100×. What changes first?**
-> *Model:* Nothing in the claim mechanism, the conditional update and the TTL hold are altitude-invariant. What changes is the protection around them, in the order things break: seat-map reads move to a cache fed by change events (the map was always a hint); if one show's claim rate exceeds the primary's write budget, shard by show/event for transaction locality; if the spike is hostile, Ticketmaster shape, 2M users at one instant, add a waiting room that caps the claim rate to what the shard sustains. That's Lesson 5.13 exactly, and it *contains* this design as its core: the climb adds layers, never replaces the atomic claim. For a GA flash sale, per-seat rows collapse to a bounded counter, conditional decrement while `avail > 0`, sharded (Lesson 3.16) if the counter becomes the hotspot.
+> *Model:* Nothing in the claim mechanism, the conditional update and the TTL hold are altitude-invariant. What changes is the protection around them, in the order things break: seat-map reads move to a cache fed by change events (the map was always a hint); if one show's claim rate exceeds the primary's write budget, shard by show/event for transaction locality; if the spike is hostile, Ticketmaster shape, 2M users at one instant, add a waiting room that caps the claim rate to what the shard sustains. That's Ticketmaster exactly, and it *contains* this design as its core: the climb adds layers, never replaces the atomic claim. For a GA flash sale, per-seat rows collapse to a bounded counter, conditional decrement while `avail > 0`, sharded if the counter becomes the hotspot.
 
 ---
 

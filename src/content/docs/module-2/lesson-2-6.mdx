@@ -10,7 +10,7 @@ import ConsistentHashingRing from '@components/widgets/ConsistentHashingRing.jsx
 - Explain why `hash(key) mod N` is a rebalancing trap, and quantify how much data moves when `N` changes.
 - Describe the **consistent-hashing ring** and show that a membership change moves only ~**K/N** keys instead of nearly all of them.
 - Reason about **virtual nodes**: why a naive ring is lumpy, how vnodes smooth load, and how they encode **heterogeneous node capacity**.
-- Place consistent hashing in real systems (Cassandra, DynamoDB, Riak, memcached/Ketama, CDNs, L7 load balancers), connect it back to partitioning (2.5), and set up CAP (2.7) and the Module 3 building blocks.
+- Place consistent hashing in real systems (Cassandra, DynamoDB, Riak, memcached/Ketama, CDNs, L7 load balancers), connect it back to partitioning, and set up CAP and the building blocks.
 
 ### Intuition first
 Imagine seating guests at a wedding by a rule: `seat = hash(name) mod (number of tables)`. It works perfectly, until one more table arrives. Now the divisor changes from, say, 10 to 11, and **almost every guest's seat number changes at once.** You don't reseat one table's worth of people; you reseat the whole room. That stampede is exactly what `hash mod N` does to a distributed cache or database every time you add or remove a server.
@@ -27,7 +27,7 @@ Imagine seating guests at a wedding by a rule: `seat = hash(name) mod (number of
 | 10 → 11 nodes | **90.9%** | 9.1% |
 | 100 → 101 nodes | **99.0%** | 1.0% |
 
-Read the right column: the *minimum* data you must move to rebalance onto one new node out of `N+1` is `1/(N+1)`, about **1%** at 100 nodes. The `mod N` scheme moves **99%**. For a cache, that's a near-total miss storm and a thundering herd onto your database the instant you scale the fleet. For a database, it's shipping nearly the entire dataset across the network to add one box, and cross-node transfer is the expensive tier of the latency hierarchy (Lesson 1.4), so "move 99% vs move 1%" is a real bandwidth-and-hours bill. **This is the problem consistent hashing exists to solve, and it's the first thing to say in the interview.**
+Read the right column: the *minimum* data you must move to rebalance onto one new node out of `N+1` is `1/(N+1)`, about **1%** at 100 nodes. The `mod N` scheme moves **99%**. For a cache, that's a near-total miss storm and a thundering herd onto your database the instant you scale the fleet. For a database, it's shipping nearly the entire dataset across the network to add one box, and cross-node transfer is the expensive tier of the latency hierarchy, so "move 99% vs move 1%" is a real bandwidth-and-hours bill. **This is the problem consistent hashing exists to solve, and it's the first thing to say in the interview.**
 
 **The ring.** Consistent hashing maps both keys and nodes into the *same* fixed hash space, a ring (Cassandra uses a 64-bit token range; Dynamo's paper used MD5's 128-bit space). The space is **independent of how many nodes you have**, that's the trick.
 
@@ -36,7 +36,7 @@ Read the right column: the *minimum* data you must move to rebalance onto one ne
 - **Add a node:** it takes over only the arc between it and its predecessor, stealing keys from exactly **one** successor. Expected data moved ≈ **K/N**.
 - **Remove a node:** its arc merges into its clockwise successor; only ≈ K/N keys move, to one place.
 
-For replication (tie-in to **Lesson 2.4**), you don't stop at the first node, you keep walking clockwise and place the next `RF−1` distinct physical nodes as replicas. Cassandra's `NetworkTopologyStrategy` does exactly this, skipping nodes to land replicas in different racks/AZs. The ring isn't just a partitioner; it's also the **replica-placement** function.
+For replication, you don't stop at the first node, you keep walking clockwise and place the next `RF−1` distinct physical nodes as replicas. Cassandra's `NetworkTopologyStrategy` does exactly this, skipping nodes to land replicas in different racks/AZs. The ring isn't just a partitioner; it's also the **replica-placement** function.
 
 **Why a naive ring is lumpy, and why that's unacceptable.** Random placement of a handful of nodes does **not** carve the ring into equal arcs: with 10 nodes placed once each, the busiest node owns roughly **1.7×** the average load, so you over-provision the whole fleet to the peak. Worse, when a node dies, **all** of its load lands on its single clockwise neighbor, instantly doubling that neighbor's traffic, a cascading-overload hazard. A plain ring fixes the *rebalancing* problem but creates a *load-balance* problem.
 
@@ -58,7 +58,7 @@ At 256 vnodes the hottest node sits within ~9% of fair share instead of 73% over
 
 </details>
 
-**A nuance worth banking: consistent hashing balances *keyspace*, not *traffic*.** It spreads keys uniformly, but if **one key is a celebrity** (the hot-partition / Bieber problem from **Lesson 2.5**), that key still lands on exactly one node and that node still melts. Consistent hashing does not solve hot keys, you need hot-key replication, request coalescing, or a dedicated cache tier. Saying this unprompted is a strong-signal move; it shows you know the boundary of the tool. One variant to name: **bounded-load consistent hashing** (Google, 2017) caps any node at `(1+ε)×` the average and overflows to the next node, a hard ceiling on imbalance for request routing, at a small locality cost.
+**A nuance worth banking: consistent hashing balances *keyspace*, not *traffic*.** It spreads keys uniformly, but if **one key is a celebrity** (the hot-partition / Bieber problem), that key still lands on exactly one node and that node still melts. Consistent hashing does not solve hot keys, you need hot-key replication, request coalescing, or a dedicated cache tier. Saying this unprompted is a strong-signal move; it shows you know the boundary of the tool. One variant to name: **bounded-load consistent hashing** (Google, 2017) caps any node at `(1+ε)×` the average and overflows to the next node, a hard ceiling on imbalance for request routing, at a small locality cost.
 
 **Named alternative to know: rendezvous (HRW) hashing.** Same minimal-movement property, no ring to maintain, naturally handles weighting, but **O(N) per lookup vs the ring's O(log N)**. Pick HRW when `N` is small (a CDN choosing among a few origins, GlusterFS) and simplicity wins; pick the ring when `N` is large or you need ring-based replica placement. Presenting the ring as one of *two* standard answers, with the lookup-cost-vs-simplicity axis, is exactly the trade-off articulation a Director loop rewards.
 
@@ -100,7 +100,7 @@ The widget renders a live hash ring. Drag the **node count**: the ring recolors 
 | **Consistent hashing (plain ring)** | ~`K/N` (minimal) | poor (~1.7× peak @10 nodes) | O(log N) | rarely alone, almost always with vnodes |
 | **Consistent hashing + vnodes** | ~`K/N`, scattered | good (~1.1× peak); supports weighting | O(log N) | dynamic clusters: Cassandra, DynamoDB, Riak, Ketama caches, ring-hash LBs |
 | **Rendezvous (HRW) hashing** | ~`K/N` (minimal) | good, easy weighting | **O(N)** per key | small `N` (few origins/backends), weighting wanted, simplicity prized |
-| **Range partitioning (2.5)** | a split moves one range | great for range scans; hot-spot risk | O(log N) via router | **ordered** access / range queries dominate (HBase, Spanner) |
+| **Range partitioning** | a split moves one range | great for range scans; hot-spot risk | O(log N) via router | **ordered** access / range queries dominate (HBase, Spanner) |
 
 ### What interviewers probe here
 - **"Why not just `hash(key) mod N`?"**, *Strong:* quantifies it, adding one node to `N` should move ~`1/N` of keys but `mod N` moves ~`(N−1)/N` (≈90% at 10 nodes, 99% at 100), causing cache-miss storms / full reshuffles; the ring moves ~`K/N`. *Red flag:* "it doesn't distribute evenly" (it does, the problem is *rebalancing*, not distribution).
@@ -120,7 +120,7 @@ The widget renders a live hash ring. Drag the **node count**: the ring recolors 
 > *Model:* Changing the divisor from 20 to 25 re-evaluates `hash(key) mod N` for every key, and the vast majority change owner at once. Every remapped key misses on its new node and re-reads from the database simultaneously, a thundering herd. Fix: a **consistent-hashing** client (Ketama or rendezvous), so adding 5 nodes to 20 moves only ~`5/25 = 20%` of keys, and those miss gradually. Add capacity off-peak, and consider request coalescing to flatten any residual spike. The decision is justified by ~20% gradual misses vs ~80% simultaneous misses.
 
 **Q2.** Your Cassandra cluster (vnodes enabled) has one node pinned at 90% CPU while the rest sit at 55%. What's your read of the situation, and what do you decide?
-> *Model:* Vnodes make *keyspace* even, so a persistent single-node hot spot is almost certainly **traffic** imbalance, a hot partition key, the celebrity problem from 2.5, which consistent hashing cannot fix by design. Decision path: confirm hot key vs token-allocation artifact (I'd have the storage team pull per-partition metrics and ownership share, a quick check, and my prior is hot key), then fix at the **data-model level**, bucket/salt the key, cache the hot row, or replicate it, rather than re-tuning the ring. The red-flag move is adding nodes: that re-spreads keyspace but leaves the one hot key on one node.
+> *Model:* Vnodes make *keyspace* even, so a persistent single-node hot spot is almost certainly **traffic** imbalance, a hot partition key, the celebrity problem, which consistent hashing cannot fix by design. Decision path: confirm hot key vs token-allocation artifact (I'd have the storage team pull per-partition metrics and ownership share, a quick check, and my prior is hot key), then fix at the **data-model level**, bucket/salt the key, cache the hot row, or replicate it, rather than re-tuning the ring. The red-flag move is adding nodes: that re-spreads keyspace but leaves the one hot key on one node.
 
 **Q3.** A teammate proposes rendezvous hashing instead of a ring for routing requests across backend servers. When is that the better call, and when not?
 > *Model:* Rendezvous gives the same minimal-movement property with no ring state and easy per-node weighting. It's the better call when `N` is **small** (a handful of backends/origins), O(N) per lookup is negligible and you avoid maintaining ring metadata. It's the worse call when `N` is **large** (hundreds+), where O(N) per request hurts and the ring's O(log N) wins, or when you need ring-based replica placement across AZs as Cassandra does. Pick HRW for small fan-out + simplicity; the ring for large `N` + replica-placement semantics.
@@ -133,6 +133,6 @@ The widget renders a live hash ring. Drag the **node count**: the ring recolors 
 - The **ring** maps keys and nodes into one fixed hash space and walks clockwise; a membership change moves only ~`K/N` keys, to/from a single successor.
 - A **plain** ring is lumpy (~1.7× peak at 10 nodes) and cascades on failure; **virtual nodes** smooth it to ~1.1×, scatter failure load, and encode **heterogeneous capacity** by vnode count.
 - Vnodes cost gossip/metadata, streaming, and repair overhead (Cassandra cut its default 256→16), the count is a **tuning trade-off**, not "max it out."
-- Consistent hashing balances **keyspace, not traffic**, it does **not** fix hot keys; it's used by Cassandra, DynamoDB, Riak, Ketama/memcached, CDNs, and ring-hash load balancers, and underpins the Key-Value Store and Distributed Cache building blocks in Module 3.
+- Consistent hashing balances **keyspace, not traffic**, it does **not** fix hot keys; it's used by Cassandra, DynamoDB, Riak, Ketama/memcached, CDNs, and ring-hash load balancers, and underpins the Key-Value Store and Distributed Cache building blocks.
 
 > **Spaced-repetition recap:** Clock face, not table-numbers. `mod N` reseats the whole room when you add a server (~90-99% move); the ring reseats only one slice (~K/N). A bare ring is lumpy and cascades, **virtual nodes** make load even (~1.1× peak), spread failure, and weight by capacity, at the cost of metadata/streaming. It balances keyspace, not traffic, so hot keys still need separate handling.

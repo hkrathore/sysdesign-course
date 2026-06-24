@@ -30,7 +30,7 @@ And the deadlock itself has a price tag, so the process needs a clock: two staff
 **Anchor scenario (the worked example for the rest of the lesson).** A commerce company, ~120 engineers, 24 of them across four backend teams on the order path. The order pipeline, checkout → inventory → payment → fulfillment → notifications, is a five-year-old monolith being decomposed. Two senior engineers bring proposals:
 
 - **Proposal A, synchronous orchestration.** An order-orchestrator service drives the steps via REST/gRPC calls: reserve inventory → authorize payment → hand to fulfillment; saga state in Postgres; failures compensated by the orchestrator. Familiar stack, explicit control flow.
-- **Proposal B, event-driven choreography.** A Kafka backbone; services react to events (`OrderPlaced` → inventory reserves and emits `InventoryReserved` → payment reacts → …). No central coordinator; teams decoupled; downstream consumers (analytics, notifications, search) subscribe for free. (Mechanics of queues and pub-sub are Lessons 3.8-3.9; we don't re-teach them, this lesson is about choosing.)
+- **Proposal B, event-driven choreography.** A Kafka backbone; services react to events (`OrderPlaced` → inventory reserves and emits `InventoryReserved` → payment reacts → …). No central coordinator; teams decoupled; downstream consumers (analytics, notifications, search) subscribe for free. (Mechanics of queues and pub-sub aren't re-taught here, this lesson is about choosing.)
 
 Both are real architectures running at real companies. That's the point. Now the requirement sheet both must serve, extracted by asking each author *"what requirement does your design serve that the other fails?"* and writing the answers down with numbers:
 
@@ -39,7 +39,7 @@ Both are real architectures running at real companies. That's the point. Now the
 **Non-functional, the ones the decision actually turns on:**
 - **Volume:** 600K orders/day ≈ 7/s average, daily peak ~35/s, **Black Friday ~140/s**. Write this on the board, Proposal B's author, asked directly, was sizing for 1,400/s "eventually."
 - **Latency:** checkout confirmation **p99 < 2s**, of which the external PSP eats 300-800ms, the long pole is not ours.
-- **Correctness:** no double-charge, no oversell, idempotency and a consistent money path are non-negotiable (the same invariant discipline as Lesson 5.13).
+- **Correctness:** no double-charge, no oversell, idempotency and a consistent money path are non-negotiable (the same invariant discipline a strongly-consistent core demands).
 - **Team capability, a first-class requirement, not a soft factor:** four teams deep in Postgres/REST; **zero production Kafka experience**; on-call is already stretched. A design the team can't operate at 3 a.m. fails an NFR exactly the way a missed latency budget does.
 - **Evolvability:** 3-year plan says 5-10× order volume and 3+ new consumer teams of order data.
 
@@ -49,16 +49,16 @@ Both are real architectures running at real companies. That's the point. Now the
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS to derive, E becomes **costing both proposals honestly**, Lesson 1.3 discipline applied to engineering time, run cost, and operational risk. Rough numbers, stated assumptions, no false precision; the matrix in Evaluation consumes these.
+> **Adaptation, said out loud:** no QPS to derive, E becomes **costing both proposals honestly**, back-of-the-envelope discipline applied to engineering time, run cost, and operational risk. Rough numbers, stated assumptions, no false precision; the matrix in Evaluation consumes these.
 
 **Proposal A, synchronous orchestration:**
 - *Build:* 2 engineers × ~6 weeks on the existing stack ≈ **0.25 eng-years (~$60K loaded)**.
 - *Run:* rides existing Postgres + service fleet; marginal infra ≈ $0; **no new on-call surface**, the failure modes (timeouts, retries, a saga table) are ones this team already debugs.
-- *Throughput sanity:* 140/s peak writing saga state to Postgres is a non-event, a single primary handles thousands of writes/s (Lesson 3.3). At this scale, **neither proposal has a throughput problem; whoever claims otherwise is arguing taste with a capacity costume.** Saying that sentence in the interview is signal.
+- *Throughput sanity:* 140/s peak writing saga state to Postgres is a non-event, a single primary handles thousands of writes/s. At this scale, **neither proposal has a throughput problem; whoever claims otherwise is arguing taste with a capacity costume.** Saying that sentence in the interview is signal.
 
 **Proposal B, event-driven choreography:**
 - *Build:* 4 engineers × ~3.5 months, the pipeline *plus* the platform work (topic design, schema registry, DLQs, replay tooling, consumer scaffolding) ≈ **1.2 eng-years (~$300K)**.
-- *Run:* managed Kafka (MSK/Confluent tier) **~$4-6K/month**, plus realistically **0.5-1 FTE of streaming-platform ownership** (~$125-250K/yr), Lesson 8.6's rule: the subscription is never the cost; the operating competence is.
+- *Run:* managed Kafka (MSK/Confluent tier) **~$4-6K/month**, plus realistically **0.5-1 FTE of streaming-platform ownership** (~$125-250K/yr), the build-vs-buy rule: the subscription is never the cost; the operating competence is.
 - *Risk premium:* first production Kafka deployment, on the **money path**, under a Black Friday deadline, by a team that has never debugged consumer-group rebalances or event-ordering bugs. Price the first year of incidents honestly: industry pattern for "new paradigm on the critical path" is **2-4 serious incidents in year one**; at ~$50K per revenue-impacting order-path incident, that's a **$100-200K expected risk cost** A doesn't carry.
 
 **The asymmetry, stated:** B costs roughly **5× to build, ~$200-300K/yr more to run, and carries a six-figure first-year risk premium**, and buys decoupling and 10x headroom the requirement sheet says we don't need for ~2 years. A is **~4× faster to production** and lands on existing operational muscle, and creates a central orchestrator that every new consumer must ask for changes, which the 3-year plan says will hurt. Estimation has framed the real trade: **certain cost now vs probable cost later.** That's what the criteria matrix is for.
@@ -188,7 +188,7 @@ team autonomy; ~10x volume stresses saga-table writes and PSP rate limits.
 
 > **Adaptation, said out loud:** Evaluation *is* the adjudication, the criteria matrix, applied. This is the heart of the lesson: watch the matrix do something better than crown a winner.
 
-**Gates first (pass/fail, unweighted):** p99 < 2s at 140/s, both pass (the PSP is the long pole either way); money-path correctness, both can be built correctly (B needs idempotent consumers and careful ordering; A needs idempotent steps, Lesson 2.10's idempotency discipline either way). Gates filter; they don't rank.
+**Gates first (pass/fail, unweighted):** p99 < 2s at 140/s, both pass (the PSP is the long pole either way); money-path correctness, both can be built correctly (B needs idempotent consumers and careful ordering; A needs idempotent steps, the same idempotency discipline either way). Gates filter; they don't rank.
 
 **The weighted matrix (criteria and weights signed by both authors before scoring; scores 1-5, consensus of the consulted group):**
 
@@ -236,7 +236,7 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 
 **The interviewer turns the dial: 10x, 6M orders/day, ~1,400/s Black Friday; the org doubles, and the new hires include engineers with real streaming experience.** The answer is a recitation, not an improvisation, because the breaking points were pre-named:
 
-- **Breaking point 1, the saga table at ~10x writes.** Pre-named at "sustained >500/s." Playbook: partition saga state by order-ID hash (Lesson 2.5 mechanics); the orchestrator is stateless, so it scales horizontally. The PSP's auth rate limit becomes a co-equal constraint, a vendor negotiation, not an architecture change. Neither requires touching the paradigm.
+- **Breaking point 1, the saga table at ~10x writes.** Pre-named at "sustained >500/s." Playbook: partition saga state by order-ID hash; the orchestrator is stateless, so it scales horizontally. The PSP's auth rate limit becomes a co-equal constraint, a vendor negotiation, not an architecture change. Neither requires touching the paradigm.
 - **Breaking point 2, the orchestrator as coupling chokepoint.** Pre-named at "3rd team in a quarter requests a sync change." Playbook: **the migration seam is already live.** New consumers were *never* allowed to couple synchronously, loyalty, search, and analytics have been on the stream since month one. At 10x, the shift is to move *more* of the pipeline behind `OrderPaid` and keep the synchronous core down to the two steps where the user genuinely waits. The dissenter's architecture arrives, incrementally, run by a team that has now operated streaming on non-critical paths for two years, led (if you've done your job) by the dissenter.
 - **Breaking point 3, what stays synchronous forever.** Inventory reserve + payment auth. 1,400/s of "reserve, then authorize" is still small for a partitioned Postgres core; the correctness argument from R hasn't changed; eventifying the money path buys decoupling nobody asked for at the price of a consistency model the invariant resists. **Knowing what *not* to migrate is the strong-signal half of the 10x answer.**
 
@@ -303,4 +303,4 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 
 ---
 
-*End of Lesson 8.9. The Ticketmaster lesson (5.13) taught you to co-design a shard key with a queue; this one teaches you to co-design a decision with its own revisit, the ADR's tripwires are to architecture choices what the waiting room was to the hot shard: the mechanism that makes an otherwise dangerous commitment safe. Same Director instinct throughout Module 8: the artifact that matters is rarely the diagram, it's the requirement sheet, the criteria, and the written record that lets the org change its mind cheaply.*
+*End of Lesson 8.9. The Ticketmaster lesson taught you to co-design a shard key with a queue; this one teaches you to co-design a decision with its own revisit, the ADR's tripwires are to architecture choices what the waiting room was to the hot shard: the mechanism that makes an otherwise dangerous commitment safe. Same Director instinct throughout this track: the artifact that matters is rarely the diagram, it's the requirement sheet, the criteria, and the written record that lets the org change its mind cheaply.*

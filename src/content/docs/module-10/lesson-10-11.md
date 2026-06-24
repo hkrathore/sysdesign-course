@@ -8,11 +8,11 @@ sidebar:
 > This cluster barely existed in Director loops before 2020 and is now close to assumed experience: running a RIF end to end, absorbing a budget or headcount cut, executing a mandate you didn't choose. What interviewers score is **ownership of decisions made above you**, "finance gave me a list and I executed it" is the signature fail, because it tells them you'll distance yourself from your own org the moment it's uncomfortable. The second thing they score is the *survivor-rebuild* half, where most candidates have nothing and strong ones lead, because a layoff is judged not by the day itself but by how the remaining 90% perform and whether your best people stay. And the sharpest 2025-26 probe lives here too: "how did you *know* the org could absorb the cut?", the question that catches an AI-justified layoff that was really just a number from above.
 
 ### Learning objectives
-- Run the efficiency-era story as **own-it-end-to-end STAR-L** (Lesson 10.2) with three pull-able sub-stories, **selection** (criteria before names), **communication** (with dignity), **rebuild** (the survivor half), owning every decision downward even when it was made above you.
+- Run the efficiency-era story as **own-it-end-to-end STAR-L** with three pull-able sub-stories, **selection** (criteria before names), **communication** (with dignity), **rebuild** (the survivor half), owning every decision downward even when it was made above you.
 - Build **selection** on criteria-before-names: role and skill criticality against the *future* org shape, an adverse-impact sanity check, and honest ownership of the number, not gut, likeability, or last-in-first-out.
 - Land **communication with dignity**: affected people first and individually, a same-day survivor all-hands with the honest why and what's *not* changing, and "this is the only planned round" only if it's true.
 - Lead the **rebuild**: re-scope the work to the smaller team (cut projects, not just people), re-recruit keepers inside 48 hours, and track a named recovery metric, the half that separates a Director from an executor.
-- Answer the **RTO / unpopular-mandate** variant as **disagree-and-commit-with-mitigation** (Lesson 10.10), and **budget cuts** as a prioritization call with a ranked stop-doing list, not peanut-butter.
+- Answer the **RTO / unpopular-mandate** variant as **disagree-and-commit-with-mitigation**, and **budget cuts** as a prioritization call with a ranked stop-doing list, not peanut-butter.
 
 ### Intuition first
 A field surgeon doing triage after a disaster has a job that doesn't end when the cutting does. The amateur focuses entirely on the casualties, who gets treated, who doesn't. But that's only the first third. What decides whether the unit survives is what happens *next*: whether the people still standing know why the calls were made, trust the bleeding has stopped, and can still function as a unit instead of scattering. A surgeon who saves the right patients but leaves the survivors panicked, overloaded, and certain they're next has failed even if every individual call was correct. That's the efficiency-era cluster exactly. Selection is the visible part everyone braces for. Communication decides whether people leave with their dignity intact or with a badge that stopped working mid-sentence. But the *rebuild*, re-scoping the work so survivors aren't carrying 130% load, re-recruiting your keepers before they update their LinkedIn, holding the org through a quarter of grief, is what interviewers are actually scoring, because it's the part only a leader can do and the part most candidates skip. They want to see you treated the layoff as a system to be led through, not a list to be executed.
@@ -21,7 +21,7 @@ A field surgeon doing triage after a disaster has a job that doesn't end when th
 
 ## The questions
 
-These are mostly past-event questions (STAR-L, Lesson 10.2), with the mandate and budget variants leaning toward how-you'd-operate hypotheticals (Clarify → Principles → Options → Decide).
+These are mostly past-event questions (STAR-L), with the mandate and budget variants leaning toward how-you'd-operate hypotheticals (Clarify → Principles → Options → Decide).
 
 | Variant | What it's really testing |
 |---|---|
@@ -33,7 +33,7 @@ These are mostly past-event questions (STAR-L, Lesson 10.2), with the mandate an
 | "How did you *know* the org could absorb the cut?" | The 2025-26 trap, whether the number was reasoned or just handed down and rationalized with AI. |
 | "Were you laid off / why is this tenure short?" | The mirror question, destigmatized, but bitterness or evasiveness still fails. |
 
-The merge: the layoff, budget-cut, and "were you laid off" variants are **past-event**, STAR-L on the spine below. The RTO/mandate variant is usually a **hypothetical**, answer it as **disagree-and-commit-with-mitigation** (Lesson 10.10). Either way, the through-line is the same: did you *own it*, all the way down to the survivors.
+The merge: the layoff, budget-cut, and "were you laid off" variants are **past-event**, STAR-L on the spine below. The RTO/mandate variant is usually a **hypothetical**, answer it as **disagree-and-commit-with-mitigation**. Either way, the through-line is the same: did you *own it*, all the way down to the survivors.
 
 ---
 
@@ -85,7 +85,7 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 - **The survivor half became the differentiator.** The 2015 answer often stopped at the day-of. The current bar is explicit: *a layoff is judged by how the remaining 90% perform and whether your best people stay.* Re-scoping the work, re-recruiting keepers, and a named recovery metric are where most of the score now lives, and where most candidates have nothing.
 - **"How did people find out?" is a deliberate trap.** The public failures, the Better.com Zoom mass-firing, the badge-deactivation-before-the-meeting stories, made *delivery mechanics* scored. Mass email, a deactivated badge, or a calendar invite with no human on it is an instant fail.
 - **"How did you know the org could absorb it?" is the sharp 2025-26 follow-up.** With AI-justified cuts and quiet re-hiring in the headlines, interviewers probe whether the number was *reasoned*, a revenue-per-team model, or rationalized after the fact. "We assumed AI would cover it" with no measurement is the new fail; a real absorption model (what work stops, what tooling closes the gap) scores.
-- **The growth-era story inverted.** "I scaled the org from 10 to 60" told with *no* efficiency angle now codes as ZIRP empire-building. **Output-per-dollar is the new strong story**, business-metric fluency (cost per transaction, payback periods, revenue per engineer) expected *inside* the answer, because Directors own budgets now (Lesson 10.8; cost cuts in system terms, Lesson 8.5).
+- **The growth-era story inverted.** "I scaled the org from 10 to 60" told with *no* efficiency angle now codes as ZIRP empire-building. **Output-per-dollar is the new strong story**, business-metric fluency (cost per transaction, payback periods, revenue per engineer) expected *inside* the answer, because Directors own budgets now.
 - **RTO is scored on stewardship, not ideology.** The expected answer separates personal preference from stewardship, with the **Amazon 5-day RTO data as known context**, an internal satisfaction score around **1.4 out of 5** with ~91% unhappy, attrition concentrated among *strong* engineers. Tribal certainty in either direction fails; the math and the mitigation plan score.
 
 ---
@@ -98,7 +98,7 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 
 **Why it scores:**
 - **It owns the number twice**, fought 18% down to 12% with a model, *and* refused to distance ("I never told my team finance made me"), the single posture this cluster is built to test, hit head-on.
-- **Selection is criteria-before-names with an adverse-impact check**, the legally literate, non-gut answer, and every beat carries a number (12%, 5 of 11 delivered personally, 8 keepers, 48 hours, week six), probe-resistant three levels down (Lesson 10.1 house rule honored in a behavioral answer).
+- **Selection is criteria-before-names with an adverse-impact check**, the legally literate, non-gut answer, and every beat carries a number (12%, 5 of 11 delivered personally, 8 keepers, 48 hours, week six), probe-resistant three levels down (the house rule honored in a behavioral answer).
 - **Communication dodges every public trap**, individual, by a human, before any broadcast, no dead badge, and "say nothing rather than lie" proves the candidate thought about the survivor's memory, not just the day.
 - **The rebuild is the load-bearing half**, cut *projects* not just people (130%-load failure signal avoided), keepers re-recruited in 48 hours, a real recovery metric (zero regretted attrition, week-six delivery), exactly where weaker candidates have nothing.
 - **The Learning holds the human cost without flinching or performing**, two people who'll never fully trust the company, owned as true, plus an upstream mechanism: the decisive-and-humane synthesis applied to layoffs.
@@ -110,7 +110,7 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 **Why it scores:**
 - **It separates personal preference from organizational stewardship explicitly**, the exact dimension this question tests, instead of arguing workplace ideology in either direction.
 - **It advocates with data, not opinion**, quit-intent modeled against real geography, the Amazon 1.4/5 figure cited as known context, landing the 2026 calibration that RTO answers carry the trade-off math.
-- **"In my own voice, not leadership decided" nails the commit-not-obedience line** (Lesson 10.10), the near-universal "what did you tell your team?" follow-up answered before it's asked, commit-theater named and rejected.
+- **"In my own voice, not leadership decided" nails the commit-not-obedience line**, the near-universal "what did you tell your team?" follow-up answered before it's asked, commit-theater named and rejected.
 - **The tripwire and tracked-KPI mitigation** turn disagree-and-commit into disagree-and-commit-*with-mitigation*, the senior move, and the forecasted, owned cost proves the model was real. It refuses the hero framing ("I protected my team from the policy") as both insubordinate and dishonest.
 
 ---
@@ -138,9 +138,9 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 ## Practice prompts
 
 1. **Walk the full layoff on the spine.** "You had to cut 15%, take me through it." *(Sketch: own-it-end-to-end STAR-L, own the number first (fought down or accepted, never 'they gave me a list'); criteria-before-names selection with an adverse-impact check; individual-and-before-broadcast communication plus the same-day survivor all-hands; rebuild by cutting projects not just people, re-recruiting keepers in 48 hours, a named recovery metric. Hold every number for the probe.)*
-2. **Defend the absorption model.** "How did you *know* the org could deliver after losing those people?" *(Sketch: a reasoned model, not a vibe, what work stopped, what tooling closed the gap, the recovery metric you tracked. If AI is part of the story, instrument it, don't hand-wave it, bridges to Lesson 10.12.)*
-3. **Make a budget cut a prioritization call.** "Your budget is down 20%, what do you stop doing?" *(Sketch: ROI structure, no-headcount alternatives first, then a ranked stop-doing list with the requester's explicit sign-off on what dies. Output-per-dollar framing. Never peanut-butter; cost cuts in system terms, Lesson 8.5.)*
-4. **Hold an RTO mandate you disagree with.** "Five days in office, company-wide, go." *(Sketch: disagree-and-commit-with-mitigation, separate preference from stewardship; advocate with quit-intent and geography data (Amazon 1.4/5 as context); commit in your own voice; mitigate with a tracked regretted-attrition KPI and a tripwire. Lesson 10.10.)*
+2. **Defend the absorption model.** "How did you *know* the org could deliver after losing those people?" *(Sketch: a reasoned model, not a vibe, what work stopped, what tooling closed the gap, the recovery metric you tracked. If AI is part of the story, instrument it, don't hand-wave it, bridges to AI-era leadership.)*
+3. **Make a budget cut a prioritization call.** "Your budget is down 20%, what do you stop doing?" *(Sketch: ROI structure, no-headcount alternatives first, then a ranked stop-doing list with the requester's explicit sign-off on what dies. Output-per-dollar framing. Never peanut-butter; cost cuts in system terms.)*
+4. **Hold an RTO mandate you disagree with.** "Five days in office, company-wide, go." *(Sketch: disagree-and-commit-with-mitigation, separate preference from stewardship; advocate with quit-intent and geography data (Amazon 1.4/5 as context); commit in your own voice; mitigate with a tracked regretted-attrition KPI and a tripwire.)*
 
 ---
 
@@ -149,10 +149,10 @@ No cluster has shifted harder in a decade, it went from a rare, almost-untellabl
 - **Selection is criteria before names.** Define the future org shape, derive criteria (role/skill criticality, coverage, documented performance), then names fall out, plus an adverse-impact sanity check. Never gut, likeability, or last-in-first-out.
 - **Communication with dignity, no public traps.** Affected people individually and by a human *before* any broadcast, never a mass email or a dead badge, then a same-day survivor all-hands with the honest why and "only planned round" *only if true*.
 - **The rebuild is the differentiator.** Cut projects not just people (130% survivor load is a failure signal), re-recruit keepers in 48 hours, track a named recovery metric. A layoff is judged by how the remaining 90% perform.
-- **RTO and budget cuts are stewardship, not ideology.** RTO = disagree-and-commit-with-mitigation (advocate with data, commit in your own voice, mitigate with a tracked KPI). Budget = a ranked stop-doing list with sign-off, never peanut-butter. "How did you know the org could absorb it?" demands a reasoned model, not an AI hand-wave (Lesson 10.12).
+- **RTO and budget cuts are stewardship, not ideology.** RTO = disagree-and-commit-with-mitigation (advocate with data, commit in your own voice, mitigate with a tracked KPI). Budget = a ranked stop-doing list with sign-off, never peanut-butter. "How did you know the org could absorb it?" demands a reasoned model, not an AI hand-wave.
 
 > **Spaced-repetition recap:** Efficiency-era leadership is scored on **ownership of decisions made above you**, "finance gave me a list" is the signature fail. Answer as **own-it-end-to-end STAR-L** with three sub-stories: **selection** (criteria before names + adverse-impact check), **communication** (affected first and individually, survivor all-hands same day, no dead badge), **rebuild** (cut projects not just people, re-recruit keepers in 48 hours, a named recovery metric, the differentiator). **RTO** = disagree-and-commit-with-mitigation, preference separated from stewardship, with the Amazon 1.4/5 data and a tracked attrition KPI. **Budget** = a ranked stop-doing list, never peanut-butter. **2026 bar:** layoff experience near-assumed, the survivor half differentiates, "how did you know the org could absorb it?" demands a reasoned model not an AI hand-wave. Keep legal content neutral and partner with local counsel for the statutory detail.
 
 ---
 
-*End of Lesson 10.11. Efficiency-era leadership is the own-it-end-to-end cluster; "how did you know the org could absorb the cut?" hands directly to Lesson 10.12, AI-era leadership, where the absorption model has to survive "did delivery actually improve?" and conviction-with-instrumentation replaces the hand-wave.*
+*End of Lesson 10.11. Efficiency-era leadership is the own-it-end-to-end cluster; "how did you know the org could absorb the cut?" hands directly to AI-era leadership, where the absorption model has to survive "did delivery actually improve?" and conviction-with-instrumentation replaces the hand-wave.*

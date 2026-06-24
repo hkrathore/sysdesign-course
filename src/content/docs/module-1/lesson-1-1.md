@@ -18,7 +18,7 @@ A system-design interview is not an exam; it's a **design review you've been ask
 Every interviewer is scoring some weighted blend of these. The numbers in brackets are *rough relative weights at Director level* (they invert for a staff IC).
 
 1. **Requirements & scoping** *(heavy)*, Do you clarify before you build? Do you cut scope to a defensible core (3-5 features) instead of trying to boil the ocean?
-2. **Estimation & quantification** *(medium)*, Do you reason in numbers well enough to know whether this fits on 10 servers or 10,000? (Lesson 1.3.)
+2. **Estimation & quantification** *(medium)*, Do you reason in numbers well enough to know whether this fits on 10 servers or 10,000?
 3. **High-level design & decomposition** *(medium)*, Can you break the system into components with clear responsibilities and a clean data flow? Necessary, but has *diminishing returns*, past a point, more boxes is not more signal.
 4. **Trade-off depth & decision-making** *(heaviest)*, Can you name 2-3 viable approaches, state pros/cons, **decide**, and defend the decision against requirements, cost, and risk? This is where the offer is won or lost at Director level.
 5. **Communication & leadership signal** *(heavy)*, Do you drive the conversation, structure your thinking out loud, handle "why not X?" without getting defensive, and know when to say "I'd delegate that benchmark"?

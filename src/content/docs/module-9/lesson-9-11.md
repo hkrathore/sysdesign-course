@@ -11,7 +11,7 @@ sidebar:
 
 1. Run the **RESHADED** spine on a problem whose crux is **executing untrusted code safely under burst load**, not a read:write ratio, and state that adaptation out loud.
 2. Choose an **isolation strategy** (container vs microVM vs language sandbox) by trading **blast radius against cold-start latency and density/cost**, naming the rejected alternative.
-3. Size the **contest-spike burst** (100k submissions in minutes) and show why a **warm worker pool**, not reactive autoscaling, is the load-bearing decision (ref 5.15).
+3. Size the **contest-spike burst** (100k submissions in minutes) and show why a **warm worker pool**, not reactive autoscaling, is the load-bearing decision.
 4. Design the **async judging pipeline**, submit returns instantly, a queue feeds an isolated worker fleet, results stream back, and place resource limits where they bind.
 5. Operate at **Director altitude:** own the cost-per-execution line, name the blast radius precisely, delegate the sandbox internals with a stated prior.
 
@@ -32,7 +32,7 @@ That is the online judge. A submission is an untrusted machine; the chamber is y
 - *Steady drip, or contest spikes?* → **Contests are the design driver.** Steady submissions are trivial; a weekly contest start is **100k submissions in ~3 minutes.**
 - *What languages?* → **~15** (C++, Python, Java, Go, Rust, …); each needs a different runtime image, an operational fact, not a footnote.
 - *Verdict latency?* → **p95 < ~5 s** end-to-end; judging itself is bounded by the problem's time limit (often 1-2 s of CPU).
-- *Is a wrong verdict acceptable?* → **No.** The same code + tests must yield the same verdict (ref 9.6's determinism discipline), and one user's run must never affect another's.
+- *Is a wrong verdict acceptable?* → **No.** The same code + tests must yield the same verdict (the determinism discipline of the stock-exchange engine), and one user's run must never affect another's.
 
 **Functional requirements:**
 1. **Submit** code (language + source + problem id); get an instant acknowledgement.
@@ -64,7 +64,7 @@ That is the online judge. A submission is an untrusted machine; the chamber is y
 
 **The contest spike (the real headline).** A huge fraction of ~150k contestants submit in the **first 3 minutes** → **~100k in 180 s ≈ ~550 submissions/s**, spiking to ~1,000/s at `t=0`. Each submission holds a worker for **compile + ~30 tests × ~1-2 s ≈ ~10 s.** By Little's Law, concurrency = arrival × hold: `550/s × 10 s ≈ ` **5,500 concurrent executions** at the sustained spike, higher instantaneously. *This is the number the fleet is sized against, not the 12/s steady rate.*
 
-**Why warm capacity is the lever.** A microVM cold-starts in ~125 ms; a fresh container with a cold runtime image takes 2-5 s, reactive scaling then *adds the cold start to every verdict during the spike*, blowing the 5 s p95. So you **pre-warm a pool for the spike**: ~5,500 slots at ~8 executions/host → **~700 warm hosts during contest windows**, scaled to a ~20-30 floor the other ~95% of the week. **The ~50× peak-vs-average gap is the cost conversation** (same shape as the GPU warm-pool in 5.15).
+**Why warm capacity is the lever.** A microVM cold-starts in ~125 ms; a fresh container with a cold runtime image takes 2-5 s, reactive scaling then *adds the cold start to every verdict during the spike*, blowing the 5 s p95. So you **pre-warm a pool for the spike**: ~5,500 slots at ~8 executions/host → **~700 warm hosts during contest windows**, scaled to a ~20-30 floor the other ~95% of the week. **The ~50× peak-vs-average gap is the cost conversation** (same shape as the GPU warm-pool).
 
 **Storage & cost (small bytes, real spend on capacity).** Submissions + verdicts are `200k/day × ~3 KB ≈ ~80 GB/yr`, a rounding error; test cases are tens of GB, cached on workers. A judged submission is ~$0.0001 of raw compute (~10 s at ~$0.04/vCPU-hour), so the **warm-pool idle cost dominates**, ~700 hosts for a ~3-hour weekly window plus the floor. Honest framing: **per-execution compute is nearly free; safe, warm, burst-ready capacity is what you pay for.**
 
@@ -80,7 +80,7 @@ That is the online judge. A submission is an untrusted machine; the chamber is y
 
 **2. Runtime images + test cases (must be local to the worker before it runs).** **Pre-baked, pre-pulled runtime images** (one per language) cached on every warm worker, and **test cases in S3 with an aggressive local cache.** The image is *already on the host* when a submission arrives. *Rejected, pulling the image on demand:* turns a 125 ms cold start into seconds and re-introduces the exact tax warm pools exist to kill.
 
-**3. The work queue (transient, the backpressure point).** A **durable queue, Kafka or SQS**, between submit and the judge fleet. Durable (unlike 5.15's in-memory queue) because a submission is a *contest entry*, losing it is unacceptable; replay on crash is required. *Rejected, synchronous judging:* couples the user's connection to a 10 s adversarial execution, and at 1,000/s the spike exhausts connection pools.
+**3. The work queue (transient, the backpressure point).** A **durable queue, Kafka or SQS**, between submit and the judge fleet. Durable (unlike an in-memory queue) because a submission is a *contest entry*, losing it is unacceptable; replay on crash is required. *Rejected, synchronous judging:* couples the user's connection to a 10 s adversarial execution, and at 1,000/s the spike exhausts connection pools.
 
 **Results delivery:** verdict updates pushed to the client via **SSE or polling**, best-effort, off the durable path.
 
@@ -252,7 +252,7 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 
 **Hardest trade-offs to defend:**
 - **Isolation strength vs density/cost vs cold start**, the genuine trilemma; resolved by **threat model** (adversarial public code → microVMs; softer internal → gVisor).
-- **Warm-pool size**, every warm host is idle money; too few and the spike blows p95. A direct $/latency dial set from the *scheduled* contest calendar (a luxury 5.15's unpredictable traffic doesn't have).
+- **Warm-pool size**, every warm host is idle money; too few and the spike blows p95. A direct $/latency dial set from the *scheduled* contest calendar (a luxury that unpredictable traffic doesn't have).
 - **Hard limits vs false positives**, aggressive CPU/memory caps protect the fleet but can fail a slow-correct solution; tuned per problem, owned by authors.
 
 **Where I'd delegate (the explicit Director move):**
@@ -313,7 +313,7 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 ### Key takeaways
 - The crux is **running untrusted, adversarial code safely at burst**, not a read:write ratio. The skew is **trusted control plane vs untrusted execution plane**; the scarce resource is **warm, isolated capacity to execute code.**
 - **Isolation is a blast-radius trade:** process+seccomp (radius = host, insufficient) < gVisor container (userspace-filtered syscalls) < **microVM/Firecracker (own kernel, radius = one VM, ~125 ms)**. Pick against the threat model; for public adversarial code, microVMs. Internals delegated.
-- **Contests drive the design:** ~5,500 concurrent (Little's Law) in a 3-minute spike. Contests are **scheduled**, so **pre-warm the pool** and scale on queue depth, reactive autoscaling lags by host cold start. The **~50× peak-vs-average gap is the cost conversation** (ref 5.15).
+- **Contests drive the design:** ~5,500 concurrent (Little's Law) in a 3-minute spike. Contests are **scheduled**, so **pre-warm the pool** and scale on queue depth, reactive autoscaling lags by host cold start. The **~50× peak-vs-average gap is the cost conversation**.
 - **Submit is async over a durable queue; verdicts stream per-test.** Runaways become **verdicts not outages** via hard CPU-time *and* wall-clock, memory, PID, and output limits; a **fresh sandbox per run** prevents residue.
 - **Director moves:** own the cost (per-execution compute ≈ free; **warm idle capacity is the spend**), name the blast radius precisely, delegate sandbox internals behind `judge()` with a Firecracker prior, and **name the generalization** (CI runners, FaaS, AI-agent sandboxes).
 
@@ -321,4 +321,4 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 
 ---
 
-*End of Lesson 9.11. The online judge inverts the data-centric reflex of the social-feed problems: the durable data is trivial, and the architecture exists to **run adversarial code safely under a scheduled burst**, a tiny trusted control plane (async submit + durable queue) feeding a hardened, warm-pooled execution plane (microVM isolation + hard resource limits), reusing the warm-pool economics of 5.15 and the determinism discipline of 9.6. The pattern generalizes to every place code you didn't write runs on infrastructure you own.*
+*End of Lesson 9.11. The online judge inverts the data-centric reflex of the social-feed problems: the durable data is trivial, and the architecture exists to **run adversarial code safely under a scheduled burst**, a tiny trusted control plane (async submit + durable queue) feeding a hardened, warm-pooled execution plane (microVM isolation + hard resource limits), reusing warm-pool economics and the determinism discipline of the matching engine. The pattern generalizes to every place code you didn't write runs on infrastructure you own.*

@@ -11,7 +11,7 @@ sidebar:
 - Run the **RESHADED** spine on a **platform-architecture** problem (E becomes data-volume and scan-cost sizing; A becomes the SQL/table-format/catalog interface; D becomes the medallion data model), and surface the load-bearing tension: **decoupled storage/compute, and managed-warehouse vs open-lakehouse.**
 - Open with the **"governed-SQL warehouse or open lakehouse?"** clarifying question and show how the answer flips storage format, ops model, and cost.
 - Justify the **open table format** (Iceberg/Delta/Hudi) as the thing that makes a data *lake* behave like a *warehouse*, ACID commits, schema evolution, time travel, concurrent writers, and reject both raw-Parquet-directories and proprietary-warehouse-storage with reasons.
-- Design the **medallion architecture** (bronze→silver→gold) and **ELT** so the platform is rebuildable from retained raw, the same idempotent-recompute property from 13.1 / 9.7.
+- Design the **medallion architecture** (bronze→silver→gold) and **ELT** so the platform is rebuildable from retained raw, the same idempotent-recompute property as the data-platform foundations and the billing-batch problem.
 - Treat **scan-cost** as the headline budget line (bytes scanned × \$/TB, or cluster-hours) and name the layout levers, partitioning, clustering/Z-order, compaction, pre-aggregation, that control it.
 
 ### Intuition first
@@ -35,10 +35,10 @@ I'll design for the **harder, increasingly-standard case: the lakehouse**, becau
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *Warehouse or lakehouse?* → **Lakehouse**, BI + ML on one open copy at PB scale. The central decision.
-- *Freshness?* → **Hourly batch for most marts**; some near-real-time (minutes) tables; truly live dashboards are a *separate* path (14.2), not this store's job.
+- *Freshness?* → **Hourly batch for most marts**; some near-real-time (minutes) tables; truly live dashboards are a *separate* path, not this store's job.
 - *Who queries?* → Hundreds of analysts (SQL/BI), scheduled transforms (dbt), and ML/data-science reading raw and curated data, **mixed, concurrent, isolation-sensitive** workloads.
-- *Governance bar?* → Real: PII columns, row/column-level access, audit, lineage (delegated depth to 13.10) — table stakes for a central store.
-- *Source data?* → OLTP DBs via CDC (14.3), event streams, and SaaS extracts (13.6).
+- *Governance bar?* → Real: PII columns, row/column-level access, audit, lineage (delegated depth to the governance/catalog lesson) — table stakes for a central store.
+- *Source data?* → OLTP DBs via CDC, event streams, and SaaS extracts.
 
 **Functional requirements:**
 1. **Land** raw data from many sources (CDC, events, files) reliably and replayably.
@@ -47,7 +47,7 @@ I'll design for the **harder, increasingly-standard case: the lakehouse**, becau
 4. **Serve** SQL analytics (BI) **and** direct file access (ML/Spark) from the *same* copy.
 5. **Govern**, catalog, access control, lineage, audit, over all of it.
 
-**Explicitly CUT (scoping is the signal):** the BI tool itself, the ML training platform, sub-second user-facing analytics (that's 14.2's real-time OLAP), the source systems, and the CDC mechanics (14.3 owns those). I scope to **land → store → transform → serve + govern.**
+**Explicitly CUT (scoping is the signal):** the BI tool itself, the ML training platform, sub-second user-facing analytics (that's a separate real-time OLAP store), the source systems, and the CDC mechanics (a separate problem owns those). I scope to **land → store → transform → serve + govern.**
 
 **Non-functional requirements:**
 - **Low storage cost at PB scale**, the lakehouse's whole economic premise; storage is the volume line.
@@ -55,7 +55,7 @@ I'll design for the **harder, increasingly-standard case: the lakehouse**, becau
 - **Workload isolation**, a heavy ML scan must not starve the finance dashboard; the decoupled-compute payoff.
 - **Open format / no lock-in**, data readable by any engine, a deliberate strategic constraint.
 - **ACID + schema evolution on the lake**, concurrent writers and changing schemas without corrupting readers.
-- **Rebuildable**, every curated table reproducible from retained raw (idempotent recompute, 13.1).
+- **Rebuildable**, every curated table reproducible from retained raw (idempotent recompute).
 
 **The skew, stated:** this is **write-once-read-many, scan-heavy, concurrency-mixed.** The hard parts are *storage economics, query cost control, workload isolation, and governance*, not write throughput. That shapes every downstream choice.
 
@@ -87,11 +87,11 @@ I'll design for the **harder, increasingly-standard case: the lakehouse**, becau
 > This is the heart of the problem. Three nested decisions: **object storage** (where), **file format** (how each file), **table format** (how files become an ACID, evolvable table), and then warehouse-vs-lakehouse falls out.
 
 **1. Object storage as the substrate (decoupled storage).**
-- *Choice:* **S3 / GCS / ADLS** holds every byte, one copy, cheap, durable (11 nines), infinitely scalable, tier-able (3.11). Compute is separate and elastic.
-- *Rejected, coupled storage+compute (classic Hadoop/HDFS or a warehouse that owns its disks):* you scale the two together and pay for an always-on cluster sized to peak; decoupling is the entire modern premise (13.3).
+- *Choice:* **S3 / GCS / ADLS** holds every byte, one copy, cheap, durable (11 nines), infinitely scalable, tier-able. Compute is separate and elastic.
+- *Rejected, coupled storage+compute (classic Hadoop/HDFS or a warehouse that owns its disks):* you scale the two together and pay for an always-on cluster sized to peak; decoupling is the entire modern premise.
 
 **2. File format: columnar Parquet (or ORC).**
-- *Choice:* **Parquet**, columnar, compressed, with per-block min/max statistics that enable pruning (13.2). Reads touch only the columns and row-groups a query needs.
+- *Choice:* **Parquet**, columnar, compressed, with per-block min/max statistics that enable pruning. Reads touch only the columns and row-groups a query needs.
 - *Rejected, row formats (CSV/JSON/Avro) for the query layer:* they force full-row reads and compress poorly; fine as a landing/interchange format, wrong as the analytical store.
 
 **3. Table format: an open table format (Iceberg / Delta Lake / Hudi), the decision that makes a lake a lakehouse.**
@@ -100,7 +100,7 @@ I'll design for the **harder, increasingly-standard case: the lakehouse**, becau
 - *Rejected, raw Parquet directories:* you reinvent transactions and metadata badly (the "hive table" era's pain). *Rejected, proprietary warehouse storage:* it gives all this turnkey but **locks the data inside one vendor's engine**, so your ML/Spark workloads can't read it without export, and you pay warehouse storage prices at PB scale. The open table format is what lets **one copy serve every engine.**
 
 **4. Catalog: a central metastore.**
-- *Choice:* a **catalog** (Iceberg REST catalog / Polaris, Unity Catalog, AWS Glue) tracks table metadata, schemas, and snapshots, and is the natural **governance and access-control chokepoint** (13.10).
+- *Choice:* a **catalog** (Iceberg REST catalog / Polaris, Unity Catalog, AWS Glue) tracks table metadata, schemas, and snapshots, and is the natural **governance and access-control chokepoint**.
 - *Rejected, no catalog / per-engine metadata:* engines disagree about what tables exist and who may read them; governance has nowhere to live.
 
 **The warehouse-vs-lakehouse resolution:** the managed warehouse bundles all four layers into one proprietary product (simplest, governed, lock-in, pricier at scale). The **lakehouse** assembles them from open parts (object storage + Parquet + Iceberg/Delta + a catalog), more assembly, but lowest cost, no lock-in, and **one copy for BI and ML.** I choose the lakehouse for this scale-and-ML profile and name the warehouse as the right call for a smaller, BI-only, ops-light shop.
@@ -114,14 +114,14 @@ I'll design for the **harder, increasingly-standard case: the lakehouse**, becau
 ```mermaid
 flowchart TB
     subgraph SRC["Sources"]
-      CDC["OLTP via CDC (14.3)"]
+      CDC["OLTP via CDC"]
       EVT["Event streams"]
       EXT["SaaS / file extracts"]
     end
-    SRC --> LAND["Ingestion / load (13.6)"]
+    SRC --> LAND["Ingestion / load"]
     LAND --> BRONZE[("Bronze<br/>raw, append-only<br/>retained = replay source")]
     BRONZE --> SILVER[("Silver<br/>cleaned, conformed, deduped")]
-    SILVER --> GOLD[("Gold<br/>business marts, aggregates<br/>dimensional (13.8)")]
+    SILVER --> GOLD[("Gold<br/>business marts, aggregates<br/>dimensional")]
 
     OBJ["Object storage (S3/GCS) · Parquet files · Iceberg/Delta table format"]
     OBJ -.holds.- BRONZE
@@ -132,7 +132,7 @@ flowchart TB
     SILVER --> ML["ML / data science (Spark, direct file read)"]
     GOLD --> RETL["Reverse-ETL to ops systems"]
 
-    CAT["Catalog + governance + lineage (13.10)"]
+    CAT["Catalog + governance + lineage"]
     CAT -.governs.- BRONZE
     CAT -.governs.- SILVER
     CAT -.governs.- GOLD
@@ -144,9 +144,9 @@ flowchart TB
     style CAT fill:#2d6cb5,color:#fff
 ```
 
-**Happy path, compressed:** data lands from CDC/events/extracts into **bronze**, raw, append-only, schema-on-read, *kept forever-ish* as the replay source. A scheduled transform (Spark/dbt, 13.4/13.8) cleans, dedups, types, and conforms bronze into **silver** (the trustworthy, query-ready base tables). Business transforms roll silver into **gold**, the dimensional marts and aggregates BI consumes (13.8). All three layers are **Iceberg/Delta tables on Parquet in object storage**, one physical copy; the layers are logical refinements, not separate systems. **Consumers fan out from one store:** BI/SQL compute reads gold; ML/data-science reads silver (or bronze) directly as files, no export; reverse-ETL pushes gold metrics back to operational tools. The **catalog** governs and tracks lineage across every layer.
+**Happy path, compressed:** data lands from CDC/events/extracts into **bronze**, raw, append-only, schema-on-read, *kept forever-ish* as the replay source. A scheduled transform (Spark/dbt, 13.4/13.8) cleans, dedups, types, and conforms bronze into **silver** (the trustworthy, query-ready base tables). Business transforms roll silver into **gold**, the dimensional marts and aggregates BI consumes. All three layers are **Iceberg/Delta tables on Parquet in object storage**, one physical copy; the layers are logical refinements, not separate systems. **Consumers fan out from one store:** BI/SQL compute reads gold; ML/data-science reads silver (or bronze) directly as files, no export; reverse-ETL pushes gold metrics back to operational tools. The **catalog** governs and tracks lineage across every layer.
 
-**The shape to notice:** the load-bearing walls are (1) **decoupled storage/compute**, one copy in object storage, many independent compute pools, and (2) **the medallion refinement**, raw is retained so everything downstream is rebuildable. This is a *projection that's continuously refined and always replayable* (13.1), not a monolithic database.
+**The shape to notice:** the load-bearing walls are (1) **decoupled storage/compute**, one copy in object storage, many independent compute pools, and (2) **the medallion refinement**, raw is retained so everything downstream is rebuildable. This is a *projection that's continuously refined and always replayable*, not a monolithic database.
 
 ---
 
@@ -181,10 +181,10 @@ POST /load   { source, dataset, files:[...], schema_ref, load_id }
 
 **Design notes (each with its rejected alternative):**
 - **Plain SQL is the query API**, the same query runs on any engine because the data is open. *Rejected: an engine-proprietary API*, which re-locks the data you chose an open format to free.
-- **`MERGE`/upsert is an atomic, snapshot-isolated table-format operation**, this is how CDC changes (14.3) apply to silver without readers seeing half-written state. *Rejected: rewrite-the-partition or delete-then-insert on raw Parquet*, which has no isolation and corrupts concurrent reads.
+- **`MERGE`/upsert is an atomic, snapshot-isolated table-format operation**, this is how CDC changes apply to silver without readers seeing half-written state. *Rejected: rewrite-the-partition or delete-then-insert on raw Parquet*, which has no isolation and corrupts concurrent reads.
 - **Time travel** (`AS OF`) makes audits and reproducible ML training trivial, train on exactly the snapshot you can name later. *Rejected: manual dated copies of tables*, expensive and error-prone.
 - **Schema evolution is metadata-only** (add/rename/reorder columns without rewriting files). *Rejected: rewriting the whole table on every schema change*, prohibitive at PB scale.
-- **Loads are idempotent on `load_id`**, re-running a failed load doesn't double-count, the rebuildability invariant (13.1, 9.7).
+- **Loads are idempotent on `load_id`**, re-running a failed load doesn't double-count, the rebuildability invariant.
 
 ---
 
@@ -195,11 +195,11 @@ POST /load   { source, dataset, files:[...], schema_ref, load_id }
 **Medallion layers (logical refinement on one copy):**
 - **Bronze**, raw, append-only, source-faithful, minimal schema. *Retained as the replay source*, the whole platform's rebuildability rests here.
 - **Silver**, cleaned, typed, deduped, conformed (consistent keys, timezones, currencies). The trustworthy base; most ML reads here.
-- **Gold**, business-level: **dimensional models** (star schema, conformed dimensions, SCDs, 13.8) and pre-aggregated marts BI reads. Denormalized for scan, not normalized for writes.
+- **Gold**, business-level: **dimensional models** (star schema, conformed dimensions, SCDs) and pre-aggregated marts BI reads. Denormalized for scan, not normalized for writes.
 
 **Physical layout (the scan-cost lever, the most consequential modeling choice):**
 - **Partition** large tables by a low-cardinality, frequently-filtered key, almost always **date** (`day`), so time-bounded queries prune to a few partitions. *Rejected: partition by a high-cardinality key (user_id)*, which explodes into millions of tiny partitions (the small-files problem) and prunes nothing for time queries.
-- **Cluster / sort / Z-order** within partitions on the next-most-common filter (e.g. `region`, `customer_id`) so row-group min/max stats skip irrelevant blocks (13.2). This is what turns a multi-GB partition scan into a few-hundred-MB read.
+- **Cluster / sort / Z-order** within partitions on the next-most-common filter (e.g. `region`, `customer_id`) so row-group min/max stats skip irrelevant blocks. This is what turns a multi-GB partition scan into a few-hundred-MB read.
 - **Compaction**, periodically rewrite many small files into fewer large ones (the table format manages this), because **the small-files problem**, thousands of tiny Parquet files, destroys scan performance via per-file metadata and I/O overhead. *Rejected: never compacting*, which is the single most common lakehouse performance failure.
 
 <details>
@@ -224,7 +224,7 @@ POST /load   { source, dataset, files:[...], schema_ref, load_id }
 
 **Bottleneck 1, runaway scan cost (the cardinal money risk).**
 An analyst runs `SELECT * ... WHERE` with no partition filter and scans a petabyte; the bill spikes.
-*Fix:* **partitioning + clustering so queries prune**, plus **guardrails**, per-query bytes-scanned limits, cost attribution per team, and `SELECT *` discouraged in BI tools (13.11). *Rejected: a bigger cluster*, it makes the wrong-shaped query *faster* and *more expensive*, not cheaper. The fix is always "scan less," never "scan harder."
+*Fix:* **partitioning + clustering so queries prune**, plus **guardrails**, per-query bytes-scanned limits, cost attribution per team, and `SELECT *` discouraged in BI tools. *Rejected: a bigger cluster*, it makes the wrong-shaped query *faster* and *more expensive*, not cheaper. The fix is always "scan less," never "scan harder."
 
 **Bottleneck 2, the small-files problem.**
 Frequent micro-loads (CDC, streaming) litter the table with tiny files; query planning and scans crawl.
@@ -240,7 +240,7 @@ A heavy ML scan or a runaway transform starves interactive BI.
 
 **Bottleneck 5, metadata and catalog scaling / governance.**
 Thousands of tables, millions of files, many teams, who can read PII, what's authoritative, where did this number come from?
-*Fix:* a **central catalog** as the single source of table truth, access-control chokepoint, and lineage anchor (13.10). *Rejected: tribal knowledge + per-engine config*, which fails audit and breaks discovery at scale.
+*Fix:* a **central catalog** as the single source of table truth, access-control chokepoint, and lineage anchor. *Rejected: tribal knowledge + per-engine config*, which fails audit and breaks discovery at scale.
 
 **Closing re-check:** cost is controlled by layout + guardrails; small-files by compaction; safe updates by the table format; isolation by separate pools; governance by the catalog. The store is cheap, open, governed, and rebuildable.
 
@@ -259,7 +259,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 
 **Hardest trade-offs to defend:**
 - **Lakehouse assembly vs warehouse turnkey.** You take on more moving parts (catalog, compaction, file layout) to win cost and openness; defending *why that complexity is worth it for this scale* is the senior tell.
-- **One copy, many engines vs purpose-built stores.** The lakehouse serves BI and ML adequately from one copy; a truly sub-second user-facing query still wants a *separate* real-time OLAP store (14.2), don't force the lakehouse to be that.
+- **One copy, many engines vs purpose-built stores.** The lakehouse serves BI and ML adequately from one copy; a truly sub-second user-facing query still wants a *separate* real-time OLAP store, don't force the lakehouse to be that.
 - **Open-format bet.** Betting on Iceberg/Delta is betting the ecosystem stays open and interoperable; the upside is no lock-in, the risk is format/community churn.
 
 **Where I'd delegate (the explicit Director move):**
@@ -267,7 +267,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 - **Warehouse-vs-lakehouse cost model:** *"I want the crossover modeled, our PB storage + scan profile vs a managed warehouse's all-in price; my prior is the lakehouse past our current volume, and I'll see it in the numbers."*
 - **Compaction / CoW-vs-MoR tuning:** *"Per-table, owned by the platform team against each table's read/write ratio; I own the policy that every streaming table has a compaction schedule."* What I keep, **decoupled storage/compute, open table format, medallion + retained raw, and scan-cost-by-layout**, is the altitude.
 
-**Handoff:** this store is the *batch/curated* half of the platform; the **sub-second, user-facing** read path is a separate real-time OLAP store (14.2), and the **reliable ingestion** that feeds bronze is the CDC/streaming-ETL problem (14.3).
+**Handoff:** this store is the *batch/curated* half of the platform; the **sub-second, user-facing** read path is a separate real-time OLAP store, and the **reliable ingestion** that feeds bronze is the CDC/streaming-ETL problem.
 
 ---
 
@@ -287,7 +287,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 - **"Warehouse or lakehouse, and why?"**, *Strong:* separates storage from compute first, then chooses on scale/workload/lock-in, lakehouse for PB + ML + openness, warehouse for BI-first/ops-light, and knows they're converging (managed engines over Iceberg). *Red flag:* names a vendor with no trade-off, or thinks "lakehouse" is just a buzzword for "data lake."
 - **"What makes a data *lake* safe to query like a warehouse?"**, *Strong:* the **open table format** (Iceberg/Delta), ACID commits, snapshot isolation, schema/partition evolution, time travel, over open Parquet; raw directories can't do this. *Red flag:* "it's just Parquet on S3", missing the table-format layer entirely.
 - **"This query costs \$40 every time it runs. Fix it."**, *Strong:* cut bytes scanned, partition by day, cluster on the filter key, project fewer columns, pre-aggregate to a gold mart; never "bigger cluster." Quantifies the scan reduction. *Red flag:* reaches for more compute or a cache without addressing layout.
-- **"Why keep the raw bronze layer if you've got clean silver/gold?"**, *Strong:* rebuildability, retained raw + idempotent transforms means you can fix a logic bug, evolve a schema, or backfill by re-running, not by panicking (13.1, 9.7). *Red flag:* loads straight to curated tables and can't recover from a transform bug.
+- **"Why keep the raw bronze layer if you've got clean silver/gold?"**, *Strong:* rebuildability, retained raw + idempotent transforms means you can fix a logic bug, evolve a schema, or backfill by re-running, not by panicking. *Red flag:* loads straight to curated tables and can't recover from a transform bug.
 - **"How do you stop one team's ML job from taking down everyone's dashboards?"**, *Strong:* **separate compute pools** on one data copy, the decoupling payoff; size each to its workload. *Red flag:* one shared cluster everyone contends for, the pre-decoupling failure.
 
 ---
@@ -305,7 +305,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 ## Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through how data gets from a production Postgres table to a finance dashboard.**
-> *Model:* CDC (14.3) streams Postgres row changes into **bronze** as raw, append-only, retained, idempotent on a load id. A scheduled transform (Spark/dbt) applies those changes with an atomic `MERGE` into a **silver** `customers`/`orders` table, snapshot-isolated so analysts never see half-applied state, cleaning types, timezones, and dedup along the way. Business logic rolls silver into a **gold** `finance.revenue` dimensional mart, partitioned by day, clustered by region. The BI tool queries gold over a right-sized compute pool, pruning to the requested days so it scans MBs. Everything is Iceberg/Delta on Parquet in object storage, one copy; the catalog governs access and records lineage so finance can trace the number to its source. If a transform bug is found, I re-run from retained bronze, no data loss.
+> *Model:* CDC streams Postgres row changes into **bronze** as raw, append-only, retained, idempotent on a load id. A scheduled transform (Spark/dbt) applies those changes with an atomic `MERGE` into a **silver** `customers`/`orders` table, snapshot-isolated so analysts never see half-applied state, cleaning types, timezones, and dedup along the way. Business logic rolls silver into a **gold** `finance.revenue` dimensional mart, partitioned by day, clustered by region. The BI tool queries gold over a right-sized compute pool, pruning to the requested days so it scans MBs. Everything is Iceberg/Delta on Parquet in object storage, one copy; the catalog governs access and records lineage so finance can trace the number to its source. If a transform bug is found, I re-run from retained bronze, no data loss.
 
 **Q2. Snowflake is turnkey and great. Justify the extra complexity of a lakehouse.**
 > *Model:* At moderate scale and BI-first, I'd *use* Snowflake, the turnkey governance and zero assembly are worth it. The lakehouse earns its complexity at *this* profile: PB-scale storage where open object storage + tiering is multiples cheaper than warehouse storage; **ML/data science that must read the same data as files** without a costly export; and a strategic mandate to avoid lock-in. Crucially the choice is converging, Snowflake and BigQuery now query external Iceberg tables, so I can keep data in open lakehouse storage and still point a managed engine at it, getting warehouse ergonomics on open, cheap, ML-readable data. The complexity (catalog, compaction, layout) is real, and it's the price of cost + openness + one-copy-for-ML at scale. Below that scale, I wouldn't pay it.
@@ -314,7 +314,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 > *Model:* The small-files problem: frequent micro-commits each write tiny Parquet files, and query planning must open every file's footer and schedule a task per file, so I/O and metadata overhead dominate. Fixes: schedule **compaction** (`OPTIMIZE`) to coalesce into ~100 MB–1 GB files; use **merge-on-read** for the write-heavy streaming table so writes stay cheap, with periodic compaction to keep reads fast; and tune ingestion to buffer toward larger files. The table format manages this safely (compaction is an atomic commit). It's the most common lakehouse performance failure, and the fix is operational hygiene, not a bigger cluster.
 
 **Q4. How do you handle a GDPR "delete this user's data" request across a petabyte lake?**
-> *Model:* Raw Parquet can't delete a row; the **table format can**. A `DELETE FROM ... WHERE user_id = ?` (or a `MERGE`) is an atomic, snapshot-isolated operation, merge-on-read writes delete files merged at read time, then compaction physically removes the data. I'd also ensure the data is **partitioned/clustered** so the delete touches few files, not the whole table, and use **lineage** (13.10) to find every table derived from that user's data (bronze, silver, gold) and propagate the deletion. Time-travel snapshots must be expired past the compliance window so the deleted data doesn't linger in old snapshots, a real gotcha. This is exactly the kind of update raw-file lakes can't do and the table format makes tractable.
+> *Model:* Raw Parquet can't delete a row; the **table format can**. A `DELETE FROM ... WHERE user_id = ?` (or a `MERGE`) is an atomic, snapshot-isolated operation, merge-on-read writes delete files merged at read time, then compaction physically removes the data. I'd also ensure the data is **partitioned/clustered** so the delete touches few files, not the whole table, and use **lineage** to find every table derived from that user's data (bronze, silver, gold) and propagate the deletion. Time-travel snapshots must be expired past the compliance window so the deleted data doesn't linger in old snapshots, a real gotcha. This is exactly the kind of update raw-file lakes can't do and the table format makes tractable.
 
 **Q5. What does this platform cost, and what would you delegate?**
 > *Model:* Two bills: **storage** (~PB on object storage, controlled by tiering cold partitions, on the order of tens of thousands/month, not the naive all-hot figure) and **compute** (dominated by **bytes scanned**, controlled by partitioning/clustering/pre-aggregation, the difference between \$600k/mo naive and single-digit-thousands pruned). I own the *policies*, every large table partitioned and compaction-scheduled, per-team cost attribution, query guardrails. I delegate, with priors, the **table-format bake-off** (Iceberg unless Databricks-centric), the **warehouse-vs-lakehouse crossover model** (prior: lakehouse past our volume), and **per-table CoW/MoR + compaction tuning** (platform team). What I keep is the architecture, decoupled storage/compute, open table format, medallion + retained raw, and scan-cost-by-layout.
@@ -328,7 +328,7 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 - **Cost is two decoupled bills: storage (tier cold data) and compute (bytes scanned).** The compute lever is **layout**, partitioning, clustering/Z-order, compaction, pre-aggregation, not bigger clusters or caches. Quantify the scan; an un-pruned PB query is a four-figure mistake.
 - **Warehouse vs lakehouse is a real, converging trade:** managed for BI-first/ops-light/time-to-value, lakehouse for PB-scale/BI+ML/no-lock-in, and managed engines over external Iceberg are the pragmatic end-state. Delegate the format and crossover with stated priors.
 
-> **Spaced-repetition recap:** "Design the analytical store" = **separate the books from the readers** (decoupled storage/compute), then choose **managed warehouse** (turnkey, governed, lock-in, BI-first) vs **open lakehouse** (object storage + Parquet + **Iceberg/Delta table format** + catalog; one copy for BI&ML, cheapest at scale, no lock-in). The **table format** brings ACID/snapshots/schema-evolution/time-travel that make a lake queryable like a warehouse. Refine through **medallion** (bronze raw-retained → silver clean → gold marts), **ELT** not ETL, everything rebuildable from raw. **Cost = storage (tier cold) + compute (bytes scanned)**; control scan by **partition + cluster + compaction + pre-aggregate**, never a bigger cluster. Watch the **small-files problem** (compact) and **upserts/deletes** (table-format MERGE, CoW vs MoR). Isolate workloads with **separate compute pools on one copy**. Sub-second user-facing reads are a *separate* store (14.2); reliable ingest is 14.3. Delegate format + crossover + compaction with priors; keep decoupling, open format, medallion, scan-cost-by-layout.
+> **Spaced-repetition recap:** "Design the analytical store" = **separate the books from the readers** (decoupled storage/compute), then choose **managed warehouse** (turnkey, governed, lock-in, BI-first) vs **open lakehouse** (object storage + Parquet + **Iceberg/Delta table format** + catalog; one copy for BI&ML, cheapest at scale, no lock-in). The **table format** brings ACID/snapshots/schema-evolution/time-travel that make a lake queryable like a warehouse. Refine through **medallion** (bronze raw-retained → silver clean → gold marts), **ELT** not ETL, everything rebuildable from raw. **Cost = storage (tier cold) + compute (bytes scanned)**; control scan by **partition + cluster + compaction + pre-aggregate**, never a bigger cluster. Watch the **small-files problem** (compact) and **upserts/deletes** (table-format MERGE, CoW vs MoR). Isolate workloads with **separate compute pools on one copy**. Sub-second user-facing reads are a *separate* store; reliable ingest is 14.3. Delegate format + crossover + compaction with priors; keep decoupling, open format, medallion, scan-cost-by-layout.
 
 ---
 

@@ -6,7 +6,7 @@ sidebar:
 ---
 import StoryCoverageMatrix from '@components/widgets/StoryCoverageMatrix.jsx';
 
-> Lesson 10.2 gave you the instruments. This lesson builds the material they operate on. A Director loop is five or six interviewers, each assigned a different competency, drilling three or four levels deep, the candidate who walks in with a mapped bank of true, quantified stories is calibrated; the one improvising a fresh story per question is not. The portfolio isn't a list of war stories. It's an **instrument**, a small bank chosen so every category the loop scores has coverage, every story holds to L3 under probe, and the *gaps* are visible before the interviewer finds them. Most candidates over-index on three flattering stories and discover live, in the room, that they have nothing for "tell me about a layoff" or "a decision you got wrong." This lesson is how you never get caught empty.
+> The frameworks lesson gave you the instruments. This lesson builds the material they operate on. A Director loop is five or six interviewers, each assigned a different competency, drilling three or four levels deep, the candidate who walks in with a mapped bank of true, quantified stories is calibrated; the one improvising a fresh story per question is not. The portfolio isn't a list of war stories. It's an **instrument**, a small bank chosen so every category the loop scores has coverage, every story holds to L3 under probe, and the *gaps* are visible before the interviewer finds them. Most candidates over-index on three flattering stories and discover live, in the room, that they have nothing for "tell me about a layoff" or "a decision you got wrong." This lesson is how you never get caught empty.
 
 ### Learning objectives
 - Build a **12-15 story bank** as a coverage matrix, stories down one axis, the nine categories and your target company's values across the other, and read the matrix for gaps before a loop, not during one.
@@ -24,8 +24,8 @@ A wardrobe, not an outfit. The mistake is preparing for a behavioral loop the wa
 
 A story is not a memory, it's a **structured, reusable asset** with four required properties:
 
-1. **A real, dated event you owned**, your decision, not your team's or your VP's. The probe (Lesson 10.2) is built to find the seam between what you did and what you're claiming.
-2. **A quantified spine**, team size, dollars, percentage, timeline, a before/after metric. A story with no number is the same red flag "it scales" is in a system-design round (Lesson 10.1's house rule).
+1. **A real, dated event you owned**, your decision, not your team's or your VP's. The probe is built to find the seam between what you did and what you're claiming.
+2. **A quantified spine**, team size, dollars, percentage, timeline, a before/after metric. A story with no number is the same red flag "it scales" is in a system-design round (the house rule).
 3. **A rejected alternative**, the option you considered and killed, with the reason. No rejected option means no decision was made, just a description.
 4. **A category tag set**, the two or three competencies this story serves, so you know what you're reaching for when a question fires.
 
@@ -35,14 +35,14 @@ The multiplier is property 4. Twelve stories that each serve one category cover 
 
 ## The mandatory slots: what the loop specifically checks
 
-The nine categories (Lessons 10.4-10.12) are the columns. But Director loops surface a sharper list: **eight specific story types interviewers go looking for**, and the absence of any one is itself a finding, because the empty slot is exactly the question a senior interviewer reaches for, where rehearsal runs out.
+The nine categories are the columns. But Director loops surface a sharper list: **eight specific story types interviewers go looking for**, and the absence of any one is itself a finding, because the empty slot is exactly the question a senior interviewer reaches for, where rehearsal runs out.
 
 | # | Mandatory slot | Why the loop checks it | The failure if you're empty |
 |---|---|---|---|
 | 1 | **Up-chart disagreement you WON** | Backbone, you'll challenge a VP/CXO with data, not just your reports | All your conflicts are down-chart; reads as someone who only wins by authority |
 | 2 | **One you LOST and committed to (with a tripwire)** | Disagree-and-commit, the senior move, not obedience | "I've never lost one" reads as either junior or unable to be moved by evidence |
 | 3 | **A termination you ran** | Decisiveness-with-dignity; you've done the hard thing personally | Never having fired anyone at this level reads as conflict-avoidant or inexperienced |
-| 4 | **A layoff or hard constraint you owned** | You own decisions made above you and rebuild after | "Finance gave me a list", distancing, is the signature efficiency-era fail (10.11) |
+| 4 | **A layoff or hard constraint you owned** | You own decisions made above you and rebuild after | "Finance gave me a list", distancing, is the signature efficiency-era fail |
 | 5 | **A consequential decision you got WRONG** | Self-awareness and decision-process quality, disqualifying dimensions at L7+ if weak | A flawless track record reads as fabricated or unreflective |
 | 6 | **An incident you COMMANDED** | You coordinate under fire, you don't type the fix, Director, not senior IC | Hands-on-fixer-with-no-command-structure reads a level too low |
 | 7 | **A manager you grew AND a transition that FAILED** | You build org capability, and you're honest that not every bet lands | "Every manager I grew succeeded" reads as a thin sample or a rewritten history |
@@ -85,13 +85,13 @@ The portfolio's efficiency comes from one story serving multiple columns. Here's
 
 **The raw event (the shared spine):** Inherited a monolith on a single Postgres instance, 40 engineers across 5 teams blocked, p99 write latency at 800ms and climbing. I drove a migration to a sharded setup over two quarters; a peer Director who owned the shared data-access layer didn't want to prioritize it; mid-migration I made a sharding-key call I had to partially reverse. We landed it: p99 to 120ms, the 5 teams unblocked, zero data-loss incidents.
 
-> **Told for Execution (10.9), delivery under constraint:**
+> **Told for Execution, delivery under constraint:**
 > "Forty engineers across five teams blocked behind one Postgres instance, p99 writes at 800ms with a hard ceiling two quarters out. I owned the migration. The decision that mattered was sequencing: I rejected a big-bang cutover, too much blast radius on a system five teams depend on, for a strangler pattern, shard by shard behind a feature flag, so any shard could roll back independently. The cost I named up front: two quarters instead of one, and holding that line against pressure to rush. We landed it, 800ms to 120ms, zero data-loss, all five teams unblocked. What I'd do differently: I sequenced the riskiest shard third, not first, so we carried uncertainty longer than needed, now I front-load the scariest slice to fail fast."
 
-> **Told for Influence (10.10), cross-org without authority:**
+> **Told for Influence, cross-org without authority:**
 > "The migration needed the shared data-access layer changed, owned by a peer Director whose roadmap had no room for it, and I couldn't order it. So I didn't ask for headcount; I brought him the cost of *not* doing it: three of the five blocked teams were *his*, with the data to prove it, and I offered to lend two of my engineers to do the work inside his standards, not around them. I made it cheaper to say yes than no. The alternative I rejected, escalating to our shared VP, would've worked once and cost me the relationship for every future dependency. He prioritized it; we shipped together. The lesson: cross-org influence is making your problem visibly *their* win, not winning the escalation."
 
-> **Told for the wrong-call slot (10.9), a decision you got wrong:**
+> **Told for the wrong-call slot, a decision you got wrong:**
 > "Mid-migration I picked a sharding key, tenant_id, that looked clean on paper. By the third shard, the data showed our largest tenant was 40% of the load on one shard: I'd built a hot shard. I caught it at week six, not at design time, because I hadn't pressure-tested the key against our real load distribution. I reversed it, composite key, re-migrated two completed shards, cost about three weeks. The process gap was the lesson: a near-one-way-door call with no skew review and no named skeptic. Now every partitioning decision in my org gets a written skew analysis and a devil's advocate, which caught a bad key on a different project six months later."
 
 Three categories, one event, and crucially **the numbers stay constant**, 40 engineers, 800ms to 120ms, two quarters, three weeks lost. You're not telling three stories; you're pulling three threads from one. That's how twelve stories cover thirty cells, and why probe-resistance compounds: you've rehearsed the same dates and figures from three angles, so they're unshakeable at L3.
@@ -112,9 +112,9 @@ The trade-off: an honestly-scoped portfolio looks *less* heroic than an inflated
 
 ## 2015 vs 2026: the calibration
 
-What a portfolio must contain shifted with the environment (the six shifts are Lesson 10.1's spine):
+What a portfolio must contain shifted with the environment (the six shifts are this track's spine):
 
-- **The growth-era story is now a liability if it's all you have.** "I scaled my org from 10 to 60" was a 2015 flex; in 2026, with no efficiency angle, it codes as ZIRP empire-building. The refresh: pair it with output-per-dollar, or lead with a *more-with-less* story (10.11). A bank stale since the growth era is the most common dated-prep tell.
+- **The growth-era story is now a liability if it's all you have.** "I scaled my org from 10 to 60" was a 2015 flex; in 2026, with no efficiency angle, it codes as ZIRP empire-building. The refresh: pair it with output-per-dollar, or lead with a *more-with-less* story. A bank stale since the growth era is the most common dated-prep tell.
 - **The mandatory slots themselves changed.** A 2015 loop rarely demanded a layoff or AI-adoption story; in 2026 both are near-assumed, and the termination/wrong-call slots are checked harder because performance management tightened and self-awareness became a disqualifying dimension at L7+.
 - **Numbers moved from polish to gate.** A clean story with no figure used to pass; 2025-26 rubrics treat the missing number as a red flag. Every row needs a defensible metric.
 - **The probe assumes AI-drafted prep.** Interviewers now assume your stories were polished, possibly with an LLM, so the bank's value isn't the polish, it's the *truth that survives drilling*. A generated-sounding story with no L3 floor is worse than no story.
@@ -160,4 +160,4 @@ What a portfolio must contain shifted with the environment (the six shifts are L
 
 ---
 
-*End of Lesson 10.3. You now have the instruments (10.2) and the material they operate on (10.3). The remaining lessons go category by category, 10.4 leadership philosophy first, and every model answer in them is a portfolio entry you'll tag back into this matrix. This lesson pairs with a live working session to extract your real stories: pull your actual layoff, termination, lost-argument, and wrong-call events onto the matrix, harden each to L3, and find the second and third thread in your workhorses, because a portfolio of true, quantified, probe-tested stories is the highest-leverage piece of behavioral-loop prep, and it can only be built from your own events.*
+*End of Lesson 10.3. You now have the instruments and the material they operate on. The remaining lessons go category by category, leadership philosophy first, and every model answer in them is a portfolio entry you'll tag back into this matrix. This lesson pairs with a live working session to extract your real stories: pull your actual layoff, termination, lost-argument, and wrong-call events onto the matrix, harden each to L3, and find the second and third thread in your workhorses, because a portfolio of true, quantified, probe-tested stories is the highest-leverage piece of behavioral-loop prep, and it can only be built from your own events.*

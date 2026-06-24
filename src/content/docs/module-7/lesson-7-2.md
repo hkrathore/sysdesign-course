@@ -44,7 +44,7 @@ An elevator is a **delivery van on a one-dimensional road**. Passengers are parc
 
 **Up-peak demand (the design driver):** industry sizing rule, morning peak ≈ **12% of population in 5 minutes** → `3,000 × 0.12 = 360 people / 300 s ≈ 1.2 arrivals/s`.
 
-**One car's capacity:** a round trip ≈ `30 floors × 2 s × 2 directions + ~8 stops × 10 s ≈ 200 s`, so one car moves `15 people × (300/200) trips ≈ 22 people per 5 min` against 360 demanded. **One car serves ~6% of the peak, the bank of `360 / 22 ≈ 8` cars is load-bearing.** (By Little's law, Lesson 2.9, as arrival rate nears service rate, lobby queue and wait blow up nonlinearly; size the bank with headroom.)
+**One car's capacity:** a round trip ≈ `30 floors × 2 s × 2 directions + ~8 stops × 10 s ≈ 200 s`, so one car moves `15 people × (300/200) trips ≈ 22 people per 5 min` against 360 demanded. **One car serves ~6% of the peak, the bank of `360 / 22 ≈ 8` cars is load-bearing.** (By Little's law, as arrival rate nears service rate, lobby queue and wait blow up nonlinearly; size the bank with headroom.)
 
 **Controller compute (the punchline):** peak event rate ≈ 1.2 hall calls/s + 8 cars × a few state transitions/s ≈ **tens of events per second**. A single-threaded event loop at 10-60 Hz has **~10,000× headroom**. Estimation just made the architecture call: **one controller process, one thread, an event queue, no locks, nothing distributed** (if it ever saturated: shard by *bank*, which shares no state, not by adding locks). Saying "the math says concurrency machinery is unnecessary; I'm spending my time on dispatch" is reasoning in numbers at Director altitude.
 
@@ -55,8 +55,8 @@ An elevator is a **delivery van on a one-dimensional road**. Passengers are parc
 > LLD adaptation: not "which database" but **"what state exists, and what is its source of truth."** The answer is unusual and worth stating: almost nothing deserves durability.
 
 - **Car state** (floor, direction, doors, load), **in-memory**. In the real-hardware framing the **shaft encoder is the truth**; on restart you re-read sensors, not a database.
-- **Request queues** (pending hall and car calls), **in-memory**. The observation that replaces a durability design: **the system's "clients" retry idempotently, a person whose button went dark presses it again.** A crashed controller recovers its workload from humans in seconds. *Rejected: a durable queue (Lesson 3.8) for calls*, ~10 s of saved re-presses bought with recovery-ordering complexity, engineering a guarantee the domain gives you free.
-- **Telemetry** (trips, waits, door cycles, faults), append-only to a log/metrics pipeline (Lessons 3.13-3.14): dispatch tuning and maintenance run on it. The *only* durable state, and it's analytical.
+- **Request queues** (pending hall and car calls), **in-memory**. The observation that replaces a durability design: **the system's "clients" retry idempotently, a person whose button went dark presses it again.** A crashed controller recovers its workload from humans in seconds. *Rejected: a durable queue for calls*, ~10 s of saved re-presses bought with recovery-ordering complexity, engineering a guarantee the domain gives you free.
+- **Telemetry** (trips, waits, door cycles, faults), append-only to a log/metrics pipeline: dispatch tuning and maintenance run on it. The *only* durable state, and it's analytical.
 
 One sentence to the interviewer: *"Operational state is in-memory and sensor-backed; durability is only for telemetry, the building's users are my retry mechanism."* A storage answer in 20 seconds, leaving time for dispatch.
 
@@ -183,7 +183,7 @@ Edge cases the sketch encodes: reversing direction is *only* allowed when the cu
 
 **Approach 1, cost-function dispatch (the workhorse).** The bank scores every car against a new hall call with an **estimated time to serve**: `ETA = travel distance × 2 s + intermediate stops × 10 s + penalties for direction mismatch and near-full`, assigning the min-cost car. The dwell term dominates: a car 10 floors away with 0 stops (ETA 20 s) **beats** a car 2 floors away with 3 stops (ETA 34 s), "nearest car wins" is wrong on the same arithmetic that priced our round trips. An aging term on unassigned calls restores no-starvation. *Trade-off:* greedy per-call assignment isn't globally optimal, accepted; lookahead gains are small against arrival uncertainty. **My default, and I'd say so.**
 
-**Approach 2, zoning.** Partition floors across cars (cars 1-4 serve 1-15; cars 5-8 serve 16-30), partitioning the keyspace, the Lesson 2.5 move, with the same failure: **hot zones**. Up-peak makes the lobby everyone's zone; a dead car orphans its zone. *Use when* traffic is structurally segregated (sky-lobby towers, hotel service cars). *Rejected as default:* static partitions lose to a cost function that re-decides per call.
+**Approach 2, zoning.** Partition floors across cars (cars 1-4 serve 1-15; cars 5-8 serve 16-30), partitioning the keyspace, the sharding move, with the same failure: **hot zones**. Up-peak makes the lobby everyone's zone; a dead car orphans its zone. *Use when* traffic is structurally segregated (sky-lobby towers, hotel service cars). *Rejected as default:* static partitions lose to a cost function that re-decides per call.
 
 **Approach 3, destination dispatch (the modern answer, name it to show range).** Riders key their floor *before* boarding; the bank **groups passengers by destination**, cutting stops per trip. Vendor studies (Schindler, Otis) claim **~25-30% up-peak capacity improvement**, on our numbers, the 8-car bank moving ~180 people/5 min gains ~50, or a new building sheds a car or two of core shaft space (shafts are leasable floor area on every floor, a **capex argument**, the kind a Director should reach for). *Trade-offs:* no in-car control, mis-keys stranded, real retrofit cost. *Use when* building new high-rise cores or fixing chronic up-peak pain; overkill at 10 floors.
 
@@ -264,4 +264,4 @@ Convoying fix without a full cost function: stagger idle-parking floors so cars 
 
 ---
 
-*End of Lesson 7.2. No QPS, no shards, the same trade-off discipline applied to one machine's scheduling policy, with starvation playing the role oversell played in 5.13 (the invariant your policy must make impossible) and the bank cost function reprising the 5.14 assignment problem on a 30-floor keyspace.*
+*End of Lesson 7.2. No QPS, no shards, the same trade-off discipline applied to one machine's scheduling policy, with starvation playing the role oversell played in Ticketmaster (the invariant your policy must make impossible) and the bank cost function reprising the assignment problem on a 30-floor keyspace.*

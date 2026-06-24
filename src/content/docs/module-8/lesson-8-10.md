@@ -187,7 +187,7 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 *Red flag:* "That wasn't in scope" with no engagement with the critique.
 
 **"What breaks first at 10×?"**
-*Strong:* Names a specific component with the load at which it saturates in numbers. "The primary Postgres WAL saturates at ~8× current peak (~160K writes/s); I'd shard by tenant, 10× headroom at the cost of cross-tenant queries becoming scatter-gather." References Lessons 2.5-2.6 without re-teaching.
+*Strong:* Names a specific component with the load at which it saturates in numbers. "The primary Postgres WAL saturates at ~8× current peak (~160K writes/s); I'd shard by tenant, 10× headroom at the cost of cross-tenant queries becoming scatter-gather." References the partitioning lesson-2.6 without re-teaching.
 *Red flag:* "We'd scale horizontally", no saturation point, no trade-off.
 
 **"Was this the right investment?"**
@@ -238,4 +238,4 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 ---
 
-*End of Lesson 8.10. The pre-submitted design-doc round tests the same trade-off fluency as the live whiteboard format but with no place to hide: your design is already on record, and the session scores whether your reasoning is legible and self-aware. Cross-references: Lesson 6.1 (capstone rubric, what strong vs weak Director answers look like end-to-end), Lesson 6.2 (self-evaluation against the rubric), Lesson 8.9 (competing proposals, related format for architectural decision-making under social pressure). Next: 8.11.*
+*End of Lesson 8.10. The pre-submitted design-doc round tests the same trade-off fluency as the live whiteboard format but with no place to hide: your design is already on record, and the session scores whether your reasoning is legible and self-aware. Cross-references: The capstone (capstone rubric, what strong vs weak Director answers look like end-to-end), the Director rubric (self-evaluation against the rubric), the competing-proposals lesson (competing proposals, related format for architectural decision-making under social pressure). Next: 8.11.*

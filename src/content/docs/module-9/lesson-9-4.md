@@ -72,7 +72,7 @@ That asymmetry, a tiny strongly-consistent per-auction core, a large eventually-
 `10M bids/day ÷ 86,400 s ≈ 116 bids/s` average; peak 10× → **~1,200 bids/s** globally. Spread across 10M auctions, this is **on average 0.000116 bids/s per auction**, roughly **one bid every ~two hours** per auction in the average case. Even a hot auction during its closing minutes might see **5-20 bids/min**, or < 1 bid/s per auction. This is the critical number: **per-auction write contention is low by design**. A global lock would be absurd; a per-auction serialization point is cheap and correct.
 
 **Fan-out (watcher notifications):**
-`1,200 bids/s × 500 watchers/auction (average, active auctions) × 30% active fraction ≈ 180,000 watcher events/s`. Hot auctions in closing minutes: `20 bids/min × 1,000 watchers ≈ 333 events/s on that one auction`. Total fan-out is comfortably handled by a pub-sub tier (Kafka + WebSocket gateway); the core never touches it. This is the fan-out number that references **Lesson 9.9** connection economics, tens of thousands of persistent WebSocket connections per gateway node.
+`1,200 bids/s × 500 watchers/auction (average, active auctions) × 30% active fraction ≈ 180,000 watcher events/s`. Hot auctions in closing minutes: `20 bids/min × 1,000 watchers ≈ 333 events/s on that one auction`. Total fan-out is comfortably handled by a pub-sub tier (Kafka + WebSocket gateway); the core never touches it. This is the fan-out number that references **the live-comments** connection economics, tens of thousands of persistent WebSocket connections per gateway node.
 
 **Storage:**
 - Auction metadata: `10M auctions × ~1 KB ≈ 10 GB` active; cheap.
@@ -96,11 +96,11 @@ That asymmetry, a tiny strongly-consistent per-auction core, a large eventually-
 - *Rejected, global Redis SETNX lock per auction:* adds a network hop and a lock-timeout dependency; DB row-level atomicity already provides the invariant.
 
 **2. Auction catalog + search (read-heavy, AP).**
-- *Choice:* **Elasticsearch/OpenSearch** (Lesson 3.13) for full-text + faceted search, fronted by Redis cache. Staleness of minutes is invisible.
+- *Choice:* **Elasticsearch/OpenSearch** for full-text + faceted search, fronted by Redis cache. Staleness of minutes is invisible.
 - *Rejected, search off the auction DB:* couples the browse firehose to the CP core.
 
 **3. Watcher notification (eventually consistent, high fan-out).**
-- *Choice:* **Kafka** for bid-event publication; **WebSocket gateway** (Lesson 9.9) for last-mile push. The displayed price is a hint; the CAS is the truth.
+- *Choice:* **Kafka** for bid-event publication; **WebSocket gateway** for last-mile push. The displayed price is a hint; the CAS is the truth.
 - *Rejected, synchronous push from bid-acceptance path:* couples bid p99 to an unbounded watcher count.
 
 ---
@@ -187,7 +187,7 @@ POST /v1/auctions
 **Design notes:**
 - **`Idempotency-Key` on bid placement is mandatory.** A network retry without it places two bids; the second may succeed as the new high bid. The unique key deduplicates server-side.
 - **The `currentPrice` in the 409 response is a Director touch.** The client gets the fresh authoritative price immediately; no follow-up GET that races with another bid.
-- **WebSocket upgrade, not polling.** 1-s polling × 1,000 watchers × 10K hot auctions = 10M reads/s on cache; WebSocket push at the same scale is ~10K fan-out events/s, two orders of magnitude cheaper. See Lesson 9.9.
+- **WebSocket upgrade, not polling.** 1-s polling × 1,000 watchers × 10K hot auctions = 10M reads/s on cache; WebSocket push at the same scale is ~10K fan-out events/s, two orders of magnitude cheaper. See the live-comments lesson.
 - **No separate "get current price" call for bidders**, the 201/409 response carries it.
 
 ---
@@ -284,20 +284,20 @@ Both fail gracefully: the CAS on bid acceptance already checks `close_at > now()
 > Push dimensions, find what breaks, name the trade-off.
 
 **At 10× (100M concurrent auctions, 12K bids/s global):**
-The bid-acceptance core scales horizontally, each `auction_id` shard is independent; add shards. The fan-out tier scales by adding WebSocket gateway nodes and Notification service consumers. The close scheduler scales by partitioning the sorted set by `auction_id % N` across N Redis nodes. Nothing here is qualitatively different; this is the system's natural scale axis. The operational risk at 10× is **shard rebalancing** during growth, plan for consistent hashing across shard nodes (Lesson 2.6) rather than static assignment.
+The bid-acceptance core scales horizontally, each `auction_id` shard is independent; add shards. The fan-out tier scales by adding WebSocket gateway nodes and Notification service consumers. The close scheduler scales by partitioning the sorted set by `auction_id % N` across N Redis nodes. Nothing here is qualitatively different; this is the system's natural scale axis. The operational risk at 10× is **shard rebalancing** during growth, plan for consistent hashing across shard nodes rather than static assignment.
 
 **Flash-sale variant (bounded-counter decrement):**
-A flash sale is not an auction, it is a **fixed inventory sold at a fixed price, first-come-first-served**. The contention shape is Ticketmaster's GA variant: one hot counter per SKU, claimed with a conditional decrement that cannot go below zero: `UPDATE inventory SET qty = qty - 1 WHERE sku_id = ? AND qty > 0`. At extreme concurrency (thousands of requests/s on one SKU), that single row serializes. The fix is a **sharded counter** (Lesson 3.16): split inventory across N shards, decrement a random shard, sum on read. Trade-off: the displayed remaining count is approximate (sum of shards with slight staleness) in exchange for N× write throughput. This is the CAS-on-max/seat-hold/bounded-counter **third face of contention**, name it explicitly as a family.
+A flash sale is not an auction, it is a **fixed inventory sold at a fixed price, first-come-first-served**. The contention shape is Ticketmaster's GA variant: one hot counter per SKU, claimed with a conditional decrement that cannot go below zero: `UPDATE inventory SET qty = qty - 1 WHERE sku_id = ? AND qty > 0`. At extreme concurrency (thousands of requests/s on one SKU), that single row serializes. The fix is a **sharded counter**: split inventory across N shards, decrement a random shard, sum on read. Trade-off: the displayed remaining count is approximate (sum of shards with slight staleness) in exchange for N× write throughput. This is the CAS-on-max/seat-hold/bounded-counter **third face of contention**, name it explicitly as a family.
 
 **The CAS-on-max vs seat-hold contrast (the Director synthesis):**
-Lesson 5.13 (Ticketmaster) uses a seat-hold TTL, a temporary claim that expires, with `AVAILABLE → HELD(ttl) → SOLD`. Auction uses CAS-on-max, no hold, no TTL on the bid; the high bid is simply replaced atomically when outbid, and the auction closes at a point in time. The underlying DB primitive is the same (conditional update, one winner), but the semantic differs: seats require a *temporary exclusive claim* during payment; bids require a *monotonically advancing maximum with no exclusive claim* (anyone can outbid you at any time). Both are serialized at the row level; neither requires an external lock. Name the pair to show pattern recognition across the module.
+Ticketmaster uses a seat-hold TTL, a temporary claim that expires, with `AVAILABLE → HELD(ttl) → SOLD`. Auction uses CAS-on-max, no hold, no TTL on the bid; the high bid is simply replaced atomically when outbid, and the auction closes at a point in time. The underlying DB primitive is the same (conditional update, one winner), but the semantic differs: seats require a *temporary exclusive claim* during payment; bids require a *monotonically advancing maximum with no exclusive claim* (anyone can outbid you at any time). Both are serialized at the row level; neither requires an external lock. Name the pair to show pattern recognition across the module.
 
 **What I'd revisit:** proxy bidding changes the CAS to "advance to `min(proxy_max, current_price + increment)`", a server-side agent; isolate behind the Bid service. Reserve-price adds a status branch in close logic. Multi-item lots flip the CAS to "maintain top-N bids", a separate auction type flag.
 
 **Where I'd delegate:**
 - *Payment/PCI:* "Payments team owns `charge(orderId, amount, paymentToken)`; my prior is delayed capture (authorize at bid win, capture at close) with idempotent retry."
 - *Fraud/shill bidding:* "Trust-and-safety owns detection; my prior is behavioral signals fed to a scoring service that can invalidate bids post-close; I expose a bid-history API."
-- *WebSocket gateway:* "Co-design with infra referencing Lesson 9.9 scale numbers; my prior is managed WebSocket service before bespoke."
+- *WebSocket gateway:* "Co-design with infra referencing the live-comments scale numbers; my prior is managed WebSocket service before bespoke."
 
 ---
 
@@ -323,7 +323,7 @@ Strong signal: CAS and `close_at` extension are one conditional UPDATE statement
 Red flag: "update close_at in a separate call."
 
 **"You have 1,000 watchers on a hot auction. How do you fan out without slowing down bids?"**
-Strong signal: Bid service emits to Kafka and returns 201 immediately; Notification service consumes async, fans out to WebSocket gateway nodes; 1-2 s lag is expected. Watcher count must not appear in bid-acceptance p99. Cost: WebSocket gateway tier dominates, not the auction DB. Reference Lesson 9.9 connection economics.
+Strong signal: Bid service emits to Kafka and returns 201 immediately; Notification service consumes async, fans out to WebSocket gateway nodes; 1-2 s lag is expected. Watcher count must not appear in bid-acceptance p99. Cost: WebSocket gateway tier dominates, not the auction DB. Reference the live-comments connection economics.
 Red flag: synchronous fan-out; or "polling" without quantifying the 10M reads/s amplification.
 
 **"Why not a per-auction distributed lock (Redis SETNX)?"**
@@ -368,14 +368,14 @@ Red flag: sizing a giant database.
 
 ### Key takeaways
 
-1. **Auction is the second face of the contention pattern** (Lesson 5.13 is the first): Ticketmaster uses a TTL-based seat hold (`AVAILABLE → HELD → SOLD`); auction uses CAS-on-max (monotonically advancing `current_price`, no exclusive claim, no TTL on the bid). The DB primitive, conditional update, one winner, is identical; the semantics differ. Name the pair.
+1. **Auction is the second face of the contention pattern** (Ticketmaster is the first): Ticketmaster uses a TTL-based seat hold (`AVAILABLE → HELD → SOLD`); auction uses CAS-on-max (monotonically advancing `current_price`, no exclusive claim, no TTL on the bid). The DB primitive, conditional update, one winner, is identical; the semantics differ. Name the pair.
 2. **Per-auction write rate < 1 bid/s on average.** DB row-level CAS is the correct primitive; a distributed lock (Redis SETNX) adds overhead and a failure domain for an invariant the DB already provides. Directors check the per-row rate before reaching for infrastructure.
 3. **The fan-out tier is where the scale and cost live**, not the auction DB. 180K watcher events/s requires a decoupled Kafka → Notification service → WebSocket gateway path; synchronous fan-out from the bid-acceptance path couples bid p99 to watcher count, immediately fatal under hot closings.
 4. **Anti-sniping extension must be atomic with bid acceptance.** Both the CAS and the `close_at` update belong in one conditional UPDATE statement; a two-step approach creates a crash-between-steps correctness failure.
 5. **Draw the strong/eventual boundary tight:** the auction DB (bid acceptance, auction state) is strongly consistent and small; search, browse, and watcher display are AP. The spend is the WebSocket gateway + Elasticsearch cluster; the auction DB is modest (~1 TB). Delegate payments/PCI and fraud/shill-bidding detection with stated priors.
 
-> **Spaced-repetition recap:** Online Auction = **CAS-on-max**, advance `current_price` only if the new bid is strictly greater, one atomic conditional UPDATE, loser gets 409. Per-auction write rate is < 1 bid/s, DB row-level CAS is sufficient; no distributed lock needed. Fan-out to **thousands of watchers** via async Kafka → WebSocket gateway; never synchronous on the bid path. **Anti-sniping** is a conditional `close_at` extension in the same CAS statement. Close scheduling uses a Redis sorted set (delayed queue) to avoid O(10M) scans. Strong on auction state + bid log; eventual on search, browse, and watcher display. Contrast with Lesson 5.13 (Ticketmaster): seat-hold TTL vs CAS-on-max, same conditional-update primitive, different semantics.
+> **Spaced-repetition recap:** Online Auction = **CAS-on-max**, advance `current_price` only if the new bid is strictly greater, one atomic conditional UPDATE, loser gets 409. Per-auction write rate is < 1 bid/s, DB row-level CAS is sufficient; no distributed lock needed. Fan-out to **thousands of watchers** via async Kafka → WebSocket gateway; never synchronous on the bid path. **Anti-sniping** is a conditional `close_at` extension in the same CAS statement. Close scheduling uses a Redis sorted set (delayed queue) to avoid O(10M) scans. Strong on auction state + bid log; eventual on search, browse, and watcher display. Contrast with Ticketmaster: seat-hold TTL vs CAS-on-max, same conditional-update primitive, different semantics.
 
 ---
 
-*End of Lesson 9.4. The online auction problem is the CAS-on-max complement to Ticketmaster's seat-hold TTL, both are contention problems solved by per-resource conditional writes at the DB layer, differentiated by whether the claim is exclusive-and-temporary (seat hold) or monotonically-advancing-and-open (highest bid). Next: Lesson 9.5 continues the business-domain module.*
+*End of Lesson 9.4. The online auction problem is the CAS-on-max complement to Ticketmaster's seat-hold TTL, both are contention problems solved by per-resource conditional writes at the DB layer, differentiated by whether the claim is exclusive-and-temporary (seat hold) or monotonically-advancing-and-open (highest bid).*

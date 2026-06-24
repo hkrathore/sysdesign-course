@@ -10,14 +10,14 @@ sidebar:
 ### Learning objectives
 - Run an **adapted RESHADED** spine on a resilience strategy: R becomes **RTO/RPO pinned per service tier** (a business sign-off, not an engineering preference), E becomes **cost-delta math**, 2× infra vs revenue-at-risk per hour.
 - Argue the load-bearing tension: **blanket active-active** (~2× spend, conflicts everywhere) vs **tiered DR**, checkout active-active, catalog warm-standby, analytics backup-restore, with the dollar delta stated.
-- Pick a per-tier data strategy with Lessons 2.7-2.8: where to pay cross-region write latency for RPO 0, where to accept seconds of RPO, where conflicts are *avoided* rather than resolved.
+- Pick a per-tier data strategy with CAP and quorum reasoning: where to pay cross-region write latency for RPO 0, where to accept seconds of RPO, where conflicts are *avoided* rather than resolved.
 - Deliver the **"region just died at peak" walkthrough** as a rehearsed script whose only live decision is *declare*.
 - Run the program like a Director: game-day cadence, survivor-region capacity as a budget line, restore-tested backups, delegated depth with priors.
 
 ### Intuition first
 Think of how a city protects its buildings against fire. The hospital has a second fully-staffed operating theater across town, running 24/7, ambulances pre-routed, because an hour of "the hospital is down" kills people. The library has smoke detectors, insurance, and an off-site archive of its catalog, if it burns, you rebuild over months, and that's *fine*. Nobody runs a duplicate, fully-staffed library "just in case"; the cost is absurd relative to what's at risk. **Disaster recovery is the same allocation problem: protection priced to what each thing is worth, not one gold-plated standard for everything.**
 
-Two definitions carry the topic. **RTO** (recovery time objective): how long until service is back, the *outage clock*. **RPO** (recovery point objective): how much recently-written data you may lose, the *amnesia window*. Every DR architecture is a price point on these two dials, and the pricing is brutally non-linear: RTO of a day costs almost nothing (restore from backup); RTO of minutes with RPO of zero means a second region running hot, roughly **double the bill**, plus a problem money can't dissolve: if both regions accept writes, the same cart can be written in two places at once, and *someone* must decide who wins. That's Lesson 2.7's CAP trade with a 70 ms ocean in the middle.
+Two definitions carry the topic. **RTO** (recovery time objective): how long until service is back, the *outage clock*. **RPO** (recovery point objective): how much recently-written data you may lose, the *amnesia window*. Every DR architecture is a price point on these two dials, and the pricing is brutally non-linear: RTO of a day costs almost nothing (restore from backup); RTO of minutes with RPO of zero means a second region running hot, roughly **double the bill**, plus a problem money can't dissolve: if both regions accept writes, the same cart can be written in two places at once, and *someone* must decide who wins. That's the CAP trade with a 70 ms ocean in the middle.
 
 So the Director's move is never "pick active-active or active-passive." It's: **which services are the hospital, and which are the library?**
 
@@ -51,7 +51,7 @@ So the Director's move is never "pick active-active or active-passive." It's: **
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS sizing here. Estimation becomes **cost-delta math**, each DR posture's annual cost versus the expected revenue-at-risk it removes. Same discipline as Lesson 1.3: round aggressively, state assumptions, let the numbers decide.
+> **Adaptation, said out loud:** no QPS sizing here. Estimation becomes **cost-delta math**, each DR posture's annual cost versus the expected revenue-at-risk it removes. Same estimation discipline: round aggressively, state assumptions, let the numbers decide.
 
 **Option math, on the $40M base.** A region that must survive alone must carry **100% of peak by itself**, so blanket active-active isn't "2 × 50%," it's close to 2 × 100%-capable:
 
@@ -69,14 +69,14 @@ So the Director's move is never "pick active-active or active-passive." It's: **
 
 ## S: Storage
 
-> **Adaptation, said out loud:** S here is the **per-tier replication strategy**, and the *write-conflict problem is created or avoided in this step*. Lesson 2.4 covered replication mechanics; 2.7-2.8 covered why cross-region agreement costs an RTT. Here we only place those tools.
+> **Adaptation, said out loud:** S here is the **per-tier replication strategy**, and the *write-conflict problem is created or avoided in this step*. Replication mechanics and why cross-region agreement costs an RTT are covered elsewhere; here we only place those tools.
 
 **Tier 0, two sub-decisions, because "checkout" is not one data shape:**
 
-- **Order/payment ledger, cross-region quorum, RPO 0.** Writes commit to a majority of replicas spanning 3 regions (N=3, W=2, Lesson 2.8), Spanner-style. *Cost:* every ledger write pays ~30-70 ms of cross-region RTT, acceptable, because order placement is once-per-checkout, and compliance demands RPO≈0 anyway. *Rejected, multi-master with LWW/CRDT merge for money:* last-write-wins on a ledger double-charges or loses orders. **For money, avoid conflicts; don't resolve them.**
+- **Order/payment ledger, cross-region quorum, RPO 0.** Writes commit to a majority of replicas spanning 3 regions (N=3, W=2), Spanner-style. *Cost:* every ledger write pays ~30-70 ms of cross-region RTT, acceptable, because order placement is once-per-checkout, and compliance demands RPO≈0 anyway. *Rejected, multi-master with LWW/CRDT merge for money:* last-write-wins on a ledger double-charges or loses orders. **For money, avoid conflicts; don't resolve them.**
 - **Carts and sessions, single-writer-per-key, async replication.** Each user's cart is **homed** to one region; only the home region writes it; async replication mirrors it. On regional death, the survivor takes over homing, accepting **seconds of RPO on carts homed to the dead region**. A lost cart line is an apology; a conflicted payment is an incident. *Rejected, quorum writes for carts:* 70 ms on every cart-add to protect apology-grade data is the wrong exchange rate.
 
-**Tier 1, async replica, promote on failover.** Catalog/search/profile keep a cross-region **asynchronous replica** (Lesson 2.4); seconds of lag = seconds of RPO, well inside the 5-min sign-off. *Rejected, sync replication:* an RTT inside every catalog write to protect data the business agreed to lose 5 minutes of.
+**Tier 1, async replica, promote on failover.** Catalog/search/profile keep a cross-region **asynchronous replica**; seconds of lag = seconds of RPO, well inside the 5-min sign-off. *Rejected, sync replication:* an RTT inside every catalog write to protect data the business agreed to lose 5 minutes of.
 
 **Tier 2, backup-restore.** Snapshots and incrementals to a **cross-region, logically isolated vault**; rebuild compute from infrastructure-as-code. The rule everyone skips: **a backup never restored is a hope, not a backup**, quarterly timed restore drills, the measured time *becoming* the real RTO. *Rejected, warm standby for analytics:* paying 24/7 compute to protect a 24-hour RTO.
 
@@ -117,7 +117,7 @@ flowchart TB
     style VLT fill:#1f6f5c,color:#fff
 ```
 
-**Steady state:** traffic steering (latency-based DNS or anycast, Lesson 3.1) splits users by proximity. Tier 0 serves actively in **both** regions, carts homed per user, ledger on the 3-leg quorum. Tier 1 serves from East with West warm at ~30%, replica trailing by seconds. Tier 2 lives in East only, shipping backups to the vault.
+**Steady state:** traffic steering (latency-based DNS or anycast) splits users by proximity. Tier 0 serves actively in **both** regions, carts homed per user, ledger on the 3-leg quorum. Tier 1 serves from East with West warm at ~30%, replica trailing by seconds. Tier 2 lives in East only, shipping backups to the vault.
 
 **Region-death state:** steering withdraws East; West's Tier 0, *already live*, absorbs the rest within minutes. **Tier 0's failover is a traffic shift, not a cold start**, that's why its RTO is minutes. Tier 1 promotes its replica and scales to full. Tier 2 waits, or restores from the vault.
 
@@ -148,7 +148,7 @@ POST /dr/shed      { below_tier: 2 }   # load-shedding order, pre-agreed
 
 **Design notes (each with its rejected alternative):**
 - **Idempotency keys on the revenue path are non-negotiable**, a failover mid-request *will* produce retries against the other region. *Rejected: trusting clients not to retry.* They always retry.
-- **Health is judged externally.** *Rejected: in-region monitoring deciding failover*, a dying region's monitoring dies with it. Lesson 3.14's stack observes; an external arbiter decides.
+- **Health is judged externally.** *Rejected: in-region monitoring deciding failover*, a dying region's monitoring dies with it. The observability stack observes; an external arbiter decides.
 - **`declare` is human-gated; everything after it is automation.** *Rejected: fully automatic regional failover*, a false positive evacuates the company on a network blip, and split-brain (both regions believing they're primary) is worse than the outage.
 
 ---
@@ -167,13 +167,13 @@ POST /dr/shed      { below_tier: 2 }   # load-shedding order, pre-agreed
 | analytics lake | 2 | 24 h / 24 h | vault backups + IaC rebuild | n/a | data |
 
 **Two structural decisions hiding in this table:**
-- **Conflict policy is a per-dataset column, not a system-wide choice.** The ledger makes conflicts impossible (quorum); carts make them impossible differently (one *regional* writer per key); nothing *resolves* conflicts after the fact. The interview trap is proposing multi-master and hand-waving "we'll use CRDTs", Lesson 2.7 applied: pick where you pay, latency now or reconciliation later; for money, always pay now.
-- **"Rebuildable" is a legitimate strategy.** The search index is derived data, re-indexable from the catalog (Lesson 3.12). Exempting derived datasets from replication spend is free money, a surprising fraction of most storage is derived.
+- **Conflict policy is a per-dataset column, not a system-wide choice.** The ledger makes conflicts impossible (quorum); carts make them impossible differently (one *regional* writer per key); nothing *resolves* conflicts after the fact. The interview trap is proposing multi-master and hand-waving "we'll use CRDTs", the CAP trade applied: pick where you pay, latency now or reconciliation later; for money, always pay now.
+- **"Rebuildable" is a legitimate strategy.** The search index is derived data, re-indexable from the catalog. Exempting derived datasets from replication spend is free money, a surprising fraction of most storage is derived.
 
 <details>
 <summary>Go deeper, conflict-resolution mechanics if you must go multi-master (IC depth, optional)</summary>
 
-If a dataset genuinely needs concurrent writes in two regions (collaborative editing, social counters), the options ladder: **LWW** (last-write-wins by timestamp), simplest, silently drops the losing write, and cross-region clock skew makes "last" a lie; acceptable only where any value is as good as another (presence flags). **Vector clocks / sibling resolution** (Dynamo-style), detects concurrency instead of hiding it, pushes resolution to the application (Lesson 2.8's quorum reads return siblings); operationally heavy. **CRDTs**, counters, sets, registers that merge deterministically; ideal for likes/counters (Lesson 3.16's sharded counters generalize to G-Counters across regions), unusable for invariant-bearing data ("balance ≥ 0" is not CRDT-expressible). **Single-writer-per-key** (our cart choice) sidesteps the ladder entirely by making concurrency impossible per key, at the cost of a homing directory and a re-homing step during failover. The prior: exhaust single-writer designs before accepting any merge semantics, and never put money behind LWW.
+If a dataset genuinely needs concurrent writes in two regions (collaborative editing, social counters), the options ladder: **LWW** (last-write-wins by timestamp), simplest, silently drops the losing write, and cross-region clock skew makes "last" a lie; acceptable only where any value is as good as another (presence flags). **Vector clocks / sibling resolution** (Dynamo-style), detects concurrency instead of hiding it, pushes resolution to the application (quorum reads return siblings); operationally heavy. **CRDTs**, counters, sets, registers that merge deterministically; ideal for likes/counters (sharded counters generalize to G-Counters across regions), unusable for invariant-bearing data ("balance ≥ 0" is not CRDT-expressible). **Single-writer-per-key** (our cart choice) sidesteps the ladder entirely by making concurrency impossible per key, at the cost of a homing directory and a re-homing step during failover. The prior: exhaust single-writer designs before accepting any merge semantics, and never put money behind LWW.
 
 </details>
 
@@ -238,7 +238,7 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 
 - **"A region just died at peak, go."** *Strong:* runs the script, declare on a pre-written rule, drain, promote, shed in pre-agreed order, communicate with a revenue number. *Red flag:* starts debugging the region, or describes a failover never drilled.
 - **"Why not active-active everywhere, one posture, simpler?"** *Strong:* two costs, quantified, ~+$18M/yr over tiered, *and* a write-conflict problem imported into 80 services that mostly don't need it. *Red flag:* agrees, or rejects it on vibes without the dollar delta.
-- **"Where do write conflicts come from, and what's your policy?"** *Strong:* conflicts are *created by* allowing two writers per key; we avoid them, quorum for the ledger, single-writer-per-key for carts (2.7/2.8). *Red flag:* "we'll handle conflicts with timestamps."
+- **"Where do write conflicts come from, and what's your policy?"** *Strong:* conflicts are *created by* allowing two writers per key; we avoid them, quorum for the ledger, single-writer-per-key for carts. *Red flag:* "we'll handle conflicts with timestamps."
 - **"Who set RPO to 5 minutes for catalog?"** *Strong:* the CPO did, with the price of the alternative in front of them, RTO/RPO are business sign-offs engineering prices. *Red flag:* "we picked numbers that seemed reasonable."
 - **"How do you know your RTO is real?"** *Strong:* quarterly production evacuations with measured numbers replacing aspirational ones; timed restores for Tier 2; the drill budget named. *Red flag:* points at the architecture diagram as evidence.
 
@@ -263,7 +263,7 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 > *Model:* Insurance with a stated premium and payout. Premium: ~$6M/yr for Tier 0 active in both regions, each able to carry full peak. Risk covered: regional outages run about once per 1-2 years for 2-6 hours; an hour of checkout at peak is ~$1M plus trust damage. Without it, checkout's RTO is 30-60 minutes of cold promotion, optimistically. Note what I'm *not* asking for: the same posture for analytics, that rides backup-restore at +$0.5M, which is why the total is +$12.5M, not the +$30M a blanket policy costs. And the fleet isn't idle: it serves real traffic daily, which is also what keeps it provably working.
 
 **Q3. A staff engineer proposes multi-master writes everywhere so "any region can take any write." Response?**
-> *Model:* One question: *what's the merge rule when both regions write the same key?* For the payment ledger there is no acceptable answer, LWW under clock skew loses or duplicates money, and "balance ≥ 0" isn't expressible as a CRDT. That's Lesson 2.7 made concrete: accepting writes everywhere means paying in reconciliation later, and for invariant-bearing data that bill is unbounded. So the ledger gets a 3-region quorum, conflicts impossible, ~50 ms per write, affordable once per checkout, and carts get single-writer-per-key. Exhaust designs that make conflicts impossible before adopting any that make them merely resolvable.
+> *Model:* One question: *what's the merge rule when both regions write the same key?* For the payment ledger there is no acceptable answer, LWW under clock skew loses or duplicates money, and "balance ≥ 0" isn't expressible as a CRDT. That's the CAP trade made concrete: accepting writes everywhere means paying in reconciliation later, and for invariant-bearing data that bill is unbounded. So the ledger gets a 3-region quorum, conflicts impossible, ~50 ms per write, affordable once per checkout, and carts get single-writer-per-key. Exhaust designs that make conflicts impossible before adopting any that make them merely resolvable.
 
 **Q4. Your catalog says Tier 1 RTO is 30 minutes. How do you know that's true?**
 > *Model:* Because we measure it, the measured number, not the aspiration, lives in the catalog. Monthly drills promote the catalog replica in production and time it; quarterly we evacuate a full region for real. Our first evacuation missed the Tier 0 target, 12 minutes against 5, and that drill-found gap produced the pre-reserved-quota fix and the client-failover SDK. For Tier 2 the discipline is timed restores: a backup never restored is a hope. The drills cost engineer-days and elevated error rates; that's budgeted inside the DR line, because an untested DR plan is fiction we'd be paying $12.5M a year to print.
@@ -273,7 +273,7 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 ### Key takeaways
 - **DR is an allocation problem, not an architecture pattern.** Tier by revenue-at-risk: checkout active-active, catalog warm-standby, analytics backup-restore. ~90% of the loss flows through ~15% of services. Blanket active-active ≈ +$30M/yr vs ~+$12.5M tiered; the $18M delta buys conflict problems, not resilience.
 - **RTO and RPO are purchases signed by the business.** Engineering prices the menu, RTO of a day is nearly free; RTO of minutes with RPO 0 is ~2× the relevant infra, and finance/product sign the line items.
-- **RPO≈0 across regions imports the write-conflict problem.** Avoid conflicts rather than resolve them: quorum (2.8) for money, single-writer-per-key for user data, merge semantics (2.7) only for counter-like data. Never LWW behind a ledger.
+- **RPO≈0 across regions imports the write-conflict problem.** Avoid conflicts rather than resolve them: quorum for money, single-writer-per-key for user data, merge semantics only for counter-like data. Never LWW behind a ledger.
 - **The best standby is never idle.** Tier 0 active-active works *because* both sides serve production daily; and replication is not backup, point-in-time backups survive in every tier.
 - **An untested DR plan is fiction.** Quarterly production evacuations, measured RTOs replacing aspirational ones, restore-tested backups, pre-reserved survivor capacity, a script where the only unscripted decision is *declare*.
 
@@ -281,4 +281,4 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 
 ---
 
-*End of Lesson 8.4. Multi-region DR closes the strategy arc the way 8.1-8.3 opened it: the technology is the easy 30%, replication from 2.4, quorums from 2.8, CAP's bill from 2.7, and the Director's 70% is the tier catalog, the signed RTO/RPO price list, the $18M/yr delta defended to a CFO, and a game-day program that turns a region's death at peak into twelve scripted minutes.*
+*End of Lesson 8.4. Multi-region DR closes the strategy arc the way the migration lessons opened it: the technology is the easy 30%, replication, quorums, and CAP's bill, and the Director's 70% is the tier catalog, the signed RTO/RPO price list, the $18M/yr delta defended to a CFO, and a game-day program that turns a region's death at peak into twelve scripted minutes.*

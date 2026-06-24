@@ -9,13 +9,13 @@ sidebar:
 - State the four reasons we replicate, and distinguish replication from partitioning.
 - Contrast the three topologies and their consistency / availability / complexity trade-offs.
 - Reason about synchronous vs asynchronous replication and the user-facing effects of replication lag.
-- Engineer around failover hazards (split-brain, lost writes) and set up the CAP discussion (2.7) and quorums (2.8).
+- Engineer around failover hazards (split-brain, lost writes) and set up the CAP discussion and quorums.
 
 ### Intuition first
 Replication is keeping **multiple synchronized copies** of your data. **Leader-follower:** one authoritative scribe (the leader) writes the master copy and dictates every change to assistants (followers) who hold read-only copies. **Multi-leader:** several scribes in different offices can all accept edits and then reconcile, with the obvious hazard that two of them edit the same line (a conflict). **Leaderless:** nobody's in charge; you write the same change to several copies and, when reading, consult several and take a majority view of the truth (the Dynamo style).
 
 ### Deep explanation
-**Why replicate (and a clean distinction):** (1) **availability**, survive node/region loss; (2) **read scaling**, spread reads across copies; (3) **latency**, keep copies near users; (4) **durability**. *Replication = the same data in many places; partitioning (Lesson 2.5) = different data split across places.* Most real systems do both.
+**Why replicate (and a clean distinction):** (1) **availability**, survive node/region loss; (2) **read scaling**, spread reads across copies; (3) **latency**, keep copies near users; (4) **durability**. *Replication = the same data in many places; partitioning = different data split across places.* Most real systems do both.
 
 **Leader-follower (single-leader / primary-replica)**, the default for relational systems. All writes go to the **leader**, which streams changes to **followers**; reads can be served by either.
 - **Synchronous replication:** the leader waits for a follower's ack before confirming the write → stronger durability/consistency, but higher write latency, and a slow or dead synchronous follower **stalls writes.**
@@ -25,7 +25,7 @@ Replication is keeping **multiple synchronized copies** of your data. **Leader-f
 
 **Multi-leader**, several leaders accept writes (often one per region). Pro: low write latency in every region and survival of a region partition. Con: **write conflicts** when the same datum is edited in two leaders. Resolution strategies, weakest→strongest: **last-write-wins** by timestamp (simple but silently drops data), **version vectors** (detect concurrent edits), **CRDTs** (conflict-free merge for suitable data types), or **application-level merge**. Used in multi-DC databases, calendar/contact sync, and collaborative editing.
 
-**Leaderless (Dynamo-style)**, no leader; a client or coordinator writes to **N** replicas and waits for **W** acks, and reads from **R** replicas, taking the newest. The **quorum rule W + R > N** guarantees a read set overlaps the latest write set (developed fully in Lesson 2.8). Node failure needs no failover, you just talk to whoever's up, and convergence is maintained by **read repair** (fix stale replicas on read) and **anti-entropy / hinted handoff** (background reconciliation). Used by Cassandra, DynamoDB, Riak. Offers **tunable consistency** by choosing N/W/R.
+**Leaderless (Dynamo-style)**, no leader; a client or coordinator writes to **N** replicas and waits for **W** acks, and reads from **R** replicas, taking the newest. The **quorum rule W + R > N** guarantees a read set overlaps the latest write set. Node failure needs no failover, you just talk to whoever's up, and convergence is maintained by **read repair** (fix stale replicas on read) and **anti-entropy / hinted handoff** (background reconciliation). Used by Cassandra, DynamoDB, Riak. Offers **tunable consistency** by choosing N/W/R.
 
 **The Director-level framing:** topology is a requirements decision. Single-region, transactional, integrity-first → **leader-follower**. Global low-latency writes that must survive partitions → **multi-leader** or **leaderless**, accepting conflict-resolution complexity. High availability with tunable consistency → **leaderless quorum**. The signal is naming the lag/conflict/failover cost you're taking on, not just the topology.
 

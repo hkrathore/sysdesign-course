@@ -9,7 +9,7 @@ sidebar:
 
 > For each problem: **the crux** (the single decision the round turns on) + **the canonical answer**. Everything else is plumbing. Spot the read:write skew first, it pre-decides the architecture.
 
-**Skim vs deep-read (2-week runway).** Deep-read **5.1-5.4** (Pastebin, rate limiter, Instagram, Twitter/feed), **5.6** (Typeahead), **5.7** (Uber/proximity), and **5.13-5.15** (Ticketmaster, job scheduler, LLM serving), those clusters carry most Director loops. Treat **5.8-5.12** (Dropbox, YouTube, Maps, crawler, notifications, the storage/streaming deep-dives, rarer at this level) as **crux-only**: memorize the row below, rehearse defending it out loud, and open the full lesson only where the defense doesn't hold. Whatever you skip, the crux table and numbers table are non-negotiable, they're the 5-minute pre-loop warm-up.
+**Skim vs deep-read (2-week runway).** Deep-read **Pastebin, rate limiter, Instagram, Twitter/feed**, **Typeahead**, **Uber/proximity**, and **Ticketmaster, job scheduler, LLM serving**, those clusters carry most Director loops. Treat **Dropbox, YouTube, Maps, crawler, notifications** (the storage/streaming deep-dives, rarer at this level) as **crux-only**: memorize the row below, rehearse defending it out loud, and open the full lesson only where the defense doesn't hold. Whatever you skip, the crux table and numbers table are non-negotiable, they're the 5-minute pre-loop warm-up.
 
 ---
 
@@ -55,7 +55,7 @@ sidebar:
 | **Precompute → serve from edge** | Typeahead (trie), Maps (tiles + CH), YouTube (ladder) | Do the expensive work offline; the request is a cheap lookup. "Compute is µs, network is the budget." |
 | **Idempotency key = exactly-once-*effect*** | WhatsApp `(sender, client_msg_id)`, Notifications, Scheduler `(job_id, fire_time)`, Ticketmaster, LLM | At-least-once transport/firing + dedup on a stable key. True exactly-once is impossible across failures/3rd-parties. |
 | **Atomic conditional write (CAS)** | Ticketmaster (`WHERE status='AVAILABLE'`), Pastebin burn, Rate Limiter (Lua) | One winner under contention; loser fails fast (no lock convoy). Prefer optimistic over pessimistic locks. |
-| **Hot-key relief: shard the counter / lease** | Rate Limiter (leasing), Instagram/YouTube likes (sharded counters 3.16), Ticketmaster GA | Split one logical counter into N sub-keys (sum on read), or lease budget locally. Accept approximate count. |
+| **Hot-key relief: shard the counter / lease** | Rate Limiter (leasing), Instagram/YouTube likes (sharded counters), Ticketmaster GA | Split one logical counter into N sub-keys (sum on read), or lease budget locally. Accept approximate count. |
 | **Partition by the query's scope-unit** | Crawler (host), Uber/Maps (region), Dropbox (namespace), Ticketmaster (event_id), Scheduler (`hash(job_id)`) | Shard so the hot operation hits ONE shard. Never by time (hot bucket) or by the wrong id (scatter-gather). |
 | **Queue decouples bursty-in from slow-out** | Notifications, WhatsApp, YouTube transcode, LLM admission, Scheduler→executor | Buffer, don't match peak. Durable queue (Kafka) gives replay + backpressure; ack-then-process. |
 

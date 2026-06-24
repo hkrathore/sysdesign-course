@@ -8,9 +8,9 @@ sidebar:
 > This is the single most calibrating Director cluster in the loop. Amazon treats *Have Backbone, Disagree and Commit* and *Earn Trust* as veto-power leadership principles; Meta scores influence-without-authority as a core dimension; Google L8 panels probe stakeholder management explicitly. What makes it leveling is *who the counterpart is* and *what happens after the decision*. A disagreement with someone junior to you isn't backbone, it's management. The scored version is **up-chart**: you pushed back on a VP, a CTO, or a CEO, on a roadmap, an architecture, or a business bet. And the post-decision half is scored as hard as the disagreement itself, whether you committed for real, carried the message down in your own voice, and built a tripwire to revisit. "Leadership decided, not me" is commit theater, and it fails. The whole cluster is a test of whether you can be both *load-bearing in the room* and *aligned once the room decides*.
 
 ### Learning objectives
-- Run the **up-chart disagreement** on explicit mechanics, steel-man the exec's position, bring a data-backed case with a concrete alternative, pick the forum and time-box the challenge, and resolve either way, delivered as STAR-L (Lesson 10.2).
+- Run the **up-chart disagreement** on explicit mechanics, steel-man the exec's position, bring a data-backed case with a concrete alternative, pick the forum and time-box the challenge, and resolve either way, delivered as STAR-L.
 - Answer **disagree-and-commit** so the *commit* is real: staffed your best people on it, carried it down in your own voice, and set a **tripwire**, the metric or date that triggers a revisit, the senior move that separates commit from obedience.
-- Deliver **bad news to execs** in **SCQA / headline-first** (Lesson 10.2), impact, new date or cost, decision needed, options *and* a recommendation in the same breath, and score the gap between *knowing and telling*.
+- Deliver **bad news to execs** in **SCQA / headline-first**, impact, new date or cost, decision needed, options *and* a recommendation in the same breath, and score the gap between *knowing and telling*.
 - Resolve **senior-report conflict** by diagnosing the *type* first, technical, structural, or interpersonal, making the call if they can't converge, and fixing the *class* of conflict, not just the instance.
 - Carry **business acumen inside** every answer: ROI, cost of delay, unit economics, because in 2026 this is scored here, not in a separate round.
 
@@ -21,7 +21,7 @@ Think of a good diplomat inside a government she serves but doesn't run. She has
 
 ## The questions
 
-These are mostly past-event questions (STAR-L, Lesson 10.2), with the influence-without-authority and product-conflict variants often arriving as hypotheticals (Clarify → Principles → Options → Decide → Tripwires) and the bad-news variant as exec-comms (SCQA).
+These are mostly past-event questions (STAR-L), with the influence-without-authority and product-conflict variants often arriving as hypotheticals (Clarify → Principles → Options → Decide → Tripwires) and the bad-news variant as exec-comms (SCQA).
 
 | Variant | What it's really testing |
 |---|---|
@@ -34,7 +34,7 @@ These are mostly past-event questions (STAR-L, Lesson 10.2), with the influence-
 | "A cross-org initiative you depended on stalled. How'd you unstick it? Worth it?" | Surgical escalation as one crisp decision request, plus a kill-vs-continue judgment. |
 | "Defend a headcount/budget ask, or tell me about losing one." | Business case with the trade-off; the *losing* variant tests whether you stayed aligned. |
 
-The merge: disagreement, commit, and conflict stories are **past-event** → **STAR-L** with the mechanics made explicit. "How do you influence…" and the product-conflict prompt are often **hypothetical** → **Clarify → Principles → Options → Decide → Tripwires**. "Deliver bad news" is **exec-comms** → **SCQA**. Read the verb and tense first (Lesson 10.2); the wrong instrument is its own red flag.
+The merge: disagreement, commit, and conflict stories are **past-event** → **STAR-L** with the mechanics made explicit. "How do you influence…" and the product-conflict prompt are often **hypothetical** → **Clarify → Principles → Options → Decide → Tripwires**. "Deliver bad news" is **exec-comms** → **SCQA**. Read the verb and tense first; the wrong instrument is its own red flag.
 
 ---
 
@@ -75,7 +75,7 @@ This cluster got re-scored along seven lines, and a 2015 answer trips most of th
 - **"What did you tell your team?" is now a near-universal scored follow-up.** "I told them leadership decided, it wasn't my call" is commit theater and fails on the spot, it protects you at the cost of the decision. The scored answer: you presented it in your own voice, as the plan, with the real reasoning, and signaled no dissent below the line.
 - **The tripwire became an expected senior marker.** A decade ago "I disagreed, then I committed" was complete. Now the question behind the question is *how do you commit fully without going blind*, and the answer is the revisit criterion: the metric or date that reopens it. Commit without a tripwire reads as obedience; a tripwire without commit reads as slow-rolling.
 - **Business acumen is scored *inside* these answers, not in a separate round.** The product-conflict answer leans commercial: concede ground deliberately, quantify the debt you're taking on, put the paydown on the *same* roadmap. "I protected my team from product churn" reads as not business-aligned. ROI, cost of delay, and unit economics are the room's language.
-- **Headcount questions now run in reverse.** "Tell me about *losing* a headcount fight" and "where does AI change your headcount math?" A pure "I won the ask, I got my five engineers" story reads as unaware post-ZIRP; the strong version starts from "headcount is the expensive option" and considers leverage first (Lesson 10.11).
+- **Headcount questions now run in reverse.** "Tell me about *losing* a headcount fight" and "where does AI change your headcount math?" A pure "I won the ask, I got my five engineers" story reads as unaware post-ZIRP; the strong version starts from "headcount is the expensive option" and considers leverage first.
 - **Bad-news probes shifted from courage to systems.** No longer just "did you have the guts to tell them", it's "*how long* between knowing and telling, and why didn't your mechanisms catch it sooner?" The detection-to-disclosure gap is the scored unit; a long gap with no early-warning fix is the fail.
 - **Cross-org stories are now migration-, platform-, or AI-adoption-shaped, and you supply the mechanism.** No PMO to delegate the coordination to. The Director personally supplies it: a single DRI, a thin-slice proof that de-risks the ask, a shared OKR, and escalation framed as *one crisp decision request*, not a complaint about another team.
 
@@ -129,10 +129,10 @@ This cluster got re-scored along seven lines, and a 2015 answer trips most of th
 
 ## Practice prompts
 
-1. **Run disagree-and-commit on the spine, with a tripwire.** "Tell me about committing to a decision you disagreed with." *(Sketch: STAR-L, steel-man the exec's case generously and quantified; bring a costed alternative, not an objection; make it once in the right forum; lose; then the commit half, strongest people staffed, message down in *your voice* with the real reasoning, never "not my call", plus a named tripwire (metric + window). Close with an honest split "was I right," naming what they saw that you didn't. Hold every number for the probe, Lesson 10.2.)*
+1. **Run disagree-and-commit on the spine, with a tripwire.** "Tell me about committing to a decision you disagreed with." *(Sketch: STAR-L, steel-man the exec's case generously and quantified; bring a costed alternative, not an objection; make it once in the right forum; lose; then the commit half, strongest people staffed, message down in *your voice* with the real reasoning, never "not my call", plus a named tripwire (metric + window). Close with an honest split "was I right," naming what they saw that you didn't. Hold every number for the probe.)*
 2. **Deliver a slip to the exec team, headline-first.** "The migration is six weeks late, tell the VP." *(Sketch: SCQA, Complication first (six weeks late, end of Q3 not Q2), the decision needed (hold the dependent launch or ship on the old stack), options *with* a recommendation in the same conversation, own the miss ("my milestone tracking should have caught this in week 2"), and the cadence you tightened. No options-without-recommendation; no sitting on it.)*
-3. **Concede to product without caving.** "CEO promised a feature your team can't build in time." *(Sketch: reframe as cost-of-delay vs cost-of-debt in ARR terms; three costed options including the consciously-named risky one; recommend the descoped slice that clears the customer's *actual* go-live gate; concede the timeline deliberately and put the quantified debt paydown on the *same* roadmap with an owner and date; upstream fix, a feasibility check before big sales commitments. Lesson 10.11 for the efficiency framing.)*
-4. **Unstick a stalled cross-org dependency.** "A platform team you depend on deprioritized your need." *(Sketch: not a complaint, supply the mechanism: a single DRI, a thin-slice proof that de-risks their ask, a shared OKR so it's on *their* scorecard too; escalate as one crisp decision request to the shared boss, not a grievance; and judge kill-vs-continue honestly, was the dependency still worth it. Lesson 10.9 for execution-under-pressure.)*
+3. **Concede to product without caving.** "CEO promised a feature your team can't build in time." *(Sketch: reframe as cost-of-delay vs cost-of-debt in ARR terms; three costed options including the consciously-named risky one; recommend the descoped slice that clears the customer's *actual* go-live gate; concede the timeline deliberately and put the quantified debt paydown on the *same* roadmap with an owner and date; upstream fix, a feasibility check before big sales commitments. The efficiency framing applies.)*
+4. **Unstick a stalled cross-org dependency.** "A platform team you depend on deprioritized your need." *(Sketch: not a complaint, supply the mechanism: a single DRI, a thin-slice proof that de-risks their ask, a shared OKR so it's on *their* scorecard too; escalate as one crisp decision request to the shared boss, not a grievance; and judge kill-vs-continue honestly, was the dependency still worth it. Execution-under-pressure applies.)*
 
 ---
 
@@ -147,4 +147,4 @@ This cluster got re-scored along seven lines, and a 2015 answer trips most of th
 
 ---
 
-*End of Lesson 10.10. Influence and disagreement is where backbone meets alignment, the diplomat who can lose to her VP, carry the loss to her org without a trace of "not my call," and still keep a tripwire. Lesson 10.11 carries the same commercial fluency into the efficiency era, layoffs, budget cuts, and the unpopular mandates you didn't choose but must own end to end.*
+*End of Lesson 10.10. Influence and disagreement is where backbone meets alignment, the diplomat who can lose to her VP, carry the loss to her org without a trace of "not my call," and still keep a tripwire. The next lesson carries the same commercial fluency into the efficiency era, layoffs, budget cuts, and the unpopular mandates you didn't choose but must own end to end.*

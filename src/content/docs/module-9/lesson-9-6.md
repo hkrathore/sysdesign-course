@@ -281,7 +281,7 @@ AAPL or BTC may see 10× the order rate of median symbols; a single core for the
 The matching engine does not change, single-threaded, in-memory, journal-backed scales linearly with symbol count. What changes:
 
 - **Journal throughput:** move to a dedicated WAL cluster (Kafka with hardware-optimized producers, per-symbol partitions) to parallelize writes while preserving per-symbol total order.
-- **Fanout tier:** 200M execution reports/day requires a dedicated gateway cluster with per-connection ordered delivery; market-data fanout moves to multicast or coalesce-and-publish (Lesson 3.4).
+- **Fanout tier:** 200M execution reports/day requires a dedicated gateway cluster with per-connection ordered delivery; market-data fanout moves to multicast or coalesce-and-publish.
 - **Symbol grouping becomes dynamic:** static assignment breaks during market events. A separate resource manager that monitors order-rate per symbol and rebalances groups above a threshold is the operational control, not inside the engine.
 
 **Brokerage-reconciliation variant (the Robinhood/brokerage problem):**
@@ -366,4 +366,4 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 ---
 
-*End of Lesson 9.6. The stock exchange is the course's canonical "when NOT to distribute" case, the single-threaded deterministic engine inverts every horizontal-scaling reflex from 5.1-5.15. Cross-reference: Lesson 9.1 (payment systems, the other CP-by-necessity domain); Lesson 2.8 (quorum reads/writes, the distributed alternative, and why it does not apply here). Next: 9.7.*
+*End of Lesson 9.6. The stock exchange is the course's canonical "when NOT to distribute" case, the single-threaded deterministic engine inverts every horizontal-scaling reflex. Related: payment systems (the other CP-by-necessity domain); quorum reads/writes (the distributed alternative, and why it does not apply here).*

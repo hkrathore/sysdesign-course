@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> The first full **RESHADED** problem of Module 5, deliberately *storage-shaped*. Pastebin looks trivial, "store some text, give back a link", and that's the trap. The single decision separating a Director answer from a junior one is whether you **split the metadata from the blob** or stuff both into one database. This walkthrough assembles four Module 3 building blocks, blob store (3.11), key-value store (3.4), CDN (3.5), sequencer (3.6), and treats the metadata-vs-blob split as the load-bearing decision it is.
+> The first full **RESHADED** problem, deliberately *storage-shaped*. Pastebin looks trivial, "store some text, give back a link", and that's the trap. The single decision separating a Director answer from a junior one is whether you **split the metadata from the blob** or stuff both into one database. This walkthrough assembles four building blocks, blob store, key-value store, CDN, sequencer, and treats the metadata-vs-blob split as the load-bearing decision it is.
 
 ### Learning objectives
 - Run the full **RESHADED** spine on a storage-heavy problem and produce a defensible design in numbers, not adjectives.
@@ -33,7 +33,7 @@ RESHADED starts by bounding the problem, **scope before build** is the first thi
 
 **Non-functional:** low read latency (p99 well under ~200 ms), 99.99% read availability, durability until expiry, scale to billions of pastes and tens of thousands of reads/s, and **cost-efficiency**, we must not pay transactional-database $/GB for bulk text.
 
-**CUT from v1 (say it out loud, scoping *down* is the signal):** syntax highlighting (client-side), full-text search (Lesson 3.12), editing/versioning (pastes are immutable; an "edit" is a new paste), accounts/folders/social, analytics. A Director who tries to build all of it in 45 minutes has misjudged altitude.
+**CUT from v1 (say it out loud, scoping *down* is the signal):** syntax highlighting (client-side), full-text search, editing/versioning (pastes are immutable; an "edit" is a new paste), accounts/folders/social, analytics. A Director who tries to build all of it in 45 minutes has misjudged altitude.
 
 **Assumptions carried forward:** **10M new pastes/day**, **100:1 → 1B reads/day**, median **~10 KB**, immutable.
 
@@ -64,11 +64,11 @@ The headline: **a small-QPS, read-skewed, storage-tiered system.** The entire di
 
 Match each dataset to a store, there are two with opposite shapes, and the central decision is **two different systems**.
 
-**Dataset 1, paste bodies.** Write-once, immutable, opaque, read by key, never queried by content. Textbook **blob/object-store** shape (3.11): **choose S3** (or GCS/equivalent).
-- *Rejected, `BLOB`/`TEXT` column in the SQL DB:* the wrong tool. A relational engine is built for small rows and transactions (2.2-2.3, 3.4); multi-MB bodies bloat replication and backups and cost **transactional $/GB** for data written once and never updated. The ~10,000× per-record size gap is the whole argument, keep bytes out of the database.
+**Dataset 1, paste bodies.** Write-once, immutable, opaque, read by key, never queried by content. Textbook **blob/object-store** shape: **choose S3** (or GCS/equivalent).
+- *Rejected, `BLOB`/`TEXT` column in the SQL DB:* the wrong tool. A relational engine is built for small rows and transactions; multi-MB bodies bloat replication and backups and cost **transactional $/GB** for data written once and never updated. The ~10,000× per-record size gap is the whole argument, keep bytes out of the database.
 - *Rejected, a DFS / raw disks we manage:* reinvents durability and tiering S3-class stores already solve.
 
-**Dataset 2, metadata (key → location + policy).** Tiny rows, must be **strongly consistent** (a create must resolve immediately; a burn must take effect immediately), pure exact-key point lookup. Textbook **KV** shape (3.4): **choose DynamoDB / Cassandra**.
+**Dataset 2, metadata (key → location + policy).** Tiny rows, must be **strongly consistent** (a create must resolve immediately; a burn must take effect immediately), pure exact-key point lookup. Textbook **KV** shape: **choose DynamoDB / Cassandra**.
 - *Why KV over relational:* O(1) lookups, horizontal scale, **native TTL**, AP-leaning availability for the four-nines read path. A **sharded Postgres** is a defensible alternative if the team runs it well, name the trade (operational familiarity vs effortless horizontal scale), don't pretend KV is the only answer.
 
 **The split, stated as the decision:** metadata in a **strongly-consistent KV** (small, hot, TTL-aware) + bodies in a **dumb object store** (bulk, immutable), with the metadata row holding a **pointer** to the body.
@@ -112,7 +112,7 @@ Two background loops keep it honest: **store-native TTL** deletes expired metada
 
 ## A: API design
 
-A small, REST-shaped surface (2.10, REST fits resource-oriented CRUD).
+A small, REST-shaped surface (REST fits resource-oriented CRUD).
 
 ```
 POST /api/v1/pastes
@@ -134,13 +134,13 @@ DELETE /api/v1/pastes/{key}      // owner-initiated delete (auth required)
   -> 204 No Content
 ```
 
-Notes: **reads are idempotent except burn pastes**, a burn read has a side effect (it consumes a view), which is why that path needs an atomic claim; non-burn `GET`s are CDN-friendly. For multi-MB bodies, hand the client a **pre-signed upload URL** so bytes go straight to the object store (the 3.11 trick), mention it as the scaling option even if v1 proxies the bytes.
+Notes: **reads are idempotent except burn pastes**, a burn read has a side effect (it consumes a view), which is why that path needs an atomic claim; non-burn `GET`s are CDN-friendly. For multi-MB bodies, hand the client a **pre-signed upload URL** so bytes go straight to the object store (the pre-signed-URL trick), mention it as the scaling option even if v1 proxies the bytes.
 
 ---
 
 ## D: Data model
 
-The detail that decides whether this scales is the **partition key**. Primary access is point-lookup by `paste_key`, so `paste_key` is both the primary key and the **partition/shard key**, keys are effectively random, so hashing them spreads load with no hot shard (2.6). The row is ~200 B of pointer + policy: `blob_ptr`, owner, timestamps, `expires_at` (drives native TTL), `view_limit` / `views_remaining`, small scalars. The bytes live in the object store keyed by `blob_ptr`, immutable.
+The detail that decides whether this scales is the **partition key**. Primary access is point-lookup by `paste_key`, so `paste_key` is both the primary key and the **partition/shard key**, keys are effectively random, so hashing them spreads load with no hot shard. The row is ~200 B of pointer + policy: `blob_ptr`, owner, timestamps, `expires_at` (drives native TTL), `view_limit` / `views_remaining`, small scalars. The bytes live in the object store keyed by `blob_ptr`, immutable.
 
 <details>
 <summary>Go deeper, full metadata schema (IC depth, optional)</summary>
@@ -156,11 +156,11 @@ The detail that decides whether this scales is the **partition key**. Primary ac
 | `views_remaining` | int / null | for burn-after-read; decremented atomically on read |
 | `size_bytes`, `content_type`, `visibility` | … | small scalars |
 
-"List my pastes" (if accounts arrive) would need an index on `owner_id`, model it as a separate query-shaped table keyed by `owner_id` (denormalize rather than add a distributed secondary index, per 2.3), kept off the read-by-key path.
+"List my pastes" (if accounts arrive) would need an index on `owner_id`, model it as a separate query-shaped table keyed by `owner_id` (denormalize rather than add a distributed secondary index), kept off the read-by-key path.
 
 </details>
 
-**Key generation (3.6):** a **7-char base62** key gives `62^7 ≈ 3.5 trillion` namespace against ~18B pastes over 5 years, random keys collide so rarely that a conditional-insert-with-retry is a non-event.
+**Key generation:** a **7-char base62** key gives `62^7 ≈ 3.5 trillion` namespace against ~18B pastes over 5 years, random keys collide so rarely that a conditional-insert-with-retry is a non-event.
 - *Chosen, random base62 + collision check:* keys are **unguessable**, which matters for unlisted pastes on a public product.
 - *Rejected, counter/Snowflake → base62:* dense and sortable, but **sequentially enumerable**, scrapers can walk your pastes and competitors can count your volume. Unguessability is worth the cheap collision check.
 
@@ -172,11 +172,11 @@ The detail that decides whether this scales is the **partition key**. Primary ac
 
 Stress the design against the NFRs; each fix names its trade-off.
 
-**Bottleneck 1, the blob round-trip on every read.** A cache-miss read is two hops (metadata + object-store GET), and object-store GETs are metered. **Fix:** Redis cache-aside (~10 GB working set) + CDN; at 99% combined hit ratio origin GETs drop from 12K/s to ~120/s, the `R×(1−h)` math from 3.5. **Trade:** cache memory and CDN spend, but pastes are **immutable**, so a cached body is *never* wrong; expiry/burn are enforced at the metadata layer. That's why the split is so clean.
+**Bottleneck 1, the blob round-trip on every read.** A cache-miss read is two hops (metadata + object-store GET), and object-store GETs are metered. **Fix:** Redis cache-aside (~10 GB working set) + CDN; at 99% combined hit ratio origin GETs drop from 12K/s to ~120/s, the `R×(1−h)` math. **Trade:** cache memory and CDN spend, but pastes are **immutable**, so a cached body is *never* wrong; expiry/burn are enforced at the metadata layer. That's why the split is so clean.
 
-**Bottleneck 2, a viral paste hammers one metadata partition.** Classic hot key (2.5/2.6). **Fix:** it's the same URL for everyone, so the **CDN absorbs it at ~100% edge hit** and Redis takes the metadata lookups that leak through. **Trade:** expiry/burn must be enforced where the CDN can't short-circuit, give public pastes a **short edge TTL** (e.g. 60 s) bounded by `expires_at`, and mark burn/unlisted pastes **non-cacheable** (`Cache-Control: private`). Slightly lower hit ratio on exactly the pastes where correctness matters most.
+**Bottleneck 2, a viral paste hammers one metadata partition.** Classic hot key. **Fix:** it's the same URL for everyone, so the **CDN absorbs it at ~100% edge hit** and Redis takes the metadata lookups that leak through. **Trade:** expiry/burn must be enforced where the CDN can't short-circuit, give public pastes a **short edge TTL** (e.g. 60 s) bounded by `expires_at`, and mark burn/unlisted pastes **non-cacheable** (`Cache-Control: private`). Slightly lower hit ratio on exactly the pastes where correctness matters most.
 
-**Bottleneck 3, burn-after-read is a race.** Two readers open a one-time paste; "read, check, serve, decrement" serves it **twice**. **Fix:** an **atomic conditional claim**, decrement only if `views_remaining > 0` (a conditional write); only the winner serves the body, the loser gets `410`. **Trade:** a strongly-consistent, serialized write on the read path and no CDN caching, isolated to burn pastes only, so the 99% of normal reads stay cheap. (On an eventually-consistent store, burn must use the strongly-consistent read/conditional-write mode, the tunable knob from 3.4/2.8.)
+**Bottleneck 3, burn-after-read is a race.** Two readers open a one-time paste; "read, check, serve, decrement" serves it **twice**. **Fix:** an **atomic conditional claim**, decrement only if `views_remaining > 0` (a conditional write); only the winner serves the body, the loser gets `410`. **Trade:** a strongly-consistent, serialized write on the read path and no CDN caching, isolated to burn pastes only, so the 99% of normal reads stay cheap. (On an eventually-consistent store, burn must use the strongly-consistent read/conditional-write mode, the tunable consistency knob.)
 
 **Bottleneck 4, expiry at scale.** With ~18B rows, a cron scanning `expires_at < now` is a non-starter. **Fix:** **store-native TTL deletes in the background, and a lazy check on read enforces correctness immediately**, enforcement is instant, physical deletion is eventual.
 
@@ -185,7 +185,7 @@ Stress the design against the NFRs; each fix names its trade-off.
 
 - Store-native TTL (DynamoDB TTL / Cassandra column TTL / Postgres partition-drop by date) deletes expired metadata with no scan, but **lags**, DynamoDB TTL can run up to ~48 h behind. The lazy read check (`if expires_at < now → 410` before serving) makes user-visible behavior correct in that window; only *physical reclamation* is delayed.
 - Orphaned **blobs** (body present, metadata gone, from failed creates or expiry) are reclaimed by an async GC that deletes blob keys with no live metadata, or more simply a **lifecycle/TTL on the bucket** matching the max paste lifetime.
-- The rejected alternative, a precise per-paste scheduled-deletion service (3.15), is far more machinery than TTL-with-lazy-check buys you; over-engineering for "the row eventually disappears."
+- The rejected alternative, a precise per-paste scheduled-deletion service, is far more machinery than TTL-with-lazy-check buys you; over-engineering for "the row eventually disappears."
 
 </details>
 
@@ -195,14 +195,14 @@ Stress the design against the NFRs; each fix names its trade-off.
 
 ## D: Design evolution
 
-**At 10× (100M pastes/day, ~300K reads/s peak).** The read path scales essentially for free, CDN + cache + stateless app + sharded KV; the **lever is hit ratio, not origin capacity** (3.5). Storage becomes the budget line: ~370 TB/year of blob → **tier it**, recent pastes on standard storage, cold pastes (most are read in their first hours, then never) lifecycle to **IA/Glacier-class** for a ~10-23× per-GB drop, with **erasure coding** (40% overhead vs 200% replication) on the cold bulk, the 3.11 cost calculus. *This is the first place I'd delegate:* "I'd have the storage team model the retrieval-fee vs storage-saving break-even; my prior is lifecycle-to-IA at ~30 days based on the read-decay curve, but the exact age is a data question I'd hand them." Metadata at 10× is still small data, standard re-sharding (2.6), no architectural change.
+**At 10× (100M pastes/day, ~300K reads/s peak).** The read path scales essentially for free, CDN + cache + stateless app + sharded KV; the **lever is hit ratio, not origin capacity**. Storage becomes the budget line: ~370 TB/year of blob → **tier it**, recent pastes on standard storage, cold pastes (most are read in their first hours, then never) lifecycle to **IA/Glacier-class** for a ~10-23× per-GB drop, with **erasure coding** (40% overhead vs 200% replication) on the cold bulk, the object-store cost calculus. *This is the first place I'd delegate:* "I'd have the storage team model the retrieval-fee vs storage-saving break-even; my prior is lifecycle-to-IA at ~30 days based on the read-decay curve, but the exact age is a data question I'd hand them." Metadata at 10× is still small data, standard re-sharding, no architectural change.
 
 **Hardest trade-offs worth naming aloud:**
 - **Where the policy lives.** Keeping expiry/burn in metadata (not the immutable body) is what lets us cache bodies forever, at the price that **two systems must agree** (live row ⇒ blob exists; dead row ⇒ blob gets GC'd). The one-store alternative is simpler but reintroduces the cost problem the design exists to avoid. Keep the split, pay the GC tax.
 - **Burn consistency.** A strongly-consistent conditional write on an otherwise cache-friendly read path, isolated to burn pastes so normal reads stay cheap. Forcing strong consistency on *all* reads would kill cacheability for a guarantee almost no paste needs.
-- **Abuse at public scale**, rate-limit creation (3.10), scan for secrets/malware, honor takedowns, keep unlisted keys unguessable. *Delegate the content-safety pipeline:* "my prior is async scanning with a fast-path block on known-bad hashes; the classifier quality and false-positive budget belong to trust-and-safety, against a takedown SLA I set."
+- **Abuse at public scale**, rate-limit creation, scan for secrets/malware, honor takedowns, keep unlisted keys unguessable. *Delegate the content-safety pipeline:* "my prior is async scanning with a fast-path block on known-bad hashes; the classifier quality and false-positive budget belong to trust-and-safety, against a takedown SLA I set."
 
-**What I'd revisit:** the single-region assumption. The CDN already gives **global read latency** (bodies are edge-cacheable), so the cheap win is CDN coverage and **read replicas** of the metadata store, *not* multi-region active-active writes, which drag in conflict resolution (2.4) for an immutable-data problem that barely needs it. Exhausting caching/replicas before multi-region writes is the Director instinct.
+**What I'd revisit:** the single-region assumption. The CDN already gives **global read latency** (bodies are edge-cacheable), so the cheap win is CDN coverage and **read replicas** of the metadata store, *not* multi-region active-active writes, which drag in conflict resolution for an immutable-data problem that barely needs it. Exhausting caching/replicas before multi-region writes is the Director instinct.
 
 ---
 
@@ -244,13 +244,13 @@ At Director altitude they're listening for **trade-off articulation, cost owners
 > *Model:* It's a **hot key**, but it's the **same URL for everyone**, so the CDN serves it at ~100% edge hit and the body reads never reach origin; Redis absorbs the metadata lookups that leak through, `origin = R×(1−h)` with `h≈0.99` means origin sees ~1% of the spike. This works because the paste is public and immutable (cacheable). A **burn** paste is self-limiting (one reader wins); an **unlisted** one stays non-cacheable and rides Redis + the sharded store. The lever is hit ratio, never "add origin capacity."
 
 **Q2. The PM wants paste *editing*. How does that change your design?**
-> *Model:* I'd push back on mutating the body, **immutability is what lets me cache and tier bodies cheaply**. The clean model: an "edit" writes a **new immutable blob version** and the metadata row's pointer flips atomically (the 3.11 versioning pattern); the short key stays stable, the old version is GC'd. Cost I name: cache/CDN invalidation on edit (versioned blob key or purge). I would not turn the body into a mutable in-place record, that reintroduces every problem the split avoids.
+> *Model:* I'd push back on mutating the body, **immutability is what lets me cache and tier bodies cheaply**. The clean model: an "edit" writes a **new immutable blob version** and the metadata row's pointer flips atomically (the blob-versioning pattern); the short key stays stable, the old version is GC'd. Cost I name: cache/CDN invalidation on edit (versioned blob key or purge). I would not turn the body into a mutable in-place record, that reintroduces every problem the split avoids.
 
 **Q3. Your metadata store is eventually consistent. Where does that bite?**
-> *Model:* Exactly two places: **read-your-writes on create** (the reader hits a replica that hasn't seen the new key → spurious 404) and **burn-after-read** (a stale replica could leak an extra read). Fixes: route the immediate post-create read to a strongly-consistent read for a short window; force burn pastes onto the **strongly-consistent read + conditional write** path (3.4/2.8) so the claim is serialized. Everything else tolerates eventual consistency happily, bodies are immutable and a few hundred ms of lag on a brand-new key is invisible.
+> *Model:* Exactly two places: **read-your-writes on create** (the reader hits a replica that hasn't seen the new key → spurious 404) and **burn-after-read** (a stale replica could leak an extra read). Fixes: route the immediate post-create read to a strongly-consistent read for a short window; force burn pastes onto the **strongly-consistent read + conditional write** path so the claim is serialized. Everything else tolerates eventual consistency happily, bodies are immutable and a few hundred ms of lag on a brand-new key is invisible.
 
 **Q4. How do you stop Pastebin becoming a malware/secrets dump, and what do you own vs delegate?**
-> *Model:* I **own the requirement and the SLA**, not the classifier: rate-limit creates (3.10), run new pastes through an **async content-safety pipeline** (secret-scanning, malware hashes), honor takedowns within a defined SLA, keep unlisted keys unguessable. I **delegate** the ML/heuristics to trust-and-safety, "my prior is async scanning with a fast-path block on known-bad hashes; model quality and the false-positive budget are theirs." I'd resist *synchronous* scanning on the create path, it adds latency and a dependency to every write, unless a legal requirement forces it.
+> *Model:* I **own the requirement and the SLA**, not the classifier: rate-limit creates, run new pastes through an **async content-safety pipeline** (secret-scanning, malware hashes), honor takedowns within a defined SLA, keep unlisted keys unguessable. I **delegate** the ML/heuristics to trust-and-safety, "my prior is async scanning with a fast-path block on known-bad hashes; model quality and the false-positive budget are theirs." I'd resist *synchronous* scanning on the create path, it adds latency and a dependency to every write, unless a legal requirement forces it.
 
 ---
 

@@ -9,7 +9,7 @@ sidebar:
 
 This is the scorecard the room is using on you, written down. It is not a lesson, it is a **reference you self-assess against the night before a real loop.** Run your last mock answer through both tables; if any row lands you in the red column, that is your highest-leverage fix.
 
-Recall the framing from Lesson 1.1: the system-design round is a **design review you've been asked to chair**, run by Staff/Principal engineers who will be your peers or reports. They are not scoring whether you can hand-derive a hash function. They are scoring whether they'd trust you to run the review when the architecture actually matters. That trust shows up as a specific texture in how you reason: you scope before you build, you quantify your claims, you name the alternative you rejected, you delegate detail with a stated prior, and you own the cost and on-call consequences of your call.
+Recall the framing from the interview-scoring lesson: the system-design round is a **design review you've been asked to chair**, run by Staff/Principal engineers who will be your peers or reports. They are not scoring whether you can hand-derive a hash function. They are scoring whether they'd trust you to run the review when the architecture actually matters. That trust shows up as a specific texture in how you reason: you scope before you build, you quantify your claims, you name the alternative you rejected, you delegate detail with a stated prior, and you own the cost and on-call consequences of your call.
 
 Two warnings before the tables:
 
@@ -27,7 +27,7 @@ These two tables are **not duplicates**, they are different views of the same an
 
 The crucial relationship: **axis 4 (trade-off depth) and axis 5 (communication/leadership) are scored continuously, at every one of the 8 steps**, not in a single "trade-offs" moment near the end. Every step is a chance to name an alternative and to drive the conversation. That is why the same answer is graded twice, once per lens.
 
-The Director weighting (from Lesson 1.1, heaviest first): **trade-offs (4) > scope (1) ≈ communication (5) > estimation (2) ≈ design (3)**. Axis 3 has *diminishing returns*, past a clean decomposition, more boxes is not more signal, and grinding mechanics there is an **active anti-signal** ("why is this Director hand-tuning a B-tree?").
+The Director weighting (from the interview-scoring lesson, heaviest first): **trade-offs (4) > scope (1) ≈ communication (5) > estimation (2) ≈ design (3)**. Axis 3 has *diminishing returns*, past a clean decomposition, more boxes is not more signal, and grinding mechanics there is an **active anti-signal** ("why is this Director hand-tuning a B-tree?").
 
 ---
 

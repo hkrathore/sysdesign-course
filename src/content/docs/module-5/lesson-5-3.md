@@ -12,7 +12,7 @@ sidebar:
 - Quantify from first principles, **~100M photos/day**, **~100:1 read:write**, **~55 PB/year** of media vs **~36 TB/year** of metadata, and use those numbers to *force* the architecture, not decorate it.
 - Make the pivotal **feed-build** decision, fan-out-on-write vs fan-out-on-read, and the **celebrity hybrid**, and state the write-amplification cost (one celebrity post = **~100M feed inserts**) that kills the naive choice.
 - Split the **upload path** correctly: object store + CDN for bytes, a partitioned metadata DB for records, async transcode off the request path.
-- Handle **likes/comments at hot-key scale** with sharded counters (3.16), and **delegate the deep-dives**, ranking model, transcode farm, graph store, like a Director, not solve them like an IC.
+- Handle **likes/comments at hot-key scale** with sharded counters, and **delegate the deep-dives**, ranking model, transcode farm, graph store, like a Director, not solve them like an IC.
 
 ### Intuition first
 Think of a **newspaper that prints a unique front page for every reader.** When a journalist (someone you follow) files a story (posts a photo), the paper can **typeset it into the personal edition of every subscriber the instant it's filed**, your front page is pre-assembled when you wake up (**fan-out-on-write**: pay at write time, reads are instant). Or it can **wait until you open your paper, then run around collecting the latest stories from everyone you follow** (**fan-out-on-read**: cheap writes, expensive reads). For an ordinary journalist with 200 subscribers, pre-typesetting is cheap, fan-out-on-write wins. But a **celebrity with 100 million followers** files one story and "typeset into everyone's edition" means **100 million edits for a single post**, the press melts. For that journalist you flip strategies: leave the story on a shelf and merge it in fresh when each reader opens their paper. **Push for the long tail, pull for the celebrities, blended per reader**, that hybrid is the whole crux, plus the fact that photos are huge and records about them are tiny, so they live in two completely different stores.
@@ -29,7 +29,7 @@ Scope *before* building, the signal is **cutting** to a defensible core and nami
 3. **Home feed**, personalized, reverse-chronological-ish timeline from accounts you follow.
 4. **Like and comment**, with visible counts.
 
-**Explicitly cut (out loud, so it reads as choice, not omission):** Stories/Reels (same media pipeline + TTL), DMs (Lesson 5.5), Explore/search, ads, and **ML feed ranking**, I build the feed as a rankable candidate set and delegate the model: *"the feed-ranking team owns scoring; my design delivers the candidate set and the signals (recency, affinity, engagement)."* That delegation *is* the Director move, not a gap.
+**Explicitly cut (out loud, so it reads as choice, not omission):** Stories/Reels (same media pipeline + TTL), DMs, Explore/search, ads, and **ML feed ranking**, I build the feed as a rankable candidate set and delegate the model: *"the feed-ranking team owns scoring; my design delivers the candidate set and the signals (recency, affinity, engagement)."* That delegation *is* the Director move, not a gap.
 
 **Clarifying questions (with assumed answers):**
 - *Scale?* **~2B registered, ~500M DAU.**
@@ -40,8 +40,8 @@ Scope *before* building, the signal is **cutting** to a defensible core and nami
 **Non-functional:**
 - **Read-heavy, hard:** ~100:1 reads:uploads (derived next). A read-serving machine with a write pipeline bolted on.
 - **Feed latency:** p99 **≲ 200 ms** server-side on feed open.
-- **Availability over strict consistency** for reads (AP lean, 2.7), a slightly stale feed is fine, an unavailable one is not. The graph and upload-commit want stronger consistency; the system is not uniformly AP.
-- **Media durability is non-negotiable**, target **11 nines** on the object store (3.11).
+- **Availability over strict consistency** for reads (AP lean), a slightly stale feed is fine, an unavailable one is not. The graph and upload-commit want stronger consistency; the system is not uniformly AP.
+- **Media durability is non-negotiable**, target **11 nines** on the object store.
 - **Cost-aware:** at ~55 PB/year of media and ~2 PB/day of egress, storage tiering and CDN hit ratio are budget lines a Director owns.
 
 ---
@@ -74,7 +74,7 @@ Four distinct data shapes, each matched to a store type, refusing to jam them in
 
 | Data | Shape & access pattern | Store **type** | Real system | Rejected alternative (and why) |
 |---|---|---|---|---|
-| **Photo bytes** | Huge, immutable, write-once read-many | **Object/blob store + CDN** | **S3 / GCS** behind **CloudFront / Cloudflare** | A database BLOB column, wrong tool: melts the DB cache, can't reach 11 nines cheaply, can't sit on a CDN (3.11). |
+| **Photo bytes** | Huge, immutable, write-once read-many | **Object/blob store + CDN** | **S3 / GCS** behind **CloudFront / Cloudflare** | A database BLOB column, wrong tool: melts the DB cache, can't reach 11 nines cheaply, can't sit on a CDN. |
 | **Photo & user metadata** | Small (~1 KB) rows, keyed lookups, very high read rate | **Wide-column / partitioned KV** | **Cassandra** (or DynamoDB) | Single Postgres, holds 36 TB but can't absorb ~290k QPS or partition cleanly without sharding work I'd rather the store do. |
 | **Follow graph** | Many-to-many edges; "who do I follow?" and "who follows me?" | **Partitioned KV / adjacency lists** | **Cassandra** edge tables; TAO-style graph cache at extreme scale | Relational join table, "followers of X" for a celebrity becomes a multi-million-row scan; **denormalize both directions**. |
 | **Home feeds** | Per-user ID lists, transient, latency-critical | **In-memory store** | **Redis** (sorted sets) | Reading the feed from the metadata DB per open, fan-out-on-read with no cache, unaffordable at 100:1. |
@@ -196,7 +196,7 @@ Stress your own design, an architecture with no self-identified failure modes re
 
 **Bottleneck 2, the celebrity `followers` partition.** The hybrid spares true celebrities from fan-out entirely (their follower lists are never enumerated for push). For big-but-sub-threshold accounts, **fan out asynchronously in parallel batches off Kafka**, many workers drain the list over seconds. **Trade:** seconds of propagation latency for bounded per-worker load, exactly what "feed may be seconds stale" bought us in R.
 
-**Bottleneck 3, hot counter key (celebrity likes).** A viral post takes likes faster than one row can serialize. **Fix:** sharded counters per **Lesson 3.16**, split into N sub-counters, increment randomly, sum on read; the count becomes exact-but-eventually-consistent, which R pre-bought. *Rejected:* one atomic counter, strongly consistent but a hard throughput wall on a viral post.
+**Bottleneck 3, hot counter key (celebrity likes).** A viral post takes likes faster than one row can serialize. **Fix:** sharded counters per **The sharded-counter building block**, split into N sub-counters, increment randomly, sum on read; the count becomes exact-but-eventually-consistent, which R pre-bought. *Rejected:* one atomic counter, strongly consistent but a hard throughput wall on a viral post.
 
 **Bottleneck 4, feed-read hydration tail latency.** A feed open hydrates ~20 post IDs into full objects at ~290k opens/s, and the slowest read sets the p99. **Fix in one line:** cache **hydrated post objects** in Redis (a hot post hydrates once, serves millions) and hydrate only the first page, accepting that **edits/deletes must evict** the cached object.
 
@@ -208,12 +208,12 @@ Stress your own design, an architecture with no self-identified failure modes re
 
 ## D: Design evolution
 
-**At 10× (1.5 PB/day media, ~3M reads/s):** media and CDN scale linearly, the levers are **CDN hit ratio** (tiered caches, origin shielding, 3.5) and **lifecycle-tiering** cold media (most photos are read heavily for days, then almost never, 3.11); at this volume tiering is a multi-million-dollar/year line. The **feed/fan-out tier is what strains**: the celebrity threshold becomes a continuous, monitored knob (fan-out cost modeled per author as follower count × follower activity). Multi-region adds geo-locality: build feeds in the user's home region, replicate graph + metadata cross-region accepting lag (2.4).
+**At 10× (1.5 PB/day media, ~3M reads/s):** media and CDN scale linearly, the levers are **CDN hit ratio** (tiered caches, origin shielding) and **lifecycle-tiering** cold media (most photos are read heavily for days, then almost never); at this volume tiering is a multi-million-dollar/year line. The **feed/fan-out tier is what strains**: the celebrity threshold becomes a continuous, monitored knob (fan-out cost modeled per author as follower count × follower activity). Multi-region adds geo-locality: build feeds in the user's home region, replicate graph + metadata cross-region accepting lag.
 
 **The hardest trade-offs (worth flagging as genuinely contested):**
 1. **Where the celebrity threshold sits.** Too low → read-time merging creeps up on the 100:1 path; too high → fan-out storms leak back. An empirical boundary, not a constant.
 2. **Ranked vs chronological.** Ranking improves engagement but forces re-scoring on every read (scores decay, signals arrive); chronological makes fan-out-on-write a trivial append. A **product-vs-infra tension** to surface to the room, not silently resolve.
-3. **Hydration-cache invalidation and delete.** "Delete must remove a photo everywhere" is a privacy/legal obligation, not best-effort; and any count feeding payouts/analytics needs **exact event-log reconciliation** separate from the fast display counter (3.16).
+3. **Hydration-cache invalidation and delete.** "Delete must remove a photo everywhere" is a privacy/legal obligation, not best-effort; and any count feeding payouts/analytics needs **exact event-log reconciliation** separate from the fast display counter.
 
 **Where I'd delegate (with a stated prior, the consolidation of every hand-off in this design):**
 - **Feed ranking model** → ranking team. I deliver the candidate set + signals; the model is theirs.
@@ -241,7 +241,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 
 - **"How do you build the home feed?"**, *Strong:* frames push vs pull, does the write-amplification arithmetic (celebrity = ~100M inserts/post), lands on the **hybrid with a follower threshold**, names the read-cost trade. *Red flag:* "query everyone they follow and sort" with no cost awareness, or precompute-everything with no celebrity carve-out.
 - **"Why two stores for photos vs metadata?"**, *Strong:* the **~1,500× ratio** (55 PB vs 36 TB); object store + CDN for immutable bytes, partitioned DB for rows. *Red flag:* "store the image in a Postgres column."
-- **"A celebrity post takes a million likes a minute, what breaks?"**, *Strong:* hot-key write contention → sharded counters, plus separating the eventually-consistent display count from an exact reconciled number (3.16). *Red flag:* "add read replicas" (replicas don't relieve a hot *write* key).
+- **"A celebrity post takes a million likes a minute, what breaks?"**, *Strong:* hot-key write contention → sharded counters, plus separating the eventually-consistent display count from an exact reconciled number. *Red flag:* "add read replicas" (replicas don't relieve a hot *write* key).
 - **"What's the CDN buying you, in numbers?"**, *Strong:* 95% hit ratio turns ~2 PB/day into ~100 TB/day at origin, latency *and* a budget line. *Red flag:* "it makes images faster."
 - **"What would you hand to another team?"**, *Strong:* ranking model, transcode matrix, extreme-scale graph store, each **with a stated prior**. *Red flag:* designing the ML ranker live (wrong altitude) or "the team handles it" with no prior.
 
@@ -252,7 +252,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 - **Only fan-out-on-write (or only on-read).** Either alone breaks at social scale; skipping the celebrity case is the single most common failure.
 - **Photo bytes in the database.** Melts the DB cache, can't reach 11 nines economically, can't sit on a CDN.
 - **App servers in the byte path / synchronous transcode or fan-out.** A "post" must return in tens of ms, bytes go direct to object storage; heavy work goes on queues.
-- **One atomic counter for viral likes.** A hot write key is a throughput wall; shard it (3.16).
+- **One atomic counter for viral likes.** A hot write key is a throughput wall; shard it.
 - **Treating the feed cache as the source of truth.** A lost feed must be rebuildable from the metadata DB, or a cache failure becomes data loss.
 
 ---
@@ -260,7 +260,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 ## Interviewer follow-up questions (with model answers)
 
 **Q1. A user posts, then immediately opens their own feed and doesn't see the post. What happened?**
-> *Model:* Classic **read-your-writes** miss (2.4), fan-out is async, so the post hasn't landed in the author's own feed list yet. Fix: merge the author's own recent posts from `posts_by_user` into their feed read for a short window (cheap, bounded), and/or write the author's own feed entry synchronously while follower fan-out stays async. Trade: a touch more work on the post path so authors always see their own post; everyone else tolerates seconds of lag.
+> *Model:* Classic **read-your-writes** miss, fan-out is async, so the post hasn't landed in the author's own feed list yet. Fix: merge the author's own recent posts from `posts_by_user` into their feed read for a short window (cheap, bounded), and/or write the author's own feed entry synchronously while follower fan-out stays async. Trade: a touch more work on the post path so authors always see their own post; everyone else tolerates seconds of lag.
 
 **Q2. The ranking team wants a new engagement signal recomputed per read. Does your design allow it?**
 > *Model:* Yes, that's exactly why the feed is a **candidate set re-scored at read time**, not a frozen list. Cost is read-side compute: re-scoring candidates at ~290k opens/s. I keep retrieval cheap (precomputed list + celebrity merge), bound scoring to the first page, push expensive features into a precomputed feature store, and **delegate the model + feature pipeline** with the contract "retrieval is mine, scoring is yours, here's the latency budget." That separation lets ranking iterate without touching storage or fan-out.
@@ -278,7 +278,7 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 - **The feed-build decision is the whole problem:** push (precompute, instant reads, write amplification) vs pull (cheap writes, expensive reads), at social scale the answer is the **hybrid**, because one celebrity post = **~100M feed inserts** otherwise.
 - **Drive it with two numbers:** **~100:1 read:write** (→ CDN + cache + precompute) and **media ≫ metadata by ~1,500×** (→ bytes in object store + CDN, records in a partitioned DB). The architecture falls out of the arithmetic.
 - **Keep heavy work off the request path:** presigned direct-to-object-store uploads, async transcode, async fan-out, a post returns in tens of ms.
-- **Hot keys get sharded and eventually consistent:** likes/comments via sharded counters (3.16), with exact event-log reconciliation for any number feeding payouts.
+- **Hot keys get sharded and eventually consistent:** likes/comments via sharded counters, with exact event-log reconciliation for any number feeding payouts.
 - **Director altitude:** go deep on the feed hybrid (where the decision turns); delegate ranking, transcode, and the graph store **with stated priors**; own the CDN and erasure-coding cost levers.
 
 > **Spaced-repetition recap:** Newspaper printing a unique front page per reader, typeset at filing time (**fan-out-on-write**) for normal authors, lay out on demand (**fan-out-on-read**) for the celebrity whose one story would mean 100M edits: that **hybrid** is the crux. Photos (≈55 PB/yr) in an **object store + CDN**; their 1 KB records (≈36 TB/yr) in a **partitioned DB**; feeds in **Redis**. **~100:1 read-heavy** → cache hard, push work off the request path, **shard the viral like counter**. Name every trade + what you'd delegate.

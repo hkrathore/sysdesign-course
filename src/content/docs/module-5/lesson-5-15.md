@@ -333,4 +333,4 @@ One client firing 100K-token prompts can monopolize KV and decode cycles - a hot
 
 ---
 
-*End of Lesson 5.15. This problem breaks the read:write framing that drove Twitter (5.5) and Instagram (5.4): here the scarce resource is **GPU HBM**, the "index" that bounds throughput is the **KV-cache**, and the cost line is **GPU-hours**, not storage - a reminder that **RESHADED's R and E steps decide the architecture before any box is drawn.** This concludes Module 5's problem set; next is Module 6 - the capstone, where you drive and the AI critiques.*
+*End of Lesson 5.15. This problem breaks the read:write framing that drove Twitter and Instagram: here the scarce resource is **GPU HBM**, the "index" that bounds throughput is the **KV-cache**, and the cost line is **GPU-hours**, not storage - a reminder that **RESHADED's R and E steps decide the architecture before any box is drawn.** This concludes the problem set; next is the capstone - the capstone, where you drive and the AI critiques.*

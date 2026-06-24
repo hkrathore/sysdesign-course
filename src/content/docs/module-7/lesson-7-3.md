@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-> **Why this gets asked.** The vending machine is the textbook explicit state machine, the State pattern shows up in roughly **30% of all LLD problems** (elevator, ATM, order lifecycle), and this is the cleanest specimen, which is why Google, Amazon, Microsoft, Apple, and Oracle keep asking it. A junior answer enumerates classes and gets the happy path vending. A Director answer **makes illegal state transitions unrepresentable** (no code path exists, not "an `if` guards it") and **owns the failure transitions**, motor jams *after* payment, exact change unavailable, power dies mid-dispense. The real test: would you catch the missing refund path in a design review. This is the module's **canonical State-pattern lesson**, 7.1, 7.2, and 7.9 reference it.
+> **Why this gets asked.** The vending machine is the textbook explicit state machine, the State pattern shows up in roughly **30% of all LLD problems** (elevator, ATM, order lifecycle), and this is the cleanest specimen, which is why Google, Amazon, Microsoft, Apple, and Oracle keep asking it. A junior answer enumerates classes and gets the happy path vending. A Director answer **makes illegal state transitions unrepresentable** (no code path exists, not "an `if` guards it") and **owns the failure transitions**, motor jams *after* payment, exact change unavailable, power dies mid-dispense. The real test: would you catch the missing refund path in a design review. This is the module's **canonical State-pattern lesson**, which the other LLD lessons reference rather than re-derive.
 
 ### Learning objectives
 - Run the **RESHADED** spine on an LLD problem, stating how each step adapts, H becomes the **explicit state machine**, Evaluation the **failure-mode walk**, Estimation nearly drops.
@@ -28,7 +28,7 @@ The idea candidates miss: the prime directive is **conservation of money**, ever
 **Clarifying questions I'd ask (with assumed answers):**
 - *Payment methods?* → **Coins first; bills and card/NFC must slot in later**, the stated evolution axis.
 - *One user at a time?* → **Yes**, the panel is serial, but sensor events arrive **asynchronously**.
-- *Is "take money, deliver nothing" acceptable?* → **No, the cardinal sin**, the LLD analogue of 5.13's oversell.
+- *Is "take money, deliver nothing" acceptable?* → **No, the cardinal sin**, the LLD analogue of Ticketmaster's oversell.
 - *Exact change?* → Detected **before committing to a vend**, not after dispensing.
 
 **Functional requirements:** accept payment incrementally with running credit; select and vend if credit ≥ price and stock > 0; return change; cancel before dispense → full refund; jam → refund; change infeasible → block up front; service mode.
@@ -63,7 +63,7 @@ The idea candidates miss: the prime directive is **conservation of money**, ever
 
 > Adaptation: no database tier, "storage" becomes **what must survive a power cut**, and in what order it's written.
 
-Three things persist in non-volatile memory (flash/EEPROM, Lesson 3.13's write-ahead logging in miniature):
+Three things persist in non-volatile memory (flash/EEPROM, write-ahead logging in miniature):
 
 1. **Transaction journal (append-only, written FIRST).** Before the motor fires: `VEND_START {slot, credit, txn_id}`. On drop-sensor confirm: `VEND_OK`. On jam: `VEND_FAIL`. **The journal entry precedes the irreversible physical action**, the motor is a side effect you cannot roll back.
 2. **Inventory counts** per slot, decremented on `VEND_OK`, not `VEND_START`: count what *happened*, not what was attempted.
@@ -212,9 +212,9 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 
 **Failure 1, motor jams after payment (the cardinal case).** Credit escrowed, `VEND_START` journaled, motor fires, drop sensor never confirms. *Handling:* jam sensor or ~5 s timeout (name the timeout, an FSM with no timer events deadlocks on silent hardware) fires `onJamDetected` → journal `VEND_FAIL` → **`Dispensing → Refunding` with full credit** → flag the slot suspect. *Rejected: retry the motor*, a second pulse on a jammed helix can dispense **two** products once it clears. A lost sale vs a violated invariant: cheap.
 
-**Failure 2, exact change unavailable.** *Handling:* a **guard before `VEND_START`**, `Collecting` checks `canMake(credit − price)` and routes to `Refunding` (or displays "exact change only") before anything irreversible. *Rejected: dispense, then discover the hopper can't pay 35¢*, you owe physical money you cannot produce. Order of operations *is* the correctness, 5.13's "re-assert the hold inside the conversion" instinct.
+**Failure 2, exact change unavailable.** *Handling:* a **guard before `VEND_START`**, `Collecting` checks `canMake(credit − price)` and routes to `Refunding` (or displays "exact change only") before anything irreversible. *Rejected: dispense, then discover the hopper can't pay 35¢*, you owe physical money you cannot produce. Order of operations *is* the correctness, Ticketmaster's "re-assert the hold inside the conversion" instinct.
 
-**Failure 3, power dies mid-dispense (the idempotency probe).** *Handling:* journal + boot reconciliation (per S): in-doubt vend → latched drop flag → else refund, customer's favor. The `txn_id` makes reconciliation **idempotent**, a second power cut during recovery can't double-refund. The deepest probe here: 5.13's idempotency keys are this journal, distributed.
+**Failure 3, power dies mid-dispense (the idempotency probe).** *Handling:* journal + boot reconciliation (per S): in-doubt vend → latched drop flag → else refund, customer's favor. The `txn_id` makes reconciliation **idempotent**, a second power cut during recovery can't double-refund. The deepest probe here: Ticketmaster's idempotency keys are this journal, distributed.
 
 **Failure 4, cancel races the dispense.** *Handling:* `Dispensing.onCancel()` returns `this`, too late, the motor committed. Handlers process events serially against one explicit state, so the race collapses to event order, flag-soup designs genuinely lose this one to interleaved boolean updates.
 
@@ -265,7 +265,7 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 - **Checking change feasibility after dispensing.** You now owe money you may not be able to produce. Feasibility guards the irreversible action, ordering is the correctness.
 - **Flags instead of states.** If two booleans can disagree about what state you're in, you don't have a state machine, illegal states become representable.
 - **No journal, or journal written after the motor fires.** Power loss silently eats money; written-after can't distinguish "never started" from "started and lost."
-- **No timeout events.** A silent drop sensor leaves the FSM in `Dispensing` forever, money escrowed. Hardware needs timer events like any distributed system (5.14).
+- **No timeout events.** A silent drop sensor leaves the FSM in `Dispensing` forever, money escrowed. Hardware needs timer events like any distributed system.
 
 ---
 
@@ -296,4 +296,4 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 
 ---
 
-*End of Lesson 7.3, Module 7's State-pattern reference; 7.1, 7.2, and 7.9 cite it rather than re-derive it. The continuity: journal-before-action, reconcile-on-boot, compensate-on-doubt is 5.13's idempotency story and 5.14's exactly-once story, shrunk to one box on a wall, the altitude skill is recognizing it's the same problem.*
+*End of Lesson 7.3, this module's State-pattern reference, which the other LLD lessons cite rather than re-derive. The continuity: journal-before-action, reconcile-on-boot, compensate-on-doubt is Ticketmaster's idempotency story and the exactly-once story, shrunk to one box on a wall, the altitude skill is recognizing it's the same problem.*

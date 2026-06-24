@@ -12,7 +12,7 @@ sidebar:
 - Open with the **billing-or-analytics** clarifying question and show how the answer **flips the architecture**, the opening Director move on this problem.
 - Decide where **exactly-once counting** is mandatory (billing) and where **at-least-once with eventual correction** is fine (live dashboards), and place **dedup, late-event handling, and idempotent reprocessing** accordingly.
 - Treat **raw-event retention** as a real budget line in estimation, the batch source of truth needs the raw events kept, and that storage is a number you defend.
-- Frame the **Lambda-vs-Kappa** design-evolution argument by reference (Lesson 2.9) rather than re-teaching it, and hand the same pipeline off to top-K (Lesson 9.8).
+- Frame the **Lambda-vs-Kappa** design-evolution argument by reference rather than re-teaching it, and hand the same pipeline off to top-K.
 
 ### Intuition first
 Picture a **cash register at a stadium concession stand** wired to two displays. One is a **big scoreboard** the manager glances at all night, "we've sold about 40,000 drinks so far", updated live, roughly right, and nobody cares if it's off by a few hundred at any instant. The other is the **end-of-night till reconciliation** the accountant runs: every receipt counted, every refund applied, every duplicate swipe removed, and the number that actually settles the books. **Same stream of sales, two completely different machines**, one optimized for *now and roughly*, the other for *eventually and exactly*, because one drives a glance and the other drives money.
@@ -134,7 +134,7 @@ flowchart TB
 - **The speed path:** a **stream processor** (Flink / Kafka Streams) does windowed aggregation, per-minute counts per campaign and dimension, and writes to the **OLAP store**, which the **dashboard** reads. This is at-least-once and fast; small over/under-counts are tolerated and self-correct.
 - **The truth path:** the same events land in **S3** as retained raw. A periodic **batch job** (hourly/daily) recomputes exact counts over the raw, applying full dedup, late-event inclusion, and fraud filtering, and writes the **billable table**, the source of truth the **billing service** invoices from. The batch also **back-corrects** the OLAP store so the dashboard converges to truth.
 
-**The shape to notice:** the load-bearing wall runs between the **approximate stream (dashboard, speed)** and the **exact batch (billing, truth)**. They share the ingest log but diverge on the correctness contract. This is the **Lambda-style two-path** structure (Lesson 2.9), and whether to collapse it to one path is the central design-evolution argument.
+**The shape to notice:** the load-bearing wall runs between the **approximate stream (dashboard, speed)** and the **exact batch (billing, truth)**. They share the ingest log but diverge on the correctness contract. This is the **Lambda-style two-path** structure, and whether to collapse it to one path is the central design-evolution argument.
 
 ---
 
@@ -197,7 +197,7 @@ GET /v1/campaigns/{campaignId}/billable?period=2026-06
 
 </details>
 
-**Partition key = `campaign_id`.** Co-locates a campaign's events on one Kafka partition (in-order, single-consumer aggregation) and matches the query shape (per-campaign dashboards and bills). *Rejected: partition by `user_id`*, scatters a campaign's events across all partitions, forcing a cross-partition shuffle to aggregate per campaign. *Hot-campaign caveat:* a viral campaign overloads one partition (Lesson 3.16's hot-key shape); sub-partition it by `(campaign_id, hash(ad_id) % k)` and sum on read, the sharded-counter pattern applied to the log.
+**Partition key = `campaign_id`.** Co-locates a campaign's events on one Kafka partition (in-order, single-consumer aggregation) and matches the query shape (per-campaign dashboards and bills). *Rejected: partition by `user_id`*, scatters a campaign's events across all partitions, forcing a cross-partition shuffle to aggregate per campaign. *Hot-campaign caveat:* a viral campaign overloads one partition (the hot-key shape); sub-partition it by `(campaign_id, hash(ad_id) % k)` and sum on read, the sharded-counter pattern applied to the log.
 
 ---
 
@@ -221,7 +221,7 @@ Someone wires the invoice to the OLAP store because it's already there.
 
 **Bottleneck 4, ingest firehose / hot campaigns.**
 300k/sec peak, with one viral campaign overloading a single partition.
-*Fix:* **partition the log** for parallelism; **sub-partition hot campaigns** by `(campaign_id, hash(ad_id) % k)` and sum on read (Lesson 3.16's sharded-counter pattern); buffer in Kafka so bursts don't backpressure ingest. *Trade-off:* sub-partitioning makes per-campaign reads fan across k partitions, cheap, and only for the rare hot campaign.
+*Fix:* **partition the log** for parallelism; **sub-partition hot campaigns** by `(campaign_id, hash(ad_id) % k)` and sum on read (the sharded-counter pattern); buffer in Kafka so bursts don't backpressure ingest. *Trade-off:* sub-partitioning makes per-campaign reads fan across k partitions, cheap, and only for the rare hot campaign.
 
 **Bottleneck 5, fraud / invalid clicks inflating the bill.**
 Bots and duplicate-intent clicks must not be billed.
@@ -233,9 +233,9 @@ Bots and duplicate-intent clicks must not be billed.
 
 ## D: Design evolution
 
-> Push the dimensions up and find what breaks, and on this problem, the central evolution argument is **Lambda vs Kappa** (referenced, not re-taught from Lesson 2.9).
+> Push the dimensions up and find what breaks, and on this problem, the central evolution argument is **Lambda vs Kappa** (referenced, not re-taught).
 
-**The Lambda-vs-Kappa question (the headline trade-off).** The two-path design above is **Lambda**, a stream layer for speed and a batch layer for truth, reconciled. Its well-known cost is **maintaining two codebases** that must compute the *same* aggregation and agree (Lesson 2.9). The **Kappa** alternative: one stream path, and to "recompute," you **replay the retained log** through the same stream code. Where each wins:
+**The Lambda-vs-Kappa question (the headline trade-off).** The two-path design above is **Lambda**, a stream layer for speed and a batch layer for truth, reconciled. Its well-known cost is **maintaining two codebases** that must compute the *same* aggregation and agree. The **Kappa** alternative: one stream path, and to "recompute," you **replay the retained log** through the same stream code. Where each wins:
 - **Stay Lambda when** the batch's correctness contract genuinely differs from the stream's, here it does: billing needs exactly-once over an *unbounded* late-event window and re-runnable fraud filtering, which is naturally a batch recompute over retained raw. The two paths aren't redundant; they have different correctness guarantees.
 - **Move toward Kappa when** you can express the exact recompute as a *replay* of the same streaming job over the retained log (which we already keep in S3). Modern stream engines make this viable, collapsing two codebases into one. *Trade-off:* a full historical replay through the stream is operationally heavier than a batch scan, and the engine must guarantee exactly-once on replay.
 - **My prior:** keep the raw log retained (we already do, it's the enabler of *both*), start Lambda for the clear billing/dashboard correctness split, and migrate the recompute to log-replay (Kappa-style) once the streaming engine's exactly-once-on-replay is proven, to kill the dual-codebase tax. This is a *managed evolution*, not a day-one bet.
@@ -252,7 +252,7 @@ Bots and duplicate-intent clicks must not be billed.
 - **The stream engine bake-off:** *"Data-platform benchmarks Flink vs Kafka Streams vs Spark Structured Streaming on our 300k/sec exactly-once-with-late-events workload; my prior is Flink for mature event-time + exactly-once, escalating only if operational cost dominates."*
 - **The OLAP store choice:** *"Analytics benchmarks Druid vs ClickHouse vs Pinot on our per-minute group-by read shape; my prior is whichever the org already runs."* What I keep, the **two-path speed/truth split, never-bill-from-the-stream, and raw retention as the recompute enabler**, and what I delegate, with a stated prior, is the altitude.
 
-**Handoff:** the exact same ingest log + aggregation pipeline is the substrate for **top-K** ("the 100 highest-clicked ads right now") in **Lesson 9.8**, same firehose, a different read shape (heavy-hitters over a window rather than per-campaign totals).
+**Handoff:** the exact same ingest log + aggregation pipeline is the substrate for **top-K** ("the 100 highest-clicked ads right now"), same firehose, a different read shape (heavy-hitters over a window rather than per-campaign totals).
 
 ---
 
@@ -273,7 +273,7 @@ Bots and duplicate-intent clicks must not be billed.
 - **"How do you count each click exactly once for billing?"**, *Strong:* dedup by explicit `eventId`; the **batch recompute over complete deduped raw is the real guarantee** (exactly-once over *all* events, not just a window); never bill from the stream. *Red flag:* "exactly-once on the stream" with no batch, ignoring late events outside the window.
 - **"A mobile event arrives 3 hours late. Where does it land on the bill?"**, *Strong:* watermarks give the stream a grace window; definitively, the **batch sees it in retained raw and attributes it to the correct period**; the dashboard converges via back-correction. *Red flag:* processing-time windows that silently misattribute it.
 - **"Why keep all the raw events, that's a lot of storage."**, *Strong:* raw retention (~50 TB/mo, a defended line item) is what makes the billing number **recomputable, auditable, and re-billable** when a fraud rule or counting bug changes; aggregate-only can never do that. *Red flag:* keeps only aggregates and can't audit or correct.
-- **"Lambda or Kappa here, and why?"**, *Strong:* names the dual-codebase cost of Lambda and the heavier-replay cost of Kappa; keeps Lambda while the billing/dashboard correctness contracts genuinely differ; migrates to log-replay once exactly-once-on-replay is proven (references Lesson 2.9, doesn't re-derive). *Red flag:* picks one by fashion with no trade-off.
+- **"Lambda or Kappa here, and why?"**, *Strong:* names the dual-codebase cost of Lambda and the heavier-replay cost of Kappa; keeps Lambda while the billing/dashboard correctness contracts genuinely differ; migrates to log-replay once exactly-once-on-replay is proven (by reference, doesn't re-derive). *Red flag:* picks one by fashion with no trade-off.
 
 ---
 
@@ -293,13 +293,13 @@ Bots and duplicate-intent clicks must not be billed.
 > *Model:* The click arrives with an assigned `eventId` and durably lands on the Kafka log, partitioned by `campaign_id`, and is tee'd to S3 as retained raw. The **stream** dedups by `eventId` in keyed state and produces a fast approximate count for the dashboard, but that's not the bill. The **bill** comes from a **batch job that recomputes over the complete retained raw**: it dedups across *all* events (not just a window), folds in late arrivals, applies the fraud filter, and writes an exact count to the billable table. The invoice reads only that table. So exactly-once for billing is structural: idempotent recomputation over an immutable, deduped raw set yields the same exact number however many times it runs. The stream is fast; the batch is true.
 
 **Q2. The same firehose, but now show me top-10 ads by clicks in the last 5 minutes.**
-> *Model:* That's the **top-K / heavy-hitters** read shape (Lesson 9.8) over the *same* ingest log and stream layer. Same partitioned firehose, same windowing, but instead of per-campaign totals I maintain a bounded top-K structure (e.g. Count-Min Sketch for frequencies + a heap of candidates) per window, so I don't sort the full cardinality. Crucially, for a *dashboard* top-K, approximate is fine, so it stays purely on the stream, no batch needed unless top-K ever drives money. The reusable substrate is the log + stream aggregation; only the aggregation function and read shape change.
+> *Model:* That's the **top-K / heavy-hitters** read shape over the *same* ingest log and stream layer. Same partitioned firehose, same windowing, but instead of per-campaign totals I maintain a bounded top-K structure (e.g. Count-Min Sketch for frequencies + a heap of candidates) per window, so I don't sort the full cardinality. Crucially, for a *dashboard* top-K, approximate is fine, so it stays purely on the stream, no batch needed unless top-K ever drives money. The reusable substrate is the log + stream aggregation; only the aggregation function and read shape change.
 
 **Q3. Your stream processor crashes mid-window. Did you lose or double-count clicks for the dashboard?**
 > *Model:* Neither, if exactly-once is configured: the processor checkpoints state and commits aggregate writes transactionally with the consumer offset (Flink + Kafka transactions). On restart it rewinds to the last checkpoint and replays from the log; because the output commit was atomic with the input offset, replay doesn't double-count, and nothing is lost because the log retained the events. The dashboard may stall for the restart window, then catch up. And even if the stream got it slightly wrong, the **batch back-corrects** the dashboard and *is* the bill, the stream never has to be perfect.
 
 **Q4. Why not just make the stream exactly-once and drop the batch entirely (Kappa)?**
-> *Model:* You can move toward Kappa, recompute by replaying the retained log through the same stream job, killing Lambda's dual-codebase cost. I keep the raw log precisely so that's possible. But I hold Lambda while two things are true: billing needs exactly-once over an *unbounded* late-event window (a stream's dedup state is finite, so a click arriving days late slips its window, the batch, seeing all raw, doesn't), and fraud rules must be re-runnable over history to re-settle past periods. Both are naturally batch recomputes. Once the engine's exactly-once-on-replay is proven for our late-event profile, I'd collapse to Kappa, a managed migration, not a day-one bet (Lesson 2.9).
+> *Model:* You can move toward Kappa, recompute by replaying the retained log through the same stream job, killing Lambda's dual-codebase cost. I keep the raw log precisely so that's possible. But I hold Lambda while two things are true: billing needs exactly-once over an *unbounded* late-event window (a stream's dedup state is finite, so a click arriving days late slips its window, the batch, seeing all raw, doesn't), and fraud rules must be re-runnable over history to re-settle past periods. Both are naturally batch recomputes. Once the engine's exactly-once-on-replay is proven for our late-event profile, I'd collapse to Kappa, a managed migration, not a day-one bet.
 
 **Q5. What does this cost, and what would you delegate?**
 > *Model:* The spend is the **ingest log + stream tier** (sized for 300k/sec peak) and **raw retention** (~50 TB/mo S3, a few hundred dollars, the price of a recomputable, auditable bill). The aggregates and dashboard tier are small; reads are trivially cached. I delegate the **fraud model** to trust-and-safety behind `isValid(event)`, owning only the integration point (batch applies the verdict before settling). I delegate the **stream-engine and OLAP-store bake-offs** with stated priors (Flink for event-time + exactly-once; whichever OLAP the org runs). What I keep is the two-path speed/truth split, never-bill-from-the-stream, and raw retention as the recompute enabler.
@@ -307,14 +307,14 @@ Bots and duplicate-intent clicks must not be billed.
 ---
 
 ### Key takeaways
-- **Every click is money, so the design splits speed from truth:** a fast **approximate stream** for live dashboards and a slow **exact batch** for the bill, two paths from one firehose (the Lambda shape, Lesson 2.9). The opening Director move is asking **"billing or analytics?"**, it flips the architecture.
+- **Every click is money, so the design splits speed from truth:** a fast **approximate stream** for live dashboards and a slow **exact batch** for the bill, two paths from one firehose (the Lambda shape). The opening Director move is asking **"billing or analytics?"**, it flips the architecture.
 - **Never bill from the stream.** The stream is at-least-once and lossy on very-late events; the **batch recompute over complete deduped raw is the source of truth**, exactly-once over *all* events, not just a window.
 - **Raw-event retention (~50 TB/mo) is a defended budget line, not waste:** it's what makes the billing number recomputable, auditable, and re-billable when a fraud rule or counting bug changes. Aggregate-only can never do that.
 - **Late events and dedup are correctness, not polish:** event-time windowing + watermarks on the stream, full-raw recompute in the batch, and explicit `eventId` dedup; the dashboard converges to truth via back-correction.
-- **It's a write-heavy, throughput-and-retention problem:** partition the durable log by `campaign_id`, sub-shard hot campaigns (Lesson 3.16), scale stream parallelism horizontally; aggregates and reads are tiny. Delegate the fraud model and the engine/store bake-offs with stated priors.
+- **It's a write-heavy, throughput-and-retention problem:** partition the durable log by `campaign_id`, sub-shard hot campaigns, scale stream parallelism horizontally; aggregates and reads are tiny. Delegate the fraud model and the engine/store bake-offs with stated priors.
 
-> **Spaced-repetition recap:** Ad click aggregator = **streaming analytics where every event is money.** Ask **billing or analytics** first, it flips the design. Build **two paths from one Kafka firehose**: a fast **approximate stream** (Flink → OLAP → dashboard, at-least-once, self-correcting) and a slow **exact batch** (S3 raw → recompute → billable table, exactly-once over complete deduped raw). **Never bill from the stream.** Handle **late events** (event-time + watermarks; batch is the authority) and **dedup** (explicit `eventId`). **Raw retention (~50 TB/mo)** is the recompute enabler. **Lambda now, Kappa once exactly-once-on-replay is proven** (Lesson 2.9). Same pipeline feeds **top-K** (Lesson 9.8). Delegate the fraud model + engine/store bake-offs.
+> **Spaced-repetition recap:** Ad click aggregator = **streaming analytics where every event is money.** Ask **billing or analytics** first, it flips the design. Build **two paths from one Kafka firehose**: a fast **approximate stream** (Flink → OLAP → dashboard, at-least-once, self-correcting) and a slow **exact batch** (S3 raw → recompute → billable table, exactly-once over complete deduped raw). **Never bill from the stream.** Handle **late events** (event-time + watermarks; batch is the authority) and **dedup** (explicit `eventId`). **Raw retention (~50 TB/mo)** is the recompute enabler. **Lambda now, Kappa once exactly-once-on-replay is proven**. Same pipeline feeds **top-K**. Delegate the fraud model + engine/store bake-offs.
 
 ---
 
-*End of Lesson 9.7. The Ad Click Aggregator is the canonical streaming-analytics interview: the hard part isn't volume, it's that **the output is invoices**, forcing a deliberate speed-vs-truth split, an approximate stream for dashboards and an exact, recomputable batch as the billing source of truth, reusing batch-vs-stream and Lambda/Kappa from 2.9 and sharded counters from 3.16. Next: 9.8 Top-K / heavy-hitters on the very same pipeline.*
+*End of Lesson 9.7. The Ad Click Aggregator is the canonical streaming-analytics interview: the hard part isn't volume, it's that **the output is invoices**, forcing a deliberate speed-vs-truth split, an approximate stream for dashboards and an exact, recomputable batch as the billing source of truth, reusing batch-vs-stream and Lambda/Kappa reasoning and sharded counters.*

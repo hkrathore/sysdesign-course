@@ -40,7 +40,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 3. **Coordination cost:** one shared 4-hour regression suite, a merge queue, a release-captain rotation; ~20-30% of sprint capacity lost to cross-team coordination.
 4. **Team coupling:** 12 teams = up to **66 pairwise coordination paths** through one codebase and one schema.
 
-**Explicitly NOT requirements (scoping is the signal):** "industry best practice," "Netflix does it," runtime scale. At this size, **the monolith almost never has a scale problem - it has an organizational problem.** It handles the traffic fine behind a load balancer (Lesson 3.2); what it can't handle is 12 teams.
+**Explicitly NOT requirements (scoping is the signal):** "industry best practice," "Netflix does it," runtime scale. At this size, **the monolith almost never has a scale problem - it has an organizational problem.** It handles the traffic fine behind a load balancer; what it can't handle is 12 teams.
 
 **Non-functional constraints:** no feature freeze; every increment **reversible**; user-visible behavior unchanged during migration; flat infra budget growth tolerated to ~2×; the org must build observability and on-call maturity *before* the first extraction, not after.
 
@@ -50,7 +50,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS here - E becomes **velocity and cost math**: before/after deploy numbers, coordination cost, the migration's price tag. Same discipline as Lesson 1.3: round aggressively, let the numbers make the call.
+> **Adaptation, said out loud:** no QPS here - E becomes **velocity and cost math**: before/after deploy numbers, coordination cost, the migration's price tag. Same estimation discipline: round aggressively, let the numbers make the call.
 
 **The tax, today.**
 - Throughput: 12 teams × 0.17 deploys/week ≈ **2 deploys/week org-wide**; merge-to-production lead time ~3-5 days.
@@ -63,7 +63,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 **The price.**
 - Migration: ~20% of 100 engineers × 24 months ≈ **40 engineer-years ≈ $8M** one-time.
-- Permanent: a platform team (~6 engineers, **$1.2M/year**); infra typically **1.5-2×**; an observability bill that grows with service count (Lessons 3.13-3.14).
+- Permanent: a platform team (~6 engineers, **$1.2M/year**); infra typically **1.5-2×**; an observability bill that grows with service count.
 - **Break-even:** $8M one-time + ~$2M/year permanent vs a ~$5M/year coordination tax *growing toward ~$10M+* at 160 engineers. Payback ≈ 2-3 years - **defensible only because headcount is growing.** At a flat 40-engineer org the same math says *modular monolith and stop*; say that version too - showing where the answer flips is the Director signal.
 
 **What estimation decided:** the driver is team scaling, not traffic; the migration clears the bar at this growth rate and not at half of it; ~20% capacity for ~24 months is the spend envelope.
@@ -79,11 +79,11 @@ And there is a third character, worse than the monolith: the **distributed monol
 **The breakup sequence per seam (each step reversible):**
 1. **Draw ownership on paper first.** Map tables to owning modules; every cross-module `JOIN` on the boundary is future work - count them before committing.
 2. **Sever in-place.** Inside the monolith, replace cross-boundary joins and direct table reads with internal interfaces. No services yet - cheap, reversible, and *is* the modular-monolith step. Much of the value lands here.
-3. **Extract the service, reads first.** The service gets its own store, hydrated from the monolith's tables via **change-data-capture** through a log (Kafka - Lessons 3.8-3.9). Reads cut over behind a flag; writes still hit the monolith. Fully reversible: flip the flag back.
+3. **Extract the service, reads first.** The service gets its own store, hydrated from the monolith's tables via **change-data-capture** through a log (Kafka). Reads cut over behind a flag; writes still hit the monolith. Fully reversible: flip the flag back.
 4. **Cut over writes.** The service becomes the writer; the *monolith* consumes the CDC stream for legacy read paths until those die. The **outbox pattern** keeps the DB write and the published event atomic.
 5. **Drop the old tables.** Only now is the seam done. A seam stuck at step 3 for a year is a smell worth naming.
 
-**Rejected, keep the shared DB "temporarily":** the temporary becomes permanent, and it *is* the distributed-monolith trap - independent deploys in name only. **Rejected, app-level dual writes:** no atomicity, guaranteed drift; the outbox/CDC pattern exists precisely to avoid this. **Rejected, 2PC across seams:** availability coupling on hot paths; cross-service workflows become **sagas** - local transactions with compensations - and you accept eventual consistency at seams (Lesson 2.7's trade, made at the org level). A workflow that truly can't tolerate that is evidence the seam is misplaced - move the boundary, don't add 2PC.
+**Rejected, keep the shared DB "temporarily":** the temporary becomes permanent, and it *is* the distributed-monolith trap - independent deploys in name only. **Rejected, app-level dual writes:** no atomicity, guaranteed drift; the outbox/CDC pattern exists precisely to avoid this. **Rejected, 2PC across seams:** availability coupling on hot paths; cross-service workflows become **sagas** - local transactions with compensations - and you accept eventual consistency at seams (the CAP trade, made at the org level). A workflow that truly can't tolerate that is evidence the seam is misplaced - move the boundary, don't add 2PC.
 
 <details>
 <summary>Go deeper, outbox, CDC, and backfill mechanics (IC depth, optional)</summary>
@@ -106,7 +106,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 > **Adaptation, said out loud:** the "architecture diagram" here is not the end-state service mesh - it's the **strangler-fig facade and the phase machine**. The end state is an output, not a blueprint.
 
-**The facade:** a routing layer in front of the monolith - usually the API gateway or L7 load balancer you already run (Lesson 3.2), not new infrastructure. All traffic hits the monolith on day one; each extraction claims routes (`/notifications/*` → new service). Cutover and rollback are **routing config changes** - percentage-based, canaried, instant to revert.
+**The facade:** a routing layer in front of the monolith - usually the API gateway or L7 load balancer you already run, not new infrastructure. All traffic hits the monolith on day one; each extraction claims routes (`/notifications/*` → new service). Cutover and rollback are **routing config changes** - percentage-based, canaried, instant to revert.
 
 **An anti-corruption layer** sits between each new service and the monolith: a thin translation boundary so the clean new model doesn't import the monolith's tangled one. *Rejected: new services speaking the monolith's internal types* - it silently re-couples everything you just paid to separate.
 
@@ -126,7 +126,7 @@ flowchart TD
 2. **Data ownership:** prefer seams whose tables are touched mostly by one module - the S-step cost is proportional to the cross-boundary joins you must sever.
 3. **Change frequency:** extract what changes often (where the release-train pain concentrates); leave what's stable - a module that deployed twice a year gains nothing.
 
-The first extraction should be **deliberately low-stakes** - high churn, low data coupling, eventual-consistency tolerant (notifications is the classic: async by nature, Lesson 5.12). Its real job is **building the org's muscle** - CDC pipeline, runbooks, deploy tooling - where failure is cheap. *Rejected: starting with checkout because "it matters most"* - highest data coupling, lowest error tolerance, zero learning banked: the worst first patient.
+The first extraction should be **deliberately low-stakes** - high churn, low data coupling, eventual-consistency tolerant (notifications is the classic: async by nature). Its real job is **building the org's muscle** - CDC pipeline, runbooks, deploy tooling - where failure is cheap. *Rejected: starting with checkout because "it matters most"* - highest data coupling, lowest error tolerance, zero learning banked: the worst first patient.
 
 ---
 
@@ -177,7 +177,7 @@ Two readings matter. **Fan-in is destiny**: a table everyone joins (users, catal
 *Symptom:* services that deploy together, share a database, or break together. *Detection:* track **% of deploys touching exactly one service** (target >90%) and lockstep changes per quarter. *Fix:* stop extracting, fix the seams you have. *Rejected: pushing on to a service-count milestone* - service count is a cost, not a KPI.
 
 **Failure mode 2, operational immaturity.**
-The monolith debugged with a stack trace; 15 services need distributed tracing, centralized logs, per-service dashboards and pagers (Lessons 3.13-3.14) - **none of which exist yet**. *Fix:* the platform investment lands **before** extraction #2, not after incident #5. *Trade-off:* ~6 engineers of spend producing zero features - name it in the budget; hiding it is how migrations get cancelled at month 9.
+The monolith debugged with a stack trace; 15 services need distributed tracing, centralized logs, per-service dashboards and pagers - **none of which exist yet**. *Fix:* the platform investment lands **before** extraction #2, not after incident #5. *Trade-off:* ~6 engineers of spend producing zero features - name it in the budget; hiding it is how migrations get cancelled at month 9.
 
 **Failure mode 3, the latency and consistency tax.**
 In-process calls (~1 µs) become network calls (~1-5 ms); transactions become sagas; read-your-own-write stops being free at seams. *Fix:* sync-call budgets per request path, async-first seams, seams placed where eventual consistency is tolerable. *Rejected: 2PC across services* - if you need it, the seam is wrong, as argued in S.
@@ -269,4 +269,4 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 
 ---
 
-*End of Lesson 8.1. This problem inverts Module 5's habits: the "load" is 100 engineers and the "latency" is a 3-day lead time. The discipline is identical - quantify, choose against alternatives, keep the risky surface small (one reversible seam at a time, as 5.13 kept its CP core small), and know what you're deliberately not building. The migration sequence is the design.*
+*End of Lesson 8.1. This problem inverts the product-design habits: the "load" is 100 engineers and the "latency" is a 3-day lead time. The discipline is identical - quantify, choose against alternatives, keep the risky surface small (one reversible seam at a time, the way a strong CP design keeps its consistent core small), and know what you're deliberately not building. The migration sequence is the design.*

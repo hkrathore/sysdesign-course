@@ -14,7 +14,7 @@ sidebar:
 ### Intuition first
 A point-to-point queue is the **kitchen ticket rail in a busy restaurant.** Waiters (producers) clip orders to the rail and walk away immediately, they don't wait for the food. Cooks (consumers) pull the next ticket when they're free. The rail **decouples** the two: a lunch rush of 40 orders in two minutes doesn't make a waiter stand and block; the tickets queue up and the cooks **drain the backlog at their own pace** (load-leveling). Each ticket is worked by **exactly one cook**, that's the "point-to-point" part, work distribution, not broadcast. And a quiet rule: a cook **pulls a ticket down only when the plate is up** (the ack). If a cook collapses mid-order, their ticket **reappears on the rail** after a while (the visibility timeout) so someone else finishes it, which is why the same order can occasionally be cooked twice, and why the expediter checks the order number at the pass (idempotency).
 
-Hold that image, every mechanic below is a literal feature of that rail. (Broadcasting one ticket to *every* station is publish-subscribe, Lesson 3.9; this lesson stays point-to-point.)
+Hold that image, every mechanic below is a literal feature of that rail. (Broadcasting one ticket to *every* station is publish-subscribe, the publish-subscribe building block; this lesson stays point-to-point.)
 
 ### Deep explanation
 
@@ -103,7 +103,7 @@ A checkout service must, on each order, **charge the card, reserve inventory, an
 - **Visibility timeout shorter than processing time** → concurrent duplicate processing of the same message.
 - **No DLQ / infinite retries** → a single poison message head-of-line-blocks the queue and burns the fleet.
 - **Expecting global ordering for free, or "just add consumers" past the partition count**, ordering is per partition/group, extra consumers idle, and total order kills parallelism; the partition count is the real ceiling.
-- **Confusing point-to-point with pub-sub**, a queue delivers each message to **one** consumer in the group; broadcasting to many subscribers is Lesson 3.9, and reaching for Kafka when SQS suffices buys real ops cost for nothing.
+- **Confusing point-to-point with pub-sub**, a queue delivers each message to **one** consumer in the group; broadcasting to many subscribers is the publish-subscribe building block, and reaching for Kafka when SQS suffices buys real ops cost for nothing.
 
 ### Practice questions
 **Q1.** Your team says "we need exactly-once delivery for payments." How do you respond at a whiteboard?

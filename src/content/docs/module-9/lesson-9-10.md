@@ -5,14 +5,14 @@ sidebar:
   order: 10
 ---
 
-> **Attempt the capstone (Lesson 6.1) first - this lesson is the debrief, not the spoiler.** This is *exactly* the capstone problem, and 6.1 hands you the empty whiteboard and a self-critique loop. Drive it yourself there before reading a worked answer here, or you burn the one chance to feel where your own design breaks. **This gets asked because it is the strongest cross-platform business-domain question on the senior loop**, and because it has a signature trap: convergence correctness (OT/CRDT) is genuinely IC-deep, so candidates either *hand-wave* "we use CRDTs" with no idea why, or *rat-hole* for fifteen minutes deriving transformation functions and never reach a design. **What separates a Director answer:** name all three concurrency strategies, decide one against *this* product's requirements, and **delegate the algorithm internals with a stated prior** - "I'd have the collaboration team prove convergence; my prior is a sequence CRDT for the offline story." Knowing the limit of your own depth, out loud, *is* the scored signal here.
+> **Attempt the capstone first - this lesson is the debrief, not the spoiler.** This is *exactly* the capstone problem, and the capstone hands you the empty whiteboard and a self-critique loop. Drive it yourself there before reading a worked answer here, or you burn the one chance to feel where your own design breaks. **This gets asked because it is the strongest cross-platform business-domain question on the senior loop**, and because it has a signature trap: convergence correctness (OT/CRDT) is genuinely IC-deep, so candidates either *hand-wave* "we use CRDTs" with no idea why, or *rat-hole* for fifteen minutes deriving transformation functions and never reach a design. **What separates a Director answer:** name all three concurrency strategies, decide one against *this* product's requirements, and **delegate the algorithm internals with a stated prior** - "I'd have the collaboration team prove convergence; my prior is a sequence CRDT for the offline story." Knowing the limit of your own depth, out loud, *is* the scored signal here.
 
 ### Learning objectives
 - Run the **RESHADED** spine on a problem whose crux is **convergence correctness**, not a read:write ratio - and quantify the load that actually shapes it (presence dwarfs edits; concurrent editors per doc are *tens*, not thousands).
 - Name the three concurrency-control strategies - **OT, CRDT, locking** - state the pros/cons of each, and **decide one for this product** against requirements, cost, and risk.
 - Make the **delegation move** the model answer: name the pivotal convergence call, hand the algorithm proof to a specialist *with a stated prior*, and recognize that an honest depth limit is the signal, not a dodge.
 - Carry the **document-representation** decision (op log vs materialized state) through Storage and Data-model, and place the **durable boundary** where it belongs.
-- Fan out **presence/cursors** on a separate, cheap, ephemeral axis (Lesson 9.9) - never down the durable edit path.
+- Fan out **presence/cursors** on a separate, cheap, ephemeral axis - never down the durable edit path.
 
 ### Intuition first
 Picture a single whiteboard with ten people holding markers, all writing at once. The naive fix is a **talking stick** - one marker at a time, everyone else waits (a lock). It prevents collisions but destroys the product: collaborative editing means *simultaneous*, and a per-document lock turns ten writers into a queue of one. So you throw the stick away and let everyone write at once - which raises the only hard question in the problem: **if Alice and Bob edit the same word in the same instant, on two screens with network delay between them, how does the board end up showing the *same* sentence to both, with neither stroke silently erased?**
@@ -46,7 +46,7 @@ That is **convergence**: independent, concurrent, intention-carrying edits must 
 - **Convergence correctness** - *the* hard one. All replicas reach the same final state given the same edit set, any arrival order. A correctness invariant.
 - **Low edit-propagation latency** - local echo instant; remote < 200 ms same-region.
 - **Durability + versioning** - committed edits survive crashes; history is restorable.
-- **AP at the client for editing** - a user whose network blips keeps typing offline and merges on reconnect (pushes toward **AP**, Lesson 2.7).
+- **AP at the client for editing** - a user whose network blips keeps typing offline and merges on reconnect (pushes toward **AP**).
 - **Presence is best-effort** - ephemeral, lossy, cheap; never on the durable path.
 
 **The skew, stated.** **Not** a read:write ratio problem. Two facts shape everything: (1) **presence/cursor traffic dwarfs edit traffic** - every keystroke and mouse move is a presence event, but only committed edits persist; and (2) **concurrent editors per doc are tens**, so the convergence algorithm runs over a *small* set of ops, not a million. The architecture follows: a **per-document coordination unit** ordering a handful of concurrent edits, fronted by a **cheap ephemeral presence layer** carrying the firehose nobody needs to keep.
@@ -65,7 +65,7 @@ That is **convergence**: independent, concurrent, intention-carrying edits must 
 
 **Durable write rate (what hits storage):** we **don't** persist every keystroke. Coalesce per doc into an op-batch every ~1-2 s: `2M docs ÷ 1.5 s ≈ 1.3M durable appends/sec` - large, but each is an **append-only log write** (the cheapest durable pattern), shardable by `doc_id`.
 
-**Presence rate (the firehose we throw away):** every cursor move and keystroke is a presence beat. `6M conns × ~5/sec ≈ 30M presence events/sec` - **10× the edit op rate**, and growing with audience, not editors. This is the number that proves presence must be **a separate, ephemeral channel** (Lesson 9.9): persisting data with a ~200 ms useful life would dominate the whole write budget.
+**Presence rate (the firehose we throw away):** every cursor move and keystroke is a presence beat. `6M conns × ~5/sec ≈ 30M presence events/sec` - **10× the edit op rate**, and growing with audience, not editors. This is the number that proves presence must be **a separate, ephemeral channel**: persisting data with a ~200 ms useful life would dominate the whole write budget.
 
 **Storage:** materialized state is small: `100M docs × ~100 KB ≈ 10 TB`, ×3 → **~30 TB** - modest. The op log is the growth driver, bounded by **snapshot + log truncation**.
 
@@ -82,7 +82,7 @@ That is **convergence**: independent, concurrent, intention-carrying edits must 
 - *Choice:* **append-only log sharded by `doc_id`** (Kafka-style log or an LSM store like Cassandra/RocksDB) for ops, plus a blob/KV store (S3 or DynamoDB) for snapshots. Open = latest snapshot + replay the **tail**.
 - *The representation decision, stated:* **op log is truth, snapshot is cache** - *not* materialized state as truth. *Rejected - store only current state:* loses version history, the ability to merge an offline client's old-baseline edits, and the audit trail. The op log *is* the feature; state-only is cheaper but throws away three requirements.
 
-**2. Presence / cursors (ephemeral, best-effort, in-memory).** **In-memory in the gateway**, Redis pub/sub for cross-node fan-out (Lesson 9.9). TTL'd, never durable - cursor-at-412 is worthless 200 ms later. *Rejected - persisting presence:* 30M events/sec with a ~200 ms shelf life would dominate the storage budget for nothing.
+**2. Presence / cursors (ephemeral, best-effort, in-memory).** **In-memory in the gateway**, Redis pub/sub for cross-node fan-out. TTL'd, never durable - cursor-at-412 is worthless 200 ms later. *Rejected - persisting presence:* 30M events/sec with a ~200 ms shelf life would dominate the storage budget for nothing.
 
 **3. Document metadata (title, owner, ACL, snapshot pointers) - small, relational.** A standard relational/KV store keyed by `doc_id`: tiny, read on open, rarely written. Not the interesting part.
 
@@ -201,7 +201,7 @@ WS   /v1/docs/{docId}/connect
 *Fix:* **periodic snapshots + log truncation** - snapshot the CRDT state every N ops, drop the prefix; open = snapshot + short tail replay. *Trade-off:* snapshots cost storage and a compaction job. *Rejected:* unbounded op log - opens slow forever, history grows without limit.
 
 **Bottleneck 5 - presence flooding the durable path.**
-*Fix:* presence is a **protocol-separate, in-memory, fire-and-forget channel** (Redis pub/sub cross-node), TTL'd, lossy by design (Lesson 9.9). *Trade-off:* a dropped beat means a cursor lags ~200 ms - invisible. *Rejected:* a unified durable event stream conflating the firehose with the source of truth.
+*Fix:* presence is a **protocol-separate, in-memory, fire-and-forget channel** (Redis pub/sub cross-node), TTL'd, lossy by design. *Trade-off:* a dropped beat means a cursor lags ~200 ms - invisible. *Rejected:* a unified durable event stream conflating the firehose with the source of truth.
 
 **Closing re-check:** convergence by construction (delegated proof); coordinator sharded + failover-fast; fan-out horizontally scaled; doc-open bounded by snapshot+truncate; presence off the durable path. The durable surface stays a small append log; everything ephemeral stays ephemeral.
 
@@ -235,7 +235,7 @@ WS   /v1/docs/{docId}/connect
 |---|---|---|---|---|
 | **Concurrency control** | **CRDT** (stable IDs, commutative merge, no coordinator needed) | **OT** (positional transforms, central order) | **Locking** (one writer at a time) | **A** when **offline / peer-merge** matters - converges with no central authority (our choice). **B** when payload size + maturity matter and editing is always online. **C** only for low-collaboration tools - **rejected** for live co-editing. |
 | **Document representation** | **Op log as truth + snapshots** | **Materialized state as truth** | **Snapshot-only, no op history** | **A** when you need history, restore, and offline merge (our choice). **B** cheaper but loses versioning. **C** loses both history and merge - rejected. |
-| **Presence transport** | **Separate ephemeral channel** (in-mem + Redis pub/sub) | **Same durable stream as edits** | **Polling** | **A** - 30M/sec disposable firehose off the durable path (our choice, Lesson 9.9). **B** buries storage. **C** too laggy for live cursors. |
+| **Presence transport** | **Separate ephemeral channel** (in-mem + Redis pub/sub) | **Same durable stream as edits** | **Polling** | **A** - 30M/sec disposable firehose off the durable path (our choice). **B** buries storage. **C** too laggy for live cursors. |
 
 ---
 
@@ -253,7 +253,7 @@ WS   /v1/docs/{docId}/connect
 
 - **Hand-waving "we'll use CRDTs"** with no reason and no trade-off - or rat-holing on transform-function derivation. Both miss the altitude: **name three, decide one against a requirement, delegate the proof.**
 - **Treating convergence as a staleness problem.** A stale read here means **two people see two different documents** - a correctness invariant, not a latency knob.
-- **Putting presence on the durable edit path.** It's 10× the edit firehose with a ~200 ms shelf life; a separate ephemeral channel (Lesson 9.9) is mandatory.
+- **Putting presence on the durable edit path.** It's 10× the edit firehose with a ~200 ms shelf life; a separate ephemeral channel is mandatory.
 - **Storing only the current document state.** Discards history, restore, *and* offline merge - three requirements. The **op log is truth**; the snapshot is a cache.
 - **Sizing for thousands of concurrent editors per doc.** Real concurrency is *tens*; the scale axis is **connection fan-out**, not convergence compute.
 
@@ -280,10 +280,10 @@ WS   /v1/docs/{docId}/connect
 - **Name all three strategies, decide one against a requirement:** locking (rejected - serializes co-editing), OT (positional transforms, central order), CRDT (stable IDs, commutative merge, no coordinator). **CRDT wins *because* offline editing is required**, and the algorithm proof is **delegated with a stated prior (Yjs)**. The honest depth limit is the scored signal, not a dodge.
 - **Op log is truth; the snapshot is a cache.** Buys history, restore, and offline merge; growth bounded by **snapshot + log truncation**. The concurrency choice fixes what an "op" is.
 - **The scale axis is connection fan-out** (~6M WebSockets), not edit compute - concurrency per doc is *tens*; the durable write rate is a **shardable append log** (~1.3M coalesced appends/sec).
-- **Presence is 10× the edit firehose and disposable** - a separate ephemeral channel (Lesson 9.9), never the durable path. Draw the durable boundary tight: op log + snapshots durable; presence ephemeral.
+- **Presence is 10× the edit firehose and disposable** - a separate ephemeral channel, never the durable path. Draw the durable boundary tight: op log + snapshots durable; presence ephemeral.
 
-> **Spaced-repetition recap:** Google Docs = the **convergence** problem - many editors, one document, zero lost keystrokes, both screens identical. **Name three strategies (locking / OT / CRDT), pick CRDT because offline editing is required, delegate the convergence proof with a stated prior (Yjs)** - delegation is the model answer, not a dodge. **Op log = truth, snapshot = cache** (history + offline merge; bound with snapshot+truncate). Scale axis is **connection fan-out (~6M WS)**, not edit compute; concurrency per doc is *tens*. **Presence is a separate ephemeral channel** (10× the edit firehose). This is the **Capstone 6.1** problem - drive it yourself first.
+> **Spaced-repetition recap:** Google Docs = the **convergence** problem - many editors, one document, zero lost keystrokes, both screens identical. **Name three strategies (locking / OT / CRDT), pick CRDT because offline editing is required, delegate the convergence proof with a stated prior (Yjs)** - delegation is the model answer, not a dodge. **Op log = truth, snapshot = cache** (history + offline merge; bound with snapshot+truncate). Scale axis is **connection fan-out (~6M WS)**, not edit compute; concurrency per doc is *tens*. **Presence is a separate ephemeral channel** (10× the edit firehose). This is the **Capstone** problem - drive it yourself first.
 
 ---
 
-*End of Lesson 9.10. Google Docs is the convergence question the social-feed problems let you dodge: the Director skill is to name the OT/CRDT/locking decision, decide it against the offline requirement, and **delegate the algorithm proof with a stated prior** rather than hand-roll a CRDT at the whiteboard. It is the Module 6.1 capstone; this lesson is the debrief. Presence fan-out reuses Lesson 9.9; AP/CP reasoning traces to 2.7.*
+*End of Lesson 9.10. Google Docs is the convergence question the social-feed problems let you dodge: the Director skill is to name the OT/CRDT/locking decision, decide it against the offline requirement, and **delegate the algorithm proof with a stated prior** rather than hand-roll a CRDT at the whiteboard. It is the capstone problem; this lesson is the debrief. Presence fan-out reuses the live-comments design; AP/CP reasoning is the standard consistency trade-off.*

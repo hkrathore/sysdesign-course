@@ -5,13 +5,13 @@ sidebar:
   order: 3
 ---
 
-> **Why this problem separates Directors from ICs:** there is no model to train here and barely any clever algorithm — and that is exactly the trap. The candidate who reaches for clever loses; the candidate who treats this as **the API gateway and rate-limiter pattern (Lessons 3.2, 5.2), re-pointed at LLM providers** wins. The whole difficulty is operational and organizational: this box sits on the request path of **every AI feature in the company**, so if it adds 50 ms it taxes all of them, and if it goes down it takes *all of them* down at once. Meanwhile it is the single layer where the things a Director is actually accountable for — **cost control, vendor lock-in avoidance, and governance** (Lessons 11.15, 11.16) — stop being slideware and become enforced code. Get the framing wrong (build an "AI router" with a model picking the model) and you've added latency, cost, and a failure mode to solve a control-plane problem. Get it right and you've built the most leveraged piece of AI infrastructure the org owns.
+> **Why this problem separates Directors from ICs:** there is no model to train here and barely any clever algorithm — and that is exactly the trap. The candidate who reaches for clever loses; the candidate who treats this as **the API gateway and rate-limiter pattern, re-pointed at LLM providers** wins. The whole difficulty is operational and organizational: this box sits on the request path of **every AI feature in the company**, so if it adds 50 ms it taxes all of them, and if it goes down it takes *all of them* down at once. Meanwhile it is the single layer where the things a Director is actually accountable for — **cost control, vendor lock-in avoidance, and governance** — stop being slideware and become enforced code. Get the framing wrong (build an "AI router" with a model picking the model) and you've added latency, cost, and a failure mode to solve a control-plane problem. Get it right and you've built the most leveraged piece of AI infrastructure the org owns.
 
 ---
 
 ### Learning objectives
 
-1. Recognize this as a **control-plane / platform** problem — the AI-era API gateway — and inherit the gateway + rate-limiter + circuit-breaker patterns from Modules 3 and 5 rather than inventing new ones.
+1. Recognize this as a **control-plane / platform** problem — the AI-era API gateway — and inherit the gateway + rate-limiter + circuit-breaker patterns from the core distributed-systems building blocks rather than inventing new ones.
 2. Design for the two NFRs that dominate everything else: **negligible added latency** and **"never the single point of failure for all AI,"** and quantify both.
 3. Make the gateway the enforcement point for **cost control** (routing + caching) and **lock-in avoidance** (a stable internal contract over swappable providers), with the numbers that justify each.
 4. Reason about **semantic caching** as a correctness/cost trade — when a near-match answer is safe to reuse and when it is a bug — and bound it.
@@ -29,12 +29,12 @@ Now put **one switchboard** in front of all of it. Every AI call dials the switc
 
 ## R: Requirements
 
-> Scope before build. State up front: the gateway does **not** serve models — providers (or our own serving fleet, Lesson 5.15) do that. We own the **control plane**, not the GPUs.
+> Scope before build. State up front: the gateway does **not** serve models — providers (or our own serving fleet) do that. We own the **control plane**, not the GPUs.
 
 **Clarifying questions I'd ask (with assumed answers):**
 
 - *Who calls this — external customers or internal teams?* → **Internal first**: every product team's AI feature. (Same design extends to an external "AI API product," noted in evolution.)
-- *One provider or many?* → **Many**: at least two frontier providers plus an open-weights model we self-host (Lesson 11.4), because multi-provider is the entire point — fallback and lock-in avoidance.
+- *One provider or many?* → **Many**: at least two frontier providers plus an open-weights model we self-host, because multi-provider is the entire point — fallback and lock-in avoidance.
 - *Who decides which model a request uses?* → **Policy, set by us, overridable per call.** A caller can pin a model; otherwise routing policy decides. (We are *not* building an LLM that chooses the LLM — that adds a model call to every request.)
 - *Streaming?* → **Yes.** Token streaming (SSE) is table stakes for chat UX; the gateway must stream through, not buffer.
 - *Is correctness of caching acceptable to relax?* → **Exact-match cache: always safe. Semantic cache: opt-in per route**, because reusing a near-match answer is a correctness decision the calling feature must own.
@@ -48,9 +48,9 @@ Now put **one switchboard** in front of all of it. Every AI call dials the switc
 5. **Caching** — exact-match always; semantic cache opt-in per route.
 6. **Secret management** — provider API keys live here, never in caller code.
 7. **Metering & observability** — token + dollar accounting per tenant/feature/model; full request tracing.
-8. **Guardrails hook** — a pluggable point to call moderation/PII redaction (Lessons 11.6, 12.4) on input/output.
+8. **Guardrails hook** — a pluggable point to call moderation/PII redaction on input/output.
 
-**Explicitly cut:** model inference/serving (providers or 5.15), prompt *content* engineering (caller's job), the RAG pipeline (Lesson 12.1; RAG calls *through* the gateway), and fine-tuning. I'll name these as "upstream of" or "downstream of" the gateway.
+**Explicitly cut:** model inference/serving (providers or the serving fleet), prompt *content* engineering (caller's job), the RAG pipeline (RAG calls *through* the gateway), and fine-tuning. I'll name these as "upstream of" or "downstream of" the gateway.
 
 **Non-functional requirements, priority order:**
 
@@ -63,7 +63,7 @@ Now put **one switchboard** in front of all of it. Every AI call dials the switc
 | 5 | **Governance / auditability** | Every call logged with tenant, model, tokens, cost, and a trace |
 | 6 | **Throughput** | Aggregate peak ~5,000 req/s across all features (scales horizontally) |
 
-**The inversion to state out loud:** unlike the serving problem (5.15), where the binding resource is GPU memory, here the gateway's *own* compute is trivial — it is an I/O-bound proxy. The hard requirements are **availability and added latency**, because this box's blast radius is "all AI in the company." Every decision below flows from NFRs 1–3, not from throughput.
+**The inversion to state out loud:** unlike the serving problem, where the binding resource is GPU memory, here the gateway's *own* compute is trivial — it is an I/O-bound proxy. The hard requirements are **availability and added latency**, because this box's blast radius is "all AI in the company." Every decision below flows from NFRs 1–3, not from throughput.
 
 ---
 
@@ -71,11 +71,11 @@ Now put **one switchboard** in front of all of it. Every AI call dials the switc
 
 > Enough math to prove the gateway is cheap to run, expensive to get wrong, and a large cost lever.
 
-**Assumptions:** ~5,000 LLM req/s at peak across the org; average call streams for ~2 s (TTFT + decode, Lesson 11.1); average ~1,500 total tokens (1k in, 500 out).
+**Assumptions:** ~5,000 LLM req/s at peak across the org; average call streams for ~2 s (TTFT + decode); average ~1,500 total tokens (1k in, 500 out).
 
 **Concurrency, not CPU, is the gateway's load.** At 5,000 req/s each held open ~2 s, in-flight concurrency ≈ `5,000 × 2 = 10,000 concurrent streams`. The gateway does almost no CPU work per request (parse, look up policy, proxy bytes) — it is **connection-bound**. With async I/O, one modern instance holds thousands of idle-ish streaming connections, so **~6–10 instances** carry peak with headroom, across ≥3 AZs. Compare that to the provider's GPU bill behind it: the gateway is a **rounding error in compute** and a **giant lever on spend**.
 
-**The cost lever (why this box pays for itself).** Suppose un-optimized org LLM spend trends to **~$2M/month** if every call hit a frontier model. Two gateway levers (Lesson 11.8):
+**The cost lever (why this box pays for itself).** Suppose un-optimized org LLM spend trends to **~$2M/month** if every call hit a frontier model. Two gateway levers:
 - **Caching.** A ~30% exact+semantic hit rate on repetitive traffic (FAQs, retries, identical system-prompt calls) removes ~30% of provider calls outright → **~$600K/month** saved, and those requests return in **single-digit ms** instead of seconds.
 - **Cascade / cheap-default routing.** Route the ~70% of simple requests to a small/cheap model (or self-hosted open-weights), escalating only hard ones to the frontier model. If the cheap model is ~8× cheaper and absorbs 70% of traffic, blended model cost falls **5–8×** on that slice.
 
@@ -96,17 +96,17 @@ The headline: the gateway team is a handful of engineers and ~10 boxes; the spen
 
 **2. Rate-limit & quota counters (hot, low-latency, ephemeral).**
 - Access: increment/check per request; per-tenant req/s windows and running spend.
-- Choice: **Redis** (token-bucket/sliding-window, exactly the Lesson 5.2 rate-limiter), with atomic Lua scripts. Spend quotas tracked as running counters, reconciled against the usage ledger.
+- Choice: **Redis** (token-bucket/sliding-window, exactly the standard rate-limiter), with atomic Lua scripts. Spend quotas tracked as running counters, reconciled against the usage ledger.
 - Rejected: a strongly-consistent DB counter per request — too slow and a contention hot spot at 5,000 req/s.
 
 **3. Response cache (hot).**
 - **Exact cache:** key = hash of `(model, normalized request)` → response, in **Redis**. Always correct.
-- **Semantic cache:** embed the prompt, ANN-search a **vector store** (Lesson 11.2) for a prior prompt within a similarity threshold, reuse its answer. Opt-in per route. (Details and its danger in D/Evaluation.)
+- **Semantic cache:** embed the prompt, ANN-search a **vector store** for a prior prompt within a similarity threshold, reuse its answer. Opt-in per route. (Details and its danger in D/Evaluation.)
 - Rejected: caching everything semantically by default — see the correctness trap below.
 
 **4. Usage & cost ledger (durable, append-only, off the hot path).**
 - Access: append one record per completed call (tenant, feature, model, tokens in/out, $, latency, trace ID); queried for billing/attribution dashboards.
-- Choice: **append-only writes via an event stream (Kafka) → a columnar/analytics store** (e.g., ClickHouse/BigQuery). Writing it **asynchronously after** the response streams keeps metering off the latency path. This is the Lesson 9.7 "two paths off one firehose" instinct: a fast approximate in-Redis spend counter for *enforcement*, and the durable ledger as the *source of truth* for billing.
+- Choice: **append-only writes via an event stream (Kafka) → a columnar/analytics store** (e.g., ClickHouse/BigQuery). Writing it **asynchronously after** the response streams keeps metering off the latency path. This is the "two paths off one firehose" instinct: a fast approximate in-Redis spend counter for *enforcement*, and the durable ledger as the *source of truth* for billing.
 - Rejected: synchronous metering write before responding — adds latency and a failure mode to every call.
 
 **5. Secrets (provider API keys).**
@@ -128,13 +128,13 @@ flowchart TB
         CACHE["Cache lookup<br/>exact → semantic"]
         ROUTE["Router<br/>policy: pin / cost / latency / capability"]
         CALL["Provider call<br/>timeout + retry + circuit-break"]
-        GUARD["Guardrails hook<br/>moderation / PII (11.6)"]
+        GUARD["Guardrails hook<br/>moderation / PII"]
     end
     RC[("Redis<br/>quotas + exact cache")]
     VS[("Vector store<br/>semantic cache")]
     P1["Provider A (frontier)"]
     P2["Provider B (frontier)"]
-    P3["Self-hosted open-weights (11.4 / 5.15)"]
+    P3["Self-hosted open-weights"]
     BUS["Kafka → usage/cost ledger<br/>(async, off hot path)"]
     CFG[("Policy config<br/>(in-memory, pushed)")]
 
@@ -161,11 +161,11 @@ flowchart TB
 3. **Rate-limit + quota check** against Redis. Over the req/s limit → `429`; over the spend budget → `402`/`429` with a clear reason. Fail-fast, microseconds.
 4. **Cache lookup**: exact key in Redis; if miss and the route opts into semantic caching, embed + ANN search the vector store within the similarity threshold. Hit → return immediately (single-digit ms, no provider call, no token cost).
 5. **Route**: read in-memory policy. If the caller pinned a model, honor it; else select by class (cheap-default with escalation, or by latency/capability). 
-6. **Guardrails hook** (optional per route): input moderation/PII redaction (Lessons 11.6, 12.4).
+6. **Guardrails hook** (optional per route): input moderation/PII redaction.
 7. **Provider call** with a **timeout, bounded retries, and a circuit breaker** per provider. On error/timeout/open-circuit, **fall back** to the configured alternate (e.g., Provider A → Provider B → self-hosted). Stream tokens straight back to the caller as they arrive.
 8. **After** the stream completes, **emit a usage event** to Kafka (async) and increment the Redis spend counter. The durable ledger write never blocks the response.
 
-**Why stateless matters:** because every instance is identical and holds no session, the LB can route anywhere, a dead instance just stops receiving traffic, and we scale by adding boxes — the Lesson 3.2 HA story. The only shared state (quotas, cache) lives in Redis, itself replicated.
+**Why stateless matters:** because every instance is identical and holds no session, the LB can route anywhere, a dead instance just stops receiving traffic, and we scale by adding boxes — the standard HA story. The only shared state (quotas, cache) lives in Redis, itself replicated.
 
 ---
 
@@ -220,7 +220,7 @@ GET  /v1/usage?tenant=&from=&to=&group_by=feature,model   # cost attribution
 <details>
 <summary>Go deeper — why semantic-cache correctness is a threshold problem (IC depth, optional)</summary>
 
-Semantic caching returns a stored answer when a new prompt's embedding is within cosine distance `τ` of a cached prompt's. The failure: "What's the capital of Australia?" and "What's the capital of Austria?" are *near* in embedding space but have different correct answers — too loose a `τ` serves Canberra for Vienna. Mitigations: (1) set `τ` conservatively per route and measure the false-reuse rate on a golden set (Lesson 11.7); (2) scope the cache by tenant/feature/route so unrelated prompts can't collide; (3) never semantic-cache routes where inputs carry decisive small differences (numbers, names, dates) — exact-cache or no-cache those; (4) include critical structured params in the key, not just the free-text embedding. The honest framing: semantic cache trades a bounded, measured correctness risk for cost/latency — so it's opt-in, measured, and per-route, never a silent global default.
+Semantic caching returns a stored answer when a new prompt's embedding is within cosine distance `τ` of a cached prompt's. The failure: "What's the capital of Australia?" and "What's the capital of Austria?" are *near* in embedding space but have different correct answers — too loose a `τ` serves Canberra for Vienna. Mitigations: (1) set `τ` conservatively per route and measure the false-reuse rate on a golden set; (2) scope the cache by tenant/feature/route so unrelated prompts can't collide; (3) never semantic-cache routes where inputs carry decisive small differences (numbers, names, dates) — exact-cache or no-cache those; (4) include critical structured params in the key, not just the free-text embedding. The honest framing: semantic cache trades a bounded, measured correctness risk for cost/latency — so it's opt-in, measured, and per-route, never a silent global default.
 
 </details>
 
@@ -232,9 +232,9 @@ Semantic caching returns a stored answer when a new prompt's embedding is within
 
 **Re-check vs NFRs:** added latency stays <1% of provider time because policy is in-memory, quota/cache checks are single Redis ops, and metering is async. Cost control is enforced by routing + caching + hard budgets. Availability is a stateless multi-AZ fleet. Now the failure modes.
 
-**Failure 1 — a provider has an outage (the expected case, not the edge case).** Frontier providers *do* have bad hours. The circuit breaker (Lesson 3.x) trips after consecutive errors/timeouts on Provider A and the router **fails over to Provider B, then to the self-hosted model**, transparently to callers. This multi-provider fallback is the single biggest reason the gateway exists. The trade to name: a fallback model may be cheaper/weaker, so quality dips during the outage — an explicit, logged degradation, far better than a hard outage of every AI feature. Without the gateway, this is forty simultaneous incidents.
+**Failure 1 — a provider has an outage (the expected case, not the edge case).** Frontier providers *do* have bad hours. The circuit breaker trips after consecutive errors/timeouts on Provider A and the router **fails over to Provider B, then to the self-hosted model**, transparently to callers. This multi-provider fallback is the single biggest reason the gateway exists. The trade to name: a fallback model may be cheaper/weaker, so quality dips during the outage — an explicit, logged degradation, far better than a hard outage of every AI feature. Without the gateway, this is forty simultaneous incidents.
 
-**Failure 2 — the gateway itself is the SPOF (the question every interviewer asks).** It sits in front of all AI, so its own failure is catastrophic. Defenses: **stateless** instances across **≥3 AZs** behind a health-checked LB (Lesson 3.2); shared state (Redis) replicated with failover; no single hot dependency on the response path; aggressive **shed-load** rather than collapse. And the decisive design choice — **fail-open vs fail-closed when the gateway's *own* dependencies degrade**:
+**Failure 2 — the gateway itself is the SPOF (the question every interviewer asks).** It sits in front of all AI, so its own failure is catastrophic. Defenses: **stateless** instances across **≥3 AZs** behind a health-checked LB; shared state (Redis) replicated with failover; no single hot dependency on the response path; aggressive **shed-load** rather than collapse. And the decisive design choice — **fail-open vs fail-closed when the gateway's *own* dependencies degrade**:
 - If **Redis (quota/cache) is unreachable**: **fail open** on rate-limiting (serve the request, log that limits are unenforced) rather than blocking all AI traffic — availability outranks perfect quota enforcement for a brief blip. 
 - If a **guardrail/moderation service is down** on a *safety-critical* route: **fail closed** (reject) — here correctness/safety outranks availability.
 
@@ -242,7 +242,7 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 **Failure 3 — semantic cache serves a wrong answer.** Covered in D: bounded by a conservative per-route threshold, tenant/route scoping, opt-in only, and a measured false-reuse rate on a golden set. The instinct: a cache that can lie is a correctness decision the *caller* owns, not a default.
 
-**Failure 4 — a noisy neighbor / runaway loop.** One team's buggy agent loops and fires 50× normal traffic (Lesson 11.13's runaway risk made real). Per-tenant **req/s limits and hard spend budgets** contain it: the offender hits `429`/`402` and is isolated; everyone else is unaffected. Without per-tenant quotas, one runaway exhausts shared provider rate limits and money for the whole org. This is multi-tenant fairness as a safety control, not just billing.
+**Failure 4 — a noisy neighbor / runaway loop.** One team's buggy agent loops and fires 50× normal traffic (the agentic runaway risk made real). Per-tenant **req/s limits and hard spend budgets** contain it: the offender hits `429`/`402` and is isolated; everyone else is unaffected. Without per-tenant quotas, one runaway exhausts shared provider rate limits and money for the whole org. This is multi-tenant fairness as a safety control, not just billing.
 
 ---
 
@@ -250,15 +250,15 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 > The gateway is a platform; its evolution is about turning policy knobs into product capabilities.
 
-**Cascade / confidence routing (cost).** Beyond cheap-default, route on *difficulty*: a cheap model attempts first, and a confidence signal (or a cheap classifier on the *output*, not a model on the input) escalates hard cases to the frontier model. Captures most of the 5–10× cost win while protecting quality on the hard tail (Lesson 11.8). The trade: escalation logic adds complexity and a small latency tax on escalated requests.
+**Cascade / confidence routing (cost).** Beyond cheap-default, route on *difficulty*: a cheap model attempts first, and a confidence signal (or a cheap classifier on the *output*, not a model on the input) escalates hard cases to the frontier model. Captures most of the 5–10× cost win while protecting quality on the hard tail. The trade: escalation logic adds complexity and a small latency tax on escalated requests.
 
-**Model A/B testing and canarying (quality).** Because callers use logical aliases, the gateway can route 5% of `frontier` traffic to a new model version and compare eval/online metrics (Lesson 11.7) before a full cutover — turning a risky org-wide migration into a dial. This is a capability **only** the gateway can offer, and a strong point to make.
+**Model A/B testing and canarying (quality).** Because callers use logical aliases, the gateway can route 5% of `frontier` traffic to a new model version and compare eval/online metrics before a full cutover — turning a risky org-wide migration into a dial. This is a capability **only** the gateway can offer, and a strong point to make.
 
-**Bring-your-own / self-hosted models (cost + control at scale).** As volume crosses the build-vs-buy threshold (Lessons 11.15, 11.4), plug a self-hosted open-weights fleet in as just another provider in the chain — no caller change. The gateway is what makes "buy to learn, build to scale" executable without a migration.
+**Bring-your-own / self-hosted models (cost + control at scale).** As volume crosses the build-vs-buy threshold, plug a self-hosted open-weights fleet in as just another provider in the chain — no caller change. The gateway is what makes "buy to learn, build to scale" executable without a migration.
 
-**External productization & multi-region.** Expose the gateway as an external AI API (adds stricter authz, billing, abuse defense) and run it **per-region** close to callers and providers to shave latency; quotas/ledger replicate. Prompt-management and a first-class guardrails pipeline (Lessons 11.6, 12.4) graduate from a hook to a platform feature.
+**External productization & multi-region.** Expose the gateway as an external AI API (adds stricter authz, billing, abuse defense) and run it **per-region** close to callers and providers to shave latency; quotas/ledger replicate. Prompt-management and a first-class guardrails pipeline graduate from a hook to a platform feature.
 
-**Cross-references:** Lesson 5.2 (rate limiter — the quota engine), 3.2 (load balancing/HA + circuit breaking), 11.8 (caching/routing/cascade economics), 11.15 (build-vs-buy this layer enables), 11.16 (cost-attribution + governance this layer enforces), 5.15 (the serving fleet behind the self-hosted provider).
+**Cross-references:** the rate limiter (the quota engine), load balancing/HA and circuit breaking, the LLM caching/routing/cascade economics, build-vs-buy (which this layer enables), cost-attribution and governance (which this layer enforces), and the serving fleet behind the self-hosted provider.
 
 ---
 
@@ -281,7 +281,7 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 - **"Our AI bill is exploding. Where do you cut, here?"** — *Strong:* routing (cheap-default + escalation, 5–10× on the easy slice) and caching (exact + bounded semantic, ~30% of calls removed), quantified, plus per-tenant **budgets** with `degrade-to-cheap` on exceed. *Red flag:* "use a smaller model everywhere" (tanks quality) or no per-tenant attribution to even find the spender.
 
-- **"How does this protect us from vendor lock-in?"** — *Strong:* the **stable internal contract + logical model aliases** mean providers are swappable and new models can be canaried without caller changes; the gateway *is* the optionality layer (Lesson 11.15). *Red flag:* treats lock-in as unsolvable, or hard-codes provider names in the API.
+- **"How does this protect us from vendor lock-in?"** — *Strong:* the **stable internal contract + logical model aliases** mean providers are swappable and new models can be canaried without caller changes; the gateway *is* the optionality layer. *Red flag:* treats lock-in as unsolvable, or hard-codes provider names in the API.
 
 - **"Why not let an LLM decide which LLM to use?"** — *Strong:* it adds a model call (hundreds of ms) and a failure mode to the routing path, violating the <1% latency budget; routing is policy + cheap signals, not a model on the hot path. *Red flag:* designs a "smart router" model unaware of the latency/cost it just added to *every* request.
 
@@ -289,7 +289,7 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 ## Common mistakes
 
-- **Treating it as an ML problem.** There is no model to train; it's the **API-gateway + rate-limiter + circuit-breaker** pattern (Modules 3, 5) re-pointed at providers. Reaching for cleverness adds latency, cost, and failure modes.
+- **Treating it as an ML problem.** There is no model to train; it's the **API-gateway + rate-limiter + circuit-breaker** pattern re-pointed at providers. Reaching for cleverness adds latency, cost, and failure modes.
 - **Forgetting the gateway is itself a SPOF.** It protects everything, so it's the most concentrated single point of failure you have — it needs its own HA story (stateless, multi-AZ, replicated shared state) before anything else.
 - **Synchronous metering on the hot path.** Writing the durable cost ledger before responding adds latency and a failure mode to every call. Meter **async** after the stream; keep a fast Redis counter for *enforcement* only.
 - **Global semantic caching.** A cache that returns a near-match answer is a correctness decision; defaulting it on silently serves wrong answers (Canberra for Vienna). Opt-in, scoped, threshold-tuned, measured.
@@ -301,7 +301,7 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 **Q1. A team's AI feature suddenly 10×'d its traffic from a buggy retry loop and the whole org's chat features started getting rate-limited by the provider. How does your design prevent this?**
 
-> *Model:* **Per-tenant rate limits and spend budgets** in the gateway (Lesson 5.2's token bucket in Redis). The offending tenant hits its own `429`/`402` and is isolated; the shared provider rate limit and budget are protected because no single tenant can consume more than its allocation. Set `on_exceed=degrade-to-cheap` so even a misbehaving team degrades rather than hard-fails. Without the gateway, the provider's *global* account limit is the only backstop, and the first noisy tenant starves everyone. This is multi-tenant fairness as a blast-radius control.
+> *Model:* **Per-tenant rate limits and spend budgets** in the gateway (the token bucket in Redis). The offending tenant hits its own `429`/`402` and is isolated; the shared provider rate limit and budget are protected because no single tenant can consume more than its allocation. Set `on_exceed=degrade-to-cheap` so even a misbehaving team degrades rather than hard-fails. Without the gateway, the provider's *global* account limit is the only backstop, and the first noisy tenant starves everyone. This is multi-tenant fairness as a blast-radius control.
 
 **Q2. Walk me through exactly where the gateway's added latency comes from and how you keep it under ~5 ms p50.**
 
@@ -309,20 +309,20 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 **Q3. Legal asks: "prove no customer PII is being sent to a provider that trains on our data, and tell me our spend per product line." How does this design answer both in minutes?**
 
-> *Model:* Both are gateway-native. PII: the **guardrails hook** runs PII redaction on input for flagged routes, and provider selection is policy — we route PII-bearing routes only to zero-retention/enterprise-terms providers (or the self-hosted model), enforced centrally, not per team. Spend: the **usage ledger** records tenant/feature/model/$ on every call, so `GET /v1/usage?group_by=feature,model` answers spend-per-product-line directly. In the no-gateway world both questions are spreadsheet archaeology across forty teams — the centralization *is* the governance answer (Lesson 11.16).
+> *Model:* Both are gateway-native. PII: the **guardrails hook** runs PII redaction on input for flagged routes, and provider selection is policy — we route PII-bearing routes only to zero-retention/enterprise-terms providers (or the self-hosted model), enforced centrally, not per team. Spend: the **usage ledger** records tenant/feature/model/$ on every call, so `GET /v1/usage?group_by=feature,model` answers spend-per-product-line directly. In the no-gateway world both questions are spreadsheet archaeology across forty teams — the centralization *is* the governance answer.
 
 ---
 
 ### Key takeaways
 
-1. **It's a control-plane problem, not an ML one.** The LLM gateway is the API-gateway + rate-limiter + circuit-breaker pattern (Modules 3, 5) re-pointed at model providers. Be deliberately dumb and bulletproof; the cleverness is making the box invisible (latency) and indestructible (availability).
+1. **It's a control-plane problem, not an ML one.** The LLM gateway is the API-gateway + rate-limiter + circuit-breaker pattern re-pointed at model providers. Be deliberately dumb and bulletproof; the cleverness is making the box invisible (latency) and indestructible (availability).
 2. **Two NFRs dominate: added latency (<1% of the provider call) and "never the SPOF for all AI."** Hence in-memory policy, single-Redis-op quota/cache checks, async metering, a stateless multi-AZ fleet, and an explicit **fail-open vs fail-closed decision per dependency**.
 3. **This is the org's biggest cost lever.** Caching (~30% of calls removed) and cheap-default + escalation routing (5–10× on the easy slice) turn a handful of boxes into millions/month saved, with per-tenant budgets to contain runaways. Meter async into a ledger that's the billing source of truth.
-4. **It's the lock-in firewall.** A stable internal contract with logical model aliases makes providers swappable and lets you canary/A-B new models with zero caller changes — the layer that makes "buy to learn, build to scale" (Lesson 11.15) actually executable.
-5. **It's where governance becomes code.** Central secret management, PII-aware routing, and per-tenant cost attribution answer the legal/finance/security questions (Lesson 11.16) that forty direct integrations never could.
+4. **It's the lock-in firewall.** A stable internal contract with logical model aliases makes providers swappable and lets you canary/A-B new models with zero caller changes — the layer that makes "buy to learn, build to scale" actually executable.
+5. **It's where governance becomes code.** Central secret management, PII-aware routing, and per-tenant cost attribution answer the legal/finance/security questions that forty direct integrations never could.
 
-> **Spaced-repetition recap:** The LLM gateway is the **AI-era API gateway** — one stable internal contract (logical model aliases) over many providers. It's a **stateless, multi-AZ, I/O-bound proxy** whose own compute is a rounding error; the hard NFRs are **added latency (<1% of the provider call)** and **not being the SPOF for all AI**. Hot path: auth → **per-tenant quota** (Redis, Lesson 5.2) → **cache** (exact always, semantic opt-in + threshold-bounded) → **route** (cheap-default + escalate; never a model on the hot path) → provider call with **timeout + circuit-break + fallback** to alternate/self-hosted → stream → **async meter** to a Kafka→ledger source of truth. Decide **fail-open** (quota/cache blip: availability wins) vs **fail-closed** (safety-critical guardrail: safety wins) *per dependency*. It's the org's biggest **cost lever** (caching + routing), its **lock-in firewall** (swap/canary models with no caller change), and where **governance becomes code** (secrets, PII routing, cost attribution). Cross-ref: 5.2 (rate limiter), 3.2 (HA/circuit-break), 11.8 (cost levers), 11.15 (build-vs-buy), 11.16 (governance/FinOps), 5.15 (serving behind self-hosted).
+> **Spaced-repetition recap:** The LLM gateway is the **AI-era API gateway** — one stable internal contract (logical model aliases) over many providers. It's a **stateless, multi-AZ, I/O-bound proxy** whose own compute is a rounding error; the hard NFRs are **added latency (<1% of the provider call)** and **not being the SPOF for all AI**. Hot path: auth → **per-tenant quota** (Redis) → **cache** (exact always, semantic opt-in + threshold-bounded) → **route** (cheap-default + escalate; never a model on the hot path) → provider call with **timeout + circuit-break + fallback** to alternate/self-hosted → stream → **async meter** to a Kafka→ledger source of truth. Decide **fail-open** (quota/cache blip: availability wins) vs **fail-closed** (safety-critical guardrail: safety wins) *per dependency*. It's the org's biggest **cost lever** (caching + routing), its **lock-in firewall** (swap/canary models with no caller change), and where **governance becomes code** (secrets, PII routing, cost attribution). Cross-ref: the rate limiter, HA/circuit-break, the LLM cost levers, build-vs-buy, governance/FinOps, and the serving fleet behind the self-hosted provider.
 
 ---
 
-*End of Lesson 12.3. The gateway is the piece of AI infrastructure with the highest leverage-to-complexity ratio in the whole module: a few hundred lines of boring proxy code that decides the company's AI reliability, bill, vendor optionality, and audit story. Lesson 12.4 turns to a problem where the model is doing real classification work under a precision/recall knob and a brutal latency-and-volume budget: LLM-based content moderation at scale.*
+*End of Lesson 12.3. The gateway is the piece of AI infrastructure with the highest leverage-to-complexity ratio in the whole module: a few hundred lines of boring proxy code that decides the company's AI reliability, bill, vendor optionality, and audit story.*

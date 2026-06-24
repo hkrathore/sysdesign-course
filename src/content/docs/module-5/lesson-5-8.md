@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-> This is a **sync-and-conflict** problem - that is what makes it different from every storage problem before it. The metadata-vs-blob split is **table stakes** here (Pastebin, 5.1, owned it). The genuinely new crux: **keep N devices byte-identical with a server source of truth, cheaply, while concurrent edits land from anywhere.** Lessons 3.11 (blob store), 3.4/2.5 (KV + partitioning), and 2.4/2.8 (replication, quorum) built the parts; this walkthrough assembles them around the one idea that ties sharing, sync, sharding, and ACLs together: the **namespace**.
+> This is a **sync-and-conflict** problem - that is what makes it different from every storage problem before it. The metadata-vs-blob split is **table stakes** here (Pastebin, 5.1, owned it). The genuinely new crux: **keep N devices byte-identical with a server source of truth, cheaply, while concurrent edits land from anywhere.** The blob-store building block (blob store), 3.4/2.5 (KV + partitioning), and 2.4/2.8 (replication, quorum) built the parts; this walkthrough assembles them around the one idea that ties sharing, sync, sharding, and ACLs together: the **namespace**.
 
 ### Learning objectives
 - Run the full **RESHADED** spine on a *sync-dominated* problem and recognize why the headline number is not one QPS but **"~120K durable metadata commits/s behind ~200M cheap idle connections"** - two planes, not one.
@@ -35,7 +35,7 @@ The shelf itself is two separate things, and keeping them separate is the load-b
 3. **Metadata service** - the file tree, **versions** (history, restore), and **sharing / ACLs**.
 4. **Conflict resolution** - concurrent edits from two offline devices must **never silently lose a write**.
 
-**Explicitly CUT from v1:** in-file co-editing (above), full-text content search (3.12 - we index metadata only), previews/transcoding, comments/activity feeds, trash/retention beyond basic versioning. Each is a real adjacent subsystem; I scope to **chunk → dedup → store → commit → journal → sync → resolve conflicts** and say so.
+**Explicitly CUT from v1:** in-file co-editing (above), full-text content search (we index metadata only), previews/transcoding, comments/activity feeds, trash/retention beyond basic versioning. Each is a real adjacent subsystem; I scope to **chunk → dedup → store → commit → journal → sync → resolve conflicts** and say so.
 
 **Non-functional requirements:**
 - **Bandwidth efficiency** - the headline NFR. Re-uploading whole files on every save kills this product; delta + dedup are mandatory.
@@ -186,7 +186,7 @@ POST /v1/files/{fileId}/restore             { version }        # restore = new c
 
 **The load-bearing decisions: shard the metadata by `namespace_id`, and give each namespace a per-namespace journal with a monotonic cursor.** Outline: `namespaces` (cursor, type), `files` (path, latest version), `file_versions` (ordered block-hash list - **versioning rides on dedup**: a version is just a different block list, so retention is a pure cost lever), `namespace_journal` (append-only change feed, range-scanned by `/delta`), `acls` (role per member - **the ACL lives on the namespace**, not per-file). The **block index** (`hash → location, refcount`) shards independently **by block hash** - deliberately decoupled, because a deduped block is shared across many namespaces and belongs to none.
 
-Sharding by `namespace_id` means a `/delta` pull hits **one shard**, a commit is a **single-shard transaction**, and the journal is naturally ordered on one node. We **reject sharding by `file_id` hash** - it scatters one user's tree across every shard, turning "what changed since N" into a fleet-wide scatter-gather and making the ordered journal impossible to maintain cheaply (the same shard-by-the-query's-scope-unit argument as 5.7's region sharding).
+Sharding by `namespace_id` means a `/delta` pull hits **one shard**, a commit is a **single-shard transaction**, and the journal is naturally ordered on one node. We **reject sharding by `file_id` hash** - it scatters one user's tree across every shard, turning "what changed since N" into a fleet-wide scatter-gather and making the ordered journal impossible to maintain cheaply (the same shard-by-the-query's-scope-unit argument as the region sharding).
 
 A consequence worth saying out loud: **a shared folder is one namespace with N ACL entries and one journal**, mounted into N trees. Sharing isn't a special case - it's the namespace abstraction doing its job.
 
@@ -324,4 +324,4 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 
 ---
 
-*End of Lesson 5.8. Dropbox/Drive reuses the metadata/blob split (5.1), shard-by-the-query's-scope-unit (5.7), the journal/log discipline (3.13), and sharded-counter contention (3.16) - but its distinctive crux is **sync**: a cursor/journal feed plus dedup'd delta upload, where RESHADED's R-step consistency bar and E-step fan-out math decide the architecture before any box is drawn. Next: 5.9 YouTube/Netflix - the video upload, transcode-ladder, and CDN-delivery problem.*
+*End of Lesson 5.8. Dropbox/Drive reuses the metadata/blob split, shard-by-the-query's-scope-unit, the journal/log discipline, and sharded-counter contention - but its distinctive crux is **sync**: a cursor/journal feed plus dedup'd delta upload, where RESHADED's R-step consistency bar and E-step fan-out math decide the architecture before any box is drawn. Next: 5.9 YouTube/Netflix - the video upload, transcode-ladder, and CDN-delivery problem.*

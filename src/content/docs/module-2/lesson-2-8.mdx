@@ -7,11 +7,11 @@ sidebar:
 import QuorumCalculator from '@components/widgets/QuorumCalculator.jsx';
 
 ### Learning objectives
-- Place the major **consistency models** on a spectrum, from linearizable down to eventual, plus the session guarantees **read-your-writes** and **monotonic reads**, and say what each costs (callback to the replication-lag anomalies in 2.4).
+- Place the major **consistency models** on a spectrum, from linearizable down to eventual, plus the session guarantees **read-your-writes** and **monotonic reads**, and say what each costs (callback to the replication-lag anomalies).
 - State the quorum rule **W + R > N**, what it buys, and what it does *not* guarantee.
 - Distinguish the two quorum rules that matter, `W + R > N` (read sees latest write) and `W > N/2` (two writes can't both commit), and reason about availability and tail-latency in numbers.
 - Explain **sloppy quorums + hinted handoff** and name the exact guarantee they trade away to buy write availability.
-- Choose a model per data-flow (money/inventory vs feeds/likes) and defend it against cost and risk, turning the PACELC dial from 2.7 into concrete `N/W/R` settings.
+- Choose a model per data-flow (money/inventory vs feeds/likes) and defend it against cost and risk, turning the PACELC dial into concrete `N/W/R` settings.
 
 ### Intuition first
 Imagine a fact that lives in several notebooks at once, three assistants, each holding a copy of a customer's account balance. Two questions decide everything.
@@ -26,15 +26,15 @@ The broader backdrop: "consistency" is a **dial**, not a binary, from *every rea
 
 #### The consistency spectrum (strongest to weakest)
 
-Each model is a **promise to the reader**, and the promises form a spectrum: at the top, **linearizable**, everyone sees the latest write instantly, as if there were one copy, which is expensive because every operation coordinates across replicas (quorum, leader, or consensus round trips); at the bottom, **eventual**, replicas drift and re-converge if writes stop, which is cheap and stays available. In between sit weaker orderings (sequential, causal) and, most usefully in practice, **session guarantees** like read-your-writes that promise recency only to the client who needs it. Stronger promise = more coordination = more latency and less availability: the **E → L vs C** trade from PACELC (2.7), now made specific.
+Each model is a **promise to the reader**, and the promises form a spectrum: at the top, **linearizable**, everyone sees the latest write instantly, as if there were one copy, which is expensive because every operation coordinates across replicas (quorum, leader, or consensus round trips); at the bottom, **eventual**, replicas drift and re-converge if writes stop, which is cheap and stays available. In between sit weaker orderings (sequential, causal) and, most usefully in practice, **session guarantees** like read-your-writes that promise recency only to the client who needs it. Stronger promise = more coordination = more latency and less availability: the **E → L vs C** trade from PACELC, now made specific.
 
 <details>
 <summary>Go deeper, formal definitions of the four models (IC depth, optional)</summary>
 
 - **Linearizable (strong/atomic).** Every operation appears to take effect instantaneously at a single point in real time, between call and return; every read sees the most recent completed write. Examples: Spanner reads, ZooKeeper writes (reads are only sequential unless you `sync`), etcd, a single-leader RDBMS primary. Scope note: linearizability is *recency of a single object in real time*, not serializability, which is about multi-object transactions in *some* serial order; they're orthogonal, and *strict serializability* is both at once.
 - **Sequential.** All operations appear in *some* single global order consistent with each process's program order, but that order need not match real time. Rarely a production datastore's explicit target; it's the conceptual rung between linearizable and causal.
-- **Causal.** Causally related operations (*happens-before*) are seen in order by everyone; concurrent operations may be seen in different orders on different replicas. The strongest model still compatible with high availability under partition, the ceiling for AP systems, and the fix for 2.4's consistent-prefix anomaly.
-- **Eventual.** If writes stop, replicas converge, eventually. No bound, no interim ordering. The default of Dynamo-style stores at low quorums, reconciled by read-repair and anti-entropy (2.4).
+- **Causal.** Causally related operations (*happens-before*) are seen in order by everyone; concurrent operations may be seen in different orders on different replicas. The strongest model still compatible with high availability under partition, the ceiling for AP systems, and the fix for the consistent-prefix anomaly.
+- **Eventual.** If writes stop, replicas converge, eventually. No bound, no interim ordering. The default of Dynamo-style stores at low quorums, reconciled by read-repair and anti-entropy.
 
 </details>
 
@@ -43,11 +43,11 @@ Each model is a **promise to the reader**, and the promises form a spectrum: at 
 - **Read-your-writes (read-after-write):** once *you* have written a value, *your* subsequent reads never see a version older than your write. Fixes the "I posted a comment, refreshed, and it vanished" anomaly.
 - **Monotonic reads:** if you read a value, later reads never return an *earlier* value, time doesn't appear to run backwards for you. Fixes "the comment count flickered 5 → 4 → 5" as your reads bounced between a fresh and a lagging replica.
 
-The Director-grade distinction: **these are per-session, not system-wide.** You deliver read-your-writes *without* linearizability, pin the user's reads to a current replica, sticky-route the session, or track their last-write version (the cheap fixes from 2.4). A full quorum buys something stronger and more expensive: recency for **every** reader. Knowing you usually only need the session guarantee, and shouldn't pay for global recency to get it, is the senior move.
+The Director-grade distinction: **these are per-session, not system-wide.** You deliver read-your-writes *without* linearizability, pin the user's reads to a current replica, sticky-route the session, or track their last-write version (the cheap fixes). A full quorum buys something stronger and more expensive: recency for **every** reader. Knowing you usually only need the session guarantee, and shouldn't pay for global recency to get it, is the senior move.
 
 #### The quorum rule: W + R > N
 
-Leaderless (Dynamo-style) replication from 2.4 has no single authority. A coordinator writes a value to **N** replicas and waits for **W** acknowledgements; a read queries replicas and waits for **R** responses, taking the newest. The rule:
+Leaderless (Dynamo-style) replication has no single authority. A coordinator writes a value to **N** replicas and waits for **W** acknowledgements; a read queries replicas and waits for **R** responses, taking the newest. The rule:
 
 ```
 W + R > N
@@ -62,7 +62,7 @@ There are **N** replica slots. A successful write has durably landed on **at lea
 
 </details>
 
-**One critical caveat, overlap proves presence, not recognition.** The guarantee is that the latest value is *somewhere in the R responses*; it does **not** tell the reader *which* response is newest. The reader needs **version metadata**, a timestamp, logical clock, or **version vector** (2.4), to pick the winner. Quorum overlap and conflict-resolution metadata are two separate machines; omitting the second is a classic interview gap.
+**One critical caveat, overlap proves presence, not recognition.** The guarantee is that the latest value is *somewhere in the R responses*; it does **not** tell the reader *which* response is newest. The reader needs **version metadata**, a timestamp, logical clock, or **version vector**, to pick the winner. Quorum overlap and conflict-resolution metadata are two separate machines; omitting the second is a classic interview gap.
 
 #### The *second* rule: W > N/2
 
@@ -86,13 +86,13 @@ Setting `W = R = ⌊N/2⌋ + 1` (majority quorum) satisfies **both** at once, wh
 Quorums are not free, and the cost is quantifiable:
 
 - **Failure tolerance.** Writes succeed as long as `W` replicas are reachable, so writes tolerate **N − W** failures; reads tolerate **N − R**. With `N=3, W=R=2`: you survive **1** replica down for both reads and writes. Push to `W=3` for cheap `R=1` reads and **any single failure now blocks every write**, you traded write availability for read speed.
-- **Tail latency.** A quorum operation can't return until its slowest required replica answers, it waits on the **W-th (or R-th) fastest** replica. Raising the quorum means waiting on a slower node, which **lifts p99.** Reusing the 2.7 numbers for continuity: a local `R=1` read is ~**1-5 ms**; a cross-AZ majority read is ~**5-15 ms**; a cross-region strong read is **tens to hundreds of ms** (each cross-region RTT ~150 ms, from 1.4). The arithmetic of the quorum is also the arithmetic of your latency budget.
+- **Tail latency.** A quorum operation can't return until its slowest required replica answers, it waits on the **W-th (or R-th) fastest** replica. Raising the quorum means waiting on a slower node, which **lifts p99.** Reusing the numbers for continuity: a local `R=1` read is ~**1-5 ms**; a cross-AZ majority read is ~**5-15 ms**; a cross-region strong read is **tens to hundreds of ms** (each cross-region RTT ~150 ms). The arithmetic of the quorum is also the arithmetic of your latency budget.
 
 This is the dial 2.7 promised: cranking `W` and `R` up to satisfy `W + R > N` moves a store's **E** behavior from **EL** (fast, eventual) toward **EC** (consistent, coordinated), the same store, *dragged along the PACELC axis* by these numbers.
 
 #### Sloppy quorums + hinted handoff (and the guarantee they break)
 
-A **strict** quorum talks to the key's **home replicas**, the N nodes that own that key's slice of the ring (2.6), and **refuses the write** when W of them are unreachable (the CP move). A **sloppy** quorum instead accepts the write on the first N *reachable* nodes, even if some aren't home replicas; the stand-ins store a **hint** and forward the write home when the owner recovers (**hinted handoff**), how Dynamo/Cassandra stay write-available through failures (2.4).
+A **strict** quorum talks to the key's **home replicas**, the N nodes that own that key's slice of the ring, and **refuses the write** when W of them are unreachable (the CP move). A **sloppy** quorum instead accepts the write on the first N *reachable* nodes, even if some aren't home replicas; the stand-ins store a **hint** and forward the write home when the owner recovers (**hinted handoff**), how Dynamo/Cassandra stay write-available through failures.
 
 **The trade, in one line (RULE 2): a sloppy quorum buys write availability by suspending the `W + R > N` guarantee, a home-set read can miss the write until hinted handoff completes.** Right call for a feed or cart write (a brief recency gap is invisible); wrong call for a balance decrement that must read-its-own-write immediately. The rejected alternative, strict quorum, preserves recency but refuses writes during the failure. Naming this trade is the most-missed nuance on the topic.
 
@@ -175,7 +175,7 @@ The Director-altitude signal throughout: you treat `N/W/R` as a **lever set agai
 - Consistency is a **spectrum**, linearizable (real-time recency) → sequential → causal → eventual (converge if writes stop), plus *session* guarantees (read-your-writes, monotonic reads) that are cheap because they're per-client, not system-wide.
 - **`W + R > N`** is the read/write overlap rule: the read set is forced to share a replica with the write set, so a read *contains* the latest write, but you still need **version metadata** to pick the winner.
 - **`W > N/2`** is the *second* rule, write/write overlap, that stops two concurrent writes committing on disjoint sets; `W=R=majority` satisfies both and is the canonical strong config.
-- Higher quorums cost **availability** (writes tolerate `N − W` down, reads `N − R`) and **tail latency** (you wait on the W-th/R-th fastest replica), the same dial that moves a store from PACELC **EL** toward **EC** (2.7).
+- Higher quorums cost **availability** (writes tolerate `N − W` down, reads `N − R`) and **tail latency** (you wait on the W-th/R-th fastest replica), the same dial that moves a store from PACELC **EL** toward **EC**.
 - **Sloppy quorum + hinted handoff** buys write availability by accepting writes on non-home nodes, explicitly *breaking* `W + R > N` until the hint delivers; choose `N/W/R` per data-flow (money/inventory → majority quorum *plus a conditional write / LWT for read-modify-write paths*, feeds/likes → `W=R=1`) and name the cost of the side you drop.
 
 > **Spaced-repetition recap:** Three notebooks (N): how many to write (W), how many to read (R)? Two sets in a pool of N must share one the moment `W + R > N`, the read can't miss the latest write (versioning picks the winner). Second rule, `W > N/2`, stops two writes diverging. Higher quorum = less availability + higher p99 = the PACELC dial in numbers. Sloppy quorum trades the overlap guarantee for write availability. Money → majority plus a conditional write/LWT for decrements; feeds → `W=R=1`; read-your-writes is a cheap session fix, not full quorum.

@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> **Why this problem separates Directors from ICs:** the throughput is a rounding error — tens of queries per second across a 50,000-person company is nothing for any serving stack — so a candidate who spends the round sharding the query path has misread the problem. The system lives or dies on four things the model cannot fix: **retrieval quality**, **grounding and citations**, **freshness**, and the one that ends the interview if you miss it — **per-user access control**. A frontier model sitting on bad retrieval produces a fluent, well-cited, *wrong* answer. The same model with no permission filter produces a fluent, well-cited answer built on a salary spreadsheet the asker was never allowed to open. Both failures look identical to the user: confident and authoritative. A Director must own the truth that **the model is the cheap, swappable part; the retrieval pipeline and its guardrails are the asset.** This is the applied walkthrough of the RAG building block in Lesson 11.3 — read that first; here we run it end-to-end through RESHADED.
+> **Why this problem separates Directors from ICs:** the throughput is a rounding error — tens of queries per second across a 50,000-person company is nothing for any serving stack — so a candidate who spends the round sharding the query path has misread the problem. The system lives or dies on four things the model cannot fix: **retrieval quality**, **grounding and citations**, **freshness**, and the one that ends the interview if you miss it — **per-user access control**. A frontier model sitting on bad retrieval produces a fluent, well-cited, *wrong* answer. The same model with no permission filter produces a fluent, well-cited answer built on a salary spreadsheet the asker was never allowed to open. Both failures look identical to the user: confident and authoritative. A Director must own the truth that **the model is the cheap, swappable part; the retrieval pipeline and its guardrails are the asset.** This is the applied walkthrough of the RAG building block — read that first; here we run it end-to-end through RESHADED.
 
 ---
 
@@ -14,7 +14,7 @@ sidebar:
 1. Argue why enterprise RAG is a **retrieval-and-permissions problem, not a model or QPS problem**, and quantify both.
 2. Design the **two pipelines** — ingestion (connectors → parse → chunk → embed → index) and query (embed → hybrid retrieve → ACL pre-filter → rerank → assemble → generate with citations → "I don't know" guard) — and name what each stage prevents.
 3. Make **per-chunk access control load-bearing**: enforce it at retrieval as a *pre-filter*, and defend why post-filtering is a breach waiting to happen.
-4. Treat **evaluation as the gate** (Lesson 11.7): separate retrieval metrics (recall/precision@k) from generation metrics (faithfulness, answer relevance), and refuse to ship without it.
+4. Treat **evaluation as the gate**: separate retrieval metrics (recall/precision@k) from generation metrics (faithfulness, answer relevance), and refuse to ship without it.
 5. Run a **RESHADED spine with inverted NFR priority** — faithfulness and access correctness dominate; latency and cost are constraints, not the point — and design-evolve toward query rewriting, multi-hop, and GraphRAG.
 
 ---
@@ -36,7 +36,7 @@ Imagine a brand-new research librarian on their first day at a giant law firm. A
 - *Permissions?* → **Yes, strictly. A user must never see content from a document they cannot open in the source system.** This is the dominant NFR.
 - *Citations required?* → **Yes. Every claim links to the source chunk; ungrounded answers are unacceptable.**
 - *Freshness target?* → **Minutes-to-low-hours after a source edit, not days.** A policy that changed at 10:00 should be reflected by mid-morning.
-- *Model ownership?* → **Delegated.** I treat the LLM as a swappable dependency behind an interface (Lesson 5.15 owns serving); I own retrieval and guardrails.
+- *Model ownership?* → **Delegated.** I treat the LLM as a swappable dependency behind an interface (the LLM-serving lesson owns serving); I own retrieval and guardrails.
 
 **Functional requirements:**
 
@@ -60,7 +60,7 @@ Imagine a brand-new research librarian on their first day at a giant law firm. A
 | 5 | **Cost** | Embedding + retrieval + generation token spend within budget |
 | 6 | **Throughput** | 50–500 q/s peak — **trivially served**; not the design driver |
 
-**The inversion, stated explicitly:** in Lesson 5.1 (URL shortener) we scaled read QPS; here, 50–500 q/s is a single small service. The two NFRs that can end a career are **faithfulness** (a confidently-wrong, well-cited answer erodes all trust in the system) and **access correctness** (one leaked chunk is a reportable security incident). Every architectural decision flows from NFRs 1–3.
+**The inversion, stated explicitly:** in the URL-shortener walkthrough we scaled read QPS; here, 50–500 q/s is a single small service. The two NFRs that can end a career are **faithfulness** (a confidently-wrong, well-cited answer erodes all trust in the system) and **access correctness** (one leaked chunk is a reportable security incident). Every architectural decision flows from NFRs 1–3.
 
 ---
 
@@ -93,7 +93,7 @@ Initial embed of 50M chunks at ~$0.02 per 1M tokens, ~200 tokens/chunk → `50M 
   - **pgvector (Postgres)** if the corpus and team are modest and operational simplicity wins: one database for vectors, chunk text, and ACL metadata, with real `WHERE` clauses for pre-filtering. Ceiling: HNSW in Postgres strains past tens of millions of vectors and the filtered-ANN path is less mature.
   - **OpenSearch / Elasticsearch kNN** if you also want first-class **hybrid (BM25 + vector)** search and you already run it — one engine for lexical + semantic + filters.
   - **Dedicated vector DB (e.g., a managed Pinecone/Weaviate-class service)** at 50M+ chunks with strict latency SLAs and filtered ANN — purpose-built, but a new vendor, new failure mode, and per-vector cost.
-- **Rejected — a raw FAISS/HNSW library you operate yourself:** great recall, but you inherit sharding, replication, filtered search, and incremental updates as homework. For an enterprise platform I delegate that to a managed kNN engine unless scale or cost forces the build (prior: buy first, build only if the bill or SLA proves it). See Lesson 11.2 for the vector-search internals behind this choice.
+- **Rejected — a raw FAISS/HNSW library you operate yourself:** great recall, but you inherit sharding, replication, filtered search, and incremental updates as homework. For an enterprise platform I delegate that to a managed kNN engine unless scale or cost forces the build (prior: buy first, build only if the bill or SLA proves it). See the embeddings & vector-search lesson for the internals behind this choice.
 
 **2. Source-document object store.** Original PDFs/docs/HTML for re-parsing, re-chunking on model upgrades, and citation deep-links. **Choice — S3/object storage.** Cheap, durable, append-with-versioning; never the live query path.
 
@@ -157,7 +157,7 @@ flowchart TB
 
 1. Embed the question; in parallel run a **BM25 lexical** retrieval (hybrid — vectors miss exact IDs, error codes, and rare proper nouns that keyword search nails).
 2. **ACL pre-filter:** the ANN/keyword query carries the user's group set and only returns chunks whose `acl_tags` intersect it. **Permissions are applied *inside* retrieval, before any chunk is read or ranked.**
-3. **Rerank** the ~50–100 survivors with a cross-encoder to get the truly top ~5–10 (first-stage ANN recall is good but ordering is coarse — Lesson 11.3).
+3. **Rerank** the ~50–100 survivors with a cross-encoder to get the truly top ~5–10 (first-stage ANN recall is good but ordering is coarse).
 4. **Assemble** context within the token budget, ordering for **lost-in-the-middle** (put the strongest chunks at the start and end, not buried in the middle where models attend least).
 5. **Generate** with an instruction to answer *only* from the provided context and to cite chunk IDs.
 6. **Abstain guard:** if reranker scores are below threshold or the model can't ground a claim, return "I don't know" with what *was* found — better than a confident fabrication (NFR #1).
@@ -197,7 +197,7 @@ POST /v1/feedback
 
 - **Identity is mandatory on `/ask` and drives the ACL filter server-side.** Rejected: letting the client pass its own permission list — clients lie, and a spoofed group set is a leak. The server resolves the caller's groups from the token.
 - **Abstention is a 200 with `grounded: false`, not a 404.** The system *successfully* determined it cannot answer; surfacing that honestly is the feature. Rejected: synthesizing an answer to avoid an empty result — that is the hallucination failure mode.
-- **Citations are structured, not prose.** Each carries `chunk_id` + `url` + `updated_at` so the UI can deep-link and the user can see *how fresh* the source is. Rejected: footnote text the model writes — models fabricate plausible-looking citations; only chunk IDs the retriever actually returned are trustworthy (Lesson 11.6 — RAG content is untrusted).
+- **Citations are structured, not prose.** Each carries `chunk_id` + `url` + `updated_at` so the UI can deep-link and the user can see *how fresh* the source is. Rejected: footnote text the model writes — models fabricate plausible-looking citations; only chunk IDs the retriever actually returned are trustworthy (RAG content is untrusted).
 - **`/feedback` is first-class, not an afterthought.** "Forbidden" feedback is a security signal that pages on-call; "down" feeds the eval set. Rejected: no feedback loop — then you have no way to grow the regression set the eval gate depends on.
 
 ---
@@ -227,7 +227,7 @@ Tombstones matter because ANN indexes don't love hard deletes — removing a vec
 
 ## E — Evaluation
 
-> Re-check against the NFRs. The bottlenecks here are *quality and security* failures, not throughput failures — and **eval is the release gate**, not a nice-to-have (Lesson 11.7).
+> Re-check against the NFRs. The bottlenecks here are *quality and security* failures, not throughput failures — and **eval is the release gate**, not a nice-to-have.
 
 **Two metric families, measured separately — conflating them hides the real bug:**
 
@@ -246,7 +246,7 @@ Now the failure modes.
 
 **Failure 4 — context overflow / lost-in-the-middle.** Too many chunks stuffed in; the model ignores the middle or truncation drops the answer. *Fix:* strict token budget, rerank to top ~5–10, order strongest chunks at the edges.
 
-**Eval as the gate (the Director framing):** no prompt, model, chunking, or reranker change ships without clearing the golden eval set on **both** metric families plus an automated **ACL leak test**. The gate is a CI step, not a quarterly review. I'd delegate the eval harness to the platform team with a stated bar: zero ACL-leak regressions, and faithfulness/recall at-or-above the current baseline before any change merges (Lesson 11.7).
+**Eval as the gate (the Director framing):** no prompt, model, chunking, or reranker change ships without clearing the golden eval set on **both** metric families plus an automated **ACL leak test**. The gate is a CI step, not a quarterly review. I'd delegate the eval harness to the platform team with a stated bar: zero ACL-leak regressions, and faithfulness/recall at-or-above the current baseline before any change merges.
 
 ---
 
@@ -266,7 +266,7 @@ Now the failure modes.
 
 **Conversational follow-ups.** "What about for interns?" needs the prior turn's context. Maintain conversation state and rewrite the follow-up into a standalone query before retrieval — and re-run the ACL filter every turn (the user's permissions don't carry over from "what they asked," only from "who they are").
 
-**Cross-references:** Lesson 11.2 (vector search internals behind the store choice and PQ trade-off); Lesson 11.3 (the RAG pattern this lesson applies end-to-end); Lesson 11.6 (retrieved content is *untrusted* — prompt-injection from a poisoned document is a real attack on this exact pipeline); Lesson 11.7 (the eval methodology this lesson makes the release gate); Lesson 5.15 (serving the LLM — the delegated, swappable dependency behind the generate step).
+**Cross-references:** vector search (the internals behind the store choice and PQ trade-off); RAG (the pattern this lesson applies end-to-end); guardrails & safety (retrieved content is *untrusted* — prompt-injection from a poisoned document is a real attack on this exact pipeline); evaluation & LLMOps (the eval methodology this lesson makes the release gate); LLM serving (the delegated, swappable dependency behind the generate step).
 
 ---
 
@@ -301,7 +301,7 @@ Now the failure modes.
 - **Post-filtering ACLs instead of pre-filtering.** Retrieving then dropping forbidden chunks already pulled secret content into the candidate set and model context — one prompt-injection or logging slip and it leaks. Permissions belong *inside* retrieval.
 - **One fixed chunking strategy for mixed content.** A 512-token window shreds a code function and orphans a policy table. Heterogeneous corpora need per-source, structure-aware chunking, or recall craters on whole document classes.
 - **No eval gate.** Shipping prompt/model/chunking changes on vibes guarantees silent regressions in faithfulness and recall — and an undetected ACL leak. Eval is a CI gate on two metric families plus a leak test, not a quarterly review.
-- **Trusting citations blindly.** Models fabricate plausible-looking source links. Only chunk IDs the retriever actually returned are trustworthy; the model cites *those*, never invented ones — and retrieved content itself is untrusted input (Lesson 11.6).
+- **Trusting citations blindly.** Models fabricate plausible-looking source links. Only chunk IDs the retriever actually returned are trustworthy; the model cites *those*, never invented ones — and retrieved content itself is untrusted input.
 
 ---
 
@@ -329,7 +329,7 @@ Now the failure modes.
 4. **Eval is the release gate, on two separate metric families.** Retrieval (recall/precision@k) and generation (faithfulness, answer relevance) measured apart, plus an automated ACL-leak test, run as CI — so you always know *which* part broke and you never ship a silent regression.
 5. **RAG beats fine-tune and beats a giant context** for this problem precisely because only RAG delivers freshness (re-index, don't retrain), citations, and per-user permissions — the three things enterprise Q&A cannot live without.
 
-> **Spaced-repetition recap:** Enterprise RAG = **retrieval + permissions, not model + QPS**. The crux: quality is bottlenecked by **retrieval** (fix retrieval before reaching for a bigger model), and the scary failures are a **confidently-wrong well-cited answer** and a **permission leak** (returning a chunk the user can't see). Build **two pipelines** — ingestion (chunk → embed → index, incremental, ACL-tagged, tombstones) and query (embed → hybrid retrieve → **ACL pre-filter** → rerank → assemble → generate + cite → "I don't know"). Enforce ACLs as a **pre-filter**. Gate every change on **eval** split into retrieval vs. generation metrics + a leak test. Choose **RAG** over fine-tune (stale, no cite, no ACL) and over a 1M context (won't fit, no ACL). Numbers: ~50M chunks → ~200–400 GB index (PQ or disk-backed ANN), ~$2–3M/yr generation. Cross-ref: 11.2 (vector search), 11.3 (RAG), 11.6 (untrusted retrieved content / injection), 11.7 (eval), 5.15 (model serving).
+> **Spaced-repetition recap:** Enterprise RAG = **retrieval + permissions, not model + QPS**. The crux: quality is bottlenecked by **retrieval** (fix retrieval before reaching for a bigger model), and the scary failures are a **confidently-wrong well-cited answer** and a **permission leak** (returning a chunk the user can't see). Build **two pipelines** — ingestion (chunk → embed → index, incremental, ACL-tagged, tombstones) and query (embed → hybrid retrieve → **ACL pre-filter** → rerank → assemble → generate + cite → "I don't know"). Enforce ACLs as a **pre-filter**. Gate every change on **eval** split into retrieval vs. generation metrics + a leak test. Choose **RAG** over fine-tune (stale, no cite, no ACL) and over a 1M context (won't fit, no ACL). Numbers: ~50M chunks → ~200–400 GB index (PQ or disk-backed ANN), ~$2–3M/yr generation. Cross-ref: vector search, RAG, untrusted retrieved content / injection, eval, model serving.
 
 ---
 

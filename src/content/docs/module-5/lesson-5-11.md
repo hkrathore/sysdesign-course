@@ -97,7 +97,7 @@ Four distinct data shapes; conflating them into one database is the classic mist
 - **Rejected, any database (SQL or wide-column) for bodies:** databases are built for indexed point/range queries and updates, none of which we need on 100 KB blobs you only ever scan sequentially. *Trade-off:* no per-page query/update, we don't need it.
 
 **2. URL/crawl metadata (~30 TB).** One row per URL (status, fingerprint, last-crawled, next-recrawl, priority); ~12k writes/s; point-lookups plus per-domain scans by the re-crawl scheduler.
-- **Choice: wide-column LSM, Bigtable/Cassandra/HBase** (LSM absorbs the write rate, Lesson 2.3), partitioned by domain hash. The crawl's source-of-truth ledger of "what have we seen and when."
+- **Choice: wide-column LSM, Bigtable/Cassandra/HBase** (LSM absorbs the write rate, the indexing lesson), partitioned by domain hash. The crawl's source-of-truth ledger of "what have we seen and when."
 - **Rejected, Postgres:** a single-leader B-tree store can't absorb 12k+ churning writes/s over tens of billions of rows; we need neither joins nor multi-row transactions. *Trade-off:* lose ad-hoc SQL for linear write scale and partition locality.
 
 **3. The seen-URL set.** ~720k membership checks/s, approximate-OK, must be RAM.

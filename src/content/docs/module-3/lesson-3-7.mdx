@@ -27,17 +27,17 @@ Every decision below trades **hit rate, latency, memory cost, and freshness** ag
 
 ### Deep explanation
 
-A distributed cache is an in-memory key-value tier - **Redis** or **Memcached** (the key-value family from Lesson 2.2) - sitting between the stateless app tier (2.10) and the origin database. It earns its place on one number: the **hit rate**.
+A distributed cache is an in-memory key-value tier - **Redis** or **Memcached** (the key-value family) - sitting between the stateless app tier and the origin database. It earns its place on one number: the **hit rate**.
 
 #### Why a cache, in numbers (the leverage)
 
-Take a read-heavy service at **50,000 read QPS**. An origin Postgres read costs ~**10 ms**; a Redis hit costs ~**0.5-1 ms** (the latency hierarchy of 1.4). Put a read-through cache in front at a **90% hit rate**:
+Take a read-heavy service at **50,000 read QPS**. An origin Postgres read costs ~**10 ms**; a Redis hit costs ~**0.5-1 ms** (the latency hierarchy). Put a read-through cache in front at a **90% hit rate**:
 
 - **Origin load:** the database sees only the 10% misses = **5,000 QPS** instead of 50,000 - a **10x reduction**. If one Postgres replica handles ~5,000 read QPS, you've gone from ~10 read replicas to ~1. That is real money and real operational surface removed.
 - **Latency:** blended p50 ≈ `0.9 × 1ms + 0.1 × 10ms ≈ 1.9 ms`, down from a flat ~10 ms.
 - **The hit-rate cliff is non-linear.** Misses, not hits, size your origin. Going **90% → 95%** halves miss traffic and halves origin cost; **99% → 99.9%** is another 10x. This is why a few points of hit rate is worth fighting for, and why **eviction policy and stampede control - which directly move the hit rate - are Director-level cost levers, not tuning trivia.**
 
-#### Write strategies - the recap (full treatment in 2.10, and in the widget below)
+#### Write strategies - the recap (full treatment in the caching-strategies lesson, and in the widget below)
 
 The cache is a **second copy of the truth**, so every write must decide how cache and database stay in agreement and who pays the latency:
 
@@ -70,7 +70,7 @@ The decision rule: **LRU is the safe default; switch to LFU for a stable, skewed
 
 One cache node has a memory ceiling (say **64 GB** usable) and a throughput ceiling; a 500 GB working set or 1M+ QPS needs a **fleet**, and the fleet needs a key→node rule **every client agrees on**, or you cache the same key in five places and serve stale copies.
 
-The naive rule, `hash(key) mod N`, has a fatal property for a cache: change `N` and **almost every key remaps** (~90%+ going 10→11 nodes - Lesson 2.6's numbers). Every remapped key is a **miss**, so scaling the fleet flushes the cache and stampedes the origin at the worst moment - you're scaling *because* you're under load. **Consistent hashing** (2.6) bounds the damage: adding or removing a node moves only ~`1/N` of the keyspace, so a capacity change costs a small, bounded miss blip instead of a full cold-load surge. Virtual nodes smooth the distribution and weight bigger machines.
+The naive rule, `hash(key) mod N`, has a fatal property for a cache: change `N` and **almost every key remaps** (~90%+ going 10→11 nodes). Every remapped key is a **miss**, so scaling the fleet flushes the cache and stampedes the origin at the worst moment - you're scaling *because* you're under load. **Consistent hashing** bounds the damage: adding or removing a node moves only ~`1/N` of the keyspace, so a capacity change costs a small, bounded miss blip instead of a full cold-load surge. Virtual nodes smooth the distribution and weight bigger machines.
 
 Two implementations, and the choice is architectural: **Memcached** keeps servers dumb and puts **sharding in the client library** - simple, but every client must share the same ring config and the client owns rebalancing. **Redis Cluster** shards **server-side** with managed hash slots and redirects clients - server-coordinated, fine-grained rebalancing, plus Redis's data structures, at the cost of more moving parts. Reject cluster mode when a single primary + replica meets your throughput and memory needs - it adds operational weight you don't need yet.
 
@@ -107,7 +107,7 @@ The Director framing: stampede control is **availability engineering**, not micr
 
 #### The consistency cost of caching authoritative data
 
-A cache buys latency by holding a copy, and the copy can be **wrong** - the PACELC Else-side (2.7) made concrete: lockstep with the database costs latency; drift serves **stale** data.
+A cache buys latency by holding a copy, and the copy can be **wrong** - the PACELC Else-side made concrete: lockstep with the database costs latency; drift serves **stale** data.
 
 - **Staleness window.** With cache-aside + TTL, a value can be stale for up to its TTL after the row changes. Make this an explicit product decision: a like-count stale for 30 s is fine; a bank balance or an authz check is **not**.
 - **Invalidation is the hard part.** Invalidate too little → stale reads; too aggressively → you destroy your own hit rate. The patterns, in rising freshness/cost order: **TTL** (bounded staleness, no coordination - the default), **explicit invalidation on write** (fresh, but you must catch *every* write path), **write-through** (fresh and warm, at write latency), **versioned keys** (a write bumps the version so old keys age out - sidesteps invalidation races at the cost of key churn).
@@ -147,7 +147,7 @@ The widget below is a single-writer **caching write-strategy simulator**. The re
 
 ### Worked example - the timeline + counts cache for a social feed (Twitter-scale read path)
 
-Continue the photo/feed app from Lessons 2.2 and 2.10. The read path is ~**100:1** reads:writes on timelines, so caching is the load-bearing decision.
+Continue the photo/feed app. The read path is ~**100:1** reads:writes on timelines, so caching is the load-bearing decision.
 
 - **Estimation (the E step).** **40,000 timeline read QPS** at peak, ~**2 KB** per rendered timeline, working set ~**10 GB** (the ~5M active users). A target **95% hit rate** means the origin (Cassandra) sees only **2,000 QPS** of misses - a **20x** shed. We pick **4 shards** for throughput headroom and blast radius, not capacity.
 - **Sharding.** Key as `timeline:{userId}`, shard with **consistent hashing** (Redis Cluster; the `{userId}` hash tag co-locates a user's timeline and counts). We reject `mod N` explicitly: adding the 5th shard remaps ~20% of keys (a bounded miss blip) instead of ~90% - a flush that would stampede Cassandra exactly when we're scaling because we're hot.
@@ -213,4 +213,4 @@ The signal isn't any single pick - it's that **eviction, sharding, replication, 
 
 ---
 
-*End of Lesson 3.7. The cache tier built here - sharded by consistent hashing (2.6), replicated like any leader-follower store (2.4), and bounded by the PACELC/quorum consistency dials (2.7, 2.8) - is the read-path workhorse the Module 5 problems (Twitter/feed, Instagram, Typeahead) lean on. Next building blocks: 3.8 Distributed Messaging Queue and 3.9 Publish-Subscribe, the asynchronous, burst-absorbing seam introduced in 2.10.*
+*End of Lesson 3.7. The cache tier built here - sharded by consistent hashing, replicated like any leader-follower store, and bounded by the PACELC/quorum consistency dials - is the read-path workhorse the design problems (Twitter/feed, Instagram, Typeahead) lean on. The asynchronous, burst-absorbing seam comes next in the distributed messaging queue and publish-subscribe building blocks.*

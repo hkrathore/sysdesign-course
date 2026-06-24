@@ -37,7 +37,7 @@ Those are your two subsystems. The stenographer is a **streaming, latency-bound 
 - *Do we need to know who said what?* → **Yes — speaker diarization.** Action items are worthless without an owner ("*someone* will follow up" is noise).
 - *Where does the audio come from?* → **A meeting platform / bot or client SDK** streams audio to us. We don't own the video conferencing; we ingest its audio.
 - *Consent model?* → **We must capture and enforce recording consent**, and operate in two-party-consent jurisdictions. First-class requirement, not deferred.
-- *Search across past meetings?* → **Yes.** "What did we decide about pricing last quarter?" → RAG over the transcript corpus (Lesson 11.3).
+- *Search across past meetings?* → **Yes.** "What did we decide about pricing last quarter?" → RAG over the transcript corpus.
 - *Multilingual?* → **English first, multilingual as a design-evolution axis**, not v1 scope.
 - *Real-time translation, sentiment, video understanding?* → **Out of scope for v1**, name as evolution.
 
@@ -75,9 +75,9 @@ The two paths fail differently and are tuned differently: the stenographer must 
 
 **Real-time ASR fleet (the dominant real-time cost):** a streaming ASR model on a modern GPU serves many concurrent real-time streams — the real-time factor is well under 1× per stream, so one GPU handles on the order of **~50–100 concurrent live streams** (model- and latency-target-dependent). At 50K concurrent: `50,000 ÷ ~75 ≈ ~670 GPUs` for transcription, plus diarization compute on top. **This GPU fleet — provisioned for the concurrent-meeting peak — is the headline real-time cost**, and it's a *capacity* (provisioned), not a per-token, cost.
 
-**Summarization token bill (the dominant batch cost):** per meeting, summarize ~8K input tokens → ~500-token summary. Map-reduce adds overhead (re-reading chunk summaries in the reduce step) → call it ~1.3–1.5× input tokens. `5M meetings/day × ~11K effective tokens ≈ ~55B tokens/day` of summarization. **This is a per-token cost that scales with usage**, so it's the line a viral growth curve blows up (Lesson 11.8). Batch it on the async API for ~50% off; it's latency-relaxed.
+**Summarization token bill (the dominant batch cost):** per meeting, summarize ~8K input tokens → ~500-token summary. Map-reduce adds overhead (re-reading chunk summaries in the reduce step) → call it ~1.3–1.5× input tokens. `5M meetings/day × ~11K effective tokens ≈ ~55B tokens/day` of summarization. **This is a per-token cost that scales with usage**, so it's the line a viral growth curve blows up. Batch it on the async API for ~50% off; it's latency-relaxed.
 
-**Storage:** transcripts ≈ `5M/day × ~50 KB ≈ 250 GB/day` of text → ~90 TB/yr before tiering; cheap, but retention policy (below) caps it. Embeddings for search: chunk each transcript → ~10–20 vectors/meeting → billions of vectors over time → a sharded vector index (Lesson 11.2), the real search-side cost.
+**Storage:** transcripts ≈ `5M/day × ~50 KB ≈ 250 GB/day` of text → ~90 TB/yr before tiering; cheap, but retention policy (below) caps it. Embeddings for search: chunk each transcript → ~10–20 vectors/meeting → billions of vectors over time → a sharded vector index, the real search-side cost.
 
 **What estimation decided:** the two paths have **different cost functions** — provisioned GPU capacity sized to *concurrent meetings* vs per-token LLM spend sized to *total meetings*. You scale and budget them separately. Audio bandwidth and transcript storage are rounding errors.
 
@@ -93,7 +93,7 @@ The two paths fail differently and are tuned differently: the stenographer must 
 
 **3. Summary / action-items store (small, structured, strongly-read).** One record per meeting: summary text, decisions[], action_items[{owner, text, due}]. Small, read by humans and downstream integrations. **Postgres** — it's tiny, relational (action items link to users), and benefits from consistency. 
 
-**4. Vector index for cross-meeting search.** Transcript chunks embedded for RAG (Lesson 11.3). Sharded ANN index (HNSW), **filtered by the requesting user's access tags at query time** so search never crosses a permission boundary. **Rejected:** keyword-only search — misses paraphrased questions ("what did we agree on for the launch" vs the literal words used).
+**4. Vector index for cross-meeting search.** Transcript chunks embedded for RAG. Sharded ANN index (HNSW), **filtered by the requesting user's access tags at query time** so search never crosses a permission boundary. **Rejected:** keyword-only search — misses paraphrased questions ("what did we agree on for the launch" vs the literal words used).
 
 **5. Consent & metadata store (authoritative, audited).** Per-meeting: participant list, consent state per participant, jurisdiction, retention class, residency region. Strongly consistent, **append-only audit trail** of consent events — because this is the record you produce in a dispute. **Postgres**, co-located with the access model.
 
@@ -149,7 +149,7 @@ flowchart TB
 2. Audio streams to the **ingest gateway**, which routes it to a **streaming ASR** worker on the GPU fleet. ASR emits **partial hypotheses** (revised as more audio arrives) for low-latency captions and **finalized** segments when an utterance endpoints.
 3. **Diarization** labels segments by speaker; finalized, speaker-attributed segments are (a) pushed to the client as **live captions over WebSocket** and (b) appended to the **transcript store**.
 4. On **meeting end**, the batch path triggers: the **map-reduce summarizer** reads the full transcript, produces a summary + **decisions** + **action items with owners**, and writes to the summary store. In parallel, transcript chunks are **embedded and indexed** for cross-meeting search.
-5. Users later **search** their meetings: query → embed → ANN over the vector index *filtered by their access* → relevant chunks → grounded, cited answer (Lesson 11.3).
+5. Users later **search** their meetings: query → embed → ANN over the vector index *filtered by their access* → relevant chunks → grounded, cited answer.
 
 **The load-bearing structural decision:** the transcript store is the **seam** between the two paths. The real-time path's only durable output is transcript segments; the batch path consumes them asynchronously. This decouples a latency-critical GPU pipeline from a cost-heavy LLM pipeline so each scales, fails, and is tuned on its own terms. If ASR is down, captions degrade but the system is up; if summarization is backed up, captions are unaffected.
 
@@ -214,7 +214,7 @@ DELETE /v1/meetings/{id}                  # honor deletion / retention expiry; t
 <details>
 <summary>Go deeper — map-reduce summarization mechanics (IC depth, optional)</summary>
 
-A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensive on every call and quality-degraded by "lost in the middle" (Lesson 11.11) — the model under-weights the middle third, exactly where mid-meeting decisions hide.
+A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensive on every call and quality-degraded by "lost in the middle" — the model under-weights the middle third, exactly where mid-meeting decisions hide.
 
 **Map-reduce:**
 1. **Chunk** the transcript on natural boundaries (topic shifts / time windows), ~1–2K tokens each, preserving speaker labels.
@@ -223,7 +223,7 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 **Refine (alternative):** carry a running summary and update it chunk-by-chunk. Better narrative coherence, but **serial** (can't parallelize) and the running summary can drift/forget early content. Use refine for short transcripts where coherence matters; map-reduce for long ones where parallelism and recall matter.
 
-**Faithfulness controls:** instruct the model to emit *only* items grounded in the chunk, attach `source_segment_ts` to every decision/action item, and run an eval pass (Lesson 11.7) that checks each extracted action item against its cited segment. An action item with no valid citation is dropped — that's how you stop the assistant inventing commitments.
+**Faithfulness controls:** instruct the model to emit *only* items grounded in the chunk, attach `source_segment_ts` to every decision/action item, and run an eval pass that checks each extracted action item against its cited segment. An action item with no valid citation is dropped — that's how you stop the assistant inventing commitments.
 
 </details>
 
@@ -243,9 +243,9 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 **Failure 2 — accuracy (WER) under real conditions.** Demo audio is clean; real meetings have accents, crosstalk, domain jargon ("our SKU-7 migration"), and bad mics. Mitigations: domain-term biasing / custom vocabulary, per-customer acoustic adaptation, and **surfacing low-confidence segments** rather than hiding them. WER is the metric; track it on a representative eval set, not on clean audio. Delegate model tuning ("I'd have the speech team benchmark a domain-adapted model vs the base on our worst-WER cohorts; my prior is adaptation pays for itself on jargon-heavy calls").
 
-**Failure 3 — hallucinated decisions/action items (the dangerous one).** A summary that invents "Priya will ship by Friday" when Priya said no such thing is worse than no summary — people act on it. This is a **faithfulness** failure (Lesson 11.3/11.7), and it's why every extracted item is citation-grounded and eval-gated against its source segment. Run faithfulness eval as a **ship gate** on any prompt/model change; a silent model update can regress it invisibly.
+**Failure 3 — hallucinated decisions/action items (the dangerous one).** A summary that invents "Priya will ship by Friday" when Priya said no such thing is worse than no summary — people act on it. This is a **faithfulness** failure, and it's why every extracted item is citation-grounded and eval-gated against its source segment. Run faithfulness eval as a **ship gate** on any prompt/model change; a silent model update can regress it invisibly.
 
-**Failure 4 — long-context summarization breaks.** One-shot stuffing of a long transcript is expensive per call and degrades via lost-in-the-middle (Lesson 11.11). Map-reduce (Go-deeper) keeps recall and cost bounded and parallelizes the map step. The trade-off: map-reduce can miss *cross-chunk* context (a decision referenced across two sections); mitigate with overlap and a reduce pass that reconciles.
+**Failure 4 — long-context summarization breaks.** One-shot stuffing of a long transcript is expensive per call and degrades via lost-in-the-middle. Map-reduce (Go-deeper) keeps recall and cost bounded and parallelizes the map step. The trade-off: map-reduce can miss *cross-chunk* context (a decision referenced across two sections); mitigate with overlap and a reduce pass that reconciles.
 
 **Failure 5 — consent/retention/residency (the career-ending one).** Recording in a two-party-consent jurisdiction without all-party consent, retaining transcripts past policy, or storing EU data outside its region are **legal incidents**. Mitigations: the consent gate blocks recording until policy is satisfied; a **retention clock** per `retention_class` auto-tombstones expired data across *all* stores; residency routing keeps data in-region; the `consent_events` audit trail is the evidence. This is a first-class operational process (echoing the reconciliation discipline of payments), not a setting. **The Director framing**: I own "can we legally record this, where does it live, and when does it disappear" — and I'd partner with legal on jurisdiction policy while owning the enforcement mechanism.
 
@@ -253,9 +253,9 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 ## D: Design evolution
 
-> The natural evolution turns the passive note-taker into an **action-taking agent** — which is exactly where the agent lessons (11.9–11.14) come back.
+> The natural evolution turns the passive note-taker into an **action-taking agent** — which is exactly where the agent designs come back.
 
-**1. From notes to actions (agentic).** Today the assistant *extracts* "Priya will file the ticket by Friday." The evolution: it *files the ticket* — via tool calls (Lesson 11.10) to Jira/calendar/email. This crosses from output-risk to **action-risk** (Lesson 11.14): an action taken on a hallucinated or misheard item has real consequences. So the evolution ships with **human-in-the-loop confirmation** on each proposed action (Lesson 11.13), least-privilege tool scopes, idempotent actions, and an audit log — autonomy gated by reversibility, the same bounded-autonomy posture as the tool-using support agent (Lesson 12.5). "Draft the follow-up email" (reversible, auto) vs "send it to the customer" (irreversible, approval).
+**1. From notes to actions (agentic).** Today the assistant *extracts* "Priya will file the ticket by Friday." The evolution: it *files the ticket* — via tool calls to Jira/calendar/email. This crosses from output-risk to **action-risk**: an action taken on a hallucinated or misheard item has real consequences. So the evolution ships with **human-in-the-loop confirmation** on each proposed action, least-privilege tool scopes, idempotent actions, and an audit log — autonomy gated by reversibility, the same bounded-autonomy posture as the tool-using support agent. "Draft the follow-up email" (reversible, auto) vs "send it to the customer" (irreversible, approval).
 
 **2. Real-time summary.** Roll up a live running summary during the meeting (refine-style on the in-progress transcript), not just at the end — a latency-relaxed-but-incremental third workload.
 
@@ -265,7 +265,7 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 **5. Multimodal.** Screenshare/slide OCR and video understanding to ground "the number on slide 4" — a separate ingest path feeding the same transcript seam.
 
-**Cross-references:** Lesson 11.4 (LLM inference & serving — the GPU economics that govern both the ASR fleet and the summarizer); 11.3 (RAG, the cross-meeting search path); 11.11 (agent memory & context management — long-context / lost-in-the-middle, the map-reduce rationale); 11.8 (LLM cost & latency — the per-token summarization bill and batch-API savings); 11.7 (eval, the faithfulness gate); 11.10/11.13/11.14 (the agentic evolution); 12.5 (the tool-using agent whose bounded-autonomy posture the agentic evolution adopts); 11.16 (the governance/cost/privacy ownership this problem foregrounds).
+**Builds on:** LLM inference & serving (the GPU economics that govern both the ASR fleet and the summarizer); RAG (the cross-meeting search path); agent memory & context management (long-context / lost-in-the-middle, the map-reduce rationale); LLM cost & latency (the per-token summarization bill and batch-API savings); eval (the faithfulness gate); the agentic evolution work; the tool-using agent whose bounded-autonomy posture the agentic evolution adopts; and the governance/cost/privacy ownership this problem foregrounds.
 
 ---
 
@@ -312,7 +312,7 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 **Q2. Your summary listed a decision that the team says they never made. Diagnose and prevent it.**
 
-> *Model:* A **faithfulness failure** — the summarizer asserted something ungrounded, likely in the reduce step or via a low-confidence (mis-transcribed) segment. Prevent it by: (a) **grounding every extracted decision/action item with a `source_segment_ts`** and dropping any item without a valid citation; (b) running a **faithfulness eval** (does each item trace to its cited segment?) as a **ship gate** on prompt/model changes; (c) surfacing low-confidence ASR segments so a transcription error doesn't silently become a "decision." If it recurs after a vendor model update, that's why the eval gate exists — a silent model change can regress faithfulness invisibly (Lesson 11.7).
+> *Model:* A **faithfulness failure** — the summarizer asserted something ungrounded, likely in the reduce step or via a low-confidence (mis-transcribed) segment. Prevent it by: (a) **grounding every extracted decision/action item with a `source_segment_ts`** and dropping any item without a valid citation; (b) running a **faithfulness eval** (does each item trace to its cited segment?) as a **ship gate** on prompt/model changes; (c) surfacing low-confidence ASR segments so a transcription error doesn't silently become a "decision." If it recurs after a vendor model update, that's why the eval gate exists — a silent model change can regress faithfulness invisibly.
 
 **Q3. Walk me through summarizing a 3-hour, multi-topic meeting that's ~30K tokens.**
 
@@ -332,8 +332,8 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 4. **Faithfulness over fluency.** A hallucinated decision or action item is worse than none — people act on it. Ground every item with a source-segment citation, eval-gate it, and drop un-cited items. Taking *action* on items (the evolution) raises the stakes to HITL.
 5. **Consent, retention, residency are first-class.** You're recording humans, often under two-party-consent law. A consent gate, a retention clock that tombstones across all stores, residency routing, and an audit trail are design primitives — and raising them unprompted is the Director signal.
 
-> **Spaced-repetition recap:** Meeting assistant = **stenographer + executive assistant + lawyer** in one system. Split into a **real-time streaming ASR/diarization path** (latency-bound, partials over WebSocket, GPU fleet sized to *concurrent* meetings) and a **batch summarization path** (context/cost-bound, triggered on meeting end), joined by the **transcript store** as the seam. Long transcripts → **map-reduce** (chunk→map→reduce), never one-shot stuffing (lost-in-the-middle + cost). Stop hallucinated action items with **citation-grounded extraction + a faithfulness eval gate**. **Consent/retention/residency are first-class** — consent gate over both paths, retention clock tombstoning across all stores, audit trail. Cross-meeting search = RAG over transcripts (11.3), access-filtered. Evolves into an **action-taking agent** (11.10/11.13/11.14) with HITL gated by reversibility. Two cost functions: provisioned ASR GPUs (concurrent) vs per-token summarization (total). Cross-ref: 11.4 (serving + GPU economics), 11.3 (search), 11.11 (long-context/map-reduce), 11.8 (cost), 11.7 (faithfulness eval), 11.16 (privacy/cost ownership).
+> **Spaced-repetition recap:** Meeting assistant = **stenographer + executive assistant + lawyer** in one system. Split into a **real-time streaming ASR/diarization path** (latency-bound, partials over WebSocket, GPU fleet sized to *concurrent* meetings) and a **batch summarization path** (context/cost-bound, triggered on meeting end), joined by the **transcript store** as the seam. Long transcripts → **map-reduce** (chunk→map→reduce), never one-shot stuffing (lost-in-the-middle + cost). Stop hallucinated action items with **citation-grounded extraction + a faithfulness eval gate**. **Consent/retention/residency are first-class** — consent gate over both paths, retention clock tombstoning across all stores, audit trail. Cross-meeting search = RAG over transcripts, access-filtered. Evolves into an **action-taking agent** with HITL gated by reversibility. Two cost functions: provisioned ASR GPUs (concurrent) vs per-token summarization (total). Builds on: serving + GPU economics, RAG search, long-context/map-reduce, LLM cost, faithfulness eval, and privacy/cost ownership.
 
 ---
 
-*End of Lesson 12.8 and of Module 12. The meeting assistant is the module's synthesis problem: it stacks a latency-bound streaming pipeline, a context-bound summarization pipeline, a RAG search layer, and a consent/governance model into one system — and the Director's job is to keep those four concerns from collapsing into a single hand-wave. The agentic evolution (acting on the notes, not just writing them) is where Module 11's agent-safety discipline stops being theory.*
+*End of Lesson 12.8 and of the GenAI-problems track. The meeting assistant is the module's synthesis problem: it stacks a latency-bound streaming pipeline, a context-bound summarization pipeline, a RAG search layer, and a consent/governance model into one system — and the Director's job is to keep those four concerns from collapsing into a single hand-wave. The agentic evolution (acting on the notes, not just writing them) is where the agent-safety discipline stops being theory.*

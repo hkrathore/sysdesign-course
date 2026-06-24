@@ -19,7 +19,7 @@ Every senior candidate stumbles, the offer turns on **how you recover, not wheth
 **1. The freeze (blank on where to go next).**
 *Recovery:* fall back to the framework, out loud. "Let me step back to RESHADED, I've done requirements and estimation; the next thing is the high-level components." Buy time legitimately with a clarifying question. The structure is your safety net; saying its name out loud signals method under pressure.
 
-**2. The rabbit hole (too deep, from Lesson 1.1).**
+**2. The rabbit hole (too deep).**
 *Recovery:* name your own altitude correction. "I'm deeper than this decision warrants. The key point is X; the tuning I'd delegate. Back to the system." Self-correcting altitude is a *positive* signal, not an admission of failure.
 
 **3. The ramble (no structure, talking in circles).**

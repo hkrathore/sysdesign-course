@@ -271,4 +271,4 @@ Two riders must not be offered the same car, and a crashed matcher mid-dispatch 
 
 ---
 
-*End of Lesson 5.7. The geo-index here reuses consistent-hash sharding (2.6) and the in-memory cache discipline (3.7), but inverts the read:write assumption that drove Twitter/Instagram - a reminder that **RESHADED's R and E steps decide the architecture before any box is drawn.** Next: 5.8 Dropbox/Drive - the large-file, sync-and-conflict problem.*
+*End of Lesson 5.7. The geo-index here reuses consistent-hash sharding and the in-memory cache discipline, but inverts the read:write assumption that drove Twitter/Instagram - a reminder that **RESHADED's R and E steps decide the architecture before any box is drawn.** Next: 5.8 Dropbox/Drive - the large-file, sync-and-conflict problem.*

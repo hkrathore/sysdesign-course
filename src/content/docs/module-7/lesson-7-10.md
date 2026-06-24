@@ -8,7 +8,7 @@ sidebar:
 > **This problem is asked precisely because you cannot have rehearsed it.** Parking Lot and LRU Cache have canned solutions on every prep platform; Amazon Locker does not, which is why it sits at #2 in recommended practice order and in heavy rotation at Amazon-flavored loops. With no template to recall, it isolates the skills templates hide: **requirement scoping under ambiguity** and **entity judgment**. A junior answer models cabinets and doors and drowns; a Director answer scopes to the allocation decision and the expiry-and-reclaim lifecycle, argues smallest-fit vs first-fit vs assign-on-arrival **with capacity arithmetic**, and notices the trap no memorized problem contains: **expiry here does not free the resource, a human has to come take the package away.** Treat this lesson as a drill, not a read.
 
 ::tip[How to drill this, the cold-open protocol]
-**Do not read past the Intuition section until you have attempted this solo.** Set a 35-minute timer, blank document, and run the RESHADED spine from memory on "Design Amazon Locker": scope it, put rough numbers on capacity, name the entities and their state machines, defend an allocation strategy against one alternative, and find at least one race or lifecycle leak unprompted. When the timer fires, stop mid-sentence, that is what the real cut-off feels like, then read on and grade yourself section by section. The gap you find *is* the prep. (Want a 10-minute low-stakes warm-up first? The Connect Four rep in Lesson 7.9 is the stretching exercise; this is the loaded set.)
+**Do not read past the Intuition section until you have attempted this solo.** Set a 35-minute timer, blank document, and run the RESHADED spine from memory on "Design Amazon Locker": scope it, put rough numbers on capacity, name the entities and their state machines, defend an allocation strategy against one alternative, and find at least one race or lifecycle leak unprompted. When the timer fires, stop mid-sentence, that is what the real cut-off feels like, then read on and grade yourself section by section. The gap you find *is* the prep. (Want a 10-minute low-stakes warm-up first? The Connect Four rep in the chess LLD is the stretching exercise; this is the loaded set.)
 ::
 
 ### Learning objectives
@@ -47,7 +47,7 @@ A locker bank is a **coat check with no attendant**. The system must pick a cubb
 
 ## E: Estimation
 
-> **Adaptation:** estimation here sizes **capacity and dwell time, not fleets**. The decision the numbers must support is *when to bind capacity*, and Little's law (Lesson 2.9) answers it in four lines.
+> **Adaptation:** estimation here sizes **capacity and dwell time, not fleets**. The decision the numbers must support is *when to bind capacity*, and Little's law answers it in four lines.
 
 **Assumptions (one metro):** 300 locations × 100 slots (40 S / 40 M / 20 L) = **30K slots**. Average dwell per delivered package ≈ **1.5 days** (most pickups within 24h; the ~5% that expire sit ~5 days awaiting return and drag the mean up).
 
@@ -55,19 +55,19 @@ A locker bank is a **coat check with no attendant**. The system must pick a cubb
 
 **The reserve-early tax (the headline calculation):** if checkout **hard-reserves a physical slot** and transit takes ~2 days, dwell becomes `2 + 1.5 = 3.5 days` → capacity falls to `30K ÷ 3.5 ≈ 8.5K/day`. **Hard-reserving at checkout costs ~60% of the network's throughput**, empty steel held against a package still on a truck. That one division decides the design in §S/§H: reserve a *promise* early, bind the *slot* late.
 
-**Load is trivial, say so and move on:** 20K allocations/day ≈ 0.25/s average, ~2/s at evening peak metro-wide, ~7 reservations/hour per location. One Postgres yawns (Lesson 3.3). Storage: 20K/day × ~1 KB ≈ **7 GB/year**. Codes: 6 digits = 1M combinations vs ≤100 active packages per location, guessing is handled by kiosk rate-limiting, not longer codes. **Verdict: a capacity-management and lifecycle-correctness problem at toy QPS**, the inverse of Module 5, and noticing that inversion out loud is a senior signal.
+**Load is trivial, say so and move on:** 20K allocations/day ≈ 0.25/s average, ~2/s at evening peak metro-wide, ~7 reservations/hour per location. One Postgres yawns. Storage: 20K/day × ~1 KB ≈ **7 GB/year**. Codes: 6 digits = 1M combinations vs ≤100 active packages per location, guessing is handled by kiosk rate-limiting, not longer codes. **Verdict: a capacity-management and lifecycle-correctness problem at toy QPS**, the inverse of the canonical design problems, and noticing that inversion out loud is a senior signal.
 
 ---
 
 ## S: Storage
 
-> **Adaptation:** as in Lesson 7.8, "storage" at LLD altitude means **where does the arbiter live**, which component decides who got the last M slot.
+> **Adaptation:** as in the movie-booking LLD, "storage" at LLD altitude means **where does the arbiter live**, which component decides who got the last M slot.
 
 **Decision: one transactional relational database (Postgres) holds all three lifecycles and the per-location size-bucket counters.** At ~2 writes/s metro-wide, the only storage question is correctness of the contested transitions, last-slot reservation and single-use code redemption, both row-level atomic conditional updates, the primitive relational stores do best.
 
-- *Rejected, in-memory allocation state:* the Lesson 7.8 argument verbatim, a second instance or a restart silently double-allocates; in-process memory cannot hold a business invariant.
+- *Rejected, in-memory allocation state:* the movie-booking LLD argument verbatim, a second instance or a restart silently double-allocates; in-process memory cannot hold a business invariant.
 - *Rejected, a distributed lock or queue per location:* infrastructure bought to solve contention measured at **7 events/hour**. A conditional `UPDATE` on a counter row is the whole mechanism; more is résumé-driven design.
-- *Eligibility browsing* reads a cached, slightly stale availability view, a hint, exactly like 5.13's seat map; the reservation transaction is the truth.
+- *Eligibility browsing* reads a cached, slightly stale availability view, a hint, exactly like the seat map; the reservation transaction is the truth.
 
 ---
 
@@ -75,12 +75,12 @@ A locker bank is a **coat check with no attendant**. The system must pick a cubb
 
 > **Adaptation:** H shrinks to **four components inside one service plus the strategy seam**, and the design's center of gravity is the two-phase allocation that §E's math forced.
 
-**Components:** an **AllocationService** owning reserve/bind/release; an **AllocationStrategy** interface (the swappable size-matching policy); a **LifecycleService** driving package states, codes, expiry, and return queuing (scheduled scans, Lesson 3.15 in miniature); and the **Kiosk/Courier edge** treated as a client of clean APIs, its firmware delegated.
+**Components:** an **AllocationService** owning reserve/bind/release; an **AllocationStrategy** interface (the swappable size-matching policy); a **LifecycleService** driving package states, codes, expiry, and return queuing (scheduled scans, the task-scheduler building block in miniature); and the **Kiosk/Courier edge** treated as a client of clean APIs, its firmware delegated.
 
 **The two-phase allocation (the design's spine):**
 
 1. **Checkout, reserve a promise, not a slot.** Atomically decrement the `(location, size_class)` availability counter; no physical slot is bound, so nothing sits empty during transit. *Rejected, hard slot binding at checkout:* the 60% throughput tax from §E. *Rejected, pure assign-on-arrival:* couriers hit full lockers and redirect constantly; the customer was promised nothing. The middle path holds capacity in the cheapest unit that still makes the promise, a counter.
-2. **Courier arrival, bind late.** The scan picks the smallest free slot ≥ package size via the strategy, flips it `AVAILABLE → OCCUPIED`, opens the door, marks the package `DELIVERED`, issues the code, fires the notification (Lesson 5.12's pipeline, one line).
+2. **Courier arrival, bind late.** The scan picks the smallest free slot ≥ package size via the strategy, flips it `AVAILABLE → OCCUPIED`, opens the door, marks the package `DELIVERED`, issues the code, fires the notification (the pipeline, one line).
 
 ```mermaid
 stateDiagram-v2
@@ -128,7 +128,7 @@ DELETE /v1/reservations/{id}              # order cancelled in transit -> counte
 - **`packages`**, `package_id` PK, `reservation_id`, `state` (the Mermaid machine), `slot_ref`, `delivered_at`, `expires_at`.
 - **`pickup_codes`**, `code` + `location_id` PK, `package_id`, `status` (`ACTIVE / USED / VOID`), single-use enforced by conditional update `WHERE status='ACTIVE'`.
 
-**The invariant ledger, stated:** `available_count` per bucket = physical `AVAILABLE` slots − outstanding unconsumed reservations. Every capacity-touching transition, reserve, cancel, bind, return-collect, adjusts counter and slot state **in one transaction**, or the promise ledger drifts from the steel. A nightly reconciliation job (Lesson 3.15) audits drift; paging on nonzero is cheap insurance.
+**The invariant ledger, stated:** `available_count` per bucket = physical `AVAILABLE` slots − outstanding unconsumed reservations. Every capacity-touching transition, reserve, cancel, bind, return-collect, adjusts counter and slot state **in one transaction**, or the promise ledger drifts from the steel. A nightly reconciliation job audits drift; paging on nonzero is cheap insurance.
 
 <details>
 <summary>Go deeper, full column schemas and indexes (IC depth, optional)</summary>

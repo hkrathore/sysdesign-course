@@ -5,7 +5,7 @@ sidebar:
   order: 14
 ---
 
-> This is the system-design *assembly* of the building block from Lesson 3.15 (Distributed Task Scheduler). 3.15 derived the hard primitives, the scheduler/executor split, leader election and its **failover gap**, **fencing with epochs**, and the thesis that **exactly-once-*effect* = at-least-once everywhere + idempotency on `(job_id, fire_time)`**. This lesson runs the full **RESHADED** spine, sizes it in numbers, and stresses the assembled design, using the primitives by name, not re-deriving them.
+> This is the system-design *assembly* of the building block from the task-scheduler building block (Distributed Task Scheduler). 3.15 derived the hard primitives, the scheduler/executor split, leader election and its **failover gap**, **fencing with epochs**, and the thesis that **exactly-once-*effect* = at-least-once everywhere + idempotency on `(job_id, fire_time)`**. This lesson runs the full **RESHADED** spine, sizes it in numbers, and stresses the assembled design, using the primitives by name, not re-deriving them.
 
 ### Learning objectives
 - Run **RESHADED** on a control-plane problem whose load is the **due-poll** and the **execution fan-out**, not user traffic, and size the timer-instance table accordingly.
@@ -33,7 +33,7 @@ What this problem tests that the social-feed problems don't: the load isn't a cr
 
 **Clarifying questions (with assumptions):**
 - *Firing precision?* → **second granularity, a few seconds of slack is fine**, which permits a poll-based design (tick every 1-5 s) and makes the whole thing tractable.
-- *Firing guarantee?* → the honest answer (3.15): **exactly-once firing across a leader death does not exist.** I deliver **at-least-once firing (catch-up) + idempotency on `(job_id, fire_time)` = exactly-once-effect**, with at-most-once (skip) where a stale run is worthless.
+- *Firing guarantee?* → the honest answer: **exactly-once firing across a leader death does not exist.** I deliver **at-least-once firing (catch-up) + idempotency on `(job_id, fire_time)` = exactly-once-effect**, with at-most-once (skip) where a stale run is worthless.
 - *Scale?* → **~100M live timers**, tens of thousands of fires/sec at peak, forces sharding and the midnight-herd confrontation.
 - *Multi-tenant?* → **Yes**, per-tenant isolation/quotas later; one tenant's 50M-job backfill must not starve another's billing.
 
@@ -81,7 +81,7 @@ Three data classes (the structural primitives, durable-not-RAM, index-over-store
 
 **2. Job instances / the timer store (the hot path).** The due-poll (`WHERE fire_time ≤ now AND status='scheduled' ORDER BY fire_time LIMIT N FOR UPDATE SKIP LOCKED`) plus per-fire status writes; 10 GB live; must support claim-without-double-claim.
 - **Choice: a relational store with a B-tree on `fire_time`** (Postgres / sharded MySQL/Aurora), **partitioned by `shard_id = hash(job_id)`**. Two reasons: `FOR UPDATE SKIP LOCKED` gives multiple scanners safe, contention-bounded claiming (the primitive Airflow 2.0 HA and Quartz clustering use), and the 10 GB live set keeps the time index RAM-resident. **The durable instance table is the source of truth.**
-- *Optional acceleration:* a **Redis ZSET per shard** scored by `fire_time` as a hot index *over* the table, rebuilt on startup. **Rejected as the only copy:** Redis is AP-leaning (3.7), async replication can silently drop a just-written future job. ZSET-as-index, yes; ZSET-as-record, never. A **hierarchical timing wheel** (O(1), Kafka-style) is the move only at Kafka-scale timer counts.
+- *Optional acceleration:* a **Redis ZSET per shard** scored by `fire_time` as a hot index *over* the table, rebuilt on startup. **Rejected as the only copy:** Redis is AP-leaning, async replication can silently drop a just-written future job. ZSET-as-index, yes; ZSET-as-record, never. A **hierarchical timing wheel** (O(1), Kafka-style) is the move only at Kafka-scale timer counts.
 - *Rejected:* RAM-only timers, the cardinal sin of 3.15.
 
 **3. Run history (the firehose).** Append-only, ~7 TB/yr, read rarely. **Choice: Cassandra/DynamoDB with TTL, rolling to S3/Parquet** after 30-90 days. *Rejected:* history in the relational instance table, it bloats the very table the hot poll scans. **Separate the firehose from the index** (the same metadata/blob discipline as 5.1).
@@ -117,7 +117,7 @@ flowchart TB
     style LEASE fill:#e8a13a,color:#000
 ```
 
-**Happy path, compressed:** register writes the definition plus one instance row (`status='scheduled'`, `shard_id = hash(job_id) % P`). Each shard's single **owner** (etcd lease + epoch) runs the ~2 s due-poll, claims a batch under `FOR UPDATE SKIP LOCKED`, flips rows to `enqueued`, and puts `run(job_id, fire_time)`, **stamped with its lease epoch**, on the durable queue, writing the next instance row for recurring jobs. Workers pull with all of 3.8's machinery (visibility timeout, acks, backoff + jitter, DLQ); the **first action is the idempotency guard**, `INSERT INTO job_runs(job_id, fire_time) … ON CONFLICT DO NOTHING`, so redeliveries and catch-up duplicates collapse to one effect. A **missed-fire monitor** alarms on expected-vs-actual fire time, and a **dead-man's switch** pages when a critical job's success ping never arrives, a job that *didn't* fire is otherwise silent.
+**Happy path, compressed:** register writes the definition plus one instance row (`status='scheduled'`, `shard_id = hash(job_id) % P`). Each shard's single **owner** (etcd lease + epoch) runs the ~2 s due-poll, claims a batch under `FOR UPDATE SKIP LOCKED`, flips rows to `enqueued`, and puts `run(job_id, fire_time)`, **stamped with its lease epoch**, on the durable queue, writing the next instance row for recurring jobs. Workers pull with all of the machinery (visibility timeout, acks, backoff + jitter, DLQ); the **first action is the idempotency guard**, `INSERT INTO job_runs(job_id, fire_time) … ON CONFLICT DO NOTHING`, so redeliveries and catch-up duplicates collapse to one effect. A **missed-fire monitor** alarms on expected-vs-actual fire time, and a **dead-man's switch** pages when a critical job's success ping never arrives, a job that *didn't* fire is otherwise silent.
 
 The split is the design choice: the scheduler plane only moves jobs `scheduled → enqueued`; the queue + worker plane owns execution. Slow jobs back up in the queue (loud, autoscaled on lag) and **never stall the clock**.
 
@@ -155,7 +155,7 @@ GET /v1/jobs/{job_id}/runs?limit=20        → 200 { runs: [...] }
 
 **Design notes:**
 - **`idempotency_key` on register**, a client retrying `POST /jobs` after a timeout must not create two recurring jobs; duplicate registrations double-fire before any scheduler logic runs. *Rejected:* non-idempotent creation.
-- **`fire_policy` is a first-class per-job field**, billing wants `catch_up`; "emit the current price" wants `skip`. *Rejected:* one platform-wide policy, the right choice is requirements-driven per job (3.15).
+- **`fire_policy` is a first-class per-job field**, billing wants `catch_up`; "emit the current price" wants `skip`. *Rejected:* one platform-wide policy, the right choice is requirements-driven per job.
 - **The target is a queue topic or HTTP callback, never inline execution.** *Rejected:* running the handler inside the scheduler call (monolithic cron), couples firing accuracy to job duration, kills independent scaling/backpressure/DLQ.
 - **No public "list all due jobs"**, the due-poll is internal and privileged.
 
@@ -198,9 +198,9 @@ GET /v1/jobs/{job_id}/runs?limit=20        → 200 { runs: [...] }
 
 </details>
 
-- **The unique constraint on `(job_id, fire_time)` *is* the idempotency guard**, `INSERT … ON CONFLICT DO NOTHING` makes a retry (same `fire_time`) a no-op while the next recurrence (different `fire_time`) is a distinct row. *The scheduled instant must be in the key:* `job_id` alone suppresses the legitimate next recurrence; a fresh per-attempt id double-runs on retry, 3.15's central point, enforced as schema.
-- **Hot index: B-tree on `(shard_id, fire_time)`**, the only index that matters. *Rejected:* secondary indexes on `status`/`tenant` on the hot table, each taxes every status write (2.3) at 10K writes/s; filter inline in the scan.
-- **Partition key = `hash(job_id)`, never `fire_time`.** Hashing spreads timers evenly so each shard owner scans only its slice; adding shards remaps ~1/P of jobs (2.6). *Rejected, sharding by `fire_time`/hour:* every due job lives in the single *current* partition, a monstrous hot shard while future partitions idle. The textbook time-as-partition-key anti-pattern.
+- **The unique constraint on `(job_id, fire_time)` *is* the idempotency guard**, `INSERT … ON CONFLICT DO NOTHING` makes a retry (same `fire_time`) a no-op while the next recurrence (different `fire_time`) is a distinct row. *The scheduled instant must be in the key:* `job_id` alone suppresses the legitimate next recurrence; a fresh per-attempt id double-runs on retry, the central point, enforced as schema.
+- **Hot index: B-tree on `(shard_id, fire_time)`**, the only index that matters. *Rejected:* secondary indexes on `status`/`tenant` on the hot table, each taxes every status write at 10K writes/s; filter inline in the scan.
+- **Partition key = `hash(job_id)`, never `fire_time`.** Hashing spreads timers evenly so each shard owner scans only its slice; adding shards remaps ~1/P of jobs. *Rejected, sharding by `fire_time`/hour:* every due job lives in the single *current* partition, a monstrous hot shard while future partitions idle. The textbook time-as-partition-key anti-pattern.
 
 ---
 
@@ -229,7 +229,7 @@ A dead shard owner means no fires for up to the **lease TTL** (~10 s); a paused-
 
 **Bottleneck 4, duplicate execution (at-least-once on *both* sides).**
 Firing duplicates (catch-up, zombie) and execution duplicates (worker crashes after finishing, before ack → redelivery) are **two independent sources**.
-*Fix:* **idempotency on `(job_id, fire_time)`**, the unique constraint, collapses duplicates from either source to **exactly-once-effect** while the next recurrence stays distinct. **Trade:** one conditional insert per execution, cheap insurance, and the only thing that survives at-least-once on both sides. **Rejected:** chasing true exactly-once delivery, it doesn't exist across failures (3.15/3.8); pretending it does is the most common altitude miss here.
+*Fix:* **idempotency on `(job_id, fire_time)`**, the unique constraint, collapses duplicates from either source to **exactly-once-effect** while the next recurrence stays distinct. **Trade:** one conditional insert per execution, cheap insurance, and the only thing that survives at-least-once on both sides. **Rejected:** chasing true exactly-once delivery, it doesn't exist across failures; pretending it does is the most common altitude miss here.
 
 **Bottleneck 5, write amplification on status churn.**
 Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at the 10K/s peak on a B-tree. *Fix:* keep the hot table lean (no secondary indexes), and **separate the status firehose from the hot table**, history goes to the LSM/TTL store, completed rows are purged promptly. **Rejected:** one fat table holding live instances, full history, and rich indexes, the design grinds at 10K/s.
@@ -302,7 +302,7 @@ Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at
 > *Model:* Election only stops two schedulers firing *simultaneously*. Two gaps remain: a **failover window** ≈ the lease TTL where no one fires (jobs late or missed), and a **zombie leader** that resumes after a pause and double-fires unless every enqueue is **fenced with a monotonic epoch** the store rejects when stale. Execution is *also* at-least-once (crash-before-ack → redelivery). The correct claim is **exactly-once-effect**: idempotency on `(job_id, fire_time)` via a unique constraint, so duplicates from either source collapse while the next recurrence still runs, plus epoch fencing and a chosen catch-up policy. Not "the leader makes it exactly-once."
 
 **Q3. Why shard by `hash(job_id)` and not by `fire_time`?**
-> *Model:* The due-poll always asks for `fire_time ≤ now`. Partitioned by time, **every due job at any instant lives in the single current partition**, a screaming hot shard taking all scan, lock, and write load while future partitions idle. Hashing `job_id` spreads 100M timers evenly across P shards, each owner scans only its ~100M/P slice with no cross-shard contention, throughput scales ≈linearly, and adding a shard remaps only ~1/P of jobs (2.6). The `fire_time` index still time-orders *within* each shard, time just isn't the partition key. The cost I name is rebalancing on churn, far cheaper than a permanent hot shard.
+> *Model:* The due-poll always asks for `fire_time ≤ now`. Partitioned by time, **every due job at any instant lives in the single current partition**, a screaming hot shard taking all scan, lock, and write load while future partitions idle. Hashing `job_id` spreads 100M timers evenly across P shards, each owner scans only its ~100M/P slice with no cross-shard contention, throughput scales ≈linearly, and adding a shard remaps only ~1/P of jobs. The `fire_time` index still time-orders *within* each shard, time just isn't the partition key. The cost I name is rebalancing on churn, far cheaper than a permanent hot shard.
 
 **Q4. When would you choose at-most-once (skip) over at-least-once (catch-up)?**
 > *Model:* **Catch-up** when the run must happen and a late run still has value, billing, reports, pipelines: if the failover gap missed the nightly billing fire, the recovered owner fires it late, and idempotency on `(account_id, billing_date)` makes duplicates a no-op. **Skip** when a stale run is worse than none, "emit the current price every minute": a 5-minute-old price emitted after recovery is misleading, so skip the missed fires and resume from now. The decision is purely requirements, does a delayed run carry value, or is freshness the point? That's why `fire_policy` is a per-job field, not a global mode.

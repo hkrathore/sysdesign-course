@@ -9,56 +9,56 @@ sidebar:
 
 ---
 
-## 2.1 Front door & request path
+## Front door & request path
 
 - **Forward proxy** acts for the **client** (egress control, filtering); **reverse proxy** acts for the **servers** (LB, TLS termination, caching, WAF, hides backend).
 - **L4 LB** = fast, connection-level, no payload inspection. **L7** = content routing, sticky, canary; costs CPU. Often L4→L7 in series.
 - **Lifecycle:** DNS → TCP (~1 RTT) → TLS (~1 RTT) → HTTP. Cross-region RTT ≈ **150 ms** → terminate handshakes near the user.
 - **DNS = cached, eventually consistent.** Low TTL = fast failover + more queries; high TTL = slow drain. DNS failover is best-effort, never a hard RTO, pair with anycast / global L7 LB.
 
-## 2.2 SQL vs NoSQL
+## SQL vs NoSQL
 
 - Decide on **4 axes**: data model · schema on-write vs on-read · ACID vs BASE · scale up vs out. Never "old vs new."
 - KV → cache/sessions/pure lookups (Redis, DynamoDB) · Document → evolving aggregates (MongoDB) · Wide-column → write-heavy/time-series at scale (Cassandra) · Graph → relationship traversal (Neo4j).
 - **Default: Postgres** (replicas, partitioning, `JSONB`) until a **measured** limit forces out-scaling. NewSQL (Spanner, CockroachDB) dissolves "scale vs ACID." Real systems are polyglot. "Schemaless" just moves the schema into app code.
 
-## 2.3 Indexing: B-tree vs LSM
+## Indexing: B-tree vs LSM
 
 - An index turns O(n) → O(log n). Cost: **speeds reads, taxes writes, uses space**, that trade is the whole subject.
 - **B-tree** read-heavy, transactional, ranges (Postgres, InnoDB); **LSM** write-heavy throughput (Cassandra, RocksDB), read-amp plus compaction's operational tax is the cost.
 - Distributed secondary indexes tax every write and stay limited → **denormalize into a query-shaped table**.
 
-## 2.4 Replication: same data, many copies
+## Replication: same data, many copies
 
-- Buys availability, read scale, latency, durability. **Does nothing for write throughput**, that's partitioning (2.5). Do both.
+- Buys availability, read scale, latency, durability. **Does nothing for write throughput**, that's partitioning. Do both.
 - **Leader-follower:** strong at leader, followers lag, single-region default. **Multi-leader:** multi-region writes, must resolve conflicts. **Leaderless:** tunable N/W/R, highest availability.
 - **Sync** = durable but latency-bound and a dead follower stalls writes; **async** = fast but stale reads + lost-write window; semi-sync compromises.
 - Lag fixes: read-your-writes (route own reads to leader) · monotonic reads (pin session to one replica).
 - Failover hazards: **split-brain** (fence with epochs/leases/quorum) · lost unreplicated writes · detection tuning (tight = false failovers, loose = long outage).
 - Conflicts, weak→strong: **LWW (silently drops data)** → version vectors → CRDTs → app-merge. Never bare LWW without the caveat.
 
-## 2.5 Partitioning / sharding
+## Partitioning / sharding
 
 - Partition when data volume or **write throughput** outgrows one node. Partition first, then replicate each shard ~3×.
 - **Range:** cheap local range scans; hot-spots on time/sequential keys ("hot shard of the day"). **Hash:** even key spread; range scans become scatter-gather. **Directory:** surgical placement; extra hop + directory SPOF.
 - **Hashing spreads keys, not one hot key** (celebrity, Black-Friday SKU). Mitigate: salt/split the key (`id#0..#9`), dedicated shard, cache it, fan-out-on-read.
 - **Partition key = high cardinality + uniform access + aligned to the dominant query.** Composite keys (`user_id + timestamp`) reconcile spread vs recency. Pick it in the R step; **name the query you made expensive**.
 
-## 2.6 Consistent hashing
+## Consistent hashing
 
 - **`hash mod N` is the trap:** 4→5 nodes moves ~80% of keys; 10→11 ~91%; 100→101 ~99%. Ideal is ~1/N. For a cache = miss storm; for a DB = re-ship the dataset.
 - **Ring:** keys and nodes in one fixed hash space; clockwise to the next node. Add/remove moves only ~**K/N** keys, to/from one successor.
 - Plain ring is lumpy (peak/mean ≈ 1.73× at 10 nodes) and a dead node dumps its load on one neighbor → **virtual nodes** (~100 vnodes → ~1.13×, failure load scattered, capacity weighting). More vnodes = gossip/streaming/repair tax, Cassandra cut the default 256 → 16.
 - **Balances keyspace, not traffic**, a hot key still melts one node. Rendezvous (HRW) = same minimal movement, O(N) lookup → small N only.
 
-## 2.7 CAP & PACELC
+## CAP & PACELC
 
 - **CAP, precisely:** under a partition you forfeit **C or A**, not "any two of three." A "CA" distributed system is a category error; the live menu is CP or AP.
 - **PACELC:** if **P**artition → A or C; **E**lse → **L**atency or **C**onsistency. The Else is 99.9% of life: strong consistency = coordination round trips (~150 ms cross-region).
 - **PA/EL:** Cassandra, DynamoDB defaults. **PC/EC:** Spanner, single-leader RDBMS. **PA/EC:** MongoDB w:majority.
-- **Decide per operation, not per company:** money / inventory / charge-once → CP/EC; cart / feed / likes / presence → AP/EL. The quorum dial (2.8) slides one store between quadrants.
+- **Decide per operation, not per company:** money / inventory / charge-once → CP/EC; cart / feed / likes / presence → AP/EL. The quorum dial slides one store between quadrants.
 
-## 2.8 Consistency models & quorums
+## Consistency models & quorums
 
 - Spectrum strong→weak: **linearizable** → sequential → **causal** (the ceiling for AP) → eventual (converges only if writes stop).
 - **Linearizable ≠ serializable**, single-object recency vs multi-object transaction order; strict serializability = both.
@@ -78,7 +78,7 @@ sidebar:
 - **Sloppy quorum + hinted handoff** buys write availability by breaking W+R>N until hints deliver, fine for carts, wrong for balances.
 - **Quorum gives recency, not atomic read-modify-write:** two decrements can both read `1` and write `0`. Prevent with a **conditional write / CAS / LWT**, not a bigger quorum.
 
-## 2.9 Bloom filters · latency vs throughput · batch vs stream
+## Bloom filters · latency vs throughput · batch vs stream
 
 **Bloom filter:** any 0 bit → **definitely absent** (safe skip); all 1 → probably present. No false negatives; a false positive = wasted lookup, never wrong. **~9.6 bits/element ≈ 1% FP at k=7**; each 10× lower FP ≈ +4.8 bits/elem; 1M keys @1% ≈ **1.2 MB** (~30× under an exact set). Plain filters can't delete or enumerate (Counting/Cuckoo if you must).
 
@@ -86,7 +86,7 @@ sidebar:
 
 **Batch vs stream:** decide from the **freshness NFR**, never "real-time is better." Hour-old fine → batch (Spark, cheapest, exactly-once trivial) · seconds → micro-batch · act in ms-s (fraud, alerting) → streaming (Flink, pays the windowing/state/exactly-once tax). Lambda = batch + speed layers (dual codebases, drift); Kappa = replay the log (one codebase, expensive replays).
 
-## 2.10 APIs, sync vs async, state, caching
+## APIs, sync vs async, state, caching
 
 - **REST**, public, CRUD, free HTTP/CDN caching, max reach. **gRPC**, internal east-west: Protobuf 3-10× smaller, native streaming; not browser-native. **GraphQL**, many heterogeneous clients, kills over-fetch; forfeits HTTP caching, adds N+1 resolvers + query-complexity risk. Name what each forfeits.
 - **Sync vs async = a coupling decision, not speed.** A 5-deep sync chain @99.9% each ≈ **99.5%** and latencies sum. Async (Kafka/SQS) absorbs bursts and isolates failure; costs eventual consistency, a broker, idempotent consumers.

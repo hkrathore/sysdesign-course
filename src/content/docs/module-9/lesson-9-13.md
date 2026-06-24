@@ -29,7 +29,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 
 ---
 
-> **RESHADED adaptation (stated out loud).** This is a building-block, not a product, so the spine bends: **A (API design)** and **E (Evaluation)** carry the weight. The "API" isn't REST endpoints, it's the **producer/consumer contract**: the `acks` durability knob, the partition-key ordering contract, consumer-group semantics, the delivery-guarantee choice. Evaluation is where the design earns its keep: **what breaks when a broker dies or the ISR shrinks.** Storage (S) and Data model (D) compose **Lesson 3.8 (Distributed Messaging Queue)** and **Lesson 3.9 (Publish-Subscribe)**, reference, not re-teach. R and estimation stay short; the log is cheap to size.
+> **RESHADED adaptation (stated out loud).** This is a building-block, not a product, so the spine bends: **A (API design)** and **E (Evaluation)** carry the weight. The "API" isn't REST endpoints, it's the **producer/consumer contract**: the `acks` durability knob, the partition-key ordering contract, consumer-group semantics, the delivery-guarantee choice. Evaluation is where the design earns its keep: **what breaks when a broker dies or the ISR shrinks.** Storage (S) and Data model (D) compose the **distributed-messaging-queue** and **publish-subscribe** building blocks, reference, not re-teach. R and estimation stay short; the log is cheap to size.
 
 ---
 
@@ -38,7 +38,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 > Define the building block crisply and cut to the contract that matters: durable, ordered-where-it-counts, replayable, multi-consumer.
 
 **Clarifying questions I'd ask (with assumed answers):**
-- *Point-to-point queue or pub-sub?* → **Both, via one mechanism**, the log with consumer groups (the 3.8 vs 3.9 distinction; Kafka unifies them).
+- *Point-to-point queue or pub-sub?* → **Both, via one mechanism**, the log with consumer groups (the queue vs pub-sub distinction; Kafka unifies them).
 - *Durability bar, can we ever drop a message?* → **No silent loss for the durable tier.** Acknowledged writes survive a single-broker failure, the headline NFR.
 - *Ordering, global, or per-key?* → **Per-key (per-partition) ordering is the contract.** Global ordering is out of scope (it means one partition = no parallelism).
 - *Delivery semantics?* → **At-least-once by default; exactly-once available** for the paths that pay for it.
@@ -91,7 +91,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 
 **The log itself (the only storage that matters).**
 - *Access pattern:* **append to the tail, scan sequentially from an offset.** Never update in place, never random-read by key, the rare workload where a plain file beats a database.
-- *Choice:* an **append-only log on local disk per partition**, split into segment files, replicated to followers, the queue/log substrate from **Lesson 3.8**. Sequential writes hit raw disk bandwidth; recent reads hit the **page cache**, not disk.
+- *Choice:* an **append-only log on local disk per partition**, split into segment files, replicated to followers, the queue/log substrate. Sequential writes hit raw disk bandwidth; recent reads hit the **page cache**, not disk.
 - *Rejected, a B-tree / RDBMS as the message store:* it optimizes for random point-reads and in-place updates, paying for an index we never query and write-amplification we don't want. Messages are immutable and read in order; the offset *is* the index. Slower, costlier, solving a problem we don't have.
 - *Rejected, an in-memory queue (RabbitMQ-style):* loses replay and risks data loss on restart. The whole value proposition is durable replay; RAM-only forfeits it.
 
@@ -220,7 +220,7 @@ The leader for partition 7 crashes mid-stream.
 
 **Bottleneck / failure 2, the ISR shrinks (the subtle one).**
 A follower falls behind (slow disk, GC pause, network) and drops out of the ISR, now 2 replicas, then 1.
-*Behavior:* with `min.insync.replicas=2`, if the ISR shrinks **below 2**, the leader **refuses new `acks=all` writes** rather than acknowledge a write it can't durably replicate. **The durability contract holds the line: unavailability over silent data loss.** *Trade-off, plainly:* `acks=all` + `min.insync.replicas=2` means a topic can become **write-unavailable** during a replica failure, a deliberate **CP-leaning** posture for the durable tier (Lesson 2.7). Lowering the floor to 1 buys availability at the cost of a data-loss window. Naming this knob and its consequence is the strongest signal in this problem.
+*Behavior:* with `min.insync.replicas=2`, if the ISR shrinks **below 2**, the leader **refuses new `acks=all` writes** rather than acknowledge a write it can't durably replicate. **The durability contract holds the line: unavailability over silent data loss.** *Trade-off, plainly:* `acks=all` + `min.insync.replicas=2` means a topic can become **write-unavailable** during a replica failure, a deliberate **CP-leaning** posture for the durable tier. Lowering the floor to 1 buys availability at the cost of a data-loss window. Naming this knob and its consequence is the strongest signal in this problem.
 
 <details>
 <summary>Go deeper, the acks / ISR / min.insync.replicas interaction (IC depth, optional)</summary>
@@ -231,7 +231,7 @@ The three settings form one contract; you can't reason about them separately:
 - **`acks=all`:** the producer waits for all *in-sync* replicas (not all RF copies, just the ones currently caught up) to write before the leader acknowledges.
 - **`min.insync.replicas=2`:** the floor. If fewer than 2 replicas are in-sync, `acks=all` writes are rejected.
 
-The interaction: RF=3 with `min.insync.replicas=2` tolerates **one** replica failure and still accepts writes (ISR=2 ≥ floor). A second failure (ISR=1) makes the topic write-unavailable, on purpose, because a single copy isn't durable enough to honor the no-loss promise. This is exactly the quorum logic from Lessons 2.7-2.8: you're choosing W and N such that an acknowledged write survives the failures you've decided to tolerate.
+The interaction: RF=3 with `min.insync.replicas=2` tolerates **one** replica failure and still accepts writes (ISR=2 ≥ floor). A second failure (ISR=1) makes the topic write-unavailable, on purpose, because a single copy isn't durable enough to honor the no-loss promise. This is exactly the standard quorum logic: you're choosing W and N such that an acknowledged write survives the failures you've decided to tolerate.
 
 The common misconfiguration: RF=3 but `min.insync.replicas=1`. Now `acks=all` is a lie, it acknowledges with one copy when two replicas are down, and a leader crash at that instant loses acknowledged data. Match the floor to the durability you actually promised.
 
@@ -322,8 +322,8 @@ A skewed key concentrates load on one partition's leader.
 - **Partition count is the throughput, parallelism, *and* rebalance-cost knob**, a sized per-topic decision. Consumer groups cap parallelism at the partition count; rebalances pause the group.
 - **Delivery is at-least-once + downstream idempotency by default**; exactly-once is real only *within* the Kafka boundary. **Delegate the log-segment / page-cache / zero-copy internals** with a stated prior, keep the contracts and failure-mode reasoning.
 
-> **Spaced-repetition recap:** Kafka = **partitioned, replicated, append-only log**, sized by sequential bandwidth (~1 GB/s → ~10 brokers, ~2 PB at 7-day retention). **Ordering is per-partition only**, the key sets the partition and the ordering scope, at the cost of parallelism. **Durability = `acks` + ISR + `min.insync.replicas`**: `acks=all` chooses write-unavailability over silent loss when the ISR shrinks; tune per topic. **At-least-once + downstream idempotency** by default; exactly-once only within the Kafka boundary. Broker death → sub-second ISR leader election, no acknowledged loss. **Delegate segments/page-cache/zero-copy; keep the contracts.** Composes 3.8 and 3.9.
+> **Spaced-repetition recap:** Kafka = **partitioned, replicated, append-only log**, sized by sequential bandwidth (~1 GB/s → ~10 brokers, ~2 PB at 7-day retention). **Ordering is per-partition only**, the key sets the partition and the ordering scope, at the cost of parallelism. **Durability = `acks` + ISR + `min.insync.replicas`**: `acks=all` chooses write-unavailability over silent loss when the ISR shrinks; tune per topic. **At-least-once + downstream idempotency** by default; exactly-once only within the Kafka boundary. Broker death → sub-second ISR leader election, no acknowledged loss. **Delegate segments/page-cache/zero-copy; keep the contracts.** Composes the messaging-queue and pub-sub building blocks.
 
 ---
 
-*End of Lesson 9.13. Design-Kafka is the senior-loop building-block question: you design what you usually pick off the shelf, and the test is whether your mental model is real. The whole design is one structure, an append-only log, partitioned for throughput, replicated for durability, with the hard parts surfaced as **caller-chosen contracts**: `acks` for durability, the partition key for ordering scope, offset-commit timing for delivery semantics. The diagnostic probe is **ordering-is-per-partition-only**; the strongest signal is naming how the ISR + `min.insync.replicas` contract chooses unavailability over silent loss. Composes 3.8 and 3.9; delegates the storage-engine internals with a prior. Next: 9.14.*
+*End of Lesson 9.13. Design-Kafka is the senior-loop building-block question: you design what you usually pick off the shelf, and the test is whether your mental model is real. The whole design is one structure, an append-only log, partitioned for throughput, replicated for durability, with the hard parts surfaced as **caller-chosen contracts**: `acks` for durability, the partition key for ordering scope, offset-commit timing for delivery semantics. The diagnostic probe is **ordering-is-per-partition-only**; the strongest signal is naming how the ISR + `min.insync.replicas` contract chooses unavailability over silent loss. Composes the messaging-queue and pub-sub building blocks; delegates the storage-engine internals with a prior.*

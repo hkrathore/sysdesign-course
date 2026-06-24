@@ -8,7 +8,7 @@ sidebar:
 > Every Director loop runs a hard-people-calls round, and it's the single most-probed behavioral cluster, Amazon bar-raisers drill it three and four levels deep precisely because it's the easiest place to catch a rehearsed or AI-drafted story. What they're scoring is **decisiveness with dignity**: did you diagnose before you acted, give early dated feedback, run a real process, make the call on a deadline, and own the team cost of waiting too long. At Director altitude the variants escalate, the low performer is a *manager*, the calibration spans teams you don't personally observe, and a candidate who has *never* terminated anyone reads as conflict-avoidant. This is the lesson where "I coach indefinitely, firing is a failure of leadership" stopped scoring around 2022, and where a cold "it was an easy call" scores *worse* than it used to. The round lives in the narrow band between those two failures.
 
 ### Learning objectives
-- Run the hard-people story on a **process spine**, diagnose skill vs will vs *system*, early dated feedback, a time-boxed plan, a decision with a deadline, the cost of inaction, the "one quarter earlier" learning, delivered as STAR-L (Lesson 10.2).
+- Run the hard-people story on a **process spine**, diagnose skill vs will vs *system*, early dated feedback, a time-boxed plan, a decision with a deadline, the cost of inaction, the "one quarter earlier" learning, delivered as STAR-L.
 - Build the story **probe-resistant**: hold the numbers, the alternatives, the timeline, and the stakeholders three levels below the headline, because this is the cluster interviewers drill hardest.
 - Answer the **PIP-philosophy** variant with candor about its **dual function**, a genuine improvement vehicle *and* legal documentation the employee reads as a termination notice, landing between naive ("PIPs usually work") and cynical ("PIPs are paperwork").
 - Hold the **brilliant-jerk line** under modern efficiency pressure: acknowledge the louder post-layoffs business case to keep them, and still make the call, with the cost math.
@@ -21,7 +21,7 @@ A good surgeon's hardest skill isn't cutting, it's calling the operation. Three 
 
 ## The questions
 
-These are all past-event questions (STAR-L, Lesson 10.2), with one philosophy-shaped exception, the PIP-view question, that switches instruments mid-cluster.
+These are all past-event questions (STAR-L), with one philosophy-shaped exception, the PIP-view question, that switches instruments mid-cluster.
 
 | Variant | What it's really testing |
 |---|---|
@@ -34,7 +34,7 @@ These are all past-event questions (STAR-L, Lesson 10.2), with one philosophy-sh
 | "How fast do you act on a clear miss? When did you wait too long?" | The 2026 decisiveness bar, weeks not quarters, plus owned self-criticism. |
 | Netflix: "Apply the keeper test. Would you re-hire everyone today?" | Whether you can hold a high bar without dressing it as cruelty. |
 
-The merge: every one of these except the PIP-view question is a **past-event** question, so they take **STAR-L** built on the process spine below. The PIP-view variant is **philosophy-shape**, answer it in Position → Mechanism → Number → Limit (Lesson 10.2), because there's no single story to tell, there's a stance to defend.
+The merge: every one of these except the PIP-view question is a **past-event** question, so they take **STAR-L** built on the process spine below. The PIP-view variant is **philosophy-shape**, answer it in Position → Mechanism → Number → Limit, because there's no single story to tell, there's a stance to defend.
 
 ---
 
@@ -49,7 +49,7 @@ The spine is a process, and the story *is* the process executed once. Six beats,
 - **Cost of inaction, named.** What the team paid for every extra week you waited, velocity, morale, an engineer who told you in a skip-level it was overdue. Owning this cost is the maturity marker.
 - **Learning, almost always "one quarter earlier."** Plus the upstream fix: tighter calibration, a hiring-rubric change, a "missed-commitment triggers the conversation in two weeks" rule. The story ends in a mechanism, not a feeling.
 
-Then survive the probe: hold the numbers, the rejected alternatives (did you consider a transfer? a role change?), the timeline, and the HR/stakeholder partnership three levels down (Lesson 10.2). Never announce the spine aloud.
+Then survive the probe: hold the numbers, the rejected alternatives (did you consider a transfer? a role change?), the timeline, and the HR/stakeholder partnership three levels down. Never announce the spine aloud.
 
 ```mermaid
 flowchart TD
@@ -88,7 +88,7 @@ This cluster got re-scored hard in both directions at once, more decisive *and* 
 
 **Why it scores:**
 - **The diagnosis comes first and rules out the system before the person**, system, then skill-vs-will, which is the single fastest way to signal you're a leader who looks in the mirror, not a complainer.
-- **Every beat carries a date or a number** (March 4th, 30/60 days, week three, one of four, recovered within a sprint), probe-resistant three levels down, and the house rule from Lesson 10.1 honored in a behavioral answer.
+- **Every beat carries a date or a number** (March 4th, 30/60 days, week three, one of four, recovered within a sprint), probe-resistant three levels down, and the house rule honored in a behavioral answer.
 - **It's decisive *and* humane**, twelve weeks to the call, but delivered personally, eight minutes, severance above policy, intro calls, landing the 2026 synthesis instead of either ditch.
 - **"He wasn't surprised" is the load-bearing line**, it proves the no-surprises process worked, and senior interviewers listen for exactly that.
 - **The Learning is "one quarter earlier" plus an upstream mechanism** (the two-week trigger), not a feeling, the cost of inaction owned without self-flagellation, which is where the L is scored at L7+.
@@ -131,12 +131,12 @@ This cluster got re-scored hard in both directions at once, more decisive *and* 
 1. **Run the firing story on the spine, with dates.** "Walk me through someone you let go." *(Sketch: STAR-L on the process spine, diagnose system-then-skill-vs-will, the dated first conversation in writing, a time-boxed plan with named support, the decision delivered personally with severance and references, the named team cost, and "one quarter earlier" plus the two-week-trigger upstream fix. Hold every date and number for the probe.)*
 2. **Defend your PIP philosophy to a skeptic.** "Aren't PIPs just legal cover?" *(Sketch: philosophy-shape, Position: a PIP formalizes a conversation already happening; Mechanism: passable criteria, weekly check-ins, the candid negotiated-exit path offered alongside; Number: your real pass rate, some pass most don't; Limit: the documentation function is real and pretending otherwise to the employee is the dishonest move. Land between naive and cynical.)*
 3. **Hold the brilliant-jerk line under pressure.** "It's right after a layoff and he owns the billing core, you can't lose him." *(Sketch: name the louder business case, reframe with behavior-is-performance and the $12.5k-vs-$5.3k cost math, give the real time-boxed chance with observable criteria, accept the roadmap risk knowingly, and end with the principle for your managers, output buys immunity is the lesson you refuse to teach.)*
-4. **Keep a flight risk without a checkbook.** "Your best engineer has a 30% higher offer." *(Sketch: diagnose the real driver first, comp is rarely it; charter-not-checkbook retention (scope, a hard problem, an honest career path) or deliberate triage if the gap is genuinely about money you can't match; a counter-offer only as a conscious bridge with a tripwire, never a reflex, and accept that some you let the market take, Lesson 10.10.)*
+4. **Keep a flight risk without a checkbook.** "Your best engineer has a 30% higher offer." *(Sketch: diagnose the real driver first, comp is rarely it; charter-not-checkbook retention (scope, a hard problem, an honest career path) or deliberate triage if the gap is genuinely about money you can't match; a counter-offer only as a conscious bridge with a tripwire, never a reflex, and accept that some you let the market take.)*
 
 ---
 
 ### Key takeaways
-- **Run the process spine, every time:** diagnose system-then-skill-vs-will, early dated feedback in writing, a time-boxed plan with named support, a decision on a deadline delivered personally, the named team cost, and the "one quarter earlier" learning with an upstream fix. The story *is* the process executed once (Lesson 10.2 STAR-L).
+- **Run the process spine, every time:** diagnose system-then-skill-vs-will, early dated feedback in writing, a time-boxed plan with named support, a decision on a deadline delivered personally, the named team cost, and the "one quarter earlier" learning with an upstream fix. The story *is* the process executed once (STAR-L).
 - **Decisive *and* humane is the 2026 synthesis.** Weeks not quarters on a clear miss, but severance, references, an eight-minute dignified conversation, and "he wasn't surprised." Cold scores worse than it used to; so does flinching.
 - **PIP candor: hold the dual function.** A genuine improvement vehicle *and* documentation the employee reads as a notice. Naive "they usually work" and cynical "it's just paper" both fail; some pass, most don't, and offer the negotiated exit candidly.
 - **Brilliant jerk: behavior is performance.** Net-negative output once you count silent attrition (~$12.5k cost vs ~$5.3k value). Name the louder post-layoffs business case and hold the line anyway, tolerating toxicity teaches the team that output buys immunity.
@@ -146,4 +146,4 @@ This cluster got re-scored hard in both directions at once, more decisive *and* 
 
 ---
 
-*End of Lesson 10.6. Hard people calls is the decisiveness-with-dignity cluster; Lesson 10.7 lifts the same instincts up a level to managing managers and org design, where the underperformer is a manager you can't directly observe, and diagnosis runs on second-hand, delayed signal.*
+*End of Lesson 10.6. Hard people calls is the decisiveness-with-dignity cluster; the next lesson lifts the same instincts up a level to managing managers and org design, where the underperformer is a manager you can't directly observe, and diagnosis runs on second-hand, delayed signal.*

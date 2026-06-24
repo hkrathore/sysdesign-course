@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-> Video looks like a streaming problem and is actually a **batch-encoding-plus-static-file-delivery** problem. The mental flip that separates a Director answer from a junior one: **you do not stream video from a server.** You **pre-chop** each source, offline, into a *ladder* of small static segments, one rung per resolution, several per codec, and the client **adaptively pulls** them from a CDN like any other static file. The engine is a **transcoding pipeline** (one source → N resolutions × M codecs, run as parallel async jobs on chunks); the thing that forces the whole architecture is **bandwidth**, **~125 Tbps of egress**. Lessons 3.11 (blob store), 3.5 (CDN), 3.8/3.9 (queues/pub-sub), and 3.16 (sharded counters) built the parts. We build **YouTube** (upload-driven UGC, hot view counts) as the primary system, with **Netflix** (finite curated catalog, pre-positioned at the ISP edge) as the contrast in Design evolution.
+> Video looks like a streaming problem and is actually a **batch-encoding-plus-static-file-delivery** problem. The mental flip that separates a Director answer from a junior one: **you do not stream video from a server.** You **pre-chop** each source, offline, into a *ladder* of small static segments, one rung per resolution, several per codec, and the client **adaptively pulls** them from a CDN like any other static file. The engine is a **transcoding pipeline** (one source → N resolutions × M codecs, run as parallel async jobs on chunks); the thing that forces the whole architecture is **bandwidth**, **~125 Tbps of egress**. The blob-store building block (blob store), 3.5 (CDN), 3.8/3.9 (queues/pub-sub), and 3.16 (sharded counters) built the parts. We build **YouTube** (upload-driven UGC, hot view counts) as the primary system, with **Netflix** (finite curated catalog, pre-positioned at the ISP edge) as the contrast in Design evolution.
 
 ### Learning objectives
 - Run a full **RESHADED** pass on a video platform, deriving every structural decision from a stated requirement and its rejected alternative.
@@ -35,7 +35,7 @@ RESHADED starts by scoping *before* building, the signal is **cutting** to a def
 - **Live streaming**, real-time/low-latency transcode, LL-HLS, no offline ladder; I'd reuse the byte plane and CDN but rebuild the encode path. A Design-evolution extension, not v1.
 - **DRM** (Widevine/FairPlay/PlayReady), non-negotiable for *Netflix* (studios won't license without it), a bolt-on for UGC. Named as a **delegated workstream** (player-security team owns key exchange; my pipeline produces encrypted segments) so the omission reads as scope control.
 - **The recommendation model itself**, I build the serving system and log the signals; the ranking model is a **delegated deep-dive**.
-- **Comments, channels/monetization, Shorts**, known patterns (5.3) or separate systems; cut for time.
+- **Comments, channels/monetization, Shorts**, known patterns or separate systems; cut for time.
 
 **Clarifying questions (and assumptions if waved on):**
 - *Scale?* **~2B monthly users, ~500 hours uploaded/min, ~1B watch-hours/day.**
@@ -47,8 +47,8 @@ RESHADED starts by scoping *before* building, the signal is **cutting** to a def
 - **Read-heavy, extreme:** watch dominates upload **~1,400:1** (derived next), a byte-delivery machine with a tiny upload pipeline and a huge encode pipeline behind it.
 - **Bandwidth is the dominant constraint:** **~125 Tbps average egress** (peak ~2.5×), the single biggest budget line a Director owns.
 - **Playback quality:** TTFF p99 ≲ 2 s, rebuffer < 0.5%, delivered by ABR + CDN proximity, not a faster origin.
-- **Durability:** losing a creator's upload is unforgivable; **11 nines** on the object store (3.11). The *source* is the irreplaceable master.
-- **Availability over strict consistency** on the watch path (AP lean, 2.7); the *upload commit* and *billing-grade count* want stronger guarantees.
+- **Durability:** losing a creator's upload is unforgivable; **11 nines** on the object store. The *source* is the irreplaceable master.
+- **Availability over strict consistency** on the watch path (AP lean); the *upload commit* and *billing-grade count* want stronger guarantees.
 
 > The requirement that secretly licenses the whole architecture is **"VOD, and a new upload need not be instantly watchable."** It is what makes offline, asynchronous, chunked transcode legal. Juniors skip it and then can't justify why the expensive encode is allowed to be slow.
 
@@ -64,7 +64,7 @@ Enough math to make a defensible call. Three anchors, everything derived from th
 
 **Egress bandwidth (the number that dominates everything):**
 - Blended ABR bitrate ≈ **3 Mbps** (stated assumption). 42M × 3 Mbps = **~125 Tbps average**, peak ~2.5× ≈ **~310 Tbps**; per day, **~1.35 EB of video egress**. **This is the system.** Serving it from origin is latency-fatal and budget-fatal, the CDN/edge *is* the read architecture.
-- **CDN offload:** at a **95% edge hit ratio** (3.5), origin sees ~5% = **~70 PB/day**; the edge absorbs ~1,280 PB/day. Every point of hit ratio is a multi-million-dollar line item.
+- **CDN offload:** at a **95% edge hit ratio**, origin sees ~5% = **~70 PB/day**; the edge absorbs ~1,280 PB/day. Every point of hit ratio is a multi-million-dollar line item.
 
 **Media storage:** 720k hrs/day × ~7 GB/source-hour = **~5 PB/day → ~1.8 EB/year**, growing forever (UGC is kept ~indefinitely). **Erasure coding (~1.4×) over 3× replication** saves on the order of **~3 EB/year of raw disk**, a budget number, justified in S.
 
@@ -82,14 +82,14 @@ Five distinct data shapes, each with a different access pattern, naming them sep
 
 | Data | Shape & access pattern | Store **type** | Real system | Rejected alternative (and why) |
 |---|---|---|---|---|
-| **Video segments + manifests** | Enormous, immutable, write-once read-many-billions | **Object store + CDN/edge** | **S3 / GCS** behind **CloudFront** / private CDN (Netflix: **Open Connect** in ISPs) | DB BLOBs / NFS, melts at EB scale, can't reach 11 nines economically, can't sit at the edge (3.11). |
+| **Video segments + manifests** | Enormous, immutable, write-once read-many-billions | **Object store + CDN/edge** | **S3 / GCS** behind **CloudFront** / private CDN (Netflix: **Open Connect** in ISPs) | DB BLOBs / NFS, melts at EB scale, can't reach 11 nines economically, can't sit at the edge. |
 | **Source / mezzanine masters** | Huge, immutable, *cold*, irreplaceable | **Object store, archive tier** | **S3 Glacier-class** | Hot storage for sources, read maybe once after upload; pure waste. |
 | **Video & channel metadata** | Small (~2 KB) rows, keyed point reads, very high read rate | **Wide-column / partitioned KV** | **Cassandra** / Bigtable / DynamoDB | A single Postgres, holds 6 TB fine, but can't absorb the read rate or partition across regions without sharding work the store should own. |
-| **View counts (+ likes)** | Hot write keys, display-tolerant lag, exact for payouts | **Sharded counters + exact recompute from a log** | **Redis** shards + **Kafka** → batch recompute | A single `UPDATE count+1` row, hot-key wall on a viral video (3.16), no fraud/dedup hook. |
+| **View counts (+ likes)** | Hot write keys, display-tolerant lag, exact for payouts | **Sharded counters + exact recompute from a log** | **Redis** shards + **Kafka** → batch recompute | A single `UPDATE count+1` row, hot-key wall on a viral video, no fraud/dedup hook. |
 | **Watch events / signals** | Append-only firehose, analytics + recommendations | **Log → columnar warehouse** | **Kafka** → BigQuery / S3+Spark | Writing events into the OLTP store, pollutes serving with analytics load. |
 
 Two sub-decisions worth defending:
-- **Erasure coding vs 3× replication** (3.11): ~11 nines at **~1.4× overhead instead of 3×**, **~3 EB/year of raw disk saved**, accepting slower reconstruction on the rare degraded read. *Rejected:* 3× everywhere; at EB scale the 200% overhead is a budget I won't sign.
+- **Erasure coding vs 3× replication**: ~11 nines at **~1.4× overhead instead of 3×**, **~3 EB/year of raw disk saved**, accepting slower reconstruction on the rare degraded read. *Rejected:* 3× everywhere; at EB scale the 200% overhead is a budget I won't sign.
 - **Keep the source as a cold mezzanine.** *Rejected:* discarding it after encode, adding a new codec or rung later would mean re-encoding from a lossy rendition, or not at all. Cold storage is cheap; keep the master.
 
 ---
@@ -182,9 +182,9 @@ Three decisions worth defending. **Resumable multipart, not a single presigned P
 ## D: Data model
 
 **Partition keys, not column inventories, are the load-bearing detail:**
-- `videos`, **PK `video_id`** for point reads, with a second query-shaped table **`videos_by_chan` (PK `channel_id`, clustered by `created_at DESC`)**, the denormalize-by-query Cassandra idiom (2.3), not secondary indexes. Manifest/rendition fields are **object-store paths; the bytes are never in the DB.**
+- `videos`, **PK `video_id`** for point reads, with a second query-shaped table **`videos_by_chan` (PK `channel_id`, clustered by `created_at DESC`)**, the denormalize-by-query Cassandra idiom, not secondary indexes. Manifest/rendition fields are **object-store paths; the bytes are never in the DB.**
 - `transcode_jobs`, **PK `video_id`**, clustered **(rung, codec, chunk_idx)**: all of one video's job state in one bounded partition, and idempotency per `(video_id, rung, codec, chunk_idx)`, a re-run overwrites the same output key.
-- **View counts**, *not* a column you `UPDATE`: **N sharded sub-counters per `video_id`** in Redis, summed on read, with **dedup per `session_id` applied before the increment**, plus the authoritative count recomputed from the event log (3.16).
+- **View counts**, *not* a column you `UPDATE`: **N sharded sub-counters per `video_id`** in Redis, summed on read, with **dedup per `session_id` applied before the increment**, plus the authoritative count recomputed from the event log.
 - `watch_events`, Kafka, **keyed by `video_id`** (a hot video streams through a bounded set of partitions; videos parallelize), and the log is what lets the exact count be recomputed independently of the display counter.
 
 <details>
@@ -236,7 +236,7 @@ Stress your own design: re-check the NFRs, hunt the bottlenecks, fix each **nami
 </details>
 
 **Bottleneck 4, Hot view-count key + fraud.** A viral video takes views faster than one Redis key or row can serialize, *and* naive counting is trivially gamed, counts drive payouts.
-> **Fix, dedup + sharded display counter + exact log reconciliation** (3.16): dedup per `session_id` and fraud-filter *before* counting; display = N sub-counters summed on read; the **payout-grade count is recomputed exactly, offline, from the Kafka event log**, bot-filtered. **Trade:** the display number is approximate and lagging (allowed by R) while the money number is exact but delayed, two numbers on purpose. *Rejected:* one atomic counter, a hot-key wall *and* no place for fraud logic.
+> **Fix, dedup + sharded display counter + exact log reconciliation**: dedup per `session_id` and fraud-filter *before* counting; display = N sub-counters summed on read; the **payout-grade count is recomputed exactly, offline, from the Kafka event log**, bot-filtered. **Trade:** the display number is approximate and lagging (allowed by R) while the money number is exact but delayed, two numbers on purpose. *Rejected:* one atomic counter, a hot-key wall *and* no place for fraud logic.
 
 **Bottleneck 5, Tail latency: TTFF and rebuffering.** A cold segment or an over-ambitious first rung spikes startup and stalls.
 > **Fix:** **start low, climb fast**, short initial segments, edge proximity, healthy buffer-ahead. **Trade:** a slightly-lower-quality first few seconds for a stall-free start, the ABR bargain. The player heuristic itself I **delegate** to the client/media team (prior: buffer-based + throughput-estimate hybrid).
@@ -252,7 +252,7 @@ Stress your own design: re-check the NFRs, hunt the bottlenecks, fix each **nami
 **At 10× (~1.25 Pbps egress, ~10B watch-hours/day):**
 - **Egress is the wall, and it's physical/commercial, not just software.** The lever becomes **owning the edge**: ISP-embedded appliances (Open Connect model) so bytes never traverse paid transit, hit ratio pushed toward 99% with predictive pre-positioning, and harder AV1 adoption (every point is terabits). Nine-figure budget lines a Director defends to finance; I'd **delegate edge placement/peering to the network team** with the prior "embed at the ISP for the top-N regional titles; CDN for the tail."
 - **Transcode scales out cheaply** (embarrassingly parallel); the lever is **encode efficiency**, per-title encoding and prioritizing codec backfill toward the most-watched content.
-- **Storage lifecycle-tiers aggressively**, most UGC is hot for days then near-never watched; at ~2 EB/year the tiering policy is itself a multi-million-dollar/year line (3.11).
+- **Storage lifecycle-tiers aggressively**, most UGC is hot for days then near-never watched; at ~2 EB/year the tiering policy is itself a multi-million-dollar/year line.
 
 **The Netflix contrast (same byte plane, opposite encode/serve economics, the "new constraint" lens):**
 - **Finite, curated catalog, not a UGC firehose.** No 500-hours-a-minute ingest and **no hot view-count problem** (a fixed catalog; counts aren't the product). The upload pipeline shrinks to an **internal ingest** of studio masters.
@@ -313,7 +313,7 @@ They are not checking whether you can name HLS, they're checking that you grasp 
 > *Model:* Three levers, biggest first. (1) **Raise the edge hit ratio** toward 99, tiered caching, origin shielding, pre-positioning anticipated-hot content (ISP-embedded appliances so bytes skip transit); every point at ~125 Tbps is huge. (2) **Drive AV1 adoption** where clients support it, ~30% fewer bytes ≈ **~37 Tbps**, prioritizing backfill toward the most-watched content so savings land where the egress is. (3) **Per-title encoding** for popular titles. I would *not* drop low-bandwidth rungs or shrink the buffer, that spikes rebuffering. Cut bytes-on-the-wire and placement, where the cost lives and the viewer never notices.
 
 **Q3. How do you count views accurately when a video is viral and people are gaming the counter for payouts?**
-> *Model:* Two numbers on purpose (3.16). **Display:** dedup per `session_id`, apply fraud heuristics *before* incrementing a **sharded** counter, sum on read, fast, approximate, allowed to lag. **Payout-grade:** recomputed exactly, in batch, from the **Kafka watch-event log**, fully deduped and bot-filtered (the anti-fraud models themselves are a delegated workstream), that's the number that touches money and trending. The live counter is an accelerator; the immutable log is the source of truth.
+> *Model:* Two numbers on purpose. **Display:** dedup per `session_id`, apply fraud heuristics *before* incrementing a **sharded** counter, sum on read, fast, approximate, allowed to lag. **Payout-grade:** recomputed exactly, in batch, from the **Kafka watch-event log**, fully deduped and bot-filtered (the anti-fraud models themselves are a delegated workstream), that's the number that touches money and trending. The live counter is an accelerator; the immutable log is the source of truth.
 
 **Q4. The same blockbuster drops globally at 8pm and everyone hits play at once. Why is that not an outage?**
 > *Model:* Two stampedes. **Bytes:** the segments are static and **already at the edge**, for a planned drop, pre-positioned overnight to ISP-embedded appliances; for an unplanned spike, origin shielding means the first edge miss pulls once and everyone after is served from cache. Origin sees a trickle. **Metadata/counts:** the metadata read is tiny and cached; view-count writes are sharded and async (a beacon, off the playback path). Worst case is a slightly slower first segment for the first viewers in a region, the heavy bytes were positioned ahead of demand and the counting never blocks playback.

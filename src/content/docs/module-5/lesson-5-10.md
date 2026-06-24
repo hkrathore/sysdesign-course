@@ -6,7 +6,7 @@ sidebar:
 ---
 
 ### Learning objectives
-- Run the full **RESHADED** spine on a **read-dominated** serving + routing system - the *inverse* of Uber (5.7): there the firehose was driver pings; here map data changes rarely and is read billions of times (read-heavy, massively cacheable).
+- Run the full **RESHADED** spine on a **read-dominated** serving + routing system - the *inverse* of Uber: there the firehose was driver pings; here map data changes rarely and is read billions of times (read-heavy, massively cacheable).
 - Make the **precompute-vs-query-time-compute** trade the through-line: it appears **twice** - **pre-rendered tiles** vs render-on-demand, and **precomputed routing shortcuts** vs raw Dijkstra at query time. Same trade, two subsystems.
 - **Estimate** the headline numbers - tile-fetch QPS, the petabyte tile footprint that forces vector tiles, and the **CDN offload** that shrinks origin traffic ~100x - and show the subtraction.
 - Explain why **plain contraction hierarchies break under live traffic**, and how splitting topology preprocessing from metric customization restores both fast queries *and* fresh ETAs.
@@ -69,11 +69,11 @@ peak (×3 diurnal/commute)               → ~1.5M tile reads/s
 - At ~10 KB/raster tile: **~15 PB - per style, per version.** Across ~10 styles, **hundreds of PB** of mostly-ocean squares re-rendered on every map update.
 - **Two decisive consequences:** (1) **don't pre-render everything** - pre-render the populated, high-traffic set; render the long tail on demand and cache it. (2) **Ship vector tiles, not raster** - a vector tile carries geometry + feature tags (~1-5 KB), renders on the client GPU, and **one tile serves every style**, collapsing storage ~10x and shrinking egress.
 
-**Road-graph size (the routing working set):** ~**10^8 nodes, a few × 10^8 edges**; with precomputed shortcuts, **tens of GB - it fits in RAM** on a routing server, sharded by region. Routing is a **RAM + CPU** problem, not storage (same shape as 5.7's in-memory index, different data).
+**Road-graph size (the routing working set):** ~**10^8 nodes, a few × 10^8 edges**; with precomputed shortcuts, **tens of GB - it fits in RAM** on a routing server, sharded by region. Routing is a **RAM + CPU** problem, not storage (same shape as the in-memory index, different data).
 
 **Routing QPS:** `200M/day ≈ 2.3K/s` avg, ~7K/s peak. Small - *because* precomputed shortcuts make each query sub-millisecond, a modest fleet suffices. Naive Dijkstra at seconds/query would need orders of magnitude more machines - **the precompute *is* the capacity plan.**
 
-**Live-traffic ingest:** `100M reporters × 1 probe / 30 s ≈ 3M probes/s`, **aggregated** into per-edge speeds and folded into routing as a periodic weight refresh - an *aggregate overlay*, not a per-entity index (the contrast with 5.7's ping firehose).
+**Live-traffic ingest:** `100M reporters × 1 probe / 30 s ≈ 3M probes/s`, **aggregated** into per-edge speeds and folded into routing as a periodic weight refresh - an *aggregate overlay*, not a per-entity index (the contrast with the ping firehose).
 
 **Bandwidth (the real bill):** `0.5M tiles/s × ~5 KB ≈ 20 Gbps` average payload, multiples at peak - **almost all from CDN edges.** Egress, not compute, dominates; vector tiles + edge caching are the levers.
 
@@ -87,7 +87,7 @@ Three data classes - the **precompute-vs-query** trade shows up in the first two
 
 **1. Map tiles (immutable, versioned, read-billions).**
 - *Choice:* an **object store** (GCS / S3) fronted by a **CDN** doing ~99% of reads. Tiles are **addressed by version**: a refresh writes *new* objects and flips a pointer - cache invalidation by changing the key, never mutating a cached URL.
-- *Rejected:* serving tiles from a database - a tile is a static blob keyed by a tuple; a DB adds query overhead and replication cost to data that wants to be a dumb cacheable file (3.11). *Also rejected:* pre-rendering 100% of tiles - the ~15 PB/style math kills it.
+- *Rejected:* serving tiles from a database - a tile is a static blob keyed by a tuple; a DB adds query overhead and replication cost to data that wants to be a dumb cacheable file. *Also rejected:* pre-rendering 100% of tiles - the ~15 PB/style math kills it.
 
 **2. The road graph + routing artifacts (near-static, in-RAM, region-sharded).**
 - *Choice:* the graph and its precomputed **shortcut structure** live **in RAM on routing servers, sharded by region**, loaded from a durable copy in object storage. The **traffic overlay** (`edgeId → current speed`) is a separate, frequently-refreshed in-memory structure applied as the metric at query time.
@@ -293,7 +293,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 
 ## What interviewers probe here (Director altitude)
 
-- **"What's the read:write ratio, and how is it different from Uber?"** - *Strong signal:* **read-dominated and cacheable** (near-static data, batch-written, read billions of times, ~99% CDN-served) - the inverse of 5.7's firehose - with traffic as the lone fast overlay. *Red flag:* reusing the ingest-firehose framing, or missing that the same tile/route serves millions.
+- **"What's the read:write ratio, and how is it different from Uber?"** - *Strong signal:* **read-dominated and cacheable** (near-static data, batch-written, read billions of times, ~99% CDN-served) - the inverse of the firehose - with traffic as the lone fast overlay. *Red flag:* reusing the ingest-firehose framing, or missing that the same tile/route serves millions.
 - **"Why not just run Dijkstra, and what breaks contraction hierarchies?"** - *Strong:* Dijkstra is seconds on a continental graph; CH precomputes shortcuts for sub-ms queries; **but CH assumes static weights, and live traffic is dynamic** - so split topology preprocessing (rare) from metric customization (every ~1-2 min). *Red flag:* "use contraction hierarchies" and stopping - missing that CH alone can't do live traffic.
 - **"Why can't you pre-render every tile?"** - *Strong:* the `4^z` math → ~15 PB/style of mostly-empty squares; pre-render the hot set, render+cache the tail, ship vector tiles (one tile, all styles). *Red flag:* "store all the tiles" with no sense of scale.
 - **"Where's the cost, and what are the levers?"** - *Strong:* **CDN egress + storage** dominate (compute is a rounding error behind ~99% hit); levers are vector tiles, immutable-versioned URLs, client caching, predicted-traffic route caching. *Red flag:* sizing a giant render fleet while ignoring the edge.
@@ -328,7 +328,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 ---
 
 ### Key takeaways
-- Google Maps is **read-dominated and cacheable** - the *inverse* of Uber's write firehose (5.7). Tiles and the road graph are **batch-written/precomputed** and read billions of times; the **only fast input is live traffic**. Design precompute + cache, not ingest.
+- Google Maps is **read-dominated and cacheable** - the *inverse* of Uber's write firehose. Tiles and the road graph are **batch-written/precomputed** and read billions of times; the **only fast input is live traffic**. Design precompute + cache, not ingest.
 - The **precompute-vs-query-time-compute** trade is the spine and appears **twice**: tiles (pre-render the hot set vs render-on-demand → hybrid + vector, because all-pre-render is ~15 PB/style) and routing (precomputed shortcuts vs Dijkstra). Name the cost on each side.
 - **Routing:** Dijkstra is seconds on a continental graph; precomputed shortcuts are sub-ms - but **plain CH assumes static weights and live traffic breaks it**. The fix: **topology preprocessing (rare) + metric customization (~seconds, every 1-2 min) + instant queries.** This single insight is the IC-vs-Director line.
 - **Serving:** immutable versioned tiles on an **object store + CDN** with cache-forever URLs → **~99% edge hit, origin sees ~100x less**. Egress + storage dominate the bill; vector tiles and edge/client caching are the levers. **Shard the graph by region**, never by edge-id.

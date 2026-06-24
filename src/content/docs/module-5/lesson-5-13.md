@@ -41,7 +41,7 @@ That asymmetry is the opposite of the read-heavy, cache-everything intuition fro
 **Explicitly CUT (scoping *is* the signal):** dynamic pricing, resale marketplace, transfers, seat recommendations, map rendering, refunds UX, season tickets, fraud onboarding. I scope to **search → seat map → hold → pay → release**, gated by the waiting room, and say so.
 
 **Non-functional requirements:**
-- **Strong consistency on inventory and money** - linearizable at the seat level: no oversell, no double-charge. A deliberate **CP** choice (Lesson 2.7) for the core.
+- **Strong consistency on inventory and money** - linearizable at the seat level: no oversell, no double-charge. A deliberate **CP** choice for the core.
 - **High availability for browse/search** - this tier is **AP**, cache-fronted, eventual.
 - **Flash-crowd tolerance** - absorb a 33:1 spike on one event without collapse or oversell.
 - **Low latency** - browse p99 < 200 ms; claim p99 < 500 ms.
@@ -88,7 +88,7 @@ That asymmetry is the opposite of the read-heavy, cache-everything intuition fro
 - *Rejected - eventually-consistent KV/wide-column (Cassandra LWW) as inventory truth:* last-write-wins can **oversell** - two replicas accept the same seat and converge too late. DynamoDB's conditional writes make a *single-seat* design defensible, but multi-seat atomicity wants real transactions. Choose the store that makes the invariant cheap to hold, not the one that scales easiest for data we don't have much of.
 
 **2. Event catalog + search (read-heavy, AP).**
-- *Choice:* **Elasticsearch/OpenSearch** (Lesson 3.13) for full-text + faceted search, fronted by Redis/CDN. Staleness of seconds is invisible.
+- *Choice:* **Elasticsearch/OpenSearch** for full-text + faceted search, fronted by Redis/CDN. Staleness of seconds is invisible.
 - *Rejected - serving search from the inventory store:* couples the sleepy-but-sacred inventory DB to the 12K-reads/s browse firehose and `LIKE` scans it's terrible at.
 
 **3. The displayed seat map (best-effort, cached).**
@@ -224,7 +224,7 @@ DELETE /v1/holds/{holdId}                        -> 204
 - *Why it looks like a disaster - and isn't:* one mega-event's entire inventory on one shard is a textbook **hot shard** under a 33K/s crowd. **The waiting room is precisely what rescues this**: capping admission to ~2K/s bounds the write rate onto that shard. *The shard key and the queue are co-designed* - event-sharding is only viable **because** the queue caps the per-event rate. Name that link; it's the heart of the problem.
 - *Rejected: shard by `seat_id` hash.* It would scatter a hot event's writes evenly - but it **shatters multi-seat atomicity**: 4 adjacent seats now span 4 shards → a **distributed transaction (2PC) on the hottest path**. Shard key buys transaction locality; the queue buys rate control - a different tool for each problem.
 
-**General-admission variant (different contention shape):** GA has no per-seat rows - one availability counter per section, claimed with a conditional decrement that can't go negative (`... SET avail=avail-1 WHERE ... avail > 0`). At extreme contention that single row serializes, so **shard the counter** (Lesson 3.16): split capacity across N shards, decrement a random one, sum on read. *Trade-off:* the exact remaining count becomes approximate to read in exchange for **N× write throughput** - acceptable, since "sold out" only needs all shards drained.
+**General-admission variant (different contention shape):** GA has no per-seat rows - one availability counter per section, claimed with a conditional decrement that can't go negative (`... SET avail=avail-1 WHERE ... avail > 0`). At extreme contention that single row serializes, so **shard the counter**: split capacity across N shards, decrement a random one, sum on read. *Trade-off:* the exact remaining count becomes approximate to read in exchange for **N× write throughput** - acceptable, since "sold out" only needs all shards drained.
 
 ---
 
@@ -236,7 +236,7 @@ DELETE /v1/holds/{holdId}                        -> 204
 
 **Bottleneck 1 - oversell / double-booking (the cardinal correctness risk).**
 Two fans claim seat 14F in the same millisecond.
-*Fix:* an **atomic conditional write (CAS)** - a single statement that tests and sets: `UPDATE seats SET status='HELD', hold_id=?, expires_at=? WHERE ... AND status='AVAILABLE'`. **One winner per seat; losers affect 0 rows and fail fast with a 409**, no lock held; multi-seat is the same predicate in one all-or-nothing transaction. *Rejected:* pessimistic `SELECT FOR UPDATE` - **pessimistic locks form convoys under contention**, serializing losers who should be bouncing to other seats. (On a quorum store the same invariant is a conditional put with W+R>N, Lessons 2.7-2.8.)
+*Fix:* an **atomic conditional write (CAS)** - a single statement that tests and sets: `UPDATE seats SET status='HELD', hold_id=?, expires_at=? WHERE ... AND status='AVAILABLE'`. **One winner per seat; losers affect 0 rows and fail fast with a 409**, no lock held; multi-seat is the same predicate in one all-or-nothing transaction. *Rejected:* pessimistic `SELECT FOR UPDATE` - **pessimistic locks form convoys under contention**, serializing losers who should be bouncing to other seats. (On a quorum store the same invariant is a conditional put with W+R>N, the CAP/PACELC lesson-2.8.)
 
 <details>
 <summary>Go deeper, CAS vs SELECT FOR UPDATE under 33:1 contention (IC depth, optional)</summary>
@@ -331,7 +331,7 @@ If the queue dies, the gate fails open (stampede) or closed (no sales).
 > *Model:* The risk is a race between the hold TTL and payment completion. Three defenses: (1) the TTL (10 min) sits far above worst-case PSP latency, so the common case never races; (2) purchase is idempotent via a unique key, so a timeout retry doesn't double-charge; (3) the `HELD -> SOLD` conversion re-asserts the hold inside the same transaction - if it expired and the seat was resold, conversion fails and triggers an automatic refund/reconcile, which is rare. Payments and PCI I delegate behind `charge(idempotencyKey, amount, token)`. The trade: a generous TTL locks abandoned seats longer - accepted to make the race vanishingly rare.
 
 **Q4. General admission, 10,000 capacity. What changes?**
-> *Model:* The contention shape flips from many seat-rows to **one hot counter**: a single `avail` per section, claimed with a conditional decrement that can't go negative (`... SET avail=avail-1 WHERE avail>0`). Same CAS principle - one decrement wins per unit; 0 rows means sold out. The new problem is that one row is the whole section's write hotspot, so I **shard the counter** (Lesson 3.16): split 10,000 across ~10 shards, decrement a random shard, sum on read. Trade-off: the exact remaining count becomes approximate (you sum shards) in exchange for ~N× write throughput - fine, because "sold out" only needs all shards drained.
+> *Model:* The contention shape flips from many seat-rows to **one hot counter**: a single `avail` per section, claimed with a conditional decrement that can't go negative (`... SET avail=avail-1 WHERE avail>0`). Same CAS principle - one decrement wins per unit; 0 rows means sold out. The new problem is that one row is the whole section's write hotspot, so I **shard the counter**: split 10,000 across ~10 shards, decrement a random shard, sum on read. Trade-off: the exact remaining count becomes approximate (you sum shards) in exchange for ~N× write throughput - fine, because "sold out" only needs all shards drained.
 
 **Q5. Why not just one big Postgres? Steady state is ~115 writes/s.**
 > *Model:* Steady state *is* trivial - that's the trap. The design exists for the **33K/s flash spike concentrated on one event's rows**, which would saturate one node with brutal lock contention, and for keeping the 12K-reads/s browse/search firehose off the sacred inventory DB. So: a small, strongly-consistent, `event_id`-sharded store for inventory + orders + payments only, fed at a queue-capped ~2K/s, with catalog/search/seat-map pushed to an eventually-consistent edge tier. One Postgres conflates a CP correctness core with an AP read firehose - the whole design is about keeping those apart.

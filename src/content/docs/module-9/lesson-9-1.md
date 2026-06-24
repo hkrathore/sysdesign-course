@@ -60,7 +60,7 @@ Imagine you walk up to an ATM, insert your card, and press "Withdraw $200." The 
 | 6 | **Latency** | Charge API p99 < 2 s end-to-end (card network RTT dominates) |
 | 7 | **Throughput** | 1,000-5,000 TPS peak; **trivially served by any reasonable DB** |
 
-**The inversion, stated explicitly:** in Lesson 5.1 (URL shortener) and 5.8 (Twitter) we scaled read throughput. Here, **1,000 TPS is not the challenge, a single Postgres node handles 10K+ TPS on simple writes.** The challenge is correctness under partial failure. Every architectural decision flows from NFRs 1-4, not from NFR 7.
+**The inversion, stated explicitly:** in the URL shortener and Twitter problems we scaled read throughput. Here, **1,000 TPS is not the challenge, a single Postgres node handles 10K+ TPS on simple writes.** The challenge is correctness under partial failure. Every architectural decision flows from NFRs 1-4, not from NFR 7.
 
 ---
 
@@ -98,7 +98,7 @@ Imagine you walk up to an ATM, insert your card, and press "Withdraw $200." The 
 
 - Access pattern: append journal entries (never update, never delete), range-scan by account and time for balances and reconciliation.
 - Choice: **Append-only table in the same PostgreSQL cluster**, co-transactional with the transaction record. The write that captures a charge inserts the transaction row *and* the two ledger entries in one transaction, atomically. No separate ledger service means no distributed transaction.
-- Rejected, a separate ledger microservice: the transaction record and ledger entries must be co-committed or you get a window where money moved but the ledger doesn't reflect it. If you insist on microservices, you need a saga with compensating transactions (Lesson 8.4) and a two-phase approach, adds latency and failure surface on the most critical path. I'd keep them in the same transactional boundary at this scale.
+- Rejected, a separate ledger microservice: the transaction record and ledger entries must be co-committed or you get a window where money moved but the ledger doesn't reflect it. If you insist on microservices, you need a saga with compensating transactions and a two-phase approach, adds latency and failure surface on the most critical path. I'd keep them in the same transactional boundary at this scale.
 
 **3. Idempotency key store (fast lookup, TTL-managed).**
 
@@ -154,7 +154,7 @@ flowchart TB
 3. If new: write a `PENDING` idempotency record to Postgres (durably, before any external call).
 4. Call the PSP with its own idempotency key (derived from ours). Network timeout → **retry with the same key**, the PSP deduplicates.
 5. On PSP success: in a **single database transaction**, write the transaction record (`AUTHORIZED`), append two ledger entries (debit buyer account, credit platform suspense), and mark the idempotency record `COMPLETE`. Commit. On failure: mark `FAILED`, return to merchant.
-6. Kafka event emitted post-commit (transactional outbox, Lesson 3.11). Settlement service reads and schedules payout.
+6. Kafka event emitted post-commit (transactional outbox). Settlement service reads and schedules payout.
 
 **The critical ordering:** idempotency record written to Postgres *before* the PSP call. If the service crashes between writing the idempotency record and calling the PSP, a retry sees the pending record, calls the PSP again (which is idempotent), and completes cleanly. The alternative ordering (PSP call first, then write) creates a window where PSP succeeds but the crash prevents recording it, a charge the merchant sees as failed, the PSP sees as successful, and your ledger never captured. That is the "silent double-charge" failure mode.
 
@@ -282,7 +282,7 @@ Most candidates treat reconciliation as a bug-fix script. The Director framing: 
 
 A subscription is a charge that recurs on a schedule. The new components:
 
-1. **Renewal scheduler.** A service that reads a `subscriptions` table and enqueues renewal jobs at the right time. The scheduler must be **exactly-once at the job level**, two scheduler instances must not both enqueue a renewal for the same billing period. Implementation: a distributed lock (Lesson 3.7) on `(subscription_id, billing_period)` before enqueueing, or a DB-level unique constraint on the renewal job record. The job enqueues a charge request with a deterministic idempotency key: `SHA256(subscription_id + billing_period)`. The charge path is already idempotent, the renewal scheduler just needs to enqueue once.
+1. **Renewal scheduler.** A service that reads a `subscriptions` table and enqueues renewal jobs at the right time. The scheduler must be **exactly-once at the job level**, two scheduler instances must not both enqueue a renewal for the same billing period. Implementation: a distributed lock on `(subscription_id, billing_period)` before enqueueing, or a DB-level unique constraint on the renewal job record. The job enqueues a charge request with a deterministic idempotency key: `SHA256(subscription_id + billing_period)`. The charge path is already idempotent, the renewal scheduler just needs to enqueue once.
 
 2. **Dunning state machine.** When a renewal charge fails (card declined, expired card), the subscription enters a dunning sequence: retry at T+1 day, T+3 days, T+7 days, then cancel. The state machine lives in the `subscription_billing_events` table (append-only, same ledger pattern). States: ACTIVE → PAST_DUE → DUNNING → CANCELED (or RENEWED on recovery). Each retry is a new charge attempt with a new idempotency key derived from `(subscription_id, billing_period, retry_number)`.
 
@@ -290,9 +290,9 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 **At 10× throughput (50,000 TPS):**
 
-50K TPS (~4.3B transactions/day) is where Postgres write throughput actually becomes a constraint (~30-50K TPS ceiling with pooling). Migration: **CockroachDB or Spanner** for horizontal transactional scaling, or aggressive `merchant_id`-based sharding with a routing layer (Lesson 2.5). Ledger at 4 entries per transaction → 200K inserts/s; partition by `(account_id, month)` and tier aggressively. Move reconciliation from nightly Spark to near-real-time Flink streaming against PSP webhooks. **The consistency requirement does not change at 10×**, the design scales out; the invariant does not relax.
+50K TPS (~4.3B transactions/day) is where Postgres write throughput actually becomes a constraint (~30-50K TPS ceiling with pooling). Migration: **CockroachDB or Spanner** for horizontal transactional scaling, or aggressive `merchant_id`-based sharding with a routing layer. Ledger at 4 entries per transaction → 200K inserts/s; partition by `(account_id, month)` and tier aggressively. Move reconciliation from nightly Spark to near-real-time Flink streaming against PSP webhooks. **The consistency requirement does not change at 10×**, the design scales out; the invariant does not relax.
 
-**Cross-references:** Lesson 3.15 (distributed transactions and sagas, relevant if you split the transaction record and ledger into separate services); Lesson 5.14 (distributed job scheduler, the renewal scheduler uses the same exactly-once job execution pattern); Lesson 9.2 (Fraud Detection System, the fraud scoring service that feeds into the charge path).
+**Related topics:** distributed transactions and sagas (relevant if you split the transaction record and ledger into separate services); the distributed job scheduler (the renewal scheduler uses the same exactly-once job execution pattern); the fraud detection system (the fraud scoring service that feeds into the charge path).
 
 ---
 
@@ -355,8 +355,8 @@ A subscription is a charge that recurs on a schedule. The new components:
 4. **Reconciliation is not error recovery, it is architecture.** Build it on day one, run it nightly, alert on every discrepancy > $0, and partner with finance on resolution SLAs. It is the explicit admission that distributed systems drift and the operational process that closes the loop.
 5. **Design evolution toward subscriptions adds exactly one new problem:** exactly-once job enqueue for the renewal scheduler. Solve it with a deterministic idempotency key `SHA256(sub_id + billing_period)` and a distributed lock or DB unique constraint before enqueue. The charge path is already idempotent, reuse it.
 
-> **Spaced-repetition recap:** Payments = **exactly-once money effects on at-least-once infra**. The triad: **idempotency keys** (write to Postgres before PSP call; derive a PSP-level key from yours) + **immutable double-entry ledger** (debits = credits, append-only, never delete) + **reconciliation as a first-class operational process** (nightly batch, alert on every discrepancy, finance partnership). QPS (1K-5K TPS) is trivial; correctness is everything. Subscription evolution adds a renewal scheduler with a deterministic idempotency key and a dunning state machine. Cross-ref: 3.15 (sagas), 5.14 (job scheduler), 9.2 (fraud detection).
+> **Spaced-repetition recap:** Payments = **exactly-once money effects on at-least-once infra**. The triad: **idempotency keys** (write to Postgres before PSP call; derive a PSP-level key from yours) + **immutable double-entry ledger** (debits = credits, append-only, never delete) + **reconciliation as a first-class operational process** (nightly batch, alert on every discrepancy, finance partnership). QPS (1K-5K TPS) is trivial; correctness is everything. Subscription evolution adds a renewal scheduler with a deterministic idempotency key and a dunning state machine. Related: sagas, the job scheduler, fraud detection.
 
 ---
 
-*End of Lesson 9.1. The payment problem inverts every instinct from the read-heavy, cache-everything modules: throughput is easy, correctness is hard, and reconciliation is not debt but architecture. Lesson 9.2 covers the fraud detection system that feeds the charge path, a real-time ML inference problem where the trade-off is false-positive rate (blocking legitimate transactions) vs false-negative rate (letting fraud through), and latency budget is measured in milliseconds.*
+*End of Lesson 9.1. The payment problem inverts every instinct from the read-heavy, cache-everything modules: throughput is easy, correctness is hard, and reconciliation is not debt but architecture.*

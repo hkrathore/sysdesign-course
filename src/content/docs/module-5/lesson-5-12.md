@@ -34,7 +34,7 @@ RESHADED step 1. Pin the scope before building, and establish the skew that driv
 **Cut from scope (state it out loud, scoping is the signal):**
 - **Building the gateways themselves** (an SMTP server, a push-notification protocol stack). We **integrate** APNs/FCM, Twilio, SES, we do not reimplement them. Naming this boundary is the whole point of the design.
 - **The notification *content* / ML targeting** (who should get a promo, send-time optimization). That is a separate recommendation system; we accept a recipient list.
-- **In-app inbox UI / real-time websocket push** to an open client, that is the feed/WebSocket problem (Lesson 5.5/5.6 territory); we persist the in-app notification and expose a fetch API, and leave live delivery to that layer.
+- **In-app inbox UI / real-time websocket push** to an open client, that is the feed/WebSocket problem (WhatsApp/5.6 territory); we persist the in-app notification and expose a fetch API, and leave live delivery to that layer.
 - **Hard, synchronous "exactly-once" delivery.** Explicitly traded away (see below), it is impossible across third parties.
 
 **Non-functional (these are the problem):**
@@ -109,7 +109,7 @@ RESHADED step 3. What must persist, matched to access pattern, with real systems
 
 **Role 3, delivery tracking / status (what must persist for "did Jane get it?").**
 - **Need:** ~300 GB/day, append-heavy, status-updated a few times per record (queued→sent→delivered→opened/failed), queried by support (by user/notification id) and analytics (aggregate delivery rates), 30-day hot.
-- **Choice:** a **wide-column / write-optimized store, Cassandra** (or DynamoDB / Bigtable). Append-and-update-heavy, time-partitioned, no joins, point + small-range reads → an LSM store's sweet spot (recall Lesson 2.3). **Rejected, Postgres:** the write/update volume (1B+ status writes/day) and the pure scan/point-read access pattern don't need OLTP transactions and would cost far more per TB; we use a relational store only for the *small* config data, not the *firehose* of status. **Rejected, Elasticsearch as primary:** great for the ad-hoc "search all failed SMS yesterday" query, but expensive and not a system-of-record; we'd **mirror** status into ES for ops search, not store it there authoritatively.
+- **Choice:** a **wide-column / write-optimized store, Cassandra** (or DynamoDB / Bigtable). Append-and-update-heavy, time-partitioned, no joins, point + small-range reads → an LSM store's sweet spot (recall the indexing lesson). **Rejected, Postgres:** the write/update volume (1B+ status writes/day) and the pure scan/point-read access pattern don't need OLTP transactions and would cost far more per TB; we use a relational store only for the *small* config data, not the *firehose* of status. **Rejected, Elasticsearch as primary:** great for the ad-hoc "search all failed SMS yesterday" query, but expensive and not a system-of-record; we'd **mirror** status into ES for ops search, not store it there authoritatively.
 
 **Role 4, dedup / idempotency keys (short-lived, hot).**
 - **Need:** "have I already accepted/sent this exact (notification id, user, channel)?", checked on the hot path, only needs to remember recent keys (a dedup window of minutes-to-hours).
@@ -264,7 +264,7 @@ RESHADED step 8. How it holds at 10×, the hardest trade-offs, what to revisit, 
 
 **What I'd revisit:**
 - **Smart send-time / channel selection** (cut from v1): an ML layer that picks the cheapest effective channel and the best moment, directly attacks the SMS cost and engagement at once.
-- **Real-time in-app delivery** to open clients (websocket/SSE), bridging this pipeline to the connection-management problem of Lesson 5.5/5.6.
+- **Real-time in-app delivery** to open clients (websocket/SSE), bridging this pipeline to the connection-management problem of WhatsApp/5.6.
 - **Exactly-once-ish for money-sensitive notifications** via a stronger idempotency/outbox pattern on the producing service.
 
 **Where I'd delegate (the Director move):**

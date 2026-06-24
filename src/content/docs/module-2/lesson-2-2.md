@@ -74,7 +74,7 @@ Justify each by access pattern + consistency need. The signal isn't picking one 
 
 ### What interviewers probe here
 - **"Why NoSQL here, can't Postgres do it?"**, *Strong:* a specific reason tied to scale/access pattern/availability, *and* honesty that Postgres often could until a named threshold. *Red flag:* "NoSQL scales, SQL doesn't."
-- **"What's your partition/shard key, and what goes wrong if you pick badly?"**, *Strong:* a key that spreads load and matches the read pattern; hot-partition risk if skewed (Lesson 2.5). *Red flag:* no shard key in mind.
+- **"What's your partition/shard key, and what goes wrong if you pick badly?"**, *Strong:* a key that spreads load and matches the read pattern; hot-partition risk if skewed. *Red flag:* no shard key in mind.
 - **"You chose Mongo, how do you do a transaction across two documents?"**, *Strong:* you know the support and limits (Mongo has multi-doc transactions but they're costlier; you'd design to avoid needing them). *Red flag:* assuming it's free, or unaware it's constrained.
 
 ### Common mistakes / misconceptions

@@ -299,4 +299,4 @@ The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The def
 
 ---
 
-*End of Lesson 8.11. This lesson closes Module 8. The constraints-first habit, naming physical and operational limits before drawing boxes, is the Director move that separates a prepared answer from a memorized one. It applies to every curveball problem in Module 8, and to every novel problem you'll face on the job. Next: Module 9 covers business-domain problems (9.1-9.14) where the constraints come from business rules, compliance, and org dynamics rather than physics.*
+*End of Lesson 8.11. This lesson closes the architecture-strategy track. The constraints-first habit, naming physical and operational limits before drawing boxes, is the Director move that separates a prepared answer from a memorized one. It applies to every curveball problem in this track, and to every novel problem you'll face on the job. The business-domain problems that follow draw their constraints from business rules, compliance, and org dynamics rather than physics.*

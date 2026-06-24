@@ -27,10 +27,10 @@ Two framing notes. First, the read:write skew is the **opposite of a feed**: a f
 - *Groups?* → **Yes, capped at 1,024 members** (WhatsApp's real cap). The cap bounds fan-out and lets me reject "group = pub-sub topic with millions of subscribers."
 - *Server-side message history?* → **No** (the WhatsApp model): the server holds a message only **until delivered**, then deletes it. Load-bearing, it turns a petabyte storage problem into a transient-queue problem. Contrasted with iMessage/Telegram in Design Evolution.
 - *E2E encryption?* → **Yes.** A *constraint*, not a feature, it removes whole sub-systems (server-side search, plaintext group fan-out).
-- *Media?* → **Delegated to blob store + CDN** (Lessons 5.9/5.10); the chat path carries only a pointer + decryption key.
+- *Media?* → **Delegated to blob store + CDN**; the chat path carries only a pointer + decryption key.
 - *Ordering?* → **Per-conversation FIFO**; no global ordering (impossible and unnecessary).
 
-**CUT (with the reason):** voice/video calls (a WebRTC/SFU problem), status/stories (a feed problem, 5.4), payments, server-side full-text search (E2E forbids it, search is client-side). Trying to design all of WhatsApp in 45 minutes is the red flag.
+**CUT (with the reason):** voice/video calls (a WebRTC/SFU problem), status/stories (a feed problem), payments, server-side full-text search (E2E forbids it, search is client-side). Trying to design all of WhatsApp in 45 minutes is the red flag.
 
 **Functional:** 1:1 messages in real time; group messages (≤1,024); **offline delivery** (reliable on reconnect); **delivery + read receipts** (✓ / ✓✓ / blue); **presence** (online / last-seen); per-conversation FIFO with **exactly-once *display***.
 
@@ -177,7 +177,7 @@ The partition keys are the decisions that determine whether the system has hot s
 
 **Session registry (Redis):** `conn:{device_id} → {gateway_id, conn_id, last_seen}` with a heartbeat TTL, plus `user:{user_id} → set of device_ids`. **Keyed by `device_id`, not `user_id`**, a user has multiple devices, each with its own socket, and delivery fans out to all of them.
 
-**Ordering:** per-conversation FIFO via a **client-attached per-conversation sequence number** (recipient orders and detects gaps), plus Kafka's partition-local ordering (partitioned by recipient) so one user's deliveries don't reorder. *Rejected, a global sequencer (3.6):* a needless single bottleneck; per-conversation order is all the product needs.
+**Ordering:** per-conversation FIFO via a **client-attached per-conversation sequence number** (recipient orders and detects gaps), plus Kafka's partition-local ordering (partitioned by recipient) so one user's deliveries don't reorder. *Rejected, a global sequencer:* a needless single bottleneck; per-conversation order is all the product needs.
 
 **Group metadata + key directory (Postgres/Vitess):** `groups` and `group_members` sharded by `group_id` with a secondary index on `user_id` ("my groups"); `key_directory` sharded by `user_id`, the one thing stored in plaintext that enables encryption, because public keys are public by design.
 

@@ -34,7 +34,7 @@ These are the open, calibrated-general questions of the hiring-manager and cultu
 | "Your CEO constantly skip-levels into your org, how do you react?" | Founder-mode-adjacent: do you channel engagement or defend turf. |
 | "What did you personally inspect at the work level last month?" | The currency trap, abdication has no answer here. |
 
-The merge: all of these are **philosophy-shape** questions (Lesson 10.2), so they all take **Position → Mechanism → Number → Limit**, and every one resolves into a probe or a live exercise. Spend the whole answer on the monologue and you've failed the actual test, which is the follow-up.
+The merge: all of these are **philosophy-shape** questions, so they all take **Position → Mechanism → Number → Limit**, and every one resolves into a probe or a live exercise. Spend the whole answer on the monologue and you've failed the actual test, which is the follow-up.
 
 ---
 
@@ -44,10 +44,10 @@ The answer shape is **Position → Mechanism → Number → Limit**, ~90 seconds
 
 - **Position**, one sentence, stated as *contextual*, not a fixed identity. "My default is delegation with explicit inspection points; I drop altitude where risk concentrates" beats "I'm a delegator." The contextual framing is what dodges the founder-mode trap before it's sprung.
 - **Mechanism**, the named, standing practice that makes the position real and verifiable: skip-level cadence, one or two inspected areas per quarter, written operating principles, blameless postmortems with owned actions, a decision log. This is the layer that separates an operator from an inspirational poster.
-- **Number**, one quantified outcome that proves the mechanism works: regretted attrition, an engagement trend, a delivery metric. The house rule from Lesson 10.1 applies to your philosophy exactly as it applies to "it scales."
-- **Limit**, a genuine downside of *your own* style and when you deliberately change it. This is the "name your trade-off and rejected alternative" rule (Lesson 10.1) turned on yourself, and at Director level it carries more of the score than the Position does.
+- **Number**, one quantified outcome that proves the mechanism works: regretted attrition, an engagement trend, a delivery metric. The house rule applies to your philosophy exactly as it applies to "it scales."
+- **Limit**, a genuine downside of *your own* style and when you deliberately change it. This is the "name your trade-off and rejected alternative" rule turned on yourself, and at Director level it carries more of the score than the Position does.
 
-Then hold the rest in reserve. The monologue is the opening; the probe is the round (Lesson 10.2). Never announce the framework aloud.
+Then hold the rest in reserve. The monologue is the opening; the probe is the round. Never announce the framework aloud.
 
 ```mermaid
 flowchart TD
@@ -71,7 +71,7 @@ This is the category the modern world re-scored most violently. Five shifts sepa
 - **Psychological safety got a backlash, so the definition matters.** Naming Project Aristotle alone is now table stakes and slightly suspect. The current answer states **Edmondson's definition, safety is the freedom to take *interpersonal* risks (admit a mistake, dissent, ask a dumb question) without humiliation, and explicitly pairs it with accountability**: "safety protects people who take risks, not people from performance consequences." Psych safety framed as comfort or absence of conflict is a 2026 red flag.
 - **Culture is mechanism, not perks or proximity.** Post-ZIRP, "ping-pong tables and a family vibe" is dead. Culture you can defend is *designed and measured*: written operating principles, blameless postmortems, decision logs, regretted-attrition and engagement-survey trends. The probe "does it survive a reorg?" is asking exactly this, perks don't survive a distribution; mechanisms do.
 - **RTO is a stewardship question, not an ideology test.** The currency bar is separating personal preference from organizational stewardship. Strong candidates know the trade-off math, Amazon's 5-day RTO polled ~1.4/5 internally with ~91% unhappy, and regretted attrition concentrates among strong engineers, and bring a *retention-risk plan for whatever policy the company sets*, not tribal certainty in either direction.
-- **Player-coach is the post-flattening signal.** With layers cut (Lesson 10.11), the credible Director is comfortable delivering in a flatter org and inspecting at the work level, not demanding more headcount to abstract themselves away from the work. "What did you personally inspect last month?" has no good answer if your philosophy is pure abstraction.
+- **Player-coach is the post-flattening signal.** With layers cut, the credible Director is comfortable delivering in a flatter org and inspecting at the work level, not demanding more headcount to abstract themselves away from the work. "What did you personally inspect last month?" has no good answer if your philosophy is pure abstraction.
 
 ---
 
@@ -125,8 +125,8 @@ This is the category the modern world re-scored most violently. Five shifts sepa
 
 1. **Deliver your style in 90 seconds, then shut up.** Write Position-Mechanism-Number-Limit for your own leadership and time it. *(Sketch: contextual Position; one named standing mechanism with a cadence; one number pairing quality + delivery; one dated, real Limit with "and here's when I change", then stop and let the probe come.)*
 2. **Answer the founder-mode question cold.** "Are you founder mode or manager mode?" *(Sketch: name the binary as false, correct the Chesky cliché, give selective-depth with a concrete "last month I inspected X and deliberately left Y alone," and add the CEO-skip-level channeling line.)*
-3. **Define psychological safety to a skeptic.** The interviewer says "isn't psych safety just an excuse for low performers?" *(Sketch: Edmondson's interpersonal-risk definition; the explicit split, safety for risk-takers, not from consequences; a blameless-postmortem mechanism that still produces owned actions and pairs with the high bar from Lesson 10.6.)*
-4. **State your RTO stance as a steward.** "We're going 4 days in-office, react." *(Sketch: separate preference from stewardship, cite the trade-off math (Amazon 1.4/5, attrition concentrated among strong engineers), commit to executing the policy *and* bring a regretted-attrition tripwire and a retention plan, disagree-and-commit, Lesson 10.10.)*
+3. **Define psychological safety to a skeptic.** The interviewer says "isn't psych safety just an excuse for low performers?" *(Sketch: Edmondson's interpersonal-risk definition; the explicit split, safety for risk-takers, not from consequences; a blameless-postmortem mechanism that still produces owned actions and pairs with the high bar.)*
+4. **State your RTO stance as a steward.** "We're going 4 days in-office, react." *(Sketch: separate preference from stewardship, cite the trade-off math (Amazon 1.4/5, attrition concentrated among strong engineers), commit to executing the policy *and* bring a regretted-attrition tripwire and a retention plan, disagree-and-commit.)*
 
 ---
 
@@ -141,4 +141,4 @@ This is the category the modern world re-scored most violently. Five shifts sepa
 
 ---
 
-*End of Lesson 10.4. Philosophy is the calibrated-general round; Lesson 10.5 narrows to the hiring bar, designing the loop, the AI-era assessment redesign, and the junior-pipeline stance, where the same "designed mechanism, with a number" instinct from this lesson becomes a system you own.*
+*End of Lesson 10.4. Philosophy is the calibrated-general round; the next lesson narrows to the hiring bar, designing the loop, the AI-era assessment redesign, and the junior-pipeline stance, where the same "designed mechanism, with a number" instinct from this lesson becomes a system you own.*

@@ -5,14 +5,14 @@ sidebar:
   order: 14
 ---
 
-> Every lesson before this taught you to *describe* leadership well, frameworks (10.2), a probe-hardened story bank (10.3), a current position per category (10.4-10.12), tuned to the room (10.13). This lesson is where the loop stops letting you describe and makes you *do*. The 2026 Director loop assumes the monologue is rehearsed and possibly AI-drafted, so it replaces "what's your philosophy?" with a live exercise: here are your team's OKRs, fix them; here's an engagement survey, your first three moves; you're my struggling staff engineer, give the feedback now; you start Monday, present your first 90 days. The exercise is unfakeable in a way the monologue isn't, which is exactly why interviewers reach for it. This is the behavioral twin of Lesson 6.1: there you drove a fresh system design and critiqued it against a RESHADED rubric; here you run four live exercises and score yourself against the five dimensions a real panel uses. The skill isn't having good answers, it's *performing judgment under observation*. Drive these yourself, out loud, on a timer.
+> Every lesson before this taught you to *describe* leadership well, frameworks, a probe-hardened story bank, a current position per category, tuned to the room. This lesson is where the loop stops letting you describe and makes you *do*. The 2026 Director loop assumes the monologue is rehearsed and possibly AI-drafted, so it replaces "what's your philosophy?" with a live exercise: here are your team's OKRs, fix them; here's an engagement survey, your first three moves; you're my struggling staff engineer, give the feedback now; you start Monday, present your first 90 days. The exercise is unfakeable in a way the monologue isn't, which is exactly why interviewers reach for it. This is the behavioral twin of the system-design drive-and-critique exercise: there you drove a fresh system design and critiqued it against a RESHADED rubric; here you run four live exercises and score yourself against the five dimensions a real panel uses. The skill isn't having good answers, it's *performing judgment under observation*. Drive these yourself, out loud, on a timer.
 
 ### Learning objectives
 - Recognize the **four live-exercise formats** the modern loop uses to replace philosophy monologues, OKR critique, org-health read, feedback roleplay, 90-day plan, and the distinct judgment each tests.
 - Run a **full worked rep** of each: prompt, strong response, and the annotations on *why it scores* at Director altitude.
 - Carry a reusable **first-90-days template**, listen fast → diagnose → operating system → first structural changes, that survives the "post-layoff, no headcount" twist.
 - **Self-score** any rep against the five interviewer dimensions, scope-for-level, decision quality, self-awareness, quantification, altitude consistency, and find your floor before a panel does.
-- Wire the track's drill tools, **ProbeSimulator (10.2)** and the **story matrix (10.3)**, into a repeatable loop, because demonstration is a rehearsed muscle, not a talent.
+- Wire the track's drill tools, **ProbeSimulator** and the **story matrix**, into a repeatable loop, because demonstration is a rehearsed muscle, not a talent.
 
 ### Intuition first
 A driving test, not a driving interview. You can describe a perfect three-point turn at the kitchen table all day, mirror, signal, lock, reverse, and the examiner learns nothing, because anyone can recite the manual. So they put you behind the wheel: *do it now, with traffic coming*. The wobble shows up only in the doing, do you actually check the mirror, or just say you would? The modern leadership loop made the same move. For a decade it asked candidates to *describe* the maneuver, "how do you give hard feedback?", and accepted a fluent answer, until it noticed fluency was cheap, increasingly LLM-shaped, and predicted nothing about who could deliver the feedback when the engineer pushed back. So it handed over the wheel. The four exercises below are the road test; reading about them is the kitchen-table version. The only prep that transfers is gripping the wheel until the wobble is gone.
@@ -70,9 +70,9 @@ The migration, observability stack, and coverage work are now *initiatives*, the
 <details>
 <summary>Go deeper, why the OKR rewrite scores (annotations)</summary>
 
-- **Diagnoses the category error, doesn't just nitpick**, names output-vs-outcome (the post-McKinsey-debate literacy, 10.8) as the *root* fault, not four separate complaints.
+- **Diagnoses the category error, doesn't just nitpick**, names output-vs-outcome (the post-McKinsey-debate literacy) as the *root* fault, not four separate complaints.
 - **Produces a better artifact**, the rewrite is the deliverable; critique-only fails the "demonstrate" bar. The new KRs are DORA-shaped, with a baseline *and* a target.
-- **Includes a guardrail KR** (change-failure), proves they know outcome metrics get gamed, and reframes the initiatives as subordinate, even willing to question whether the migration is worth it (cost discipline, 10.11). A number on every KR, house rule one, live.
+- **Includes a guardrail KR** (change-failure), proves they know outcome metrics get gamed, and reframes the initiatives as subordinate, even willing to question whether the migration is worth it (cost discipline). A number on every KR, house rule one, live.
 
 </details>
 
@@ -100,7 +100,7 @@ What I would *not* do: a morale or perks push at the 2.8 'best work' number. Tha
 
 - **Reads the pattern, not the worst cell**, connects four metrics and three themes into one diagnosis (decision-thrash). That's "read data into action," not "summarize data."
 - **Uses the *non*-alarming number diagnostically**, manager effectiveness being *fine* localizes the problem above the managers. A senior move.
-- **Three sequenced, prioritized moves**, names the one it would *not* do with the reason (house rule two), and closes the loop with a 90-day re-pulse scorecard (10.8); surveying-then-silence is a named trap. Director altitude, decision rights and initiative portfolio, not "skip-level coffee chats."
+- **Three sequenced, prioritized moves**, names the one it would *not* do with the reason (house rule two), and closes the loop with a 90-day re-pulse scorecard; surveying-then-silence is a named trap. Director altitude, decision rights and initiative portfolio, not "skip-level coffee chats."
 
 </details>
 
@@ -120,9 +120,9 @@ The roleplay is the format candidates fear most, no framework to hide behind, yo
 
 **Why this scores:**
 - **Says the hard sentence**, the exact quote, the dated incident, the named people; no retreat into "some feedback I've heard." Specificity is what makes it land and proves you'd actually deliver it.
-- **Separates the asset from the behavior**, "your bar is an asset; the delivery is the cost", protecting the strength while being unambiguous on the change (the brilliant-jerk discipline, 10.6, as live coaching).
+- **Separates the asset from the behavior**, "your bar is an asset; the delivery is the cost", protecting the strength while being unambiguous on the change (the brilliant-jerk discipline, as live coaching).
 - **Holds the line under push-back**, concedes the valid point (don't lower the bar), reframes to the real issue (verdict vs. question); caving fails, going cold fails, it threads both. Ends with a concrete, observable ask *and* an inspection plan, feedback with no next step reads as venting.
-- **Warm and direct at once**, the 2026 calibration (10.6): the compassion bar rose, so cold delivery scores worse, but conflict-avoidance still fails. Candor *and* care.
+- **Warm and direct at once**, the 2026 calibration: the compassion bar rose, so cold delivery scores worse, but conflict-avoidance still fails. Candor *and* care.
 
 <details>
 <summary>Go deeper, the SBI spine and the three roleplay failure modes (IC depth, optional)</summary>
@@ -131,7 +131,7 @@ The roleplay is the format candidates fear most, no framework to hide behind, yo
 
 The three ways the roleplay fails, in order of how common they are:
 1. **The cushion**, so much praise and hedging that the actual message never lands ("you're amazing, just maybe, possibly, a tiny bit…"). Maya leaves not knowing she has to change. This is the most common Director-candidate failure: senior people who've gotten conflict-avoidant.
-2. **The framework recital**, describing SBI instead of *doing* it ("so I'd use situation-behavior-impact here, where the situation is…"). The interviewer is playing Maya; talk to *her*, not about the model. Announcing the framework breaks the roleplay the way it breaks a STAR answer (10.2).
+2. **The framework recital**, describing SBI instead of *doing* it ("so I'd use situation-behavior-impact here, where the situation is…"). The interviewer is playing Maya; talk to *her*, not about the model. Announcing the framework breaks the roleplay the way it breaks a STAR answer.
 3. **The freeze under push-back**, folding the moment Maya pushes ("oh, well, if you think the designs were bad, maybe it's fine"). The push-back *is* the test. Concede what's true, hold what matters.
 
 </details>
@@ -142,18 +142,18 @@ The three ways the roleplay fails, in order of how common they are:
 
 > **The prompt:** "You start as Director of this 60-person org on Monday. Present your first 90 days. By the way, they just absorbed a layoff two months ago, and you're not getting new headcount this year."
 
-The near-universal closing exercise, with a sharp modern calibration: "I'd spend a quarter listening" now reads *slow* (10.7). The shape is **listen fast → diagnose → install the operating system → make the first structural changes**, diagnosis visible by day 30, first decisions by 60-90. The layoff-and-no-headcount twist tests whether your plan survives constraint or assumes growth.
+The near-universal closing exercise, with a sharp modern calibration: "I'd spend a quarter listening" now reads *slow*. The shape is **listen fast → diagnose → install the operating system → make the first structural changes**, diagnosis visible by day 30, first decisions by 60-90. The layoff-and-no-headcount twist tests whether your plan survives constraint or assumes growth.
 
 **Strong response (a plan, not a calendar):** "First I classify the situation, it sets my clock. A 60-person org that just took a layoff with no headcount coming is a **stabilize-and-refocus**, not a growth build: the 90-day job is trust, focus, and more output from the team I have, not scaling it. Three phases (detail in the template below):
 
 - **Days 1-30, listen fast with evidence:** time-boxed 1:1s and skip-levels *plus* the hard data (delivery, incidents, the attrition list, the survey), with two questions in every conversation, *do you have a future here* and *what work shouldn't we be doing*, and a **diagnosis presented back to my VP and org by day 30**, so my read is visible and falsifiable.
-- **Days 30-60, install the operating system and make the first focus call:** the cadence that gives truth without micromanaging (10.8), and the first structural decision, survivors are carrying too much, so I **kill 1-2 low-value projects** to get the portfolio back inside capacity. Cutting *work*, not just absorbing the cut, is what makes a layoff actually work (10.11).
-- **Days 60-90, first org changes and a re-recruit:** redraw a thrash-causing boundary, address one manager if the data says so (a real coaching arc, not a snap exit), and re-recruit high-potentials with scope, with no promotion budget, *interesting problems* are my retention currency (10.7), plus one visible win.
+- **Days 30-60, install the operating system and make the first focus call:** the cadence that gives truth without micromanaging, and the first structural decision, survivors are carrying too much, so I **kill 1-2 low-value projects** to get the portfolio back inside capacity. Cutting *work*, not just absorbing the cut, is what makes a layoff actually work.
+- **Days 60-90, first org changes and a re-recruit:** redraw a thrash-causing boundary, address one manager if the data says so (a real coaching arc, not a snap exit), and re-recruit high-potentials with scope, with no promotion budget, *interesting problems* are my retention currency, plus one visible win.
 
 Two things I would *not* do: reorg in week one (rearranging a problem I don't understand yet), and promise no further cuts unless it's true, post-layoff, survivor trust is the asset, and one lie about safety spends it permanently. Scorecard: diagnosis by day 30, portfolio inside capacity, zero regretted attrition among named keepers, one shipped win."
 
 **Why this scores:**
-- **Classifies the situation first** (stabilize-and-refocus vs. growth), sets the clock and proves the plan is diagnosed, not templated; the same move opens the inherited-team answer in 10.7.
+- **Classifies the situation first** (stabilize-and-refocus vs. growth), sets the clock and proves the plan is diagnosed, not templated; the same move opens the inherited-team answer.
 - **Listens fast with evidence**, time-boxed 1:1s *plus* hard data, diagnosis *presented back* by day 30. Beats the dated "quarter of listening" and makes it falsifiable.
 - **Survives the constraint**, the post-layoff, no-headcount twist is met head-on: cut initiatives, re-recruit with scope not comp, no false safety promises. A growth-assuming plan fails here.
 - **Installs an operating system, not a meeting list** (artifacts, decision rights), names the first structural call with a number, says what it would *not* do with reasons, and ends with a scorecard it'll be held to.
@@ -168,7 +168,7 @@ Carry this shape into any version of the prompt; swap specifics to the situation
 | **Days 30-60, Install the OS** | Get truth without micromanaging; first focus call | Weekly written ops review on one dashboard; themes-based 1:1s; skip-level cadence; **kill 1-2 low-value initiatives** | An operating cadence + portfolio back inside capacity |
 | **Days 60-90, First structural changes** | The decisions the diagnosis earned | Redraw a thrash-causing boundary; address one manager (coaching arc); re-recruit keepers with scope; ship one visible win | First org changes + a **90-day scorecard** you're held to |
 
-The adaptors: a **turnaround** moves the manager call earlier; **growth** (rare in 2026, interrogate headcount-vs-output, 10.11) adds the hiring machine and span math at 30-60 (10.7); a **strong inherited team** lightens the structural changes and lengthens trust-building. The spine holds; the emphasis shifts with the situation.
+The adaptors: a **turnaround** moves the manager call earlier; **growth** (rare in 2026, interrogate headcount-vs-output) adds the hiring machine and span math at 30-60; a **strong inherited team** lightens the structural changes and lengthens trust-building. The spine holds; the emphasis shifts with the situation.
 
 ---
 
@@ -177,16 +177,16 @@ The adaptors: a **turnaround** moves the manager call earlier; **growth** (rare 
 The shift to live exercises *is* the calibration, and the bar inside each one also moved.
 
 - **The format is the headline shift.** A 2015 loop ran on monologue questions and accepted a fluent answer. The 2026 loop assumes fluency is cheap and possibly AI-generated, so it reaches for the *exercise* precisely because performance under observation can't be pre-drafted. Prepare only polished answers and the live exercise is where the floor falls out.
-- **The listening tour got a clock.** "I'd spend 90 days listening" was respected in 2015; in 2026 it reads slow. The calibration is **listen-fast-then-act**, visible diagnosis by day 30, first decisions by 60-90, evidenced by *specifics*, not duration (10.7).
-- **Every exercise carries an efficiency constraint.** The 90-day prompt comes with "post-layoff, no headcount"; the OKR rewrite questions whether the work is worth the quarter; the survey response can't reach for a perks budget. The post-ZIRP assumption (10.11) is baked into the prompts, a plan that assumes growth dates you instantly.
-- **Feedback's compassion bar rose alongside its candor bar.** Cold, clinical delivery now scores *worse* post-2022, while conflict-avoidant cushioning still fails. The scored delivery is candor *and* care, held under push-back (10.6).
-- **Outcome-over-activity is assumed literacy.** Post-McKinsey-debate and post-AI (code volume is free), output KRs are an instant fail, the exercise scores whether you reach for *outcome* metrics with guardrails (10.8).
+- **The listening tour got a clock.** "I'd spend 90 days listening" was respected in 2015; in 2026 it reads slow. The calibration is **listen-fast-then-act**, visible diagnosis by day 30, first decisions by 60-90, evidenced by *specifics*, not duration.
+- **Every exercise carries an efficiency constraint.** The 90-day prompt comes with "post-layoff, no headcount"; the OKR rewrite questions whether the work is worth the quarter; the survey response can't reach for a perks budget. The post-ZIRP assumption is baked into the prompts, a plan that assumes growth dates you instantly.
+- **Feedback's compassion bar rose alongside its candor bar.** Cold, clinical delivery now scores *worse* post-2022, while conflict-avoidant cushioning still fails. The scored delivery is candor *and* care, held under push-back.
+- **Outcome-over-activity is assumed literacy.** Post-McKinsey-debate and post-AI (code volume is free), output KRs are an instant fail, the exercise scores whether you reach for *outcome* metrics with guardrails.
 
 ---
 
 ## The self-scoring rubric: five dimensions a panel uses
 
-After any rep, yours or a model answer, score it on the five dimensions a real panel scores, 1-3 each. This is the behavioral counterpart of the system-design self-assessment scorecard in Lesson 6.2: the point isn't the total, it's finding the dimension where you're a 1 and drilling it.
+After any rep, yours or a model answer, score it on the five dimensions a real panel scores, 1-3 each. This is the behavioral counterpart of the system-design self-assessment scorecard: the point isn't the total, it's finding the dimension where you're a 1 and drilling it.
 
 | Dimension | 3, Strong signal | 1, Red flag |
 |---|---|---|
@@ -196,9 +196,9 @@ After any rep, yours or a model answer, score it on the five dimensions a real p
 | **Quantification** | Real numbers, baselines, targets, team sizes, percentages, timelines | "It'll improve," "significantly," "a lot", house rule one violated |
 | **Altitude consistency** | Holds Director altitude across all four exercises and three probe levels | Drifts up into hand-waving or down into IC detail when pushed |
 
-Two columns are this track's house rules (10.1): **quantification** is "always quantify," and **decision quality**'s rejected-alternative requirement is "name the trade-off." Both transfer verbatim from the system-design track, the same Principal/Staff interviewer often scores both your rounds, so altitude consistency *across* rounds is itself a signal. The 6.1 self-critique loop applies exactly: run the exercise, score it cold, find the 1, drill *that* dimension rather than re-running your strongest one.
+Two columns are this track's house rules: **quantification** is "always quantify," and **decision quality**'s rejected-alternative requirement is "name the trade-off." Both transfer verbatim from the system-design track, the same Principal/Staff interviewer often scores both your rounds, so altitude consistency *across* rounds is itself a signal. The system-design self-critique loop applies exactly: run the exercise, score it cold, find the 1, drill *that* dimension rather than re-running your strongest one.
 
-**The drill loop.** Wire the track's two tools into a repeatable rep: run an exercise out loud on a timer, then turn the **ProbeSimulator (10.2)** on your answer to push each follow-up three levels deep until your specifics run out, that floor is your real score. Pull the live material from your **story matrix (10.3)**: your actual OKR rewrites, a real survey you read, hard feedback you've delivered. The matrix supplies true events, the simulator finds where they're thin, this rubric says which dimension to harden.
+**The drill loop.** Wire the track's two tools into a repeatable rep: run an exercise out loud on a timer, then turn the **ProbeSimulator** on your answer to push each follow-up three levels deep until your specifics run out, that floor is your real score. Pull the live material from your **story matrix**: your actual OKR rewrites, a real survey you read, hard feedback you've delivered. The matrix supplies true events, the simulator finds where they're thin, this rubric says which dimension to harden.
 
 ---
 
@@ -215,7 +215,7 @@ Two columns are this track's house rules (10.1): **quantification** is "always q
 ## Common mistakes
 
 - **Critiquing without producing.** Listing what's wrong and never building the better version. The premise is *demonstrate*, the rewrite, the three moves, the said sentence *is* the answer; the teardown alone fails.
-- **Reciting the framework instead of running it.** "I'd use SBI here," or "first a listening tour" as a label. The interviewer wants the maneuver performed, not named, announcing it breaks the moment, exactly as in a STAR answer (10.2).
+- **Reciting the framework instead of running it.** "I'd use SBI here," or "first a listening tour" as a label. The interviewer wants the maneuver performed, not named, announcing it breaks the moment, exactly as in a STAR answer.
 - **Acting on the loudest number, not the load-bearing one.** Reaching for the 2.8 "best work" score or a morale initiative instead of the decision-thrash root cause. Read the *pattern*; treat the cause.
 - **A 90-day plan that's a calendar, not decisions**, meetings with no diagnosis presented, no structural call, no scorecard; or the dated full-quarter listen before any action. Visible diagnosis by day 30 is the bar.
 - **Assuming growth and comfort.** A plan or survey response that needs new headcount, a perks budget, or "no further cuts" promises. The 2026 prompts come with constraints baked in; assuming the good times dates you in one sentence.
@@ -236,10 +236,10 @@ Two columns are this track's house rules (10.1): **quantification** is "always q
 - **Every exercise rewards production over critique.** Rewrite the OKR, give three prioritized moves, say the hard sentence, present sequenced decisions, the artifact you build *is* the answer; the teardown alone fails.
 - **The first-90-days shape is listen-fast → diagnose → install the OS → first structural changes** (diagnosis by day 30, decisions by 60-90), and it must survive the post-layoff/no-headcount twist by cutting work, re-recruiting with scope, and refusing false safety promises.
 - **Score every rep on five dimensions**, scope-for-level, decision quality, self-awareness, quantification, altitude consistency, and drill the one where you're a 1. Two are this course's house rules (quantify; name the trade-off) applied to behavior.
-- **Demonstration is a rehearsed muscle.** Drive a real exercise out loud on a timer, probe it to its floor with the ProbeSimulator (10.2) on stories from your matrix (10.3), harden the weak dimension, the 6.1 drive-then-critique reflex, transferred verbatim.
+- **Demonstration is a rehearsed muscle.** Drive a real exercise out loud on a timer, probe it to its floor with the ProbeSimulator on stories from your matrix, harden the weak dimension, the system-design drive-then-critique reflex, transferred verbatim.
 
-> **Spaced-repetition recap:** Modern loops replace philosophy monologues with **four live exercises**, rewrite broken OKRs (outputs → outcomes + guardrail), read a survey (pattern not worst-cell → three prioritized moves + re-pulse), deliver feedback live (SBI, say the sentence, hold the line, warm + direct), present first 90 days (classify → listen-fast → install the OS → structural changes; survive post-layoff/no-headcount). Every exercise **rewards production over critique** under a 2026 efficiency constraint. **Self-score on five dimensions, drill your 1.** The behavioral twin of 6.1: drive, critique, close the gap.
+> **Spaced-repetition recap:** Modern loops replace philosophy monologues with **four live exercises**, rewrite broken OKRs (outputs → outcomes + guardrail), read a survey (pattern not worst-cell → three prioritized moves + re-pulse), deliver feedback live (SBI, say the sentence, hold the line, warm + direct), present first 90 days (classify → listen-fast → install the OS → structural changes; survive post-layoff/no-headcount). Every exercise **rewards production over critique** under a 2026 efficiency constraint. **Self-score on five dimensions, drill your 1.** The behavioral twin of the system-design drive-and-critique exercise: drive, critique, close the gap.
 
 ---
 
-*End of Lesson 10.14, and of the Leadership Track. You arrived with frameworks (10.2), built a probe-hardened story bank (10.3), calibrated a position for every category (10.4-10.12), and tuned it to the room (10.13). This capstone is where it all has to leave your mouth under observation, the OKR you rewrite, the survey you act on, the feedback you deliver to a face, the plan you present on day one. The two house rules, quantify everything, name every trade-off, govern the RESHADED system-design track too (10.1), because the same senior interviewer increasingly scores both your rounds and calibrates your altitude across them. Don't read this again. Drive the four exercises out loud, on a timer, until the wobble is gone.*
+*End of Lesson 10.14, and of the Leadership Track. You arrived with frameworks, built a probe-hardened story bank, calibrated a position for every category, and tuned it to the room. This capstone is where it all has to leave your mouth under observation, the OKR you rewrite, the survey you act on, the feedback you deliver to a face, the plan you present on day one. The two house rules, quantify everything, name every trade-off, govern the RESHADED system-design track too, because the same senior interviewer increasingly scores both your rounds and calibrates your altitude across them. Don't read this again. Drive the four exercises out loud, on a timer, until the wobble is gone.*

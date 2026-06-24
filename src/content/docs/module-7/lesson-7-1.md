@@ -11,7 +11,7 @@ sidebar:
 - Adapt the **RESHADED** spine to an LLD problem, say out loud which letters shrink (E becomes capacity math, not QPS) and which transform (A = class interfaces, H = class/state diagram, D = entity model).
 - Practice the Director meta-skill this problem exists to test: **lock scope first**, name what you're cutting, and resist anticipatory abstraction (gold-plating) until a requirement demands it.
 - Apply the **Strategy pattern exactly once, where a requirement varies** (pricing), and defend why nothing else in v1 deserves a pattern.
-- Handle the **multi-threaded variant**: make spot assignment atomic so two cars racing for the last spot cannot both win, the same `AVAILABLE → HELD → OCCUPIED` shape as Ticketmaster's seat claim (Lesson 5.13), at micro scale.
+- Handle the **multi-threaded variant**: make spot assignment atomic so two cars racing for the last spot cannot both win, the same `AVAILABLE → HELD → OCCUPIED` shape as Ticketmaster's seat claim, at micro scale.
 - Evolve the design under new constraints (multi-floor, dynamic pricing, gate hardware, a city-wide chain) and name the point where LLD turns back into system design.
 
 ### Intuition first
@@ -61,7 +61,7 @@ Everything a weak answer adds, `AbstractVehicleFactory`, a `Car`/`Truck`/`Motorc
 
 ## S: Storage
 
-> Adapted: "what persists" rather than "which distributed store." The LLD trap is dragging Module-3 machinery into a 0.3 MB problem.
+> Adapted: "what persists" rather than "which distributed store." The LLD trap is dragging distributed machinery into a 0.3 MB problem.
 
 - **Live spot state: in-memory, inside the process.** It's 0.3 MB, mutated under the assignment claim, rebuildable. *Rejected: Redis or a DB as live truth*, a network hop and a failure mode on every gate operation, buying nothing at 0.13 arrivals/s.
 - **Tickets and payments: one small Postgres/MySQL instance.** Money needs durability and audit (NFR 3); a ticket row written at entry, finalized at exit, is the whole schema. *Rejected: in-memory only*, a restart that loses open tickets means free parking and fee disputes; *rejected: an event-sourced ledger*, gold-plating for 2,000 rows/day.
@@ -90,7 +90,7 @@ stateDiagram-v2
     OutOfService --> Available: restored
 ```
 
-Two things to narrate on this diagram. First, **`Held` exists for the same reason Ticketmaster's `HELD` does** (Lesson 5.13): assignment at the gate and the car physically occupying the spot are separate moments, and the spot must belong to exactly one car for that window, with a timeout so an abandoned assignment self-heals. Second, **`OutOfService`** is the cheap, real-world state juniors forget; one enum value now, or a display-board outage later.
+Two things to narrate on this diagram. First, **`Held` exists for the same reason Ticketmaster's `HELD` does**: assignment at the gate and the car physically occupying the spot are separate moments, and the spot must belong to exactly one car for that window, with a timeout so an abandoned assignment self-heals. Second, **`OutOfService`** is the cheap, real-world state juniors forget; one enum value now, or a display-board outage later.
 
 ---
 
@@ -195,7 +195,7 @@ The correctness hinges on one line: `poll()` on `ConcurrentLinkedQueue` is an at
 2. **Per-spot CAS:** `status.compareAndSet(AVAILABLE, HELD)`; loser retries the next spot. Maximal concurrency, but near-full, losers scan many spots retrying: O(n) under exactly the contention you built it for.
 3. **Concurrent free-list per spot type**, a lock-free queue of available spots; atomic `poll()` to claim, `offer()` to release. The claim **is** the dequeue: one winner by construction, losers get `null` in O(1) and fall through to the next size or "full."
 
-**Decision: the concurrent free-list (option 3).** It makes the invariant structural, a spot is claimable *because* it's in the pool, rather than guarded. *Rejected: the coarse lock*, not on throughput (the math says it survives) but because the free-list is the same line count with no shared bottleneck to reason about; *rejected: per-spot CAS*, because it degrades precisely at high occupancy, the only contention regime this system has. The `Held` window between claim and ticket persistence gets a timeout sweep, so a gate crash mid-assignment self-heals, lazy reclaim, exactly as Lesson 5.13's holds.
+**Decision: the concurrent free-list (option 3).** It makes the invariant structural, a spot is claimable *because* it's in the pool, rather than guarded. *Rejected: the coarse lock*, not on throughput (the math says it survives) but because the free-list is the same line count with no shared bottleneck to reason about; *rejected: per-spot CAS*, because it degrades precisely at high occupancy, the only contention regime this system has. The `Held` window between claim and ticket persistence gets a timeout sweep, so a gate crash mid-assignment self-heals, lazy reclaim, exactly as Ticketmaster's holds.
 
 **Re-check the other NFRs:** money durable (tickets in Postgres, fee computed at close); restart rebuilds spot state from open tickets; the DB partial index backstops the in-memory claim. The design holds.
 
@@ -204,7 +204,7 @@ The correctness hinges on one line: `poll()` on `ConcurrentLinkedQueue` is an at
 
 The failure mode of per-spot CAS is the **retry storm at 99% full**: a gate thread scans the spot array CAS-ing each `AVAILABLE` it sees; with 5 free spots in 1,000 and 4 competing threads, most CAS attempts hit spots another thread just took, and each loser rescans. Expected work per park approaches O(n) exactly when the lot is nearly full, the regime the system lives in at rush hour.
 
-The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head pointer is the single CAS target, and a failed CAS means another thread *succeeded*, the loser's very next `poll()` attempt sees the new head. Claims are O(1) amortized regardless of occupancy, and "empty queue" is an immediate, definitive "no spots of this type" rather than the end of a scan. The structural point generalizes: **when contenders should fail fast and fall back (next size up, "lot full"), put the contended resource in a pool with an atomic take, rather than guarding each resource and making contenders hunt.** Compare Lesson 5.13's seat CAS, where contenders *want* a specific seat and per-row CAS is right, the access pattern, not fashion, picks the primitive.
+The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head pointer is the single CAS target, and a failed CAS means another thread *succeeded*, the loser's very next `poll()` attempt sees the new head. Claims are O(1) amortized regardless of occupancy, and "empty queue" is an immediate, definitive "no spots of this type" rather than the end of a scan. The structural point generalizes: **when contenders should fail fast and fall back (next size up, "lot full"), put the contended resource in a pool with an atomic take, rather than guarding each resource and making contenders hunt.** Compare Ticketmaster's seat CAS, where contenders *want* a specific seat and per-row CAS is right, the access pattern, not fashion, picks the primitive.
 
 </details>
 
@@ -217,7 +217,7 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 - **Multi-floor with per-floor displays and nearest-to-elevator assignment:** *now* `Floor` earns existence (it owns per-floor pools and a display), and *now* assignment policy varies by requirement, so `SpotAssignmentStrategy` appears, justified by the same rule that excluded it from v1. The seam was foreseen; the abstraction waited for its requirement.
 - **Pricing changes (weekend rates, lost ticket, EV surcharge):** new `PricingStrategy` implementations behind the existing interface, **zero core changes**, the payoff of the one abstraction v1 did buy.
 - **Gate/sensor hardware:** wrap it behind thin ports (`GateController`, `SpotSensor`) so vendor SDKs never leak into domain logic. *Delegate it:* "the embedded team owns gate firmware behind those two interfaces; my prior is dumb hardware + smart server, sensors report, the server decides, because pushing decisions into firmware makes every pricing change a fleet update."
-- **From one lot to a 50-lot city chain:** the moment **LLD turns back into HLD**, say so explicitly. S grows back (a multi-tenant store, lots as partitions), E grows back (consumer-app occupancy polling is a read-QPS story), availability gets a cache tier, cross-lot search is a new product. The free-list remains correct *per lot*, concurrency was always per-facility, but the system around it becomes a Module-5-shaped problem.
+- **From one lot to a 50-lot city chain:** the moment **LLD turns back into HLD**, say so explicitly. S grows back (a multi-tenant store, lots as partitions), E grows back (consumer-app occupancy polling is a read-QPS story), availability gets a cache tier, cross-lot search is a new product. The free-list remains correct *per lot*, concurrency was always per-facility, but the system around it becomes a system-design-shaped problem.
 
 **Cost/ops dimension (own it even in LLD):** v1 is one service instance + one small Postgres, **tens of dollars a month; on-call is "is the process up."** The gold-plated version costs the same to *run* but more to *change*, carried forever in maintenance, onboarding, and test surface, and change-cost is the budget a Director actually protects.
 
@@ -227,7 +227,7 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
-| **Last-spot concurrency** | **Coarse lock on park/unpark** | **Per-spot CAS with scan-retry** | **Concurrent free-list per type, atomic poll** | **A** is defensible at gate-scale arrival rates (quantify it!). **B** when contenders want one *specific* resource (5.13 seats). **C** (our choice) when any resource of a type will do and losers should fail fast in O(1). |
+| **Last-spot concurrency** | **Coarse lock on park/unpark** | **Per-spot CAS with scan-retry** | **Concurrent free-list per type, atomic poll** | **A** is defensible at gate-scale arrival rates (quantify it!). **B** when contenders want one *specific* resource (Ticketmaster seats). **C** (our choice) when any resource of a type will do and losers should fail fast in O(1). |
 | **Where patterns go** | **No abstractions, hardcode all policy** | **Strategy only where a requirement varies, pricing** | **Strategy/Factory/Observer everywhere "for flexibility"** | **A** for a true throwaway. **B** (our choice), each abstraction names the requirement that bought it. **C** is the over-engineering failure this interview exists to catch. |
 | **Vehicle modeling** | **Enum + size-compatibility map** | **Class hierarchy Car/Truck/Motorcycle** | **Full type registry with metadata config** | **A** (our choice) while types differ only by data. **B** only when behavior genuinely diverges per type. **C** only for a platform where operators define vehicle types at runtime. |
 
@@ -256,7 +256,7 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 ## Interviewer follow-up questions (with model answers)
 
 **Q1. Two cars hit two entry gates simultaneously; one compatible spot remains. Walk me through exactly why only one gets it.**
-> *Model:* Spot assignment is an atomic dequeue from a lock-free free-list per spot type, both gate threads call `poll()`; the queue's internal CAS guarantees one gets the spot and the other gets `null`, falling through to the next compatible size, then "lot full." There is no check-then-act window because the claim *is* the removal. The claimed spot sits `Held` until the ticket persists, with timeout reclaim if the gate crashes mid-assignment, the `AVAILABLE → HELD → OCCUPIED` shape of a Ticketmaster seat (Lesson 5.13), shrunk to one process. Defense in depth: a partial unique index on open tickets per spot makes the database reject a double-issue even if the in-memory layer ever regressed.
+> *Model:* Spot assignment is an atomic dequeue from a lock-free free-list per spot type, both gate threads call `poll()`; the queue's internal CAS guarantees one gets the spot and the other gets `null`, falling through to the next compatible size, then "lot full." There is no check-then-act window because the claim *is* the removal. The claimed spot sits `Held` until the ticket persists, with timeout reclaim if the gate crashes mid-assignment, the `AVAILABLE → HELD → OCCUPIED` shape of a Ticketmaster seat, shrunk to one process. Defense in depth: a partial unique index on open tickets per spot makes the database reject a double-issue even if the in-memory layer ever regressed.
 
 **Q2. Product adds weekend rates and a lost-ticket flat fee. How much of your design changes?**
 > *Model:* Two new `PricingStrategy` implementations and a selector, zero changes to `ParkingLot`, spots, or tickets. That's deliberate: R surfaced "pricing may change" as the one axis of stated variability, so v1 spent its single abstraction there. The contrast: had you asked me to change *assignment* policy, I'd be editing core code, because no requirement justified that seam, and I'd rather pay one small refactor later than carry speculative interfaces on every axis forever. Restraint plus one cheap refactor beats ten abstractions, nine never used.
@@ -273,11 +273,11 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 - **Parking Lot is a restraint test wearing an OOD costume.** Lock scope to ~3 entities (Lot, Spot, Ticket + a Vehicle value object), state the cut list, and let the interviewer watch you *not* build the airport.
 - **Narrating the RESHADED adaptation is itself teaching:** E collapses to capacity math (1,000 spots, 0.13 arrivals/s, 0.3 MB state, nothing scales, so build nothing that scales); A = class interfaces; H = the spot state machine; D = the entity model with the ticket as durable truth.
 - **One pattern, one requirement:** pricing varies by stated requirement → `PricingStrategy`; assignment doesn't → no strategy. Same pattern, opposite verdicts; the requirement decides.
-- **Volunteer the last-spot race.** Atomic claim via a concurrent free-list (`poll()` is the claim), a `Held` window with timeout reclaim, a DB partial index as backstop, 5.13's seat machine at micro scale. Quantify why even a coarse lock survives before rejecting it.
+- **Volunteer the last-spot race.** Atomic claim via a concurrent free-list (`poll()` is the claim), a `Held` window with timeout reclaim, a DB partial index as backstop, Ticketmaster's seat machine at micro scale. Quantify why even a coarse lock survives before rejecting it.
 - **Evolution proves the restraint was judgment, not ignorance:** floors bring `Floor` + assignment strategy *with* their requirements; hardware hides behind ports (delegate firmware; prior: dumb hardware, smart server); 50 lots turns the problem back into system design, say so and rerun the spine.
 
 > **Spaced-repetition recap:** Parking Lot = the #1 LLD curveball, scored on **restraint**. Three entities (Lot/Spot/Ticket), enum not vehicle hierarchy, cuts stated aloud. E drops to capacity math, nothing scales. One Strategy (pricing, requirement varies), no others. Volunteer the race: two gates, last spot → atomic free-list claim, `Held` + timeout, partial-index backstop. Evolution: floors → `Floor` + assignment strategy *then*; chain of lots → it's system design again.
 
 ---
 
-*End of Lesson 7.1. The parking lot inverts Module 5's instinct: there the danger was designing too small for the load; here, too big for the requirement. The atomic claim carries over from Ticketmaster (5.13) at process scale, knowing which RESHADED letters grow and which collapse is the transferable skill.*
+*End of Lesson 7.1. The parking lot inverts the HLD instinct: there the danger was designing too small for the load; here, too big for the requirement. The atomic claim carries over from Ticketmaster at process scale, knowing which RESHADED letters grow and which collapse is the transferable skill.*

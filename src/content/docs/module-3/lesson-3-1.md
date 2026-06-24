@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> Lesson 2.1 surveyed DNS inside the request lifecycle (the root→TLD→authoritative *walk* exists, TTL trades failover speed against lookup load, GeoDNS/anycast steer globally, failover isn't instant). This lesson is the **building-block deep-dive** at decision altitude: TTL as the operational knob, the four steering policies as distinct mechanisms, anycast's real semantics, and, the Director angle, DNS as a **global control plane** and an **outage blast-radius**.
+> The request-lifecycle lesson surveyed DNS at a glance (the root→TLD→authoritative *walk* exists, TTL trades failover speed against lookup load, GeoDNS/anycast steer globally, failover isn't instant). This lesson is the **building-block deep-dive** at decision altitude: TTL as the operational knob, the four steering policies as distinct mechanisms, anycast's real semantics, and, the Director angle, DNS as a **global control plane** and an **outage blast-radius**.
 
 ### Learning objectives
 - State who does the work in resolution (the recursive resolver, not the client) and why caching makes DNS viable at internet scale.
@@ -42,7 +42,7 @@ Your client makes **one recursive query** ("hand me the final answer") to its re
 
 1. **Failover / rollback speed.** TTL bounds how fast a record change actually takes effect. A **30-60 s** TTL lets you repoint a dead region or **roll back a bad DNS change** within a minute. A **24 h** TTL means a mistake, or a region outage, lingers for up to a day in resolver caches you don't control.
 2. **Query volume → cost.** Lower TTL = more lookups reaching your authoritative provider, who **bills per query**. Route 53 charges roughly **$0.40 per million standard queries**. Drop a TTL from 3600 s to 30 s on a domain serving **2B resolutions/day** and you can multiply authoritative query volume **~10-50×** depending on cacheability, a real line item, and a self-inflicted DDoS surface if mis-set.
-3. **Resolver slop.** Many resolvers and clients **don't honor TTL precisely**, some clamp a minimum, some serve stale. So a low TTL is a **best-effort floor on propagation, not a guarantee.** This is *the* Director caveat (carried over from 2.1 and worth repeating): **never design a hard RTO around DNS alone.**
+3. **Resolver slop.** Many resolvers and clients **don't honor TTL precisely**, some clamp a minimum, some serve stale. So a low TTL is a **best-effort floor on propagation, not a guarantee.** This is *the* Director caveat (worth repeating): **never design a hard RTO around DNS alone.**
 
 A common pattern: keep a **moderate TTL (300 s)** in steady state for cost, and **pre-lower it to 30-60 s** ahead of a planned migration or failover drill, then restore it.
 
@@ -86,7 +86,7 @@ flowchart TD
 ### Worked example: the DNS layer for a global, 3-region service
 Requirement (the R/E of RESHADED): a service in **us-east-1, eu-west-1, ap-southeast-1**, target **RTO ≤ 2 min** on a region loss, **EU PII must stay in EU**, and we run **canary deploys**. Design the DNS layer:
 
-1. **Steering: latency-based routing** as the default, each user's resolver gets the lowest-latency region, cutting cross-ocean RTT (recall ~150 ms per intercontinental hop from 2.1). This is the **performance** policy.
+1. **Steering: latency-based routing** as the default, each user's resolver gets the lowest-latency region, cutting cross-ocean RTT (recall ~150 ms per intercontinental hop). This is the **performance** policy.
 2. **Compliance override: a geolocation rule for the EU** so EU-origin queries pin to `eu-west-1` regardless of latency, **data residency beats latency** for that population. (Rejected alternative: latency-only, simpler, but a Frankfurt user routed to a US region on a bad day would put PII outside the EU. Not acceptable.)
 3. **Failover: health checks + 30-60 s TTL.** When a region's health check fails, the authoritative provider stops returning it; resolvers pick it up within ~a TTL. (Rejected alternative: 3600 s TTL, far cheaper in query volume, but blows the 2-min RTO; a dead region would linger ~an hour in caches.) **The honest caveat:** DNS failover is a best-effort floor, resolver slop means a few clients lag. For a *hard* SLA, pair it with **anycast withdrawal** or a **global L7 LB** that fails over faster than DNS can.
 4. **Canary: weighted records** to shift 5% → 25% → 100% to the new version, watching metrics between steps. Rejected alternative, flip 100% at once, is faster but has no blast-radius control if the new version is bad.

@@ -13,7 +13,7 @@ sidebar:
 
 1. Quantify why **long-horizon autonomy is unreliable** — the p^N compounding-error math — and design verification, checkpointing, and re-planning as the countermeasures rather than hoping for a better model.
 2. Decide **when multi-agent helps and when it hurts**: parallel, independently-verifiable subtasks justify the ~10–15× token multiplier; a single coupled thread of control does not.
-3. Architect a **durable, sandboxed agent runtime** — checkpointed state, isolated tool execution, idempotent side effects — reusing the exactly-once and untrusted-execution machinery from Modules 9 and 11.
+3. Architect a **durable, sandboxed agent runtime** — checkpointed state, isolated tool execution, idempotent side effects — reusing the exactly-once and untrusted-execution machinery from the payments and agent-runtime designs.
 4. Make **cost and safety first-class controls**: per-task token/time/step budgets, a kill switch, least-privilege tools, and human-in-the-loop gates placed by reversibility and blast radius.
 5. Run a **RESHADED spine where the NFRs invert the usual order** — task success rate, bounded cost, and containment dominate; raw QPS is a footnote — and design-evolve toward graduated autonomy.
 
@@ -48,7 +48,7 @@ That's exactly the shift an autonomous agent forces. A chatbot that's wrong *say
 5. **Stream progress and a full trace**, and **pause for human approval** at defined checkpoints.
 6. **Return a verified artifact** (a diff/PR, a cited report) plus the trace and a cost accounting.
 
-**Explicitly cut:** the foundation model itself (we consume a serving API — Lesson 5.15 / 11.4), the IDE/PR UI, fine-tuning the base model, and a self-improvement training loop. I'll name these as delegated or out of scope.
+**Explicitly cut:** the foundation model itself (we consume a serving API), the IDE/PR UI, fine-tuning the base model, and a self-improvement training loop. I'll name these as delegated or out of scope.
 
 **Non-functional requirements, priority order:**
 
@@ -62,7 +62,7 @@ That's exactly the shift an autonomous agent forces. A chatbot that's wrong *say
 | 6 | **Latency** | Minutes-to-hours per task; async by nature — *not* an interactive-latency problem |
 | 7 | **Throughput** | Thousands of concurrent tasks; trivially horizontal — a footnote |
 
-**The inversion, stated explicitly:** unlike the conversational assistant (12.2) where TTFT and QPS dominate, here a task takes minutes to hours and you run thousands, not millions per second. The scarce things are **a correct outcome, a capped bill, and a contained blast radius.** Every architectural decision flows from NFRs 1–3.
+**The inversion, stated explicitly:** unlike the conversational assistant where TTFT and QPS dominate, here a task takes minutes to hours and you run thousands, not millions per second. The scarce things are **a correct outcome, a capped bill, and a contained blast radius.** Every architectural decision flows from NFRs 1–3.
 
 ---
 
@@ -77,11 +77,11 @@ That's exactly the shift an autonomous agent forces. A chatbot that's wrong *say
 | 0.95 | 77% | 36% | **13%** |
 | 0.99 | 95% | 82% | 67% |
 
-This is why naive long-horizon agents fail in production despite great demos: **errors compound multiplicatively.** You cannot prompt your way out of 0.95⁴⁰. The design response is to (a) **shorten the chain** (decompose, constrain, use deterministic workflow steps where possible — Lesson 11.9), (b) **raise effective p with verification + retry** (catch a bad step and redo it, so a step's *effective* reliability approaches 1), and (c) **checkpoint** so a failure costs one step, not the whole task.
+This is why naive long-horizon agents fail in production despite great demos: **errors compound multiplicatively.** You cannot prompt your way out of 0.95⁴⁰. The design response is to (a) **shorten the chain** (decompose, constrain, use deterministic workflow steps where possible), (b) **raise effective p with verification + retry** (catch a bad step and redo it, so a step's *effective* reliability approaches 1), and (c) **checkpoint** so a failure costs one step, not the whole task.
 
 **Token and cost per task.** A non-trivial coding task runs ~20–60 model turns; with planning, tool results, and re-reading context, call it **~0.5–2M tokens** for a single agent. Multi-agent fan-out (an orchestrator plus several workers, each with its own context) commonly runs **~10–15× the tokens of a single chat turn-for-turn** — Anthropic has reported their multi-agent research system using roughly that multiplier. So a multi-agent task can be **~5–20M tokens ≈ low-single-digit to low-double-digit dollars per task** at 2026 frontier prices. That number is why **budgets are an NFR, not a nicety**: a stuck agent re-planning in a loop overnight is a four-figure incident.
 
-**Concurrency and capacity.** At, say, 10k tasks/day averaging 20 minutes of wall-clock, Little's Law gives ~140 concurrent tasks (`10000/86400 × 1200s ≈ 139`). Each needs a sandbox (a microVM/container) and durable state — so we size a **pool of a few hundred warm sandboxes**, not millions of anything. The model inference is delegated to a serving tier (5.15) and is the dominant *cost*, not a capacity headache for *this* system.
+**Concurrency and capacity.** At, say, 10k tasks/day averaging 20 minutes of wall-clock, Little's Law gives ~140 concurrent tasks (`10000/86400 × 1200s ≈ 139`). Each needs a sandbox (a microVM/container) and durable state — so we size a **pool of a few hundred warm sandboxes**, not millions of anything. The model inference is delegated to a serving tier and is the dominant *cost*, not a capacity headache for *this* system.
 
 **What estimation decided:** throughput is trivial; the crux is that success decays as pᴺ (→ verification + checkpoints + decomposition) and cost scales with the multi-agent multiplier (→ hard budgets + the single-vs-multi decision). The numbers justify the entire NFR inversion.
 
@@ -94,13 +94,13 @@ This is why naive long-horizon agents fail in production despite great demos: **
 **1. Durable task & step state (the resumability core).**
 
 - Access pattern: write a checkpoint after every step (plan, tool call + result, decision); on crash, reload the latest checkpoint and resume.
-- Choice: a **durable-execution / workflow engine** (Temporal, AWS Step Functions, Restate, or DBOS) backing the agent loop, with state in its persistent store (Postgres-class). The engine gives durable timers, retries, and exactly-once step semantics for free (Lesson 11.13).
+- Choice: a **durable-execution / workflow engine** (Temporal, AWS Step Functions, Restate, or DBOS) backing the agent loop, with state in its persistent store (Postgres-class). The engine gives durable timers, retries, and exactly-once step semantics for free.
 - Rejected: holding agent state in process memory. A crash at step 30 of 40 would restart from zero — re-running every tool call (double side effects) and re-burning every token. Durability is non-negotiable when tasks run for hours.
 
 **2. The sandbox / workspace (isolated, ephemeral).**
 
 - Access pattern: a per-task isolated environment to clone the repo, edit files, and **execute model-written code** safely.
-- Choice: a **per-task microVM (Firecracker) or hardened container (gVisor)** from a pre-warmed pool, with **no inbound access and tightly controlled egress** (Lesson 9.11 — untrusted execution). Fresh sandbox per task; destroyed after.
+- Choice: a **per-task microVM (Firecracker) or hardened container (gVisor)** from a pre-warmed pool, with **no inbound access and tightly controlled egress** (untrusted execution). Fresh sandbox per task; destroyed after.
 - Rejected: a shared executor or running tools in the orchestrator's process. Model-written code is *untrusted by construction*; one escape or one injected `curl … | sh` and the blast radius is your control plane.
 
 **3. Artifact store (workspace snapshots & outputs).**
@@ -109,12 +109,12 @@ This is why naive long-horizon agents fail in production despite great demos: **
 
 **4. Agent memory (semantic + procedural).**
 
-- Choice: a **vector store** (Lesson 11.2/11.11) for retrievable long-term memory — prior task traces, learned project conventions ("this repo uses pnpm, tests run with `make test`"), and reusable skills. Working memory lives in-context and is compacted (11.11) as the task grows.
+- Choice: a **vector store** for retrievable long-term memory — prior task traces, learned project conventions ("this repo uses pnpm, tests run with `make test`"), and reusable skills. Working memory lives in-context and is compacted as the task grows.
 - Rejected: stuffing all history into the context window — it blows the budget and triggers context rot.
 
 **5. Trace / observability store (audit + eval).**
 
-- Choice: a **structured trace store** (LangSmith/Langfuse/Phoenix-class, or OpenTelemetry into a columnar store) recording every prompt, tool call, result, token count, latency, and cost — keyed by task and step, fully replayable. This is both the debugging surface and the **evaluation dataset** (Lesson 11.7).
+- Choice: a **structured trace store** (LangSmith/Langfuse/Phoenix-class, or OpenTelemetry into a columnar store) recording every prompt, tool call, result, token count, latency, and cost — keyed by task and step, fully replayable. This is both the debugging surface and the **evaluation dataset**.
 
 ---
 
@@ -134,7 +134,7 @@ flowchart TB
     SBX["Sandbox pool<br/>microVM/gVisor · egress-controlled<br/>file edit · code exec · run tests"]
     VER{"Verifier / Critic<br/>tests pass? sources cross-checked?"}
     HITL{"HITL gate<br/>irreversible / high-blast-radius?"}
-    LLM["LLM serving tier (5.15)"]
+    LLM["LLM serving tier"]
     OUT["Verified artifact + trace + cost"]
     MEM[("Vector memory<br/>conventions · skills · past traces")]
     TRACE[("Trace store<br/>replayable audit")]
@@ -224,9 +224,9 @@ GET  /v1/tasks/{taskId}/artifacts       -> { diff_url, pr_url | report_url, cost
 
 **`tasks`** — `task_id` (PK), `goal`, `autonomy_level`, `acceptance_signal`, `status` (PLANNING / RUNNING / AWAITING_APPROVAL / VERIFYING / DONE / FAILED / KILLED), `budget` (JSON), `cost_spent` (JSON ledger), `created_at`. Sharded by `task_id` — tasks are independent, so even distribution beats locality here.
 
-**`steps`** — append-only, `step_id` (PK), `task_id` (FK), `seq`, `type` (PLAN / TOOL_CALL / OBSERVATION / DECISION / VERIFY / APPROVAL), `input`, `output`, `tokens`, `cost`, `latency_ms`, `checkpoint_ref`, `created_at`. **Append-only** so the trajectory is an immutable audit trail — replayable for debugging and as eval data. This is the same append-only-ledger instinct as payments (9.1), applied to agent decisions.
+**`steps`** — append-only, `step_id` (PK), `task_id` (FK), `seq`, `type` (PLAN / TOOL_CALL / OBSERVATION / DECISION / VERIFY / APPROVAL), `input`, `output`, `tokens`, `cost`, `latency_ms`, `checkpoint_ref`, `created_at`. **Append-only** so the trajectory is an immutable audit trail — replayable for debugging and as eval data. This is the same append-only-ledger instinct as payments, applied to agent decisions.
 
-**`tool_calls`** — `call_id` (PK), `step_id`, `tool`, `args_hash`, `idempotency_key`, `result`, `side_effecting` (bool), `status`. The **`idempotency_key`** is load-bearing: side-effecting tool calls (open PR, send email, write to an external system) must be **idempotent** so a durable retry after a crash doesn't double-act — exactly the Module 9 idempotency pattern, now applied to agent actions.
+**`tool_calls`** — `call_id` (PK), `step_id`, `tool`, `args_hash`, `idempotency_key`, `result`, `side_effecting` (bool), `status`. The **`idempotency_key`** is load-bearing: side-effecting tool calls (open PR, send email, write to an external system) must be **idempotent** so a durable retry after a crash doesn't double-act — exactly the payments idempotency pattern, now applied to agent actions.
 
 **`budget_ledger`** — per-task running totals of tokens / $ / steps / elapsed, checked before *every* model call and tool call. When any dimension hits its ceiling, the run transitions to AWAITING_APPROVAL or KILLED. This is what makes "bounded cost" a hard guarantee rather than a hope.
 
@@ -261,15 +261,15 @@ A 40-step task drifts: an early wrong assumption poisons every later step, and t
 A stuck agent loops — re-planning, re-reading, retrying — and burns tokens with no progress. *Mitigation:* the **budget ledger** (tokens / $ / steps / wall-clock) is checked before every model and tool call; **loop/no-progress detection** trips early; a hard **kill switch** tears down the task and sandbox. A task that exhausts its budget **stops and asks**, never silently continues. Cost is capped by construction, not by vigilance.
 
 **Failure 3 — Destructive or hijacked action (the safety failure).**
-The agent runs model-written code, or an **indirect prompt injection** (a malicious string in a fetched web page, a repo file, or a tool result — Lesson 11.6) tries to make it exfiltrate secrets or `rm -rf`. *Mitigation, defense-in-depth:* the **sandbox** (microVM/gVisor, controlled egress — 9.11) contains code execution; **least-privilege tools** mean the agent literally lacks a "delete prod" capability; **HITL gates** on anything irreversible; all tool output is **untrusted input** (11.14). You cannot fully prevent injection — you **contain the blast radius** so that even a hijacked agent can't do irreversible damage.
+The agent runs model-written code, or an **indirect prompt injection** (a malicious string in a fetched web page, a repo file, or a tool result) tries to make it exfiltrate secrets or `rm -rf`. *Mitigation, defense-in-depth:* the **sandbox** (microVM/gVisor, controlled egress) contains code execution; **least-privilege tools** mean the agent literally lacks a "delete prod" capability; **HITL gates** on anything irreversible; all tool output is **untrusted input**. You cannot fully prevent injection — you **contain the blast radius** so that even a hijacked agent can't do irreversible damage.
 
 **Failure 4 — Multi-agent where it doesn't belong (the cost-multiplier failure).**
-Someone fans out a tightly-coupled task (refactor one file, debug one stack trace) across many agents. Now you're paying the ~10–15× multiplier *and* fighting coordination/consistency on shared state, for worse results than a single agent. *Mitigation:* the **single-vs-multi rule** — multi-agent only for subtasks that are **parallel and independently verifiable** (research fan-out); single agent or a deterministic workflow for coupled threads of control (Lesson 11.12). The default is one agent; multi-agent must earn its multiplier.
+Someone fans out a tightly-coupled task (refactor one file, debug one stack trace) across many agents. Now you're paying the ~10–15× multiplier *and* fighting coordination/consistency on shared state, for worse results than a single agent. *Mitigation:* the **single-vs-multi rule** — multi-agent only for subtasks that are **parallel and independently verifiable** (research fan-out); single agent or a deterministic workflow for coupled threads of control. The default is one agent; multi-agent must earn its multiplier.
 
 **Failure 5 — Non-reproducibility.**
 "It worked yesterday" with no way to see what it did. *Mitigation:* the **append-only trace** captures every prompt, tool call, and decision, replayable step-by-step — both for incident response and as the eval dataset.
 
-**Evaluating the agent (Director framing, ties 11.7/11.14):** you evaluate the **trajectory, not just the final answer** — did it take a wasteful or dangerous path even if it eventually succeeded? Use a **task-success benchmark** (a held-out set of issues with known-good fixes; for coding, SWE-bench-style verified resolution rate), **trajectory eval** for safety/efficiency, and **red-teaming** for harmful action sequences (including injection-to-action). Task success rate is a *measured* number gating releases, not a vibe — and a prompt or model change that regresses it doesn't ship.
+**Evaluating the agent (Director framing):** you evaluate the **trajectory, not just the final answer** — did it take a wasteful or dangerous path even if it eventually succeeded? Use a **task-success benchmark** (a held-out set of issues with known-good fixes; for coding, SWE-bench-style verified resolution rate), **trajectory eval** for safety/efficiency, and **red-teaming** for harmful action sequences (including injection-to-action). Task success rate is a *measured* number gating releases, not a vibe — and a prompt or model change that regresses it doesn't ship.
 
 ---
 
@@ -277,15 +277,15 @@ Someone fans out a tightly-coupled task (refactor one file, debug one stack trac
 
 > Graduated autonomy as the primary evolution, because it adds a trust-and-governance machine the bounded version doesn't have.
 
-**Graduated autonomy.** Start every new task type at **suggest-only** (the agent proposes, a human executes). As the **measured** success rate and safety record on that task type clear a bar, promote it to **bounded** (auto-execute reversible actions, gate irreversible ones), and only well-proven, low-blast-radius types to **auto**. Autonomy is *earned per task type with data*, and demotion on a regression is automatic. The governance question — *who authorizes raising autonomy, and on what evidence* — is a Director-owned control (11.14), not an engineer's config flag.
+**Graduated autonomy.** Start every new task type at **suggest-only** (the agent proposes, a human executes). As the **measured** success rate and safety record on that task type clear a bar, promote it to **bounded** (auto-execute reversible actions, gate irreversible ones), and only well-proven, low-blast-radius types to **auto**. Autonomy is *earned per task type with data*, and demotion on a regression is automatic. The governance question — *who authorizes raising autonomy, and on what evidence* — is a Director-owned control, not an engineer's config flag.
 
-**Learned skills (procedural memory).** Promote repeatedly-useful patterns ("this repo's tests run with `make test`", "our deploy needs flag X") into the **procedural memory** store (11.11) so future tasks start smarter. Guard against memory poisoning — a wrong learned fact silently degrades every future run, so learned skills are themselves verified before promotion.
+**Learned skills (procedural memory).** Promote repeatedly-useful patterns ("this repo's tests run with `make test`", "our deploy needs flag X") into the **procedural memory** store so future tasks start smarter. Guard against memory poisoning — a wrong learned fact silently degrades every future run, so learned skills are themselves verified before promotion.
 
-**The eval harness as product.** The held-out task benchmark and trajectory evals become the **regression gate** for every prompt/model/tool change (11.7) — and, increasingly, a competitive moat: the team that measures agent quality rigorously ships improvements safely while others ship regressions blind.
+**The eval harness as product.** The held-out task benchmark and trajectory evals become the **regression gate** for every prompt/model/tool change — and, increasingly, a competitive moat: the team that measures agent quality rigorously ships improvements safely while others ship regressions blind.
 
 **Scale-out and integration.** Thousands of parallel tasks scale by adding sandboxes and workers (stateless given the durable store); the cost ceiling, not the compute, is the real governor. Integrate as a **PR-opening bot in CI** or an IDE agent — at which point the HITL gate *is* code review, a control developers already trust.
 
-**Cross-references:** Lesson 9.11 (untrusted code execution / sandboxing — the same isolation problem), 9.1 (idempotency + append-only ledger — reused for tool calls and the trajectory), 11.9 (the agent loop and agent-vs-workflow), 11.12 (multi-agent orchestration — the single-vs-multi decision), 11.13 (durable runtime + HITL), 11.14 (agent action safety + trajectory eval), 12.5 (the tool-using support agent — the same safety machinery at lower autonomy).
+**Builds on:** untrusted code execution / sandboxing (the same isolation problem), payments idempotency + append-only ledger (reused for tool calls and the trajectory), the agent loop and agent-vs-workflow, multi-agent orchestration (the single-vs-multi decision), durable runtime + HITL, agent action safety + trajectory eval, and the tool-using support agent (the same safety machinery at lower autonomy).
 
 ---
 
@@ -337,7 +337,7 @@ Someone fans out a tightly-coupled task (refactor one file, debug one stack trac
 
 **Q3. An indirect prompt injection in a fetched web page tells the agent to email a customer database to an attacker. Trace what stops it.**
 
-> *Model:* Defense-in-depth, no single layer trusted. The agent runs in a **sandbox** with **controlled egress**, so an arbitrary outbound connection is blocked. **Least-privilege tools** mean the agent has no "dump the customer DB" or "email arbitrary address" capability in the first place. Any irreversible/external action hits a **HITL gate**. All fetched content is treated as **untrusted input** (11.6/11.14). You **assume injection is possible** and design so the blast radius is contained — the worst case is a wasted step the verifier rejects, not data exfiltration. The residual control is the **audit trace** for detection. Prevention isn't fully possible; containment is the design.
+> *Model:* Defense-in-depth, no single layer trusted. The agent runs in a **sandbox** with **controlled egress**, so an arbitrary outbound connection is blocked. **Least-privilege tools** mean the agent has no "dump the customer DB" or "email arbitrary address" capability in the first place. Any irreversible/external action hits a **HITL gate**. All fetched content is treated as **untrusted input**. You **assume injection is possible** and design so the blast radius is contained — the worst case is a wasted step the verifier rejects, not data exfiltration. The residual control is the **audit trace** for detection. Prevention isn't fully possible; containment is the design.
 
 ---
 
@@ -347,10 +347,10 @@ Someone fans out a tightly-coupled task (refactor one file, debug one stack trac
 2. **An external verifier defines "done" — never the agent.** Tests for code, cross-checked citations for research, supplied as an input. Verify-and-retry raises *effective* per-step reliability far more than a smarter model does.
 3. **Cost and safety are hard, pre-flight controls.** A budget ledger (tokens/$/steps/wall-clock) checked before every call plus a kill switch caps cost by construction; a sandbox + least-privilege tools + HITL on irreversible actions contains a hijacked or buggy agent. Injection-to-action you *contain*, you don't prevent.
 4. **Multi-agent must earn its ~10–15× multiplier.** Use it only for parallel, independently-verifiable subtasks; keep coupled threads of control single-agent or as a deterministic workflow.
-5. **Production agents are durable, idempotent, observable distributed workflows.** Per-step checkpoints in a durable runtime, idempotent side-effecting tool calls, and an append-only replayable trace — the exactly-once and untrusted-execution machinery of Modules 9 and 11, applied to autonomy.
+5. **Production agents are durable, idempotent, observable distributed workflows.** Per-step checkpoints in a durable runtime, idempotent side-effecting tool calls, and an append-only replayable trace — the exactly-once and untrusted-execution machinery of the payments and agent-runtime designs, applied to autonomy.
 
-> **Spaced-repetition recap:** Autonomous coding/research agent = **autonomy is the liability you bound**, not the feature you unleash. Reliability collapses as **pᴺ** (0.95⁴⁰ ≈ 13%) → **decompose + verify-and-retry + checkpoint** (a cheap verifier beats a smarter model). Cost explodes under the **~10–15× multi-agent multiplier** → **multi-agent only for parallel + independently-verifiable subtasks**, single-agent/workflow otherwise, with a **hard budget ledger + kill switch**. Containment over prevention: **sandbox (9.11) + least-privilege tools + HITL on irreversible actions**, all tool output untrusted (11.6/11.14). **Durable runtime** (11.13) with per-step checkpoints + **idempotent** tool calls (9.1) so a crash resumes, not restarts. "Done" = an **external verifier** (tests / cross-checked sources), never self-assessment. Evaluate the **trajectory**, not just the answer; success rate is a measured release gate. Throughput is trivial; **success rate, bounded cost, and containment** are the crux.
+> **Spaced-repetition recap:** Autonomous coding/research agent = **autonomy is the liability you bound**, not the feature you unleash. Reliability collapses as **pᴺ** (0.95⁴⁰ ≈ 13%) → **decompose + verify-and-retry + checkpoint** (a cheap verifier beats a smarter model). Cost explodes under the **~10–15× multi-agent multiplier** → **multi-agent only for parallel + independently-verifiable subtasks**, single-agent/workflow otherwise, with a **hard budget ledger + kill switch**. Containment over prevention: **sandbox + least-privilege tools + HITL on irreversible actions**, all tool output untrusted. **Durable runtime** with per-step checkpoints + **idempotent** tool calls so a crash resumes, not restarts. "Done" = an **external verifier** (tests / cross-checked sources), never self-assessment. Evaluate the **trajectory**, not just the answer; success rate is a measured release gate. Throughput is trivial; **success rate, bounded cost, and containment** are the crux.
 
 ---
 
-*End of Lesson 12.6. The autonomous agent inverts the conversational-assistant instincts: latency and QPS are footnotes, and the design is dominated by making a fallible, occasionally-hijacked long-running process produce verifiably-correct work without runaway cost or irreversible damage. Lesson 12.7 turns to a different resource frontier — text-to-image generation, where the binding constraint is GPU-seconds in a queue, not tokens in a loop.*
+*End of Lesson 12.6. The autonomous agent inverts the conversational-assistant instincts: latency and QPS are footnotes, and the design is dominated by making a fallible, occasionally-hijacked long-running process produce verifiably-correct work without runaway cost or irreversible damage. The next problem turns to a different resource frontier — text-to-image generation, where the binding constraint is GPU-seconds in a queue, not tokens in a loop.*

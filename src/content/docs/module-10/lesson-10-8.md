@@ -21,7 +21,7 @@ A good pilot doesn't fly by staring out the window. At cruise altitude over an o
 
 ## The questions
 
-This whole cluster is **present-tense "how do you operate"**, so it takes the system-description shape (Lesson 10.2), *not* STAR-L. There's no single past story; there's a system to describe, anchored with one or two pieces of evidence that it's real.
+This whole cluster is **present-tense "how do you operate"**, so it takes the system-description shape, *not* STAR-L. There's no single past story; there's a system to describe, anchored with one or two pieces of evidence that it's real.
 
 | Variant | What it's really testing |
 |---|---|
@@ -30,7 +30,7 @@ This whole cluster is **present-tense "how do you operate"**, so it takes the sy
 | "How do you measure team performance / productivity / health?" | DORA/SPACE/DX-Core-4 literacy *and* the diagnose-systems-not-individuals meta-position. |
 | "Walk me through a metric going red and what you did." | That your metrics *drive decisions*, the one proof a number changed an action. |
 | "What meeting or process did you kill? How do you ensure predictable delivery at scale?" | Pruning discipline and planning/release-gating mechanics, a system that grows forever is process maximalism, a fail. |
-| "How do you measure whether AI tooling is actually paying off?" | Cost/ROI literacy inside the review, bridges to Lesson 10.12. |
+| "How do you measure whether AI tooling is actually paying off?" | Cost/ROI literacy inside the review, bridges to AI-era leadership. |
 | "What would your first 90 days here look like?" | Listening tour → diagnosis → install the OS (the near-universal closer). |
 
 The merge: every one is **present-tense system-shape**, so the instrument is the layered-system answer below, describe the stack, then prove it with the killed meeting and the metric-changed-a-decision story. First-90-days is the same system sequenced: listen, diagnose, *then* install.
@@ -61,7 +61,7 @@ flowchart TD
     OUT --> DEC["Metric changes a decision"]
 ```
 
-For the **first-90-days** variant, sequence the same system over a clock: weeks 1-30 listening tour (1:1s, delivery and incident data, the artifacts), 30-60 diagnosis and first structural calls, 60-90 install the operating system. Listening is evidenced by *specifics*, not duration, "I spent a quarter listening" reads slow (Lesson 10.7).
+For the **first-90-days** variant, sequence the same system over a clock: weeks 1-30 listening tour (1:1s, delivery and incident data, the artifacts), 30-60 diagnosis and first structural calls, 60-90 install the operating system. Listening is evidenced by *specifics*, not duration, "I spent a quarter listening" reads slow.
 
 ---
 
@@ -72,7 +72,7 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 - **DORA / SPACE / DX Core 4 are now assumed vocabulary**, the way "agile" was in 2010. The four DORA keys (deployment frequency, lead time, change-failure rate, time to restore) are table stakes; SPACE and DX Core 4 signal you know throughput alone misses developer experience. But naming them isn't the differentiator, the **meta-position is**: diagnose systems, never rank individuals; pair quantitative with DevEx survey; tie to business outcomes. Reciting acronyms without that stance reads as someone who read a blog post.
 - **Activity metrics are an instant fail, and worse now.** LOC, commits, story points as productivity was a fail post-McKinsey-debate; post-AI it's a *crater*, because code volume is essentially free when a model writes the first draft. Source code is a liability, not output. Count artifacts produced rather than outcomes delivered and the round is over. **Metrics-nihilism fails just as hard:** "it's all gamed, I judge by feel" is the equal-and-opposite ditch, hold both truths, metrics are gameable *and* indispensable, which is exactly why you diagnose systems with them rather than rank people.
 - **An async-first, written operating system is expected.** RFCs/ADRs, decision logs, templated reviews, status-goes-written. A meeting-dense answer reads as a remote/hybrid failure, "I walk the floor" describes a system that breaks the moment the team is distributed, which it now always is. Management-by-walking-around is obsolete with wide spans and hybrid norms.
-- **Cost and AI-ROI live inside the operating review.** Cost per request, cloud spend, and AI-tooling payback now sit in the monthly business review, because Directors own budgets (Lesson 10.11). "I track delivery and reliability" with no cost line reads as someone who's never owned a P&L. The AI-ROI question (Lesson 10.12) folds in: can you measure whether the tooling moved lead time, or are you quoting vendor claims.
+- **Cost and AI-ROI live inside the operating review.** Cost per request, cloud spend, and AI-tooling payback now sit in the monthly business review, because Directors own budgets. "I track delivery and reliability" with no cost line reads as someone who's never owned a P&L. The AI-ROI question folds in: can you measure whether the tooling moved lead time, or are you quoting vendor claims.
 - **Surveillance is a named red flag, distinct from outcome monitoring.** Monitoring *activity*, keystroke trackers, PR-count leaderboards, time-in-IDE, is an explicit fail: you instrument the system's outputs (lead time, reliability, cost), never the individuals' inputs. And process maximalism (SAFe-heavy, ceremony for its own sake) is as damaging as no system, minimal, metric-anchored, visibly pruned is the bar.
 
 ---
@@ -97,7 +97,7 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 
 **Why it scores:**
 - **It opens with the surveillance-vs-visibility distinction**, naming and ruling out the 2026 red flag (monitoring activity), which signals current literacy in the first sentence.
-- **Every layer has a purpose, an artifact, and a rhythm**, async exception-driven dashboard, themes-not-status 1:1, leading-indicator survey, so it reads as a designed system, not a meeting list; and the 20-point DevEx-drop story is the metric-changed-a-decision proof, probe-resistant (Lesson 10.1's quantify rule, honored in a behavioral answer).
+- **Every layer has a purpose, an artifact, and a rhythm**, async exception-driven dashboard, themes-not-status 1:1, leading-indicator survey, so it reads as a designed system, not a meeting list; and the 20-point DevEx-drop story is the metric-changed-a-decision proof, probe-resistant (the quantify rule, honored in a behavioral answer).
 - **It names *when* it goes deep**, incidents, key hires, one inspected area per quarter, converting "delegation" into something verifiable, the line between trust and abdication.
 - **It carries both proofs**, the week-three migration catch and the killed status meeting, closing on pruning discipline, the evidence interviewers check that the system is real and maintained.
 
@@ -110,7 +110,7 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 **Why it scores:**
 - **It leads with the diagnose-systems-not-individuals meta-position**, stated unprompted, the highest-signal move in this cluster, and explains *why* (gaming + trust collapse), then pairs DORA with DevEx survey, ties to a business outcome, and rejects activity metrics with the AI-era reasoning (code volume is free): the exact 2026 literacy bar.
 - **The red-metric story is a real intervention with numbers** (8% → 15% → under 10%, lead time held), and the fix is *systemic*, a review gate, not "I found the team responsible", the meta-position demonstrated in action.
-- **It bridges to AI-ROI cleanly** (the change-failure climb was an AI-rollout side effect the system caught), showing the cost/AI lens lives inside the operating review (Lesson 10.12).
+- **It bridges to AI-ROI cleanly** (the change-failure climb was an AI-rollout side effect the system caught), showing the cost/AI lens lives inside the operating review.
 
 ---
 
@@ -119,7 +119,7 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 - **"Give me a meeting you killed, and how you knew it was safe to."**, *Strong:* a specific forum removed because an artifact made it redundant (the async review replacing the status all-hands), "nobody noticed" as the evidence. *Red flag:* no killed meeting, a system that only adds is process maximalism, and you'll bloat the calendar here too.
 - **"How would you use DORA to find your weakest engineers?"**, *Strong:* you wouldn't, that's the stack-rank trap; DORA diagnoses where the *system* is slow, individual performance runs through 1:1s and calibration, not a flow dashboard. *Red flag:* taking the bait and ranking people by a team-level metric (or naming LOC, commits, or velocity as a productivity measure, an instant fail, harder post-AI).
 - **"How does the OS change from 30 to 300 engineers?"**, *Strong:* more goes async/written, the cadence adds a manager-of-managers layer and a metrics review, and *more* gets delegated with the exception protocol carrying the load, flatter on your calendar, not denser. *Red flag:* the same meetings, just more of them, or "I'd hire a chief of staff" with no system change.
-- **"How do you know your AI tooling is paying off?"**, *Strong:* it's in the operating review, lead time and change-failure rate before/after, not acceptance rate or LOC, with cost per transaction tracked (Lesson 10.12). *Red flag:* Copilot acceptance rate or commit volume as the ROI proof, or no measurement at all.
+- **"How do you know your AI tooling is paying off?"**, *Strong:* it's in the operating review, lead time and change-failure rate before/after, not acceptance rate or LOC, with cost per transaction tracked. *Red flag:* Copilot acceptance rate or commit volume as the ROI proof, or no measurement at all.
 
 ---
 
@@ -136,7 +136,7 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 
 1. **Describe your operating system, then prove it.** "What's your management operating cadence?" *(Sketch: the layered stack, staff for decisions, monthly metrics review with a cost line, quarterly planning, 1:1s/skip-levels/incident loop, each with owner, artifact, decision right; then the visibility three channels + exception protocol; close with the killed meeting and the metric-changed-a-decision proof. Say the "owner, artifact, decision right" sentence aloud.)*
 2. **Walk a red metric to a systemic fix.** "Your change-failure rate doubled, go." *(Sketch: diagnose-systems-not-individuals, 'where did the safety net thin,' not 'who broke it'; a real cause, a systemic fix (a review gate, not a person), the recovery number with lead time held. State the meta-position explicitly.)*
-3. **Defend your metrics stance against a nihilist.** "Aren't all engineering metrics just gamed?" *(Sketch: hold both truths, gameable *and* indispensable, which is why you diagnose systems, never rank people; pair DORA with DevEx survey, tie to business outcomes, reject activity metrics with the AI-era reasoning; and note the 30 → 300 scaling answer is *flatter* not denser, more async, more delegated to the exception protocol, Lesson 10.7. Land between recitation and nihilism.)*
+3. **Defend your metrics stance against a nihilist.** "Aren't all engineering metrics just gamed?" *(Sketch: hold both truths, gameable *and* indispensable, which is why you diagnose systems, never rank people; pair DORA with DevEx survey, tie to business outcomes, reject activity metrics with the AI-era reasoning; and note the 30 → 300 scaling answer is *flatter* not denser, more async, more delegated to the exception protocol. Land between recitation and nihilism.)*
 
 ---
 
@@ -144,11 +144,11 @@ This cluster has a hard literacy bar that re-scores every answer. Five shifts se
 - **An operating system is layered, not a meeting list:** a cadence stack where every forum has an **owner, an artifact, and a decision right**; a three-channel visibility system (instrumented outcomes + human signal + exception protocol); and calibrated intervention where you *name when you go deep* (incidents, key hires, one inspected area per quarter).
 - **Visibility without micromanaging = instrument outcomes, not activity.** Async DORA dashboard, themes-not-status 1:1s, skip-levels, a DevEx pulse that catches people problems two quarters early, postmortems you read yourself. Surveillance (keystrokes, PR leaderboards) is a named fail.
 - **The metrics meta-position, stated unprompted: diagnose systems, never rank individuals.** DORA/SPACE/DX-Core-4 are assumed vocabulary; pair quantitative with DevEx survey, tie to business outcomes. Both ditches fail, activity metrics (LOC, commits, story points, worse post-AI) and metrics-nihilism.
-- **Cost and AI-ROI live inside the operating review.** Cost per transaction in the monthly review; AI tooling measured on lead time and change-failure rate, never acceptance rate or LOC (Lesson 10.12). Directors own budgets.
+- **Cost and AI-ROI live inside the operating review.** Cost per transaction in the monthly review; AI tooling measured on lead time and change-failure rate, never acceptance rate or LOC. Directors own budgets.
 - **Carry the two proofs:** a **killed meeting** (a system that only grows is process maximalism) and a **metric that changed a decision**, without them the system is theory. First-90-days is the same OS sequenced: listen with specifics, diagnose, then install.
 
-> **Spaced-repetition recap:** Your operating system is a **leveling question** scored on whether you have a *system*, not a calendar. Answer in **system-shape** (Lesson 10.2): a **cadence stack** (every meeting has an owner, an artifact, a decision right; status async/written), a **visibility system** (instrumented outcomes + human signal + exception protocol), and **calibrated intervention** (name when you go deep). Meta-position, said unprompted: **metrics diagnose systems, never rank individuals**, DORA/SPACE/DX-Core-4 paired with DevEx survey, tied to business outcomes. **Both ditches fail:** activity metrics (LOC/commits/story points, worse post-AI) and metrics-nihilism. Put **cost and AI-ROI inside the review**. Carry the two proofs: a **killed meeting** and a **metric that changed a decision**. Surveillance ≠ visibility.
+> **Spaced-repetition recap:** Your operating system is a **leveling question** scored on whether you have a *system*, not a calendar. Answer in **system-shape**: a **cadence stack** (every meeting has an owner, an artifact, a decision right; status async/written), a **visibility system** (instrumented outcomes + human signal + exception protocol), and **calibrated intervention** (name when you go deep). Meta-position, said unprompted: **metrics diagnose systems, never rank individuals**, DORA/SPACE/DX-Core-4 paired with DevEx survey, tied to business outcomes. **Both ditches fail:** activity metrics (LOC/commits/story points, worse post-AI) and metrics-nihilism. Put **cost and AI-ROI inside the review**. Carry the two proofs: a **killed meeting** and a **metric that changed a decision**. Surveillance ≠ visibility.
 
 ---
 
-*End of Lesson 10.8. The operating system is how you run the org day to day; Lesson 10.9 takes the same instruments into the crucible, execution under pressure, where the dashboard you built here is what lets you see the slip at week three instead of week twelve, and the exception protocol gets the sev-1 to your desk in time to command it.*
+*End of Lesson 10.8. The operating system is how you run the org day to day; the next lesson takes the same instruments into the crucible, execution under pressure, where the dashboard you built here is what lets you see the slip at week three instead of week twelve, and the exception protocol gets the sev-1 to your desk in time to command it.*

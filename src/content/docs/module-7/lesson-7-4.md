@@ -12,7 +12,7 @@ sidebar:
 - State the **O(1) result** (hash map + doubly-linked recency list) in one sentence and move on - mechanics are delegable; contract decisions are not.
 - Choose **lock granularity** (global vs striped vs read-write) with arithmetic - including the honest admission that **a coarse lock is fine until a measurement says otherwise**.
 - Adapt the **RESHADED spine** to an LLD problem - the letters survive; narrating how each step adapts is itself interview signal.
-- Know **where the LLD answer ends**: two processes sharing the cache puts you in Lesson 3.7 territory, and Lesson 9.14 picks up that thread.
+- Know **where the LLD answer ends**: two processes sharing the cache puts you in distributed-cache territory, and the distributed-cache deep-dive picks up that thread.
 
 ### Intuition first
 Think of a **coat check**. The numbered tags are the hash map: hand over tag 47, get coat 47 instantly, no searching. The recency rule is the attendant re-hanging every retrieved coat at the *front* of the rack - so when the room fills, the coat at the *back* (untouched longest) goes to overflow. That is LRU: tags for lookup, rack order for eviction.
@@ -26,7 +26,7 @@ Now the part that matters at this level: management changes the rule - evict the
 > In an LLD problem, R adapts from "scope a planet-scale product" to **"pin the contract"**: who calls this, with what concurrency, under what capacity definition. Skipping to code without these questions is the most common down-level signal.
 
 **Clarifying questions I'd ask (with assumed answers):**
-- *Single process or shared across services?* → **Single process, in-memory.** (Shared = Lesson 3.7's distributed-cache problem - a different question; I say that boundary out loud.)
+- *Single process or shared across services?* → **Single process, in-memory.** (Shared = the distributed-cache problem - a different question; I say that boundary out loud.)
 - *Thread-safe?* → **Yes**, multiple application threads.
 - *Capacity in entries or bytes?* → **Count for v1, but the interface must admit a byte-weigher** - ops teams budget heap in MB, not entries.
 - *Strict or approximate LRU?* → **Strict for v1**; approximate recency is the standard escape hatch if the lock ever becomes the bottleneck.
@@ -63,7 +63,7 @@ Now the part that matters at this level: management changes the rule - evict the
 - **Everything on-heap, two state holders:** the **store** (hash map: key → entry) and the **policy's bookkeeping** (whatever ordering structure the policy maintains). Keeping them separately owned is the extensibility seam - see H.
 - **Capacity by count *and* by weight.** Constructor takes `maxEntries` or `weigher + maxWeight`. *Rejected: count-only* - 1M tiny entries vs 1M 50 KB entries differ by 50 GB.
 - **Rejected: soft/weak references ("let the GC evict").** Zero eviction code, but eviction timing becomes a GC detail: unpredictable hit rates, no policy control, undebuggable. Explicit bounded capacity costs the eviction machinery and buys deterministic behavior.
-- **Expired-but-unread TTL entries** are a slow leak. Handle with **lazy expiry on access plus a cheap periodic sweep** - the same lazy-reclaim instinct as Lesson 5.13's holds: correctness never depends on the sweeper; it only reclaims memory.
+- **Expired-but-unread TTL entries** are a slow leak. Handle with **lazy expiry on access plus a cheap periodic sweep** - the same lazy-reclaim instinct as Ticketmaster's holds: correctness never depends on the sweeper; it only reclaims memory.
 
 ---
 
@@ -129,7 +129,7 @@ interface EvictionPolicy<K>
 
 The **entry** carries key, value, weight, optional expiry, and **a handle to the policy's bookkeeping node** for that key - the back-pointer that makes everything O(1): when `get` hits the map, the policy splices its node without searching for it.
 
-**The O(1) result, in one sentence:** a hash map gives O(1) lookup, a doubly-linked recency list gives O(1) move-to-front and O(1) evict-from-tail, and the entry's node pointer ties them - **hash map for *finding*, linked list for *ordering*, neither doing the other's job.** State that, offer depth if wanted, and spend your minutes on the contract. Reciting the pointer surgery unprompted is the too-deep failure mode from Lesson 1.1.
+**The O(1) result, in one sentence:** a hash map gives O(1) lookup, a doubly-linked recency list gives O(1) move-to-front and O(1) evict-from-tail, and the entry's node pointer ties them - **hash map for *finding*, linked list for *ordering*, neither doing the other's job.** State that, offer depth if wanted, and spend your minutes on the contract. Reciting the pointer surgery unprompted is the too-deep failure mode the altitude lesson warns of.
 
 <details>
 <summary>Go deeper, HashMap + DLL mechanics and the LFU variant (IC depth, optional)</summary>
@@ -145,7 +145,7 @@ A singly-linked list fails because unlinking needs the predecessor - O(n) to fin
 
 **LFU in O(1)** (the standard follow-up): a map of `frequency → DLL of nodes at that frequency` plus `minFreq`; on access, move the node from list *f* to *f+1*; victim = LRU end of the `minFreq` list. All O(1). Naive LFU with a min-heap is O(log n) per access - exactly the leaky-abstraction trap from section H.
 
-**TTL bookkeeping:** a timer wheel (Lesson 3.15's scheduler uses the same structure) or an expiry-ordered list for uniform TTLs; the lazy check on access (`expiry < now → miss, reclaim inline`) keeps correctness independent of the sweeper.
+**TTL bookkeeping:** a timer wheel (a scheduler uses the same structure) or an expiry-ordered list for uniform TTLs; the lazy check on access (`expiry < now → miss, reclaim inline`) keeps correctness independent of the sweeper.
 
 </details>
 
@@ -182,7 +182,7 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 
 **The production honesty (Directors say this; juniors don't):** *in real life I would not build this.* Caffeine (JVM), `lru-cache` (Node), or an `OrderedDict` wrapper beat anything written in 40 minutes - Caffeine's TinyLFU admission alone is worth several hit-rate points over textbook LRU. The exercise tests whether you can **design what those libraries are** - then designing it anyway with full command is the strongest frame.
 
-**The boundary question - "now two services need this cache."** Refuse the false continuity: a shared cache is **not a bigger LRU object**; it has different physics. In-process hit: ~100 ns. Cross-process: a network hop makes every hit **~0.5-1 ms - call it 5,000× slower** (Lesson 1.4) - and you inherit invalidation, staleness, hot keys, and cache-aside-vs-write-through topology: Lesson 3.7's **distributed caching** building block, with the strategies from Lesson 2.10. The usual production answer is **both tiers**: this lesson's cache as a tiny hot L1 in each instance over Redis/Memcached as shared L2 - and L1 invalidation across replicas becomes the new hard problem. **Lesson 9.14 picks up exactly there**; the deliverable of *this* lesson is knowing where its own answer stops.
+**The boundary question - "now two services need this cache."** Refuse the false continuity: a shared cache is **not a bigger LRU object**; it has different physics. In-process hit: ~100 ns. Cross-process: a network hop makes every hit **~0.5-1 ms - call it 5,000× slower** - and you inherit invalidation, staleness, hot keys, and cache-aside-vs-write-through topology: the **distributed caching** building block, with the caching strategies. The usual production answer is **both tiers**: this lesson's cache as a tiny hot L1 in each instance over Redis/Memcached as shared L2 - and L1 invalidation across replicas becomes the new hard problem. **The distributed-cache deep-dive picks up exactly there**; the deliverable of *this* lesson is knowing where its own answer stops.
 
 **Where I'd delegate (the explicit Director move):** *"The platform team benchmarks coarse-lock vs 16-way striping under our replayed production trace; my prior is the coarse lock survives - we're 20× under its ceiling - and if not, striping is contained behind the facade. I also want hit-rate telemetry from day one: an unmeasured cache is a rumor, and policy choice is an empirical question, not a taste question."*
 
@@ -205,7 +205,7 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 - **"How do you make it thread-safe?"** - *Strong:* "global mutex - the arithmetic shows 20× headroom; striping is a contained refactor if profiling disagrees," and names the compound map+policy invariant. *Red flag:* reflexive striping or lock-free talk with no number attached.
 - **"Why not a read-write lock?"** - *Strong:* "strict LRU has no read-only operations - every get splices the recency list; the rwlock degenerates to exclusive with extra overhead." *Red flag:* "reads can share" - never traced what `get` does.
 - **"Now make eviction LFU."** - *Strong:* new policy class, same four hooks, owns frequency-bucket bookkeeping to stay O(1); callers untouched. *Red flag:* edits the cache class, or shrugs at an O(log n) heap.
-- **"Now two services need it."** - *Strong:* names the 5,000× latency cliff, invalidation, and the L1-over-Redis two-tier shape; points at Lesson 3.7. *Red flag:* "wrap it in gRPC," as if the object just grew a port.
+- **"Now two services need it."** - *Strong:* names the 5,000× latency cliff, invalidation, and the L1-over-Redis two-tier shape; points at the distributed-caching block. *Red flag:* "wrap it in gRPC," as if the object just grew a port.
 
 ---
 
@@ -228,10 +228,10 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 > *Model:* Strict LRU has no read-only operations - every `get` moves the entry to the front of the recency list, so "readers" are writers and the rwlock degenerates into an exclusive lock costing ~2× per acquire. It helps only when reads genuinely don't mutate: a pure TTL policy with no recency, or an approximate-LRU design where reads append to a lossy buffer instead of splicing (Caffeine's approach - relax recency precision to buy concurrency). Which is exactly why lock choice lives behind the facade, per policy, not in the public contract.
 
 **Q3. Add TTL as a policy. What breaks, and what do you decide?**
-> *Model:* TTL plugs into the same four hooks - its bookkeeping is an expiry ordering (a timer wheel, like Lesson 3.15's scheduler) instead of a recency list - but it surfaces two contract decisions. Does `get` refresh the TTL? Default no, expiry from write: touch-on-read lets a hot-but-stale entry live forever; offer touch as explicit opt-in. And expired-but-unread entries are a leak, so expiry is checked lazily on access - an expired hit is a miss, reclaimed inline, correctness never depending on a background job - with a periodic sweep purely for hygiene, the lazy-reclaim shape from Lesson 5.13. TTL *plus* LRU composes as expiry-for-validity over LRU-for-victim-choice, not two competing victim pickers.
+> *Model:* TTL plugs into the same four hooks - its bookkeeping is an expiry ordering (a timer wheel, like a scheduler) instead of a recency list - but it surfaces two contract decisions. Does `get` refresh the TTL? Default no, expiry from write: touch-on-read lets a hot-but-stale entry live forever; offer touch as explicit opt-in. And expired-but-unread entries are a leak, so expiry is checked lazily on access - an expired hit is a miss, reclaimed inline, correctness never depending on a background job - with a periodic sweep purely for hygiene, the lazy-reclaim shape from Ticketmaster. TTL *plus* LRU composes as expiry-for-validity over LRU-for-victim-choice, not two competing victim pickers.
 
 **Q4. "Great. Now ten instances of the service need a coherent view of this cache."**
-> *Model:* Then we've left this problem. An in-process hit is ~100 ns; a shared cache puts a network hop in the path - ~0.5-1 ms, roughly 5,000× - so the answer is not my object behind gRPC, it's Lesson 3.7's distributed-caching block: Redis/Memcached as the shared tier, an explicit cache-aside or write-through strategy (Lesson 2.10), and an invalidation story - the actual hard part. In practice: keep this cache as a small hot L1 in each instance over the shared L2, and the new design problem is L1 invalidation across ten replicas - pub/sub invalidation or short L1 TTLs bounding staleness. That's Lesson 9.14's problem; the Director move is recognizing the LLD answer ended at the process boundary.
+> *Model:* Then we've left this problem. An in-process hit is ~100 ns; a shared cache puts a network hop in the path - ~0.5-1 ms, roughly 5,000× - so the answer is not my object behind gRPC, it's the distributed-caching block: Redis/Memcached as the shared tier, an explicit cache-aside or write-through strategy, and an invalidation story - the actual hard part. In practice: keep this cache as a small hot L1 in each instance over the shared L2, and the new design problem is L1 invalidation across ten replicas - pub/sub invalidation or short L1 TTLs bounding staleness. That's the distributed-cache deep-dive's problem; the Director move is recognizing the LLD answer ended at the process boundary.
 
 ---
 
@@ -240,10 +240,10 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 - **Strategy-pluggable eviction, policies owning their own bookkeeping.** Four hooks - access, insert, remove, victim - each O(1) by contract. A shared generic ordering structure is the leaky abstraction that breaks the NFR.
 - **Lock granularity is arithmetic, not reflex:** 150K ops/s vs a ~2-5M coarse-lock ceiling = global mutex for v1, striping as a measured, contained refactor. The rwlock is wrong because **strict LRU reads are writes**.
 - **Three contract details carry senior signal:** listener outside the lock; TTL without touch-on-read by default; a byte weigher, because ops budgets heap in MB.
-- **Know where the answer ends:** in production you'd adopt Caffeine and say so; across a process boundary it's Lesson 3.7's distributed problem (Lesson 9.14's sequel), with a 5,000× latency cliff at the door.
+- **Know where the answer ends:** in production you'd adopt Caffeine and say so; across a process boundary it's the distributed problem, with a 5,000× latency cliff at the door.
 
-> **Spaced-repetition recap:** LRU cache at Director altitude = **contract + seam, not pointer surgery**. `Cache` facade owns map, capacity, and when-to-evict; **Strategy policy** owns who-dies via four O(1) hooks and its **own** structure (DLL / freq buckets / timer wheel). O(1) = map finds, list orders. Concurrency: **coarse lock, justified by arithmetic** (150K ops/s vs ~2-5M ceiling); rwlock wrong - LRU reads write; stripe only on measurement. Listener outside the lock; TTL lazy-expire, no touch-on-read; weigher for bytes. Cross-process = Lessons 3.7 / 9.14, not a bigger object.
+> **Spaced-repetition recap:** LRU cache at Director altitude = **contract + seam, not pointer surgery**. `Cache` facade owns map, capacity, and when-to-evict; **Strategy policy** owns who-dies via four O(1) hooks and its **own** structure (DLL / freq buckets / timer wheel). O(1) = map finds, list orders. Concurrency: **coarse lock, justified by arithmetic** (150K ops/s vs ~2-5M ceiling); rwlock wrong - LRU reads write; stripe only on measurement. Listener outside the lock; TTL lazy-expire, no touch-on-read; weigher for bytes. Cross-process = the distributed-caching block, not a bigger object.
 
 ---
 
-*End of Lesson 7.4. The LLD curveball inverts Module 5's habits - no QPS planet to size - but keeps the discipline: requirements before structure, every choice with its rejected alternative, numbers before knobs. The lazy-reclaim and contention instincts came from Lesson 5.13; the process-boundary handoff goes to Lesson 3.7's distributed cache and is taken up again in Lesson 9.14.*
+*End of Lesson 7.4. The LLD curveball inverts the HLD habits - no QPS planet to size - but keeps the discipline: requirements before structure, every choice with its rejected alternative, numbers before knobs. The lazy-reclaim and contention instincts came from Ticketmaster; the process-boundary handoff goes to the distributed cache and is taken up again in the distributed-cache deep-dive.*

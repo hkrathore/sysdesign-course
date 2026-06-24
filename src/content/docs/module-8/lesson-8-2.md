@@ -17,7 +17,7 @@ sidebar:
 ### Intuition first
 You've bought a 90-year-old house the family still lives in. The wiring is a fire hazard, the foundation has one worrying crack, and three rooms were added by builders who never met. The rewrite instinct says: demolish, rebuild, move the family into a hotel for two years. But the family can't leave, they run a business from the kitchen. **Inspect first**: which walls are load-bearing, where the damage actually is, which rooms just look dated. **Then stabilize**: the foundation and the wiring, the things that can kill you. **Then renovate room by room**, each room usable when finished, the family in the house the whole time. And the guest bedroom nobody uses? **You don't touch it.** Renovation risk is real and the room earns nothing.
 
-That is the entire lesson: inspect (the 90-day audit), stabilize (observability, deploys, backups), strangle room by room (Lesson 8.1 has the mechanics), and leave the guest bedroom alone. The interview tests whether you can resist the demolition instinct *and* articulate why, "I'd rewrite it properly this time" is the most expensive sentence in software.
+That is the entire lesson: inspect (the 90-day audit), stabilize (observability, deploys, backups), strangle room by room (the strangler-fig lesson has the mechanics), and leave the guest bedroom alone. The interview tests whether you can resist the demolition instinct *and* articulate why, "I'd rewrite it properly this time" is the most expensive sentence in software.
 
 ---
 
@@ -47,7 +47,7 @@ That is the entire lesson: inspect (the 90-day audit), stabilize (observability,
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** there is no QPS to estimate. E becomes the **first-90-days assessment**, a risk map and a coverage audit. Same discipline as Lesson 1.3's envelope math: a few load-bearing numbers, measured not guessed.
+> **Adaptation, said out loud:** there is no QPS to estimate. E becomes the **first-90-days assessment**, a risk map and a coverage audit. Same discipline as back-of-the-envelope math: a few load-bearing numbers, measured not guessed.
 
 **The first-90-days framework, what to measure before touching anything:**
 
@@ -75,15 +75,15 @@ That is the entire lesson: inspect (the 90-day audit), stabilize (observability,
 
 > **Adaptation, said out loud:** S compresses. There's no store to select, there's a store to *escape*: **the shared database, not the code, is the real monolith.**
 
-Anyone can split code into services; if they all still read and write the same 800 Oracle tables, you've built a **distributed monolith**, every schema change still coordinates every team, plus network hops you didn't have before. So: **data ownership follows the strangle**, an extracted domain gets its own store, populated by **CDC from the legacy schema** (Lesson 2.4's replication machinery, pointed at Oracle), reads cut over first, writes second, legacy tables dropped via **expand-contract**. *Rejected, extract services now, split data later:* "later" never comes; you carry the monolith's coupling plus microservices' latency indefinitely. *Rejected, one big migration weekend:* an 800-table cutover is the rewrite in disguise. Lesson 8.1 covers the dual-write/CDC mechanics; the Director-level point is the *ownership boundary*, not the pipe.
+Anyone can split code into services; if they all still read and write the same 800 Oracle tables, you've built a **distributed monolith**, every schema change still coordinates every team, plus network hops you didn't have before. So: **data ownership follows the strangle**, an extracted domain gets its own store, populated by **CDC from the legacy schema** (replication machinery, pointed at Oracle), reads cut over first, writes second, legacy tables dropped via **expand-contract**. *Rejected, extract services now, split data later:* "later" never comes; you carry the monolith's coupling plus microservices' latency indefinitely. *Rejected, one big migration weekend:* an 800-table cutover is the rewrite in disguise. The strangler-fig lesson covers the dual-write/CDC mechanics; the Director-level point is the *ownership boundary*, not the pipe.
 
 ---
 
 ## H: High-level design
 
-> **Adaptation, said out loud:** H is two pictures, the target end-state (brief; 8.1 owns the façade mechanics) and the **disposition map**: which module gets which treatment. The disposition map *is* the high-level design of a modernization.
+> **Adaptation, said out loud:** H is two pictures, the target end-state (brief; the strangler-fig lesson owns the façade mechanics) and the **disposition map**: which module gets which treatment. The disposition map *is* the high-level design of a modernization.
 
-**Target end-state, one sentence:** a routing façade in front of the monolith (the strangler fig, Lesson 8.1), 3-5 extracted services for the hot domains each owning its data, and the cold remainder as a smaller, stabilized modular monolith that may live for years, deliberately.
+**Target end-state, one sentence:** a routing façade in front of the monolith (the strangler fig), 3-5 extracted services for the hot domains each owning its data, and the cold remainder as a smaller, stabilized modular monolith that may live for years, deliberately.
 
 **The disposition map, every module gets one of four treatments, decided by the audit:**
 
@@ -107,7 +107,7 @@ flowchart TD
 - **Leave alone** (the cold half): stable, low-churn, off the money path, gets observability and a deploy pipeline, then nothing. **Migration risk is real and these modules earn nothing from it.** Saying this list out loud, with data, is a top-three Director signal here.
 - **Retire** (the dead ~third): instrumentation will show a surprising fraction of endpoints get near-zero traffic. Deleting them is the cheapest modernization there is, parity with nothing.
 
-**Sequencing principle:** stabilize → prove → strangle → decommission. You cannot strangle safely at a 25% change-failure rate with quarterly deploys, **stabilization makes the strangle survivable**. Foundation: observability on the money path (Lessons 3.13-3.14), CI and a weekly deploy train, tested restores, **characterization tests** pinning current behavior, bugs included, on the modules about to move.
+**Sequencing principle:** stabilize → prove → strangle → decommission. You cannot strangle safely at a 25% change-failure rate with quarterly deploys, **stabilization makes the strangle survivable**. Foundation: observability on the money path, CI and a weekly deploy train, tested restores, **characterization tests** pinning current behavior, bugs included, on the modules about to move.
 
 ---
 
@@ -115,7 +115,7 @@ flowchart TD
 
 > **Adaptation, said out loud:** A compresses to two strategic artifacts, the **seam inventory** and the **parity contract**. The interfaces that matter are the ones between old and new.
 
-**The seam inventory.** Before extracting anything, define the contract *at the seam*: each strangle target gets an explicit interface (REST/gRPC, Lesson 2.10) with an **anti-corruption layer** translating between the legacy schema's tangled vocabulary and the new domain model. *Rejected, new services speaking the legacy schema's language:* that exports the monolith's worst abstractions into the systems meant to replace them.
+**The seam inventory.** Before extracting anything, define the contract *at the seam*: each strangle target gets an explicit interface (REST/gRPC) with an **anti-corruption layer** translating between the legacy schema's tangled vocabulary and the new domain model. *Rejected, new services speaking the legacy schema's language:* that exports the monolith's worst abstractions into the systems meant to replace them.
 
 **The parity contract, feature-parity discipline.** "Full parity" kills modernizations, because the legacy spec is 14 years of accreted behavior nobody can enumerate. The discipline: **parity is defined against measured usage, not the spec.** Instrument first; features below a usage floor (<1 call/day over 90 days, batch callers checked) go to the retire list with named business sign-off. What remains is *verified*, not asserted, shadow traffic through old and new with response diffing, then a canaried cutover with instant rollback at the façade. Observed behavior is the spec; the diff harness is the compliance test.
 
@@ -138,7 +138,7 @@ Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, co
 
 ## E: Evaluation
 
-> Stress the *program* the way 5.x lessons stress an architecture. None of the fatal failure modes are technical.
+> Stress the *program* the way you'd stress an architecture. None of the fatal failure modes are technical.
 
 **Failure mode 1, the half-migrated forever-state.** Funding dies at quarter 5; you run a monolith *and* four services *and* a façade, forever. *Mitigation:* **every completed slice is independently done**, façade + slice + retired legacy code, no slice >1 quarter. The strangle's defining property is stable intermediate states; protect it when scoping. A program killed early keeps everything shipped.
 
@@ -230,4 +230,4 @@ Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, co
 
 ---
 
-*End of Lesson 8.2. The inherited-legacy question is architecture strategy in its purest form: almost no new components, the grade rides on sequencing, evidence, and the discipline not to touch what doesn't need touching. It reuses 8.1's strangler façade, and it is where the line between "system design round" and "how you'd run the org" disappears.*
+*End of Lesson 8.2. The inherited-legacy question is architecture strategy in its purest form: almost no new components, the grade rides on sequencing, evidence, and the discipline not to touch what doesn't need touching. It reuses the strangler façade, and it is where the line between "system design round" and "how you'd run the org" disappears.*

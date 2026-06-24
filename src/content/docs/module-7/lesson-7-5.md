@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-> **Why this gets asked.** The rate limiter is one of the few problems asked in *both* LLD and HLD rounds, Stripe, Google, Amazon, Meta, and Cloudflare all run it, deliberately probing the seam between the forms. The course covers the distributed half (Lessons 3.10, 5.2); this is the missing half: **design the `RateLimiter` class**. A junior answer recites token-bucket mechanics. A Director answer treats **algorithm selection as a requirements decision**, puts it behind a **Strategy seam**, gets **per-client concurrency** right without a global lock, and names, unprompted, **where the in-process design stops and 3.10/5.2 begins.** Interviewers ask the climb; have it ready.
+> **Why this gets asked.** The rate limiter is one of the few problems asked in *both* LLD and HLD rounds, Stripe, Google, Amazon, Meta, and Cloudflare all run it, deliberately probing the seam between the forms. The course covers the distributed half; this is the missing half: **design the `RateLimiter` class**. A junior answer recites token-bucket mechanics. A Director answer treats **algorithm selection as a requirements decision**, puts it behind a **Strategy seam**, gets **per-client concurrency** right without a global lock, and names, unprompted, **where the in-process design stops and 3.10/5.2 begins.** Interviewers ask the climb; have it ready.
 
 ### Learning objectives
 - Design the **`RateLimiter` interface and Strategy hierarchy** so token bucket, sliding-window log, and fixed window are interchangeable per rule.
@@ -35,7 +35,7 @@ The LLD question is not "which mechanism is best." It is: **design the turnstile
 
 **Non-functional requirements:** **hot-path latency**, `allow()` runs on *every* request, budget **< 50 µs** (< 2.5% of a 2 ms handler); **thread safety**, check-and-update atomic per client; **bounded memory**, ~1M clients in heap with idle eviction; **no external dependency in v1**.
 
-**Explicitly CUT:** distributed coordination, Redis, multi-node consistency (3.10/5.2), quota billing, admin UI. Cutting them by name, *with a forwarding address*, is the Director move.
+**Explicitly CUT:** distributed coordination, Redis, multi-node consistency, quota billing, admin UI. Cutting them by name, *with a forwarding address*, is the Director move.
 
 ---
 
@@ -45,7 +45,7 @@ The LLD question is not "which mechanism is best." It is: **design the turnstile
 
 **Hot-path budget.** One server at **5K req/s**, handler p50 ~2 ms. At 50 µs, `allow()` adds 2.5% latency and `5K × 50 µs = 0.25` CPU-sec/sec, a quarter core. At 1 ms (a careless contended implementation): 5 full cores for rate limiting alone. The budget rules out anything heavier than a map lookup plus arithmetic under a brief lock.
 
-**Why a global lock dies.** A 10 µs critical section under one global lock: at 5K req/s the lock is 5% busy, fine. At 50K req/s (a beefy gateway box): **50% utilization**, and by Lesson 2.9's queueing math waits explode well before saturation, every request queues behind one lock. Contention must be per-client.
+**Why a global lock dies.** A 10 µs critical section under one global lock: at 5K req/s the lock is 5% busy, fine. At 50K req/s (a beefy gateway box): **50% utilization**, and by the queueing math waits explode well before saturation, every request queues behind one lock. Contention must be per-client.
 
 **Memory per client, this decides the algorithm.** Token bucket: 2 longs ≈ **50 B with overhead**; 1M clients ≈ **50 MB**, trivial. Sliding-window log: a timestamp per request in the window, at 1,000 req/min, `1,000 × 8 B = 8 KB`/client; 1M clients ≈ **8 GB**, dead as a default. The same log on *5 attempts/hour* (password resets): 40 B, fine for **low-limit, high-stakes rules.**
 
@@ -55,14 +55,14 @@ The LLD question is not "which mechanism is best." It is: **design the turnstile
 
 ## S: Storage
 
-> **The adaptation:** "what persists, in which store" becomes **"where does counter state live, in which structure"**, the Module 2 instinct, aimed at the heap.
+> **The adaptation:** "what persists, in which store" becomes **"where does counter state live, in which structure"**, the instinct, aimed at the heap.
 
 **Choice: an in-heap concurrent map, `client:resource → StateEntry`** (a `ConcurrentHashMap`), each entry owning its algorithm state *and its own lock*. Lookup is lock-free; mutation locks only the entry.
 
-- *Rejected, Redis in v1:* an intra-AZ round trip is ~0.5-1 ms (Lesson 1.4), **20× the entire 50 µs budget**. Redis answers a *different* requirement (shared state across nodes); it arrives in Design evolution.
+- *Rejected, Redis in v1:* an intra-AZ round trip is ~0.5-1 ms, **20× the entire 50 µs budget**. Redis answers a *different* requirement (shared state across nodes); it arrives in Design evolution.
 - *Rejected, one synchronized global map:* the convoy computed above; it poisons the box's p99.
 
-**The eviction requirement (the leak everyone forgets).** Clients are unbounded, every new API key or IP allocates an entry forever; a scraper cycling IPs is a slow OOM. **Bound the map: TTL expiry of idle entries or an LRU cap.** Trade-off: eviction forgets history, benign for buckets (a fresh client starts full anyway), *not* for the password-attempt log, so **security rules get longer TTLs**. A Lesson 3.7 cache-eviction decision hiding inside a class design.
+**The eviction requirement (the leak everyone forgets).** Clients are unbounded, every new API key or IP allocates an entry forever; a scraper cycling IPs is a slow OOM. **Bound the map: TTL expiry of idle entries or an LRU cap.** Trade-off: eviction forgets history, benign for buckets (a fresh client starts full anyway), *not* for the password-attempt log, so **security rules get longer TTLs**. A the distributed-cache building block cache-eviction decision hiding inside a class design.
 
 ---
 
@@ -119,7 +119,7 @@ interface RateLimitStrategy {                           // the Strategy seam
 **Design notes (each with its rejected alternative):**
 - **`Decision`, not `boolean`.** The caller needs `Retry-After` and remaining quota for 429 headers; a bare boolean forces a second, racy query. *Rejected: `boolean allow()`*, cleaner-looking, starves the caller.
 - **Time is a parameter.** Inject a **monotonic** clock: wall clock steps backward under NTP and mints free tokens; injection makes boundary tests deterministic. *Rejected: inline wall time*, untestable, subtly wrong.
-- **`tryAcquire` is check-AND-consume in one call.** *Rejected: separate `check()` then `consume()`*, the gap is a TOCTOU race; two threads both pass `check`, both take the last token. The contract must make the race **inexpressible**, 5.13's single-atomic-statement instinct, applied to method design.
+- **`tryAcquire` is check-AND-consume in one call.** *Rejected: separate `check()` then `consume()`*, the gap is a TOCTOU race; two threads both pass `check`, both take the last token. The contract must make the race **inexpressible**, the single-atomic-statement instinct, applied to method design.
 - **`newState` lives on the strategy**, each algorithm owns its state shape; the facade stays ignorant of internals, the property that survives the later move to Redis.
 
 ---
@@ -132,7 +132,7 @@ interface RateLimitStrategy {                           // the Strategy seam
 
 **State records, per strategy:** token bucket, `tokens` + `lastRefillNanos` (~50 B); sliding-window log, a deque of timestamps (8 B × limit); fixed window, `windowStart` + `count` (~50 B). Each entry also carries **its own lock** and `lastAccessNanos` for eviction, the data model anticipates Evaluation's concurrency and Storage's TTL.
 
-The fixed-window flaw, once: rule 100/min, 100 requests at 0:59 and 100 at 1:01 are both allowed: **200 in two seconds**, because the reset is a cliff. Fine for coarse abuse caps; unacceptable where the limit *is* the contract. (Algorithm internals are Lesson 3.10's material; here we need only state shapes and costs.)
+The fixed-window flaw, once: rule 100/min, 100 requests at 0:59 and 100 at 1:01 are both allowed: **200 in two seconds**, because the reset is a cliff. Fine for coarse abuse caps; unacceptable where the limit *is* the contract. (Algorithm internals are the material; here we need only state shapes and costs.)
 
 <details>
 <summary>Go deeper, full token-bucket strategy listing with per-entry locking (IC depth, optional)</summary>
@@ -171,7 +171,7 @@ final class TokenBucketStrategy implements RateLimitStrategy {
 }
 ```
 
-Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, atomic on a ConcurrentHashMap, so two threads seeing a new client cannot mint two states. Lazy refill (compute elapsed tokens at read time) means **no background refill thread**, the same lazy-reclaim instinct as 5.13's hold expiry: correctness never depends on a timer.
+Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, atomic on a ConcurrentHashMap, so two threads seeing a new client cannot mint two states. Lazy refill (compute elapsed tokens at read time) means **no background refill thread**, the same lazy-reclaim instinct as the hold expiry: correctness never depends on a timer.
 
 </details>
 
@@ -210,11 +210,11 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 
 **Three responses, escalating:**
 
-1. **Divide the limit: 100/50 = 2 per node.** Free, and broken: traffic is never uniform (Lesson 3.2), so a client routed 80/20 is falsely rejected on the hot node while quota idles elsewhere; the divisor changes on every autoscale. *Only for coarse ceilings tolerating 2-3× error.*
-2. **Sticky routing: consistent-hash clients to nodes (Lessons 2.6, 3.2)**, each local limiter becomes globally correct for its clients. Elegant, fragile: node loss remaps clients with fresh state, and it hijacks LB policy. *Real when the LB already hashes by client.*
-3. **Centralize: Redis-backed counters, atomic Lua, ~1 ms per request, Lessons 3.10 and 5.2**, with their race windows and fail-open/fail-closed posture. The practical winner is usually the **hybrid**: local burst allowance + async sync, hot path at local speed, global error bounded by the sync interval.
+1. **Divide the limit: 100/50 = 2 per node.** Free, and broken: traffic is never uniform, so a client routed 80/20 is falsely rejected on the hot node while quota idles elsewhere; the divisor changes on every autoscale. *Only for coarse ceilings tolerating 2-3× error.*
+2. **Sticky routing: consistent-hash clients to nodes**, each local limiter becomes globally correct for its clients. Elegant, fragile: node loss remaps clients with fresh state, and it hijacks LB policy. *Real when the LB already hashes by client.*
+3. **Centralize: Redis-backed counters, atomic Lua, ~1 ms per request, the rate-limiter building block and 5.2**, with their race windows and fail-open/fail-closed posture. The practical winner is usually the **hybrid**: local burst allowance + async sync, hot path at local speed, global error bounded by the sync interval.
 
-**The two-altitude framing, said out loud (memorize this move):** *"Today's design is the in-process half, and the Redis design still needs it: every node keeps local state, strategies, and thread safety; the shared store is just another state store behind the same seam. The distributed half, where shared state lives, what happens when Redis is down, what the millisecond costs, is a different problem: Lessons 3.10/5.2."* That demonstrates what the dual-form question tests: **which problem you're solving, and where the other one starts.**
+**The two-altitude framing, said out loud (memorize this move):** *"Today's design is the in-process half, and the Redis design still needs it: every node keeps local state, strategies, and thread safety; the shared store is just another state store behind the same seam. The distributed half, where shared state lives, what happens when Redis is down, what the millisecond costs, is a different problem: The rate-limiter building block/5.2."* That demonstrates what the dual-form question tests: **which problem you're solving, and where the other one starts.**
 
 **Where I'd delegate:** the CAS-vs-lock benchmark (prior above); Redis failover posture to the platform team, *"my prior is fail-open with an alarm: fail-closed turns a Redis blip into a full outage; brief abuse exposure is the cheaper risk"*; rule governance to the API platform owner, limits are revenue policy.
 
@@ -262,7 +262,7 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 > *Model:* When the limit is small and a false *accept* is the expensive error. At 1,000 req/min the log is 8 KB/client, 8 GB for a million clients, dead as a default. At 5 attempts/hour on password reset it's 40 B, free, and exact: no boundary burst, no burst allowance (a bucket's forgiveness is precisely wrong for brute force). Bucket as fleet default for revenue paths; the log for low-limit security rules, a per-rule config line, which is why the seam exists.
 
 **Q3. Your limiter is correct on one node. Production runs 40 nodes behind an LB. Walk me up.**
-> *Model:* Local enforcement is now globally wrong, 100/min per node is up to 4,000/min for a spraying client. Three rungs: **divide by N** (free; breaks on traffic skew and every autoscale); **consistent-hash clients to nodes** (globally correct per client; fragile on churn, hijacks LB policy); **Redis with atomic Lua**, the 3.10/5.2 design, ~1 ms per request against my 50 µs budget, so the practical winner is the **hybrid**: local burst allowance with async sync. Posture: **fail open with an alarm**, fail-closed converts a Redis blip into a self-inflicted outage. The class survives the climb: the shared store is another state store behind the same seam.
+> *Model:* Local enforcement is now globally wrong, 100/min per node is up to 4,000/min for a spraying client. Three rungs: **divide by N** (free; breaks on traffic skew and every autoscale); **consistent-hash clients to nodes** (globally correct per client; fragile on churn, hijacks LB policy); **Redis with atomic Lua**, the 3.10/the rate-limiter problem design, ~1 ms per request against my 50 µs budget, so the practical winner is the **hybrid**: local burst allowance with async sync. Posture: **fail open with an alarm**, fail-closed converts a Redis blip into a self-inflicted outage. The class survives the climb: the shared store is another state store behind the same seam.
 
 **Q4. Why per-client locks rather than lock-free CAS?**
 > *Model:* CAS is faster under contention, and the contention doesn't exist: distinct clients never share a lock; a client racing itself spends sub-µs in the critical section. CAS costs real things: bucket state must pack into 64 bits, the log can't pack at all, two concurrency models in one codebase. **Decision: per-client locks; platform team benchmarks CAS; prior: the lock loses under a microsecond and wins maintainability.**
@@ -274,13 +274,13 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 - **The Strategy seam is forced by per-endpoint requirements:** stateless shared strategies, per-client state records, and the seam later absorbs the Redis-backed store.
 - **The interface is the correctness story:** `Decision` not boolean, check-and-consume in one atomic call (no TOCTOU), injected monotonic clock. Make races inexpressible in the contract.
 - **Concurrency: per-client locks**, not a global lock (10 µs × 50K req/s = 50% utilization = convoy), not CAS by default (delegated with a prior). TTL-evict the state map or it's a slow OOM.
-- **Always volunteer the climb:** 50 nodes makes local limits 50× wrong → divide → sticky-hash → shared store (3.10/5.2), hybrid in practice, fail open. Knowing where the in-process half ends is the Director signal.
+- **Always volunteer the climb:** 50 nodes makes local limits 50× wrong → divide → sticky-hash → shared store, hybrid in practice, fail open. Knowing where the in-process half ends is the Director signal.
 
-> **Spaced-repetition recap:** LLD rate limiter = **interface + Strategy + per-client state under concurrency**. `Decision allow(client, resource)`; check-and-consume atomic; injected monotonic clock. Bucket default; log for low-limit security rules; fixed window = 2× boundary burst. Per-client locks; TTL-evict the map. The climb: 50 nodes = 50× the limit → divide / sticky-hash / Redis (3.10/5.2), hybrid + fail-open. Name the seam unprompted.
+> **Spaced-repetition recap:** LLD rate limiter = **interface + Strategy + per-client state under concurrency**. `Decision allow(client, resource)`; check-and-consume atomic; injected monotonic clock. Bucket default; log for low-limit security rules; fixed window = 2× boundary burst. Per-client locks; TTL-evict the map. The climb: 50 nodes = 50× the limit → divide / sticky-hash / Redis, hybrid + fail-open. Name the seam unprompted.
 
 ---
 
-*End of Lesson 7.5. This lesson built the class inside each node, interface, Strategy seam, per-client locking under a 50 µs budget; Lessons 3.10 and 5.2 own where shared state lives and what happens when it's unreachable. The interview rewards the candidate who can stand at the seam and describe both sides.*
+*End of Lesson 7.5. This lesson built the class inside each node, interface, Strategy seam, per-client locking under a 50 µs budget; the rate-limiter building block and the rate-limiter problem own where shared state lives and what happens when it's unreachable. The interview rewards the candidate who can stand at the seam and describe both sides.*
 
 
 
