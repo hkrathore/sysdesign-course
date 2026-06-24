@@ -1,0 +1,177 @@
+---
+// Standalone landing page (site root). Bespoke "Blueprint" design — renders
+// without Starlight chrome. Links are wired to the course via the base path.
+// BASE_URL is "/sysdesign-course" (no trailing slash) — strip any trailing
+// slash and join with one, so links are "/sysdesign-course/<path>".
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const u = (p) => `${base}/${p}`;
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Modern System Design Interview · Director-altitude interview prep</title>
+<meta name="description" content="System-design and engineering-leadership interview prep at Director altitude — trade-off fluency over implementation trivia, taught the RESHADED way." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FBFAF7; --ink:#16201c; --ink-soft:#48564f;
+    --line:#e3e7e0; --line-strong:#cfd6cd;
+    --em:#0c976a; --em-deep:#053627; --em-wash:#e9f5ef; --maxw:1120px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto} *{animation:none!important;transition:none!important}}
+  body{margin:0;color:var(--ink);background:var(--paper);font-family:"Inter",system-ui,sans-serif;line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:28px 28px;}
+  a{color:inherit}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+  .mono{font-family:"JetBrains Mono",monospace}
+  .eyebrow{font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--em);font-weight:600}
+  header.nav{position:sticky;top:0;z-index:20;backdrop-filter:saturate(1.1) blur(6px);background:color-mix(in srgb,var(--paper) 86%,transparent);border-bottom:1px solid var(--line)}
+  .nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .brand{display:flex;align-items:center;gap:10px;font-family:"Space Grotesk";font-weight:600;letter-spacing:-.01em}
+  .brand .glyph{width:26px;height:26px;border:1.5px solid var(--ink);border-radius:5px;display:grid;place-items:center;font-family:"JetBrains Mono";font-size:.7rem;color:var(--em);font-weight:700}
+  .nav nav{display:flex;gap:26px;align-items:center;font-size:.9rem;color:var(--ink-soft)}
+  .nav nav a{text-decoration:none}.nav nav a:hover{color:var(--ink)}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:.9rem;text-decoration:none;padding:9px 16px;border-radius:8px;border:1.5px solid var(--ink);background:var(--ink);color:var(--paper)}
+  .btn.ghost{background:transparent;color:var(--ink)}
+  .btn:focus-visible,a:focus-visible,.track:focus-visible{outline:2.5px solid var(--em);outline-offset:3px}
+  @media(max-width:780px){.nav nav{display:none}}
+
+  /* centered hero */
+  .hero{padding:74px 0 18px;text-align:center}
+  h1{font-family:"Space Grotesk";font-weight:700;letter-spacing:-.03em;line-height:1.02;font-size:clamp(2.5rem,5.6vw,4.2rem);margin:18px auto 0;max-width:18ch}
+  h1 .em{color:var(--em)}
+  .lede{font-size:1.15rem;color:var(--ink-soft);max-width:60ch;margin:20px auto 0}
+  .cta-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:28px}
+  .note{font-size:.8rem;color:var(--ink-soft);margin-top:16px}.note b{color:var(--ink);font-weight:600}
+
+  /* horizontal RESHADED flow - the hero centerpiece (the whiteboard) */
+  .flowwrap{margin:50px 0 8px;border:1px solid var(--line-strong);border-radius:16px;background:#fff;
+    box-shadow:0 30px 60px -36px rgba(5,54,39,.32);padding:24px 18px 22px;position:relative}
+  .flowwrap .tag{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--em-wash);color:var(--em-deep);border:1px solid var(--em);border-radius:6px;font-family:"JetBrains Mono";font-size:.66rem;padding:2px 10px;font-weight:600;letter-spacing:.06em;white-space:nowrap}
+  .flow{display:flex;align-items:flex-start;gap:0;overflow-x:auto;padding-bottom:6px}
+  .node{flex:0 0 auto;width:108px;text-align:center}
+  .node .box{width:54px;height:54px;margin:0 auto;border-radius:11px;display:grid;place-items:center;
+    font-family:"JetBrains Mono";font-weight:700;font-size:1.35rem;background:var(--paper);border:1.5px solid var(--line-strong);color:var(--ink)}
+  .node.acc .box{background:var(--em);border-color:var(--em);color:#042b1f}
+  .node .nm{font-family:"Space Grotesk";font-weight:600;font-size:.82rem;margin-top:9px;letter-spacing:-.01em}
+  .node .ds{font-family:"JetBrains Mono";font-size:.64rem;color:var(--ink-soft);margin-top:2px;line-height:1.3}
+  .conn{flex:0 0 auto;align-self:flex-start;margin-top:26px;width:26px;height:2px;position:relative;
+    background:var(--line-strong)}
+  .conn::after{content:"";position:absolute;right:-1px;top:50%;transform:translateY(-50%);
+    border-left:6px solid var(--line-strong);border-top:4px solid transparent;border-bottom:4px solid transparent}
+
+  /* metrics band - quantify the course itself (the 'always quantify' rule, applied to the course) */
+  .metrics{padding:34px 0 6px}
+  .method{padding:6px 0 10px}
+  .metrics-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  .metrics-head p{margin:0;color:var(--ink-soft);font-size:1rem;max-width:54ch}
+  .metrics-head p b{color:var(--em);font-weight:600}
+  .mgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+  .metric{background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:20px 18px;text-align:left}
+  .metric .v{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:2.1rem;letter-spacing:-.02em;line-height:1;color:var(--ink)}
+  .metric .v.em{color:var(--em)}
+  .metric .k{font-size:.8rem;color:var(--ink-soft);margin-top:8px;line-height:1.35}
+  @media(max-width:900px){.mgrid{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:560px){.mgrid{grid-template-columns:repeat(2,1fr)}}
+  .rules{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--paper) 70%,#fff);margin-top:40px}
+  .rules .wrap{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .rule{padding:32px 0}.rule:first-child{padding-right:40px;border-right:1px solid var(--line)}.rule:last-child{padding-left:40px}
+  .rule h3{font-family:"Space Grotesk";font-size:1.18rem;margin:8px 0 6px;letter-spacing:-.01em}
+  .rule p{margin:0;color:var(--ink-soft);font-size:.96rem}
+  .rule .n{font-family:"JetBrains Mono";color:var(--em);font-weight:700;font-size:.85rem}
+  @media(max-width:780px){.rules .wrap{grid-template-columns:1fr}.rule:first-child{border-right:0;border-bottom:1px solid var(--line);padding:28px 0}.rule:last-child{padding:28px 0}}
+
+  section.tracks{padding:64px 0}
+  .sec-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:26px;gap:20px;flex-wrap:wrap}
+  .sec-head h2{font-family:"Space Grotesk";font-size:1.7rem;letter-spacing:-.02em;margin:6px 0 0}
+  .sec-head p{margin:0;color:var(--ink-soft);max-width:46ch;font-size:.95rem}
+  .grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+  @media(max-width:1000px){.grid5{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:640px){.grid5{grid-template-columns:1fr 1fr}}
+  @media(max-width:430px){.grid5{grid-template-columns:1fr}}
+  .track{display:block;text-decoration:none;background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:20px 18px;transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+  .track:hover{transform:translateY(-3px);box-shadow:0 18px 36px -22px rgba(5,54,39,.3);border-color:var(--em)}
+  .track .mod{font-family:"JetBrains Mono";font-size:.68rem;color:var(--em);letter-spacing:.06em}
+  .track h4{font-family:"Space Grotesk";font-size:1.1rem;margin:10px 0 6px;letter-spacing:-.01em}
+  .track p{margin:0;font-size:.85rem;color:var(--ink-soft)}
+  .track .arrow{margin-top:14px;font-family:"JetBrains Mono";font-size:.78rem;color:var(--ink);font-weight:600}
+  footer{border-top:1px solid var(--line);padding:34px 0;color:var(--ink-soft);font-size:.84rem}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px}
+</style>
+</head>
+<body>
+<header class="nav"><div class="wrap">
+  <div class="brand"><span class="glyph">SD</span> System Design Interview</div>
+  <nav><a href="#tracks">Tracks</a><a href={u('cheatsheets/reshaded-method/')}>RESHADED</a><a href={u('cheatsheets/master-reshaded/')}>Cheat sheets</a><a class="btn" href={u('start/')}>Start the course →</a></nav>
+</div></header>
+<main>
+<section class="hero"><div class="wrap">
+  <span class="eyebrow">System design + leadership interview prep</span>
+  <h1>Draw the system. Defend the <span class="em">trade-off.</span></h1>
+  <p class="lede">For senior engineers and engineering leaders - calibrated at Director altitude: trade-off fluency over implementation trivia, plus the leadership half of the loop most prep ignores.</p>
+</div></section>
+
+<section class="metrics"><div class="wrap">
+  <div class="metrics-head">
+    <span class="eyebrow">The course by the numbers</span>
+    <p>A triaged path, not a 740k-word encyclopedia - calibrated to finish in a focused <b>~4 weeks</b>.</p>
+  </div>
+  <div class="mgrid">
+    <div class="metric"><div class="v">16</div><div class="k">modules, foundations to leadership</div></div>
+    <div class="metric"><div class="v">~60</div><div class="k">design problems, RESHADED end-to-end</div></div>
+    <div class="metric"><div class="v em">~40%</div><div class="k">of the loop is leadership</div></div>
+    <div class="metric"><div class="v">10</div><div class="k">interactive widgets to drill with</div></div>
+    <div class="metric"><div class="v em">~4 wk</div><div class="k">focused prep path</div></div>
+  </div>
+</div></section>
+
+<section class="method"><div class="wrap">
+  <div class="flowwrap">
+    <span class="tag">RESHADED · RUN IN ORDER ON EVERY PROBLEM</span>
+    <div class="flow">
+      <div class="node acc"><div class="box">R</div><div class="nm">Requirements</div><div class="ds">scope first</div></div>
+      <div class="conn"></div>
+      <div class="node"><div class="box">E</div><div class="nm">Estimation</div><div class="ds">the math</div></div>
+      <div class="conn"></div>
+      <div class="node"><div class="box">S</div><div class="nm">Storage</div><div class="ds">pick the store</div></div>
+      <div class="conn"></div>
+      <div class="node"><div class="box">H</div><div class="nm">High-level</div><div class="ds">components</div></div>
+      <div class="conn"></div>
+      <div class="node"><div class="box">A</div><div class="nm">API</div><div class="ds">the contract</div></div>
+      <div class="conn"></div>
+      <div class="node"><div class="box">D</div><div class="nm">Data model</div><div class="ds">keys & shards</div></div>
+      <div class="conn"></div>
+      <div class="node acc"><div class="box">E</div><div class="nm">Evaluation</div><div class="ds">find bottlenecks</div></div>
+      <div class="conn"></div>
+      <div class="node acc"><div class="box">D</div><div class="nm">Evolution</div><div class="ds">past v1</div></div>
+    </div>
+  </div>
+</div></section>
+
+<section class="rules"><div class="wrap">
+  <div class="rule"><span class="n">RULE 01</span><h3>Always quantify.</h3><p>"It scales" is banned. Show the math - QPS, nines, latency, storage. Round aggressively, state your assumptions, make a defensible call.</p></div>
+  <div class="rule"><span class="n">RULE 02</span><h3>Name the trade-off you rejected.</h3><p>No choice stands without its alternative and the reason you passed on it. That argument - not the mechanics - is what earns the offer.</p></div>
+</div></section>
+
+<section class="tracks" id="tracks"><div class="wrap">
+  <div class="sec-head"><div><span class="eyebrow">Five tracks · one method</span><h2>Both halves of the loop.</h2></div><p>The design round is ~60% of the decision. Leadership is the other ~40% - and it's where most strong engineers lose the offer.</p></div>
+  <div class="grid5">
+    <a class="track" href={u('module-1/lesson-1-1/')}><div class="mod">MODULES 1-6</div><h4>System Design</h4><p>Canonical and non-canonical problems, RESHADED run end-to-end on each.</p><div class="arrow">Open →</div></a>
+    <a class="track" href={u('module-7/lesson-7-1/')}><div class="mod">MODULES 7-8</div><h4>Data Platforms</h4><p>Lakehouse, real-time OLAP, CDC, governance for the data-and-eng leader.</p><div class="arrow">Open →</div></a>
+    <a class="track" href={u('module-9/lesson-9-1/')}><div class="mod">MODULES 9-10</div><h4>Gen AI &amp; Agentic</h4><p>RAG, agents, LLM serving - the AI-systems round every loop now adds.</p><div class="arrow">Open →</div></a>
+    <a class="track" href={u('module-11/lesson-11-1/')}><div class="mod">MODULES 11-13</div><h4>Engineering Excellence</h4><p>Security &amp; trust, testing &amp; quality, and production troubleshooting - the operational rounds.</p><div class="arrow">Open →</div></a>
+    <a class="track" href={u('module-15/lesson-15-1/')}><div class="mod">MODULE 15</div><h4>Leadership</h4><p>STAR-L, a probe-resistant story bank, and a 2026 calibration.</p><div class="arrow">Open →</div></a>
+  </div>
+</div></section>
+</main>
+<footer><div class="wrap"><div>Modern System Design Interview - taught the RESHADED way.</div><div class="mono">~740k words · built clean · free to read</div></div></footer>
+</body>
+</html>

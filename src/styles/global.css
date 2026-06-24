@@ -4,6 +4,8 @@
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 @import '@fontsource-variable/inter';
+@import '@fontsource-variable/space-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
 
 /* Make Tailwind's `dark:` variant follow Starlight's theme toggle
    (`<html data-theme="dark">`), so embedded React widgets can theme
@@ -22,6 +24,18 @@
  * ================================================================== */
 :root {
 	--sl-font: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+	/* Blueprint design schema (matches the landing page): Space Grotesk for
+	   display/headings, Inter for body, JetBrains Mono for code/labels. */
+	--font-display: 'Space Grotesk Variable', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+	--sl-font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	/* Space Grotesk has a larger x-height and wider letterforms than Inter, so
+	   at Starlight's default scale the headings read a step too big. Pull the
+	   heading type scale down a notch (~8-12%, graduated so the largest shrink
+	   most). Starlight's --sl-text-h* derive from these, so all levels follow. */
+	--sl-text-2xl: 1.375rem; /* was 1.5rem    (h3/h4) */
+	--sl-text-3xl: 1.625rem; /* was 1.8125rem (h2/h3) */
+	--sl-text-4xl: 1.95rem; /* was 2.1875rem (h1/h2) */
+	--sl-text-5xl: 2.3rem; /* was 2.625rem  (h1)    */
 	/* Wider reading column. With the "On this page" TOC disabled (astro.config.mjs),
 	   the main pane has the room; 54rem (vs Starlight's 45rem default) lets the
 	   5-column RESHADED trade-off tables breathe instead of wrapping into cramped
@@ -37,8 +51,16 @@
 }
 :root[data-theme='light'] {
 	--sl-color-accent-low: #c7efdc;
-	--sl-color-accent: #0c976a; /* darker emerald for AA contrast on white */
+	--sl-color-accent: #0c976a; /* darker emerald for AA contrast on paper */
 	--sl-color-accent-high: #053627;
+	/* Blueprint paper palette (matches the landing page): warm off-white
+	   surfaces + green-tinted ink, instead of Starlight's stark white/gray.
+	   Widget cards (--w-bg #fff) intentionally stay brighter so they pop on
+	   the paper, exactly like the landing page's white cards. */
+	--sl-color-bg: #fbfaf7; /* paper */
+	--sl-color-bg-nav: #fbfaf7;
+	--sl-color-bg-sidebar: #f5f3ee;
+	--sl-color-text: #16201c; /* ink */
 }
 
 /* Editorial typography — refined hierarchy, rhythm, and links. */
@@ -46,8 +68,10 @@ body {
 	-webkit-font-smoothing: antialiased;
 	text-rendering: optimizeLegibility;
 }
-.sl-markdown-content :is(h1, h2, h3, h4),
-.content-panel h1 {
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6),
+.content-panel h1,
+.site-title {
+	font-family: var(--font-display);
 	letter-spacing: -0.02em;
 	font-weight: 650;
 }

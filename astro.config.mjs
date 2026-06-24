@@ -53,11 +53,11 @@ export default defineConfig({
 			],
 			customCss: ['./src/styles/global.css'],
 			// Sidebar = 13 modules grouped into 5 Parts (the learning sequence), plus the
-			// course-overview home (index.md) and the Cheat Sheets. Lessons autogenerate from
+			// Course Overview (start.md syllabus; the site root `/` is the bespoke landing at src/pages/index.astro) and the Cheat Sheets. Lessons autogenerate from
 			// each module directory by frontmatter sidebar.order. Module numbers are presentation
 			// only — cross-references were removed so the order can change without breaking links.
 			sidebar: [
-				{ label: 'Course Overview', link: '/' },
+				{ label: 'Course Overview', link: '/start/' },
 				{ label: 'Part I · Method & Fundamentals', collapsed: false, items: [
 					{ label: 'Module 1 · Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-1' } }] },
 					{ label: 'Module 2 · Core Concepts & Trade-offs', collapsed: true, items: [{ autogenerate: { directory: 'module-2' } }] },
