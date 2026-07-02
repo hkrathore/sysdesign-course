@@ -26,7 +26,7 @@ And underneath it all is the landlord's ledger: rent has to cover what each unit
 
 Multi-tenancy sits on a spectrum. **Siloed** gives each tenant a dedicated stack (strongest isolation, worst economics, caps at a few hundred tenants). **Pooled** runs all tenants through shared services and a shared datastore (best economics, scales to tens of thousands of tenants, but tenants now contend for the same finite resources). Most SaaS is pooled with a few siloed whales, and the pooled majority is where fairness has to be engineered in.
 
-The reason it is not optional: **tenant load follows a power law, not a normal distribution.** In a typical B2B platform the top 1% of tenants drive **40 to 60% of total request volume**, the top 10% drive **80 to 90%**, and a single enterprise tenant can be **100 to 1,000x the median** (median does 10 requests/second, a whale bursts to 2,000 to 5,000). So "average load per tenant" hides the whole risk: capacity is set by a handful of giants, and any one of them, through a bad deploy, a runaway batch job, or a retry storm, can consume the shared pool and **starve every other tenant at once**. Provisioning for the peak of your largest tenant and hoping is not a design, it is an outage waiting for a trigger.
+The reason it is not optional: **tenant load follows a power law, not a normal distribution.** In a typical B2B platform the top 1% of tenants drive **40 to 60% of total request volume**, the top 10% drive **80 to 90%**, and a single enterprise tenant can be **100 to 1,000x the median** (median does 10 requests/second, a whale bursts to 2,000 to 5,000). So "average load per tenant" hides the whole risk: capacity is set by a handful of giants, and any one of them, through a bad deploy, a runaway batch job, or a retry storm, can consume the shared pool and **starve every other tenant at once**.
 
 The defenses form a layered posture, cheapest to strongest:
 
@@ -38,7 +38,7 @@ The defenses form a layered posture, cheapest to strongest:
 
 **Rate limiting is enforced per tenant with a token bucket, and the plan sets the numbers.** A key like `ratelimit:{tenant_id}` in Redis holds the tenant's token count, refilled at the plan's sustained rate, capped at the plan's burst size. A request spends a token; if the bucket is empty the gateway returns **429 Too Many Requests** with `Retry-After`. Token bucket beats a fixed window because it absorbs short bursts while still bounding the sustained rate, and Redis makes the check a sub-millisecond atomic operation shared across every gateway node.
 
-Concrete per-plan limits for an API platform:
+Concrete per-plan limits:
 
 | Plan | Sustained rate | Burst | Concurrent jobs | Storage | Seats |
 |---|---|---|---|---|---|
