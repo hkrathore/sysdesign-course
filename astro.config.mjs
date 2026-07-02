@@ -73,6 +73,8 @@ export default defineConfig({
 					{ label: 'Module 8 · Data Platform Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-8' } }] },
 					{ label: 'Module 9 · Gen AI & Agentic Foundations', collapsed: true, items: [{ autogenerate: { directory: 'module-9' } }] },
 					{ label: 'Module 10 · Gen AI & Agentic Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-10' } }] },
+					{ label: 'Module 11 · Client & Mobile System Design', collapsed: true, items: [{ autogenerate: { directory: 'module-11' } }] },
+					{ label: 'Module 12 · Multi-Tenancy & SaaS Architecture', collapsed: true, items: [{ autogenerate: { directory: 'module-12' } }] },
 				] },
 				{ label: 'Part IV · Engineering Excellence & Operations', collapsed: false, items: [
 					{ label: 'Module 13 · Security, Privacy & Trust', collapsed: true, items: [{ autogenerate: { directory: 'module-13' } }] },

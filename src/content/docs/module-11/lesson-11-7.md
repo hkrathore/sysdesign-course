@@ -1,0 +1,347 @@
+---
+title: "11.7 - Design an Offline-First Mobile App"
+description: A full RESHADED walkthrough of a cross-device notes and tasks app that must be fully usable offline, sync automatically across a user's devices, and resolve concurrent offline edits without ever losing data, argued at Director altitude, tying together offline sync, conflict resolution, mobile push, and client performance.
+sidebar:
+  order: 7
+---
+
+### Learning objectives
+- Run the **RESHADED** spine on a client-heavy problem where the hard part lives on an untrusted, frequently-partitioned device, and defend each step against battery, data, and convergence cost rather than reciting components.
+- Separate the two engines that make offline-first work: a **local database that is the source of truth for the UX** (so every read and write is instant and offline-capable) and a **delta-sync protocol keyed by a per-account cursor** (so reconnection is cheap and incremental).
+- Quantify what a Director can stand behind: **20M users, 3 devices each, ~4 MB per account (40 MB for power users), ~6k mutations/s peak, KB-sized deltas, an ~8k/s reconnect storm**, and why this is a per-account sync problem, not a live-socket problem.
+- Make the **conflict-resolution** call explicit: per-field last-writer-wins for scalar fields, merge or keep-both for text, never a silent data loss, and know when the answer graduates to a **CRDT**.
+- Know where a Director **goes deep** (the conflict cases, the cursor design, push-as-a-hint) and where they **delegate a benchmark** (the on-device store, the merge UX, the CRDT investment), naming each trade-off.
+
+### Intuition first
+An offline-first app is a **fleet of ships that each keep their own logbook**, coordinated by a harbor master, not a single control tower with a perfect radio link to every ship.
+
+Each ship (a phone, a tablet, a laptop) carries its own logbook (a local database) and writes in it continuously, in a storm, in a dead zone, mid-ocean, with no contact at all. The writing never waits for the harbor. When a ship reaches port (reconnects), it hands the harbor master (the server) the new pages it wrote since it last docked, and the harbor master hands back the pages the *other* ships filed while this one was away. The harbor master keeps the durable master log so a brand-new ship joining the fleet can be brought up to speed.
+
+Three things make this a real system and not a toy. First, a ship must be able to write a full page with **no radio**, which means the logbook, not the harbor, is the thing the crew actually reads and writes. Second, two ships can log the **same event differently** while both were out of contact (you edited a note on your phone and your tablet, both offline), so the harbor master needs a rule for reconciling the two pages that never quietly tears one out. Third, when a **whole convoy returns at once** after a storm (a regional outage heals and half a million devices reconnect in a minute), the harbor cannot melt down, and a ship back from a two-week voyage cannot be made to re-file its entire logbook from page one. Everything hard in this design, the local store, the sync protocol, conflict handling, the reconnect burst, the cold start of a fresh device, is one of those three problems.
+
+Two framing notes. First, this is the **opposite** of a delete-on-delivery messaging system: the server here is a **durable, permanent source of truth**, because the whole product promise is that your notes survive and show up on every device, including one you buy tomorrow. Second, the network is treated as **absent by default**, present as a bonus; the design that assumes a live connection is the one that fails the moment a user walks into an elevator.
+
+---
+
+### R - Requirements
+
+"Build an offline notes app" hides a dozen products. The signal is cutting to a defensible core and saying why.
+
+**Clarifying questions (and assumed answers):**
+- *Single-user multi-device, or multi-user shared docs?* → **Single user, multiple devices** (phone + tablet + web) is the core; team sharing is a v2. This bounds the conflict problem hugely: conflicts are between *your own* two or three devices with low concurrency, not thousands of simultaneous editors. Live multi-user co-editing is deferred to Design evolution, where it forces a CRDT.
+- *Does the server keep history?* → **Yes.** The server is the durable, authoritative store, and it keeps everything. This is the deliberate inverse of a transient messaging queue, and it is load-bearing: a new device must be able to reconstruct the full account.
+- *How long offline?* → **Days to weeks.** The motivating user is a field worker in a low-connectivity area, so I design for long partitions and large accumulated backlogs, not a thirty-second subway gap.
+- *How real-time does sync need to be?* → **A few seconds when online is plenty.** This is not chat. That single answer lets me use pull-based deltas plus a push-to-wake hint instead of millions of live sockets, the biggest cost decision in the design.
+- *What is acceptable on conflict?* → **Never silently lose user text.** Scalar fields (a done-checkbox, a due-date) can take a last-writer-wins; a note body cannot, losing paragraphs is a product failure.
+
+**CUT (with the reason):** live real-time collaborative editing (a CRDT problem, deferred), rich-media editing and version-by-version history UI (product scope), full team permissions and sharing (v2), and end-to-end encryption (a constraint I add later to show its shape). Trying to design co-editing plus sharing plus E2E in 45 minutes is the red flag.
+
+**Functional:** create, edit, view, and delete notes and tasks **fully offline**; **automatic background sync** across the user's devices when connectivity returns; **correct conflict handling** for concurrent offline edits; **local full-text search** over the user's own notes; **attachments** (images, files); a **push notification** to wake other devices (and, later, to alert on a shared change).
+
+**Non-functional (these drive every later decision):**
+- **Offline-first correctness:** every operation succeeds locally with zero network, and the app is fully usable offline. This is the headline NFR, and it forces a local-authoritative store plus an outbound queue.
+- **Durability / no data loss:** a committed local edit survives app kill, reboot, and a failed sync attempt, and once synced it is durably stored server-side across zones.
+- **Convergence:** after all devices reconnect, they converge to the same state (eventual consistency), with conflicts resolved deterministically and never by dropping text.
+- **Efficiency:** sync is incremental (a delta, not a full re-download), and a day of edits costs tens of KB, not MB, respecting battery and metered-data budgets.
+- **Sync latency:** when both devices are online, a change reaches the other device in a few seconds (p95 under ~5 s). Good enough, deliberately not real-time.
+
+The decisive requirement is **offline-first plus convergence**. It forces the entire architecture: a local database as the source of truth for the UX, an outbound mutation queue, a pull-deltas-since-cursor protocol, and a conflict rule. Everything else hangs off "must work fully offline and still converge."
+
+---
+
+### E - Estimation
+
+Enough math to size the account, the sync payloads, and the reconnect burst, and to expose that this is a **per-account delta-sync** problem, not a live-connection problem.
+
+**Assumptions:** 20M registered users, 5M DAU; 3 devices per user; 2,000 notes per account average, with power users at 20,000+; a note averages ~2 KB of text plus metadata (attachments are separate); an active user makes ~50 mutations/day (creates, edits, check-offs).
+
+**Account size (the number that drives cold sync):**
+```
+2,000 notes x 2 KB   ≈ 4 MB text per typical account
+20,000 notes x 2 KB  ≈ 40 MB for a power user
+```
+Attachments live in blob storage and are fetched lazily, so they stay out of these numbers.
+
+**Server storage:**
+```
+20M accounts x 4 MB ≈ 80 TB text (pre-replication)
++ per-account operation log + replication + power-user skew → low hundreds of TB
+```
+Attachments in S3 are separate and larger, and offloaded to a CDN.
+
+**Mutation rate (the write load):**
+```
+5M DAU x 50 mutations/day = 250M/day ≈ 2,900/s average → ~6k/s peak
+```
+Each mutation is small, a patch of `{op_id, note_id, patch, base_version, ts}` at ~200 to 500 B, and even a full-note replace is ~2 KB.
+
+**Sync payload sizes (the efficiency win):**
+```
+Reconnect after 1 hour offline  → a handful of changed notes → a few KB
+Reconnect after 1 day offline   → tens of changed notes      → ~50 to 100 KB
+Cold sync (new device/install)  → the whole account          → 4 MB typical, 40 MB power user
+Push after 2 weeks offline      → ~500 queued local ops x 300 B ≈ 150 KB outbound
+```
+Delta-since-cursor is what keeps the steady state in KB. Only the **cold sync** of a fresh device is expensive, and it is the case to engineer around.
+
+**Reconnect storm (the concurrency spike):**
+```
+A regional outage heals; ~500k devices reconnect within a minute:
+  500,000 / 60 ≈ 8,300 sync-open requests/s burst on top of baseline
+```
+This is a thundering-herd read spike, and naming it is the Director signal.
+
+**Push and connections (why this is not messaging):** we do **not** hold 20M live sockets. Sync is pull-based; the platform push services (APNs, FCM) are used only to **wake a device and tell it to sync**, and they are built for billions of messages, so the coalesced ~100M wakes/day (~1,200/s) is trivial for them. At most we hold a persistent socket for the small slice of **foreground, actively-editing sessions** (call it 500k to 1M concurrent) for snappier propagation, a fraction of a messaging app's connection load.
+
+**The one-line takeaway:** size for **KB-sized deltas, a painful tens-of-MB cold-sync tail, ~6k mutations/s, and an ~8k/s reconnect burst**, not for millions of sockets. The scarce resources are the user's **battery and data**, and the server's **cold-sync and reconnect** paths.
+
+---
+
+### S - Storage
+
+Two stores, and conflating them is the classic mistake: a local store on the device and a durable store on the server.
+
+**On the device (the source of truth for the UX).** **SQLite**, embedded on every mobile OS, wrapped by the platform's local layer (Core Data / Room, or a sync-aware layer like Realm or WatermelonDB on top). It holds three things: the **note/task records**, a **pending-mutations outbox table**, and the **sync cursor**. SQLite is the right choice because it is transactional locally, which lets a note write and its outbox row commit **in one atomic transaction**, killing the on-device dual-write bug, and because it gives fast indexed queries and **FTS5 full-text search** so offline search never touches the server. *Rejected, raw files or a plain key-value store:* no transactions and no query or index, so you would hand-roll local consistency and search and get both wrong. *Rejected, a server round-trip per read or write:* that is the definition of not offline-first; the whole design fails the headline NFR.
+
+**On the server (the durable source of truth for convergence and new-device bootstrap).** Two structures:
+1. **The record store**, notes and tasks with version metadata, partitioned by `account_id`. **Choice: a DynamoDB or Cassandra-class store** (partition key `account_id`, sort key `note_id`), because every sync query is scoped to a single account, so partitioning by account makes a delta read a single-partition scan, and the store scales horizontally to absorb ~6k writes/s across 20M accounts. *Rejected, a single Postgres primary:* the write volume is fine when sharded, but a single primary bottlenecks and we need no cross-account joins; sharded Postgres (Vitess) is a viable alternative if we want richer per-account transactions.
+2. **The per-account operation log**, an append-only change feed where each mutation gets a **monotonically increasing server sequence number scoped to the account**. This log is what powers "pull everything since cursor," and its sequence is the backbone of convergence.
+
+**Attachments** go to **S3 plus a CDN**; records carry only a pointer and a content hash, and bytes are uploaded and downloaded lazily, off the sync path, the same offload principle any media-heavy system uses.
+
+What persists where: the device holds a working copy plus its outbox plus its cursor, and is fully usable offline; the server holds the durable, authoritative, mergeable copy plus the per-account op log plus attachments. Unlike a delete-on-delivery messaging queue, the server here **keeps everything**, because the product is durable notes that must reach any device, including a brand-new one.
+
+---
+
+### H - High-level design
+
+The design splits into an **offline-capable client** (local DB is authoritative, a background sync engine reconciles) and a **stateless server sync tier** (applies mutations, serves deltas, wakes other devices), with push used only as a hint.
+
+```mermaid
+flowchart LR
+  subgraph DEVICE["Device (fully offline-capable)"]
+    UI["UI"]
+    DB[("Local SQLite<br/>records + FTS")]
+    OUT[("Outbox<br/>pending mutations")]
+    CUR[("Sync cursor")]
+    SE["Sync engine"]
+    UI --> DB
+    UI --> OUT
+    SE --> OUT
+    SE --> DB
+    SE --> CUR
+  end
+
+  SE -->|"push mutations (op-ids)"| SYNC["Sync service<br/>stateless"]
+  SYNC -->|"pull deltas since cursor"| SE
+
+  SYNC --> REC[("Record store + op log<br/>per account, DynamoDB/Cassandra")]
+  SYNC --> PUSH["Push service<br/>APNs / FCM"]
+  PUSH -.->|"wake & sync (a hint)"| OTHER["User's other devices"]
+  SYNC --- BLOB[("Attachments<br/>S3 + CDN")]
+```
+
+**Happy path, a user edits a note on the phone while offline:**
+1. The app writes the new record version to SQLite **and** appends a mutation to the outbox, in **one local transaction**. The UI updates instantly from local state. The user has read-your-writes locally with zero network, and a crash cannot leave an edit without its outbox row or an outbox row for an edit that rolled back.
+2. When connectivity returns, the sync engine **drains the outbox**: it pushes the mutations (each carrying its `op_id`) to the sync service, which dedupes on `op_id`, applies them to the record store, bumps the account's server sequence, appends to the op log, and returns the new versions and cursor. Applied `op_id`s are recorded so a retried push is idempotent.
+3. The sync service asks the **push service** to wake the user's other devices with a "come sync" nudge.
+4. Each other device, on push wake or next foreground, calls **pull deltas since its cursor**, gets the changed records and a new cursor, applies them to local SQLite, resolves any conflict against its own pending edits, and updates the UI.
+
+**Offline path:** there is no special offline path, which is the point. The device always reads and writes locally; being offline just means the outbox grows and the cursor does not advance until connectivity returns.
+
+The two defining choices: **(a)** the **local DB is the source of truth for the UX**, so every read and write is local and instant and sync is asynchronous and out-of-band, which is what actually delivers offline-first; **(b)** sync is **pull-based deltas keyed by a per-account cursor**, with push used only as a wake hint, which keeps us off the millions-of-sockets hook and turns a reconnect into a cheap cursor check.
+
+---
+
+### A - API design
+
+Because sync tolerates seconds of latency, the core API is a small, batched, idempotent **REST/HTTPS** surface, not a persistent socket. Every call carries a bearer token and a `device_id`.
+
+**Push mutations (upload the device's local changes):**
+```
+POST /v1/sync/push
+{ device_id, base_cursor,
+  mutations: [ { op_id,            // client-generated UUID = idempotency key
+                 note_id,          // client-generated, stable before first sync
+                 type: "create|update|delete",
+                 patch | fields,   // per-field patch, not a whole-note blob
+                 base_version,     // the version this edit was made against
+                 client_ts } ] }
+-> 200 { applied:   [ {op_id, note_id, new_version, server_seq} ],
+         conflicts: [ {op_id, note_id, server_version, resolution} ] }
+```
+The `op_id` is the idempotency key: the network is at-least-once, so a flaky connection resends, and the server **dedupes on (account, op_id)** to turn at-least-once transport into exactly-once apply. `base_version` is what lets the server detect a concurrent edit.
+
+**Pull deltas (download remote changes since the cursor):**
+```
+GET /v1/sync/pull?device_id=..&cursor=<opaque>&limit=500
+-> 200 { changes: [ {note_id, version, updated_at, tombstone?, patch|body} ],
+         next_cursor: <opaque>, has_more: bool }
+```
+The cursor is an **opaque encoding of the per-account server sequence** the device has consumed, never a wall-clock timestamp. Pagination (`limit` + `has_more`) lets a cold sync or a two-week backlog stream in chunks. A pull with an unchanged cursor returns an empty `changes` and the same cursor by reading a single per-account sequence, the cheap fast-path that makes a reconnect storm survivable.
+
+**Supporting surface:** `POST /v1/devices/push-token` (register the APNs/FCM token), `GET /v1/media/upload-url` and `download-url` (presigned S3, out of band).
+
+```mermaid
+sequenceDiagram
+  participant A as Device A (offline edit)
+  participant S as Sync service
+  participant R as Record store + op log
+  participant P as APNs / FCM
+  participant B as Device B
+
+  A->>A: edit note -> local commit + outbox row
+  Note over A: fully usable offline
+  A->>S: POST /sync/push {op_id, patch, base_version}
+  S->>R: dedupe op_id, apply, bump account seq
+  R-->>S: new_version, server_seq
+  S-->>A: applied {new_version}, next_cursor
+  S->>P: wake user's other devices
+  P-->>B: "come sync" (a hint)
+  B->>S: GET /sync/pull?cursor=..
+  S->>R: read changes since cursor
+  R-->>S: changes + next_cursor
+  S-->>B: changes, next_cursor
+  B->>B: merge into local DB, resolve conflicts
+```
+
+*Rejected, full-state sync (the client ships its whole DB and the server diffs):* simple, but O(account size), tens of MB every sync, which destroys battery and data budgets; delta-since-cursor is mandatory. *Rejected, a persistent WebSocket as the primary channel for every device:* unnecessary for a few-seconds-latency product and expensive, since millions of idle sockets drain battery and add server cost; we pull and wake instead, and hold a socket only for an active foreground editing session. *Rejected, a wall-clock "since" cursor:* clock skew across devices and servers reorders or silently drops changes, so the cursor must be a **server-assigned monotonic per-account sequence**, not a timestamp.
+
+---
+
+### D - Data model
+
+The version and tombstone decisions are what determine whether the system converges.
+
+**Record (note/task), on device and on server:**
+```
+note_id       UUID, client-generated so an offline-created note has a stable ID
+account_id
+type          note | task
+title, body, done, due_date, ...
+version       server-assigned, monotonic per note
+updated_at
+server_seq    the per-account sequence at which this version committed (drives cursor pull)
+tombstone     soft-delete flag (never hard-delete until GC-safe)
+content_hash  for dedupe + attachment pointer
+```
+**Client-generated `note_id` is load-bearing:** a note created offline needs a stable ID *before* it ever reaches the server, so IDs are client UUIDs (v7, so they sort by creation time), not server-assigned sequential IDs that would require a round trip and break offline creation. Collision risk is negligible.
+
+**Tombstones are non-negotiable.** If device A deletes note N while device B is offline, and we **hard-delete** N on the server, then when B reconnects there is nothing in the delta to tell it N is gone, so B's local copy survives and its next push **resurrects the deleted note**. A soft-delete tombstone propagates like any other change; we retain it until every device's cursor has advanced past it, then garbage-collect.
+
+**Operation / mutation (outbox on device, op log on server):**
+```
+op_id         client UUID, the idempotency key
+note_id, type
+patch | fields
+base_version  the version the edit was made against → concurrency detection
+client_ts, device_id
+```
+On the device these sit in the outbox until acked; on the server they are the append-only per-account change feed carrying the monotonic sequence.
+
+**Sync cursor / checkpoint (per device):** the last per-account `server_seq` the device has fully consumed, stored locally and sent on pull. The server also tracks each device's last-seen cursor, so once **every** device is past sequence X, the op log and tombstones before X can be compacted, keeping the log from growing forever.
+
+**Version and merge strategy:** scalar fields (`done`, `due_date`, `title`) take **per-field last-writer-wins** by `version` and `updated_at`; the **body text** cannot, because per-field LWW there silently discards a concurrent edit, so the body is resolved by operation-based merge or, on a true same-field conflict, by keeping **both** as a conflict copy. This sets up the Evaluation and the CRDT upgrade in Design evolution.
+
+---
+
+### E - Evaluation
+
+Stress the design against the NFRs, fix each bottleneck, and name the trade. This step and the next are the crux of the problem.
+
+**1. Offline correctness.** The app must be fully usable with zero network. Guaranteed by three things working together: the local SQLite store is the source of truth (every read and write is local), **client-generated UUIDs** let a note be created offline with a stable ID and no round trip, and the record write plus its outbox row commit in **one SQLite transaction**, so a crash cannot leave an edit that never syncs or an orphan outbox row for an edit that rolled back. *Trade:* client UUIDs carry a negligible collision risk versus server-assigned sequential IDs, which would be collision-free but require a round trip and break offline creation, so the trade is trivially worth it.
+
+**2. Conflict cases, two devices edit the same note offline (the heart of the problem).** Phone A and tablet B both edit note N while both are offline, both against `base_version = v3`. The server applies A first, taking N to v4. B's push then arrives with `base_version = v3` while the server is at v4, so the **conflict is detected** by the base-version mismatch. The resolution depends on the field, and naming the trade is the whole signal:
+- **Pure last-writer-wins:** simplest, keep the higher `client_ts`. But it **silently discards the loser's edit**, which is fine for a `done` checkbox and a product failure for a note body. Acceptable only for scalar fields.
+- **Per-field merge:** if A changed the title and B changed the body, there is no real conflict; merge both fields. This reduces true conflicts to same-field edits and is the sensible default for structured records.
+- **Conflict copy:** on a genuine same-field body conflict, keep **both**, spawn a "note (conflicted copy from Tablet)," and let the human reconcile. This is the safe fallback every mature sync product uses, and it guarantees no text is ever lost.
+- **CRDT merge for text:** model the body as a sequence CRDT and both edits merge deterministically with no conflict copy at all. That is the Design-evolution upgrade, not the v1.
+
+The Director line: **never silently lose user data**; scalar fields take LWW, text fields merge or keep both. I would delegate the merge UX to the client team with a stated prior, per-field LWW plus a conflict copy now, and a CRDT for the body once telemetry shows the real concurrent-edit rate justifies the complexity.
+
+**3. Sync storms, many clients reconnect after an outage.** A regional outage heals and ~500k devices reconnect within a minute, an ~8k/s burst. Four fixes: clients use **jittered exponential reconnect backoff** so they do not all hit at t=0; the **cheap cursor fast-path** answers "nothing changed" by reading a single per-account sequence rather than scanning; the push wakes are already coalesced and rate-limited by APNs/FCM; and the sync service is **stateless and horizontally scaled** behind a load balancer with read replicas absorbing the pull burst. *Trade:* jitter adds a few seconds to worst-case propagation after an outage, invisible for a notes app.
+
+**4. Large-account cold sync.** A new device must pull the whole account, 4 MB typically and 40 MB for a power user, plus attachments. Three fixes: **paginated pull** (`limit` + `has_more`) streaming newest-first so the user sees recent notes within a second while the tail loads; **lazy attachments**, so we sync metadata and pointers first and fetch blob bytes from the CDN on demand; and **prioritized sync** of the notes the user actually opens first. *Trade:* newest-first means the local search index is incomplete until the tail lands, so we show a "syncing" state; acceptable versus blocking the whole UI on a 40 MB download.
+
+**5. Battery and data budget.** A tight poll loop keeps the radio hot and drains the battery, and a fat payload burns metered data. Four fixes: **push-to-wake instead of polling**, so a device syncs when told there is something or on foreground, not on a timer; **coalesced outbound pushes**, batching mutations on a debounce rather than one request per keystroke; **delta-only transfer** keeping payloads in KB; and deferring big attachment fetches to Wi-Fi, respecting the OS background-refresh and metered-data settings. *Trade:* push-to-wake makes propagation depend on APNs/FCM latency, usually seconds and occasionally delayed, which is fine for notes and would not be for chat.
+
+**6. Dropped and duplicate pushes.** APNs and FCM are **best-effort and droppable**: a device may be offline, its token stale, or the message throttled. So push must be treated as a **hint, never the source of truth**. Correctness rests entirely on **cursor-based pull**: even if the wake is dropped, the device still syncs on next foreground and on a low-frequency safety-net poll (every 15 to 30 minutes where the OS allows background work), so a lost push only delays propagation, never loses data. Duplicate pushes are harmless because pull is idempotent, a redundant pull with an unchanged cursor returns nothing new. This is the key correctness argument of the whole design: **convergence depends on pull, not on push delivery.**
+
+**Re-check versus NFRs:** offline-first ✓ (local SQLite authoritative, client IDs, atomic outbox); durability ✓ (durable in local SQLite across app kill before push, multi-AZ server-side after); convergence ✓ (per-account monotonic sequence plus cursor pull plus a deterministic conflict rule, with tombstones preventing resurrection); efficiency ✓ (KB deltas, push-to-wake not poll, lazy attachments); sync latency ✓ (a few seconds when online). The residual costs, op-log and tombstone GC, the conflict-copy UX, the cold-sync tail, and push unreliability, are **named and handled**, which is the point of this step.
+
+---
+
+### D - Design evolution
+
+Scale the design under new constraints, and name every trade.
+
+**1. Real-time collaborative editing, via CRDT.** The v1 (per-field LWW plus conflict copy) is right for single-user, multi-device, where conflicts are rare. The moment the product adds live multi-user co-editing (shared team notes, a Google-Docs feel), per-field LWW loses concurrent keystrokes and conflict copies explode. The upgrade is to model the body as a **sequence CRDT (Yjs or Automerge)**: every edit becomes a commutative operation that merges deterministically regardless of arrival order, so two people typing in the same paragraph converge with no lost text and no conflict copy. Co-editing also wants a **low-latency channel** (a WebSocket) for live cursors and ops during an active session, falling back to the pull-and-wake sync when the session closes. *Trade:* CRDTs carry metadata overhead, they retain tombstones for deleted characters and grow the document state, and they change storage, since you persist the CRDT document and its op history rather than just the latest text, so you adopt them where concurrent editing is genuinely happening, not everywhere. *Rejected, operational transformation (OT):* powerful but it needs a central authoritative server to transform every op and is notoriously hard to get right; CRDTs merge without a central transformer, a better fit for an offline-first design where a device merges on reconnect.
+
+**2. Selective / partial sync for huge accounts.** A power user with 40 MB and 20,000 notes, or a field organization with a shared multi-GB dataset, should not cold-sync everything onto a phone. Add **selective sync**: pull metadata and the search index for all notes, but full bodies and attachments only for recently-opened or pinned notes or a chosen folder, fetching the rest on demand. This bounds device storage and cold-sync time. *Trade:* opening an un-synced note then needs the network, a partial regression of offline-first for the cold tail, which we accept because the alternative is a 40 MB phone download, and we let the user **pin** folders for guaranteed offline access.
+
+**3. End-to-end encryption.** For a privacy-first product, encrypt on the device so the server stores opaque ciphertext it can version and route but never read. The constraint it imposes has the familiar shape: **no server-side search** (search stays client-side over the local decrypted index, which we already have via SQLite FTS, so it fits offline-first cleanly), **no server-side merge** (conflict resolution must run on the device, which our CRDT or conflict-copy approach already supports), and **key management** (getting the account key to a new device without the server learning it, via a passphrase-derived key or the secure enclave). *Trade:* privacy costs you server-side features. It is notably **less disruptive here than in a server-merge design**, because our search is already local and our conflict resolution is already client-capable, a genuine benefit of the offline-first shape.
+
+**4. Multi-region.** As the base globalizes, **pin each account to a home region** for latency and data residency, replicate the record store within that region across zones, and route the account's sync to its home region. A traveling user is rare, so route them cross-region over the backbone and accept the extra latency. Keeping the per-account sequence single-authority in the home region keeps convergence simple. *Trade:* a traveling user pays cross-region latency; the alternative, multi-master per account across regions, buys local latency everywhere at the cost of cross-region conflict on the sequence itself on every write, which is not worth it for a notes app. Home-region pinning also delivers **data residency** (EU accounts stay in the EU) for free.
+
+**Where I would delegate (with stated priors):**
+- *Client:* the on-device store choice (SQLite versus Realm versus WatermelonDB) and the merge UX; my prior is SQLite plus per-field LWW plus a conflict copy for v1.
+- *The CRDT investment:* only when telemetry shows a real concurrent-edit rate; my prior is Yjs for the body when co-editing ships.
+- *Infra:* op-log and tombstone GC plus cold-sync pagination tuning; my prior is to compact once every device cursor has advanced past a sequence.
+
+---
+
+### Trade-offs table: the pivotal decisions
+
+| Decision | Option A | Option B | Option C | Use when… |
+|---|---|---|---|---|
+| **Source of truth** | **Local-first, device authoritative** ✅ | Server-authoritative (thin client) | Hybrid | **Local-first** when offline use is the product. Server-authoritative only when always-connected and logic must stay hotfixable. |
+| **Sync model** | **Delta pull since cursor + push-to-wake** ✅ | Full-state sync each time | Persistent WebSocket for all devices | **Delta + wake** for battery/data efficiency at a few-seconds latency. **Full-state** only for tiny datasets. **WebSocket-for-all** only for live co-editing (then add a CRDT). |
+| **Conflict resolution** | **Per-field LWW + conflict copy** ✅ | Pure last-writer-wins | CRDT (Yjs/Automerge) | **Per-field + copy** for single-user multi-device. **Pure LWW** only for scalar/toggle fields. **CRDT** for live multi-user co-editing. |
+| **ID generation** | **Client-generated UUID** ✅ | Server-assigned sequential | n/a | **Client UUID** so notes are creatable offline with stable IDs. **Server-assigned** only when a round trip is always available. |
+
+---
+
+### What interviewers probe here
+
+- **"How does the app work with no network at all?"** *Strong:* the **local DB is the source of truth**, notes are created with client-generated IDs, the record and its outbox row commit atomically, and sync is asynchronous and out-of-band, so offline is the default path, not a special case. *Red flag:* a server round-trip on every read or write, or "we just cache responses," which is not offline-first.
+- **"Two devices edit the same note offline. What happens?"** *Strong:* `base_version` mismatch detects the conflict; per-field merge handles different fields; a same-field body conflict keeps **both** as a conflict copy so no text is lost; a CRDT is the upgrade for live co-editing. *Red flag:* last-writer-wins silently overwriting the body, or "the second write just wins."
+- **"You can't re-download everything each sync. How is it efficient?"** *Strong:* a **per-account monotonic sequence plus a cursor delta pull**, push-to-wake rather than polling, lazy attachments, and coalesced batched pushes, keeping the steady state in KB. *Red flag:* full-state sync, a wall-clock "since" cursor (clock skew), or a tight poll loop.
+- **"500k devices reconnect after an outage. Does the system fall over?"** *Strong:* jittered backoff, the cheap cursor fast-path, a stateless horizontally-scaled sync tier with read replicas, and already-coalesced push. *Red flag:* every client hammering at t=0 with full syncs.
+- **"What if a push notification is dropped?"** *Strong:* push is a **hint, not the source of truth**; convergence rests on cursor pull, foreground and a safety-net poll guarantee eventual sync, and duplicates are harmless because pull is idempotent. *Red flag:* relying on push delivery for correctness, so a dropped APNs message loses an update.
+
+---
+
+### Common mistakes
+
+- **A server round-trip in the read or write path.** It kills offline-first; the local DB must be the source of truth and sync must be out-of-band.
+- **Pure last-writer-wins on the note body.** It silently loses text; use per-field LWW for scalars and a conflict copy or CRDT for the body.
+- **A wall-clock "since" cursor.** Clock skew reorders or drops changes; use a server-assigned monotonic per-account sequence.
+- **Hard-deleting instead of tombstoning.** An offline device that never saw the delete resurrects the note on its next push; soft-delete and GC when safe.
+- **Trusting push for delivery, or skipping the idempotency key.** APNs/FCM are best-effort, so correctness must rest on pull plus a safety-net poll, and every mutation needs an `op_id` or retries duplicate.
+
+---
+
+### Interviewer follow-up questions (with model answers)
+
+**Q1. How do you generate IDs for notes created while the device is offline?**
+> *Model:* Client-generated UUIDs, v7 so they sort by creation time. A note created offline needs a stable ID immediately, before it has ever reached the server, so a server-assigned sequential ID is out, it would require a round trip and break offline creation. Collision risk on a v7 UUID is negligible. Separately, every *mutation* carries its own `op_id` UUID as an idempotency key, so when a flaky network resends a push the server dedupes on `(account, op_id)` and applies it exactly once. Stable client IDs for entities, idempotency keys for operations, are what make offline creation and at-least-once transport safe together.
+
+**Q2. Walk me through two devices editing the same note's body offline, then both reconnecting.**
+> *Model:* Both edited against `base_version = v3`. Whichever push lands first, say the phone, applies cleanly and takes the note to v4. The tablet's push arrives with `base_version = v3` while the server is at v4, so the base-version mismatch flags a conflict. If the two devices touched **different fields** (phone changed the title, tablet changed the body), I merge per-field and there is no real conflict. If they both edited the **body**, I do not silently pick one, that loses paragraphs; I keep **both** as a conflict copy, "note (conflicted copy from Tablet)," and let the user reconcile. The principled endpoint, once live co-editing is a real requirement, is a **sequence CRDT** for the body so the two edits merge deterministically with no copy at all. The invariant I never break is that user text is never silently discarded.
+
+**Q3. A field team is offline for two weeks, then all reconnect at a depot on one Wi-Fi. What breaks and how do you handle it?**
+> *Model:* Two things spike at once, a reconnect storm and a large per-device backlog. For the storm, clients use **jittered backoff** so they do not all hit at t=0, the **cursor fast-path** cheaply answers "nothing new," and the sync tier is stateless and horizontally scaled with read replicas soaking up the pull burst. For the backlog, each device pushes its queued mutations in **coalesced batches** (roughly 500 ops at ~300 B is ~150 KB, trivial) and pulls the two weeks of others' changes **paginated**, newest-first, so recent notes appear immediately while the tail streams. Attachments are deferred to that Wi-Fi and fetched lazily. Convergence is guaranteed throughout by the per-account monotonic sequence and tombstones, so even a fortnight of divergence reconciles to one consistent state.
+
+**Q4. Product now wants Google-Docs-style real-time co-editing. What changes?**
+> *Model:* The body graduates from per-field LWW to a **sequence CRDT** (Yjs or Automerge), so concurrent keystrokes from multiple users merge deterministically with no lost text and no conflict copy. I add a **WebSocket channel** for an active co-editing session to carry live ops and cursors at low latency, falling back to the existing pull-and-wake sync when the session ends. Storage changes too, I now persist the CRDT document and its op history rather than just the latest text. I explicitly reject **operational transformation**, which needs a central server to transform every op and is very hard to get right; CRDTs merge without a central transformer, which fits an offline-first world where a device merges on reconnect. The trade is CRDT metadata overhead, so I adopt it for the body where co-editing is real and keep the cheaper model elsewhere.
+
+---
+
+### Key takeaways
+- **Offline-first is a fleet of logbooks, not a control tower:** the two engines are a **local database that is the source of truth for the UX** (SQLite, client-generated IDs, an atomic outbox) and a **delta-sync protocol keyed by a per-account monotonic sequence** (pull since cursor, push only to wake). Size for **KB deltas, a tens-of-MB cold-sync tail, ~6k mutations/s, and an ~8k/s reconnect burst**, not for live sockets.
+- **The server is a durable source of truth, the inverse of a delete-on-delivery queue,** because the product promise is notes that survive and reach every device, including a new one.
+- **Convergence rests on pull, not push:** APNs/FCM are best-effort hints, so correctness comes from cursor-based pull plus a safety-net poll, and `op_id` idempotency turns at-least-once transport into exactly-once apply. Tombstones stop deleted notes from resurrecting.
+- **Never silently lose user text:** scalar fields take per-field LWW, the body takes per-field merge or a conflict copy, and the principled upgrade for live co-editing is a **CRDT** (Yjs/Automerge), not OT.
+- **Director altitude:** go deep on the conflict cases, the cursor design, and push-as-a-hint; **delegate** the on-device store, the merge UX, and the CRDT investment with stated priors, and always quote the **battery-and-data** cost, because on the client, efficiency is retention.
+
+> **Spaced-repetition recap:** A fleet of ships each keeping their own logbook, reconciled by a harbor master. **Local SQLite is the source of truth for the UX** (instant, offline, client-generated IDs, record + outbox committed atomically); sync is **delta-pull since a per-account monotonic cursor**, with **APNs/FCM only to wake** devices. The server is **durable and permanent** (opposite of delete-on-delivery). **Convergence depends on pull, not push** (push is a droppable hint; correctness = cursor pull + safety-net poll + `op_id` idempotency; tombstones prevent resurrection). Conflicts: **scalar = LWW, body = merge or conflict copy, never silent loss**; upgrade to a **CRDT** (Yjs/Automerge, not OT) for live co-editing. Hard cases: **reconnect storm** (jitter + cursor fast-path + stateless scale), **cold sync** (paginate newest-first + lazy attachments + selective sync). Efficiency (battery/data) is the scarce resource, so delta-only, coalesced pushes, push-to-wake not poll.

@@ -93,7 +93,7 @@ const u = (p) => `${base}/${p}`;
   .sec-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:26px;gap:20px;flex-wrap:wrap}
   .sec-head h2{font-family:"Space Grotesk";font-size:1.7rem;letter-spacing:-.02em;margin:6px 0 0}
   .sec-head p{margin:0;color:var(--ink-soft);max-width:46ch;font-size:.95rem}
-  .grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+  .grid5{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
   @media(max-width:1000px){.grid5{grid-template-columns:repeat(3,1fr)}}
   @media(max-width:640px){.grid5{grid-template-columns:1fr 1fr}}
   @media(max-width:430px){.grid5{grid-template-columns:1fr}}
@@ -122,7 +122,7 @@ const u = (p) => `${base}/${p}`;
 <section class="metrics"><div class="wrap">
   <div class="metrics-head">
     <span class="eyebrow">The course by the numbers</span>
-    <p>A triaged path, not a 760k-word encyclopedia - calibrated to finish in a focused <b>~4 weeks</b>.</p>
+    <p>A triaged path, not an 820k-word encyclopedia - calibrated to finish in a focused <b>~4 weeks</b>.</p>
   </div>
   <div class="mgrid">
     <div class="metric"><div class="v">16</div><div class="k">modules, foundations to leadership</div></div>
@@ -162,16 +162,17 @@ const u = (p) => `${base}/${p}`;
 </div></section>
 
 <section class="tracks" id="tracks"><div class="wrap">
-  <div class="sec-head"><div><span class="eyebrow">Five tracks · one method</span><h2>Both halves of the loop.</h2></div><p>The design round is ~60% of the decision. Leadership is the other ~40% - and it's where most strong engineers lose the offer.</p></div>
+  <div class="sec-head"><div><span class="eyebrow">Six tracks · one method</span><h2>Both halves of the loop.</h2></div><p>The design round is ~60% of the decision. Leadership is the other ~40% - and it's where most strong engineers lose the offer.</p></div>
   <div class="grid5">
     <a class="track" href={u('module-1/lesson-1-1/')}><div class="mod">MODULES 1-6</div><h4>System Design</h4><p>Canonical and non-canonical problems, RESHADED run end-to-end on each.</p><div class="arrow">Open →</div></a>
     <a class="track" href={u('module-7/lesson-7-1/')}><div class="mod">MODULES 7-8</div><h4>Data Platforms</h4><p>Lakehouse, real-time OLAP, CDC, governance for the data-and-eng leader.</p><div class="arrow">Open →</div></a>
     <a class="track" href={u('module-9/lesson-9-1/')}><div class="mod">MODULES 9-10</div><h4>Gen AI &amp; Agentic</h4><p>RAG, agents, LLM serving - the AI-systems round every loop now adds.</p><div class="arrow">Open →</div></a>
+    <a class="track" href={u('module-11/lesson-11-1/')}><div class="mod">MODULES 11-12</div><h4>Client, Mobile &amp; SaaS</h4><p>Offline-first sync, mobile push, and multi-tenant SaaS - the client and platform rounds.</p><div class="arrow">Open →</div></a>
     <a class="track" href={u('module-13/lesson-13-1/')}><div class="mod">MODULES 13-15</div><h4>Engineering Excellence</h4><p>Security &amp; trust, testing &amp; quality, and production troubleshooting - the operational rounds.</p><div class="arrow">Open →</div></a>
     <a class="track" href={u('module-17/lesson-17-1/')}><div class="mod">MODULE 17</div><h4>Leadership</h4><p>STAR-L, a probe-resistant story bank, and a 2026 calibration.</p><div class="arrow">Open →</div></a>
   </div>
 </div></section>
 </main>
-<footer><div class="wrap"><div>Modern System Design Interview - taught the RESHADED way.</div><div class="mono">~760k words · built clean · free to read</div></div></footer>
+<footer><div class="wrap"><div>Modern System Design Interview - taught the RESHADED way.</div><div class="mono">~820k words · built clean · free to read</div></div></footer>
 </body>
 </html>
