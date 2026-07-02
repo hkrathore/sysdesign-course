@@ -1,233 +1,146 @@
 ---
-title: "14.2 - Inherited Legacy System"
-description: The first-90-days modernization scenario, audit before touching, stabilize-then-strangle over the rewrite instinct, and a quarter-by-quarter sequence where every quarter ships business-visible value, defended to a CEO who wants features.
+title: "14.2 - Contract & Integration Testing"
+description: In a microservices world the bugs live at the seams — consumer-driven contract testing catches integration breaks without the cost and flake of full end-to-end, the flake-vs-fidelity tension governs test doubles vs real dependencies, and API compatibility direction lets teams deploy independently.
 sidebar:
   order: 2
 ---
 
-> **This question appears nearly verbatim in Director and architect interview banks because it is the job:** "You've inherited a 15-year-old system that runs the business. Nobody fully understands it. The CEO wants features. What do you do?" It doubles as the behavioral "re-platforming you led" story. A junior answer reaches for the rewrite, new stack, clean slate, two years, and fails on the spot. A Director answer **measures before touching anything**, names the modules it will deliberately *leave alone*, sequences a strangle so **every quarter ships business-visible value**, and sells it to the CEO in capacity and risk dollars, not architecture diagrams. The interviewer is scoring whether you can run a multi-quarter change program without stopping the business.
-
 ### Learning objectives
-- Run a **first-90-days assessment**, revenue map, risk map, churn-×-incident hotspots, test coverage, KTLO burn, before changing a line of code.
-- Defend **stabilize-then-strangle** against the rewrite instinct with numbers: rewrite cost, historical failure rates, and the feature-freeze the CEO will never grant.
-- Adapt the **RESHADED** spine to an architecture-strategy problem, R becomes business-continuity constraints, E becomes a risk and coverage audit, Design evolution becomes the quarter-by-quarter sequence that *is* the deliverable.
-- Apply **feature-parity discipline**: scope parity to measured usage, not the legacy spec, and make the explicit case for "leave it alone" where migration buys nothing.
-- Sell the program upward as **bought-back capacity and retired risk**, with value milestones a CEO can see each quarter.
+- State the **seams thesis**: once a system is split across services owned by different teams, the bugs stop living inside a service and start living at the **boundaries between them**, so your test strategy has to verify *agreements between services* as a first-class thing, not just code inside one.
+- Explain **consumer-driven contracts** at architecture altitude: the consumer declares the requests and responses it actually depends on, the provider verifies against that recorded contract in CI, and the payoff is **decoupled deploys**, two teams ship on their own cadence with no shared environment to coordinate in.
+- Reason in the **flake-vs-fidelity tension**: real dependencies give high fidelity but high flake, slowness, and cost; test doubles (mock/stub/fake/spy) are fast and stable but **drift** from reality and hand you false confidence. Know where each belongs.
+- Make the **API-compatibility-direction call**: backward vs forward compatibility, and the **deploy-order rule** that lets the provider ship a change before its consumers without a coordinated big-bang release.
+- Name the **failure modes** this discipline engineers around, integration breaks surfacing in prod, mock drift, one shared integration environment coupling every deploy, before reaching for a tool.
 
 ### Intuition first
-You've bought a 90-year-old house the family still lives in. The wiring is a fire hazard, the foundation has one worrying crack, and three rooms were added by builders who never met. The rewrite instinct says: demolish, rebuild, move the family into a hotel for two years. But the family can't leave, they run a business from the kitchen. **Inspect first**: which walls are load-bearing, where the damage actually is, which rooms just look dated. **Then stabilize**: the foundation and the wiring, the things that can kill you. **Then renovate room by room**, each room usable when finished, the family in the house the whole time. And the guest bedroom nobody uses? **You don't touch it.** Renovation risk is real and the room earns nothing.
+Think of two companies that trade by **purchase order**. The buyer sends an order in an agreed shape, fields, units, currency, and the supplier promises to honor anything that matches that shape. Neither company audits the other's internal accounting; they only care that the **document at the boundary** stays valid. If the buyer needs a new field, they say so up front; if the supplier wants to change the form, they have to keep accepting the old one until every buyer has migrated. The contract is the purchase order, and as long as both sides keep their half of it, each runs its own back office however it likes, on its own schedule.
 
-That is the entire lesson: inspect (the 90-day audit), stabilize (observability, deploys, backups), strangle room by room (the strangler-fig lesson has the mechanics), and leave the guest bedroom alone. The interview tests whether you can resist the demolition instinct *and* articulate why, "I'd rewrite it properly this time" is the most expensive sentence in software.
+That is exactly what contract testing does for services. The expensive, fragile alternative is to **build one full replica of the whole supply chain** and watch a real order flow end to end through every warehouse before you trust anything. It works, but it is slow, it breaks for reasons that have nothing to do with your change, and now every company's shipping schedule is hostage to one shared test warehouse. The cheaper, sharper move is to test the **purchase order itself**: does what the buyer sends still match what the supplier accepts? Get the document right and the two back offices never have to be in the same room.
 
----
+### Deep explanation
 
-## R: Requirements
+**The seams thesis is the foundational fact, and the whole lesson falls out of it.** In a monolith, a function call either compiles against its callee or it does not; the boundary is checked for free by the type system at build time. Split that monolith into an `orders` service and a `payments` service owned by two teams, and the call becomes an HTTP or gRPC request across a network, validated by nobody until it runs. The bug is no longer inside a function; it is the **disagreement between what `orders` sends and what `payments` now accepts**, a renamed field, a type change, a removed endpoint, a status code nobody documented. The Director-altitude statement: *in a distributed system the integration is the risky part, not the unit, so your test investment has to move toward verifying the agreements at the seams, and the cheapest way to do that is not to run the whole system.*
 
-> **Adaptation, said out loud:** in a build-from-scratch problem, R scopes features. Here R scopes **business-continuity constraints**, what must keep working while you operate, and the political requirements that decide whether the program survives its second quarter.
+**Three test layers prove three different things, and conflating them is the classic mistake.** Each answers a distinct question and carries a distinct cost:
 
-**The scenario, made concrete (state your assumptions):** a 14-year-old order-management monolith, ~1.5M lines of Java 8, one shared Oracle schema with ~800 tables, quarterly big-bang deploys that take a weekend, **100% of ~$200M annual revenue flowing through it**. 45 engineers; the two who understand billing have one foot out the door. The CEO's stated requirement is a feature roadmap, not a re-platforming.
+- **Integration tests** prove that *one service plus its real adjacent infrastructure* works, the service against a real database, a real queue, a real cache. They catch wiring bugs (bad SQL, wrong serialization, a misconfigured client) that unit tests with everything mocked cannot. Scope: one service and its own backing stores. Cost: seconds to low minutes.
+- **Contract tests** prove that *the agreement between two services* holds, that the consumer's expectations of the provider's API still match what the provider delivers, without ever standing both services up together. Scope: the API boundary, in isolation. Cost: seconds.
+- **End-to-end (E2E) tests** prove that *a real user journey across many real services* works, login through checkout through fulfillment, every service deployed and talking. They are the only thing that proves the whole flow, and they are the most expensive, slowest, and flakiest. Scope: the entire system. Cost: many minutes, and a flake rate that climbs with every service in the path.
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *The actual pain, velocity, reliability, or cost?* → **All three, but velocity is what the CEO feels**: features that took 2 weeks now take 2 months.
-- *Forcing functions?* → **Java 8 and the Oracle version go end-of-support in 18 months**; a PCI/SOC 2 audit lands next year. Deadlines are leverage, use them.
-- *My real budget?* → **No dedicated re-platforming budget**, everything comes out of feature capacity. This constraint *is* the design: it forces incremental delivery and kills the rewrite on arrival.
-- *Revenue seasonal?* → **40% lands in Q4.** Therefore: a money-path change freeze every Q4, planned into the sequence, not discovered in October.
+**Consumer-driven contracts (CDC) is the technique that gets seam confidence without standing up the system.** The pattern, popularized by Pact: the **consumer** (`orders`) writes a test describing the exact requests it makes and the responses it depends on, *only the fields it actually reads*. Running that test produces a **contract** (a JSON pact file) and publishes it to a **broker**. The **provider** (`payments`), in its own CI, pulls every consumer's contract and **replays each recorded request against the real provider code**, asserting the real response satisfies what that consumer expects. Crucially the consumer never talks to the live provider and the provider never talks to the live consumer; they meet only through the recorded contract in the broker. The word *consumer-driven* is the whole point: the provider is verified against **what its consumers genuinely use**, so a field no consumer reads can be changed freely, and a field someone depends on fails CI the moment it breaks.
 
-**Functional requirements (of the *program*, not the system):**
-1. The business keeps running, zero revenue-impacting regressions attributable to the modernization.
-2. Feature delivery continues every quarter, no freeze longer than a sprint.
-3. Each migrated slice reaches **measured parity** (see A) before legacy retirement.
-4. Key-person risk on billing retired within two quarters.
+**The payoff is decoupled deploys, and that is the business case, not a testing nicety.** Without contracts, the only way two teams gain confidence their services still integrate is a shared integration environment where both are deployed and exercised together, which means every deploy queues behind that environment, and one team's broken build blocks the other's release. With contracts verified in **each team's own CI**, `payments` knows before merge whether its change breaks any consumer, and `orders` knows its expectations are still honored, **without a shared environment and without coordinating release timing.** Two teams that used to ship together on a weekly train now ship independently many times a day. That decoupling, fewer cross-team handoffs, no shared-env queue, is worth far more than the bugs the tests catch.
 
-**Non-functional requirements:** deploys quarterly → weekly within 2 quarters; change-failure ~25% → <10%; MTTR hours → <30 min on the money path; EOL/compliance deadlines met with a quarter of slack.
+**The flake-vs-fidelity tension governs the test-double-versus-real-dependency choice, and it is the real engineering judgment here.** Every test boundary forces a pick between using the *real* thing and using a *double*:
 
-**Explicitly CUT (scoping is the signal):** no stack migration for its own sake; no microservices-by-default ("a modular monolith plus 3-5 extracted services" is the honest target); no UI re-skin riding along; and, load-bearing, **no migration of modules the audit shows stable and low-churn.** "Leave it alone" is a first-class disposition, not a failure to finish.
+- **Real dependencies** give the **highest fidelity**, you are testing against the actual behavior, including the quirks a mock would never reproduce, but they are **slow** (network, startup), **costly** (infrastructure, sometimes paid third-party calls), and **flaky** (the dependency is down, slow, rate-limited, or in a bad state). Flake is the silent tax: a suite that fails 1-in-50 runs for reasons unrelated to the code teaches engineers to hit "retry" and stop reading failures, which destroys the signal you built the suite for.
+- **Test doubles** trade fidelity for **speed and stability**. A **mock** asserts the call was made a certain way; a **stub** returns a canned response; a **fake** is a working lightweight implementation (an in-memory store standing in for a database); a **spy** records calls for later inspection. All are fast and deterministic, and all share one fatal weakness: **drift**. The double encodes *your belief* about how the dependency behaves, and when the real dependency changes, the double does not, so your tests stay green while production breaks. A mock that has drifted is worse than no test: it is **confident false assurance**.
+- **Ephemeral-real (testcontainers)** is the modern middle: spin up a *real* dependency (Postgres, Kafka, Redis) in a throwaway container for the duration of the test, then tear it down. You get the fidelity of the real thing with the determinism of a fresh, isolated instance, at the cost of a few seconds of startup and the need for a container runtime in CI. This is now the default for integration tests against infrastructure you can containerize.
 
----
+The Director resolution of the tension: **use doubles for speed where fidelity is cheap to fake, use ephemeral-real for your own infrastructure, use contracts for service-to-service seams, and reserve real-dependency E2E for the handful of critical journeys where nothing else proves the flow.** Contract testing is precisely the tool that escapes the tension at the service boundary: it gives you fidelity (verified against real provider code) without the flake (no live network between the two services).
 
-## E: Estimation
+**API and schema compatibility is the other half, because a passing contract today must not silently break a consumer tomorrow.** Two directions matter, and they are not symmetric:
 
-> **Adaptation, said out loud:** there is no QPS to estimate. E becomes the **first-90-days assessment**, a risk map and a coverage audit. Same discipline as back-of-the-envelope math: a few load-bearing numbers, measured not guessed.
+- **Backward compatibility** means a *new* provider still serves *old* consumers, you only **add** optional fields and new endpoints, never **remove** or **rename** or **tighten** an existing one. This is the property that lets the provider deploy first.
+- **Forward compatibility** means an *old* consumer tolerates a *new* provider's responses, the consumer ignores fields it does not recognize rather than rejecting them. This is the property that lets the consumer lag behind.
 
-**The first-90-days framework, what to measure before touching anything:**
-
-1. **Revenue map (weeks 1-2).** Which code paths carry money: checkout + billing carry ~$550K/day (~$200M ÷ 365); one hour of checkout downtime ≈ **$23K direct**. This number prices every risk decision that follows.
-2. **Risk map (weeks 2-5).** Twelve months of incidents mapped to modules; MTTR; **bus factor per module** (billing: 2 people, both flight risks, the scariest finding); EOL dependencies with dates; whether backup *restore* has ever been tested (assume no until proven).
-3. **Change map (weeks 3-6).** Git churn × incident density per module, the **hotspot quadrant** that drives all sequencing. Typical finding: ~80% of commits land in ~15% of modules (here: pricing, checkout, billing). High + high = strangle first; low + low = leave alone.
-4. **Coverage and deployability audit (weeks 4-8).** Line coverage (assume ~10-15%, concentrated in easy modules, not the money path); whether *anything* deploys independently (no); time-to-rollback ("restore the weekend deploy" ≈ 8+ hours, a finding worth escalating by itself).
-5. **Cost and capacity baseline (weeks 6-10).** Run cost including licenses (Oracle: ~$500K-1M/yr, a savings line for the CFO); and the **KTLO number**: % of engineering time spent keeping the lights on. Assume **~60% KTLO**, the CEO's 45 engineers are really 18. *This is the number that sells the program.*
-
-**The strategic math the audit enables (round aggressively):**
-- **Rewrite:** 1.5M lines, ~45 engineers → realistically 2+ years and ~$15-18M loaded cost, *with* a feature freeze the CEO already refused, *and* the well-documented second-system record putting big-bang rewrite failure (late, over budget, or abandoned) **north of 50%**, stated as an assumption.
-- **Strangle:** a **~20% capacity tax** (≈9 engineers) for ~8 quarters ≈ $5-6M over two years, no freeze, value shipping each quarter, and if killed at quarter 4, **everything shipped still works.** Rewrite value is all-or-nothing at the end; strangle value is cumulative.
-- **Payback:** KTLO 60% → ~35% recovers ~11 engineers, ~$2.5M/yr, before the Oracle line item. Modernization framed as **buying back a quarter of the engineering org** is a sentence a CEO acts on.
+The operational consequence is the **deploy-order rule**: for any change, **the side that adds capability ships before the side that depends on it.** Adding a field to a response? The provider ships the backward-compatible change first, then consumers adopt the field. Adding a required field to a request? The provider must accept it as optional first, consumers start sending it, then the provider can tighten. Removing a field? Stop reading it in all consumers first, then remove it from the provider, the **expand-then-contract** pattern. Violate the order, ship the consumer's dependency before the provider supports it, and you get a self-inflicted outage in the gap between the two deploys. Contract verification in CI is what catches a breaking change *before merge*: the provider's CI replays existing consumer contracts and goes red the instant a change would break one.
 
 <details>
-<summary>Go deeper, running the audit mechanically (IC depth, optional)</summary>
+<summary>Go deeper — the Pact verification flow and breaking-change detection (IC depth, optional)</summary>
 
-**Churn map:** `git log --since="24 months" --name-only` aggregated by top-level package; normalize by module size. **Incident density:** tag 12 months of postmortems/pages by module (expect to do this by hand from the ticket tracker; the tagging discipline you institute here becomes permanent). **Bus factor:** per-module distinct-author count over 24 months, weighted by share, a module where one author owns >70% of recent commits is bus-factor-1 regardless of headcount. **KTLO measurement:** two sprints of coarse time-tagging (feature / KTLO / migration) across all teams, resist the urge for finer categories; you need one defensible ratio, not a timesheet system. **Coverage:** run JaCoCo/coverage per module, but weight by the revenue map, 10% coverage on a cold admin module is fine; 10% on billing is the headline. **Dead-feature instrumentation:** access-log analysis per endpoint over 60-90 days (include batch/cron callers before declaring anything dead, monthly jobs hide for 29 days).
+- **Consumer side produces the pact.** The consumer test uses a Pact mock server in place of the provider. Each interaction declares a `request` (method, path, headers, body matchers) and the expected `response`. Matchers (`like`, `eachLike`, `term` with a regex) assert *shape and type*, not exact values, so the contract verifies structure without pinning literal data. Running the test writes a pact JSON file capturing every interaction the consumer exercised.
+
+- **The broker is the exchange and the gatekeeper.** The pact is published to a Pact Broker (or Pactflow) tagged with the consumer's version and branch. The broker stores every consumer-provider pair's contract and tracks which versions have been verified against which. It also serves `can-i-deploy`: a CLI query that answers "is version X of this service verified compatible with the versions of its dependencies currently in the target environment?", a hard gate you put in the deploy pipeline.
+
+- **Provider side verifies.** The provider's CI pulls all pacts naming it as provider and replays each recorded request against the running provider (real handler code, often with the data layer stubbed via `provider states`, a named setup like "user 42 exists" the provider sets up before the interaction). The response must satisfy every matcher in the contract. A removed field, a changed type, a 200 that became a 404, any of these fails verification.
+
+- **Breaking-change detection is the bidirectional CI gate.** Consumer change → consumer CI republishes the pact → provider CI re-verifies against the new expectation. Provider change → provider CI re-verifies all existing consumer pacts; if the change drops a field a consumer reads, verification fails *before merge*. `can-i-deploy` then blocks promotion of any version not verified against what is actually running in the target environment, which is what makes independent deploys safe rather than merely fast.
+
+- **Provider states are the sharp edge.** They are the one place mock drift can re-enter: if "user 42 exists" sets up data that does not match how the real provider would shape it, the verification passes against a fiction. Keep provider-state setup as close to real production data shaping as possible.
 
 </details>
 
----
-
-## S: Storage
-
-> **Adaptation, said out loud:** S compresses. There's no store to select, there's a store to *escape*: **the shared database, not the code, is the real monolith.**
-
-Anyone can split code into services; if they all still read and write the same 800 Oracle tables, you've built a **distributed monolith**, every schema change still coordinates every team, plus network hops you didn't have before. So: **data ownership follows the strangle**, an extracted domain gets its own store, populated by **CDC from the legacy schema** (replication machinery, pointed at Oracle), reads cut over first, writes second, legacy tables dropped via **expand-contract**. *Rejected, extract services now, split data later:* "later" never comes; you carry the monolith's coupling plus microservices' latency indefinitely. *Rejected, one big migration weekend:* an 800-table cutover is the rewrite in disguise. The strangler-fig lesson covers the dual-write/CDC mechanics; the Director-level point is the *ownership boundary*, not the pipe.
-
----
-
-## H: High-level design
-
-> **Adaptation, said out loud:** H is two pictures, the target end-state (brief; the strangler-fig lesson owns the façade mechanics) and the **disposition map**: which module gets which treatment. The disposition map *is* the high-level design of a modernization.
-
-**Target end-state, one sentence:** a routing façade in front of the monolith (the strangler fig), 3-5 extracted services for the hot domains each owning its data, and the cold remainder as a smaller, stabilized modular monolith that may live for years, deliberately.
-
-**The disposition map, every module gets one of four treatments, decided by the audit:**
+### Diagram: the consumer-driven contract flow
 
 ```mermaid
-flowchart TD
-    AUDIT[90 day audit] --> MAP[Churn x incident map]
-    MAP --> HOT[High churn high incident]
-    MAP --> EDGE[High churn low incident]
-    MAP --> COLD[Low churn stable]
-    MAP --> DEAD[Near zero usage]
-    HOT --> STRANGLE[Strangle behind facade]
-    EDGE --> FIRST[First slice proves the pattern]
-    COLD --> LEAVE[Stabilize and leave alone]
-    DEAD --> RETIRE[Retire outright]
-    FIRST --> SEQ[Quarterly sequence]
-    STRANGLE --> SEQ
+flowchart LR
+    subgraph CONS["Consumer team (orders) — own CI"]
+      CT["Consumer test<br/>declares requests<br/>+ responses it needs"]
+      PACT["Pact file<br/>(the contract)"]
+    end
+    subgraph PROV["Provider team (payments) — own CI"]
+      VER["Verify: replay each<br/>recorded request vs<br/>real provider code"]
+    end
+    CT --> PACT
+    PACT --> BROKER[("Broker<br/>stores contracts<br/>can-i-deploy gate")]
+    BROKER --> VER
+    VER -->|green| DEPLOYP["payments deploys<br/>on its own cadence"]
+    PACT -->|green| DEPLOYC["orders deploys<br/>on its own cadence"]
+    VER -->|red: breaking change| BLOCK["Blocked in CI<br/>before merge"]
+    style BROKER fill:#1f6f5c,color:#fff
+    style VER fill:#e8a13a,color:#000
+    style BLOCK fill:#b5482d,color:#fff
 ```
 
-- **Strangle** (pricing, checkout, billing, the hotspot 15%): highest churn, highest incident density, highest payoff. Billing goes early for bus-factor reasons, *especially* because it's scary.
-- **First slice** (a high-churn, *low-risk* edge module, notifications): the cheapest place to prove the façade, the CDC pipe, the parity harness, and the team's muscle memory before betting the money path on them.
-- **Leave alone** (the cold half): stable, low-churn, off the money path, gets observability and a deploy pipeline, then nothing. **Migration risk is real and these modules earn nothing from it.** Saying this list out loud, with data, is a top-three Director signal here.
-- **Retire** (the dead ~third): instrumentation will show a surprising fraction of endpoints get near-zero traffic. Deleting them is the cheapest modernization there is, parity with nothing.
+### Worked example: contract-testing the payments API between two teams
+Two teams, **`orders`** and **`payments`**, each own their service and want to stop shipping on a shared weekly release train. Today they coordinate through a single staging environment where both are deployed and a nightly E2E suite exercises checkout; a red E2E run blocks both teams, and the suite is flaky enough (real third-party payment sandbox, ~3% of runs fail spuriously) that engineers have learned to ignore failures, which is how a real break once reached prod.
 
-**Sequencing principle:** stabilize → prove → strangle → decommission. You cannot strangle safely at a 25% change-failure rate with quarterly deploys, **stabilization makes the strangle survivable**. Foundation: observability on the money path, CI and a weekly deploy train, tested restores, **characterization tests** pinning current behavior, bugs included, on the modules about to move.
+- **The contract.** `orders` calls `POST /charges` with `{amount, currency, order_id}` and reads back `{charge_id, status}`, it does not read the other twelve fields `payments` returns. The consumer test records exactly that, request shape plus the two fields it depends on, and publishes the pact to the broker. The contract is small on purpose: it pins only the dependency, so `payments` stays free to evolve everything `orders` ignores.
+- **Independent deploys.** `payments` wants to add a `risk_score` field to the response and rename an internal field. Its CI replays the `orders` pact against the new code: `risk_score` is additive and `orders` does not read the renamed field, so verification stays green and `payments` ships at 11am without telling `orders`. `orders` ships its own change at 2pm, its pact unchanged, no shared environment touched. **Rejected: the shared staging E2E gate**, because it serializes both teams behind one environment and one flaky suite, turning two independent deploys into one coupled, queued release.
+- **Catching the break in CI, not prod.** Next sprint `payments` proposes renaming `status` to `state`, a field `orders` reads. The provider CI replays the `orders` contract, the response no longer satisfies the `status` matcher, and verification goes **red before merge**. The fix is forced into the right order: `payments` adds `state` alongside `status` (backward-compatible), `orders` migrates to `state`, then `payments` removes `status`, expand-then-contract. The break that once took a flaky nightly E2E run (or prod) to find now fails a 4-second contract job at PR time.
+- **Where real fidelity still earns its keep.** One E2E test remains: a single happy-path checkout against the real payment sandbox, run on the release candidate, because nothing but a real charge proves the end-to-end money movement and the sandbox's actual quirks. **Rejected: deleting E2E entirely**, because contracts verify the *agreement* but not the *emergent behavior* of the full flow; the call is to keep one, not forty.
 
----
+The number a Director carries out of this is not "we added Pact"; it is *"two teams went from one weekly coupled release to independent daily deploys, breaking changes fail in a 4-second CI job instead of a flaky nightly suite, and we kept exactly one real-dependency E2E where money actually moves."*
 
-## A: API design
+### Trade-offs table: how to verify a service boundary
+| Approach | Fidelity | Speed | Flake | Cost | Deploy coupling | Use when… |
+|---|---|---|---|---|---|---|
+| **Mocks / stubs** | low (encodes a belief; can drift) | seconds | very low | cheap | none | unit-level logic where the dependency is incidental |
+| **Real deps (ephemeral / testcontainers)** | high for *own* infra | seconds–minutes | low–medium | medium | none | integration tests against your DB/queue/cache |
+| **Consumer-driven contracts** | high *at the seam* (vs real provider code) | seconds | very low | low | **decoupled** | service-to-service boundaries, independent deploys |
+| **End-to-end** | highest (real full flow) | many minutes | high (climbs per service) | high | **couples every deploy to one env** | a handful of critical journeys nothing else proves |
 
-> **Adaptation, said out loud:** A compresses to two strategic artifacts, the **seam inventory** and the **parity contract**. The interfaces that matter are the ones between old and new.
+The Director move is matching each boundary to the cheapest approach that proves what you actually need, contracts at the seams, ephemeral-real for your own infrastructure, and a thin layer of E2E only where emergent full-flow behavior is the risk, never "stand up everything and run E2E" as the default integration strategy.
 
-**The seam inventory.** Before extracting anything, define the contract *at the seam*: each strangle target gets an explicit interface (REST/gRPC) with an **anti-corruption layer** translating between the legacy schema's tangled vocabulary and the new domain model. *Rejected, new services speaking the legacy schema's language:* that exports the monolith's worst abstractions into the systems meant to replace them.
+### What interviewers probe here
+- **"How do you test across service boundaries so teams can deploy independently?"**, *Strong signal:* consumer-driven contracts verified in each team's own CI, real dependencies only where fidelity is the risk (own infra via testcontainers, a thin E2E layer for critical journeys), and deploys decoupled from any shared environment. *Red flag:* "stand up the whole system and run end-to-end", which is slow, flaky, and couples every team's deploy to one environment and one suite.
+- **"When do you use a mock versus a real dependency?"**, *Strong:* names the flake-vs-fidelity trade explicitly, doubles for speed where faking is cheap, ephemeral-real for own infrastructure, contracts at service seams, and calls out **mock drift** as the failure mode that makes a green suite lie. *Red flag:* "mock everything" (drift, false confidence) or "use real everything" (flaky, slow, expensive) with no sense of the trade.
+- **"A provider needs to remove a field two consumers use. Walk me through the deploy."**, *Strong:* expand-then-contract with the deploy-order rule, add the replacement and keep the old field (backward-compatible), migrate consumers, verify via contracts in CI, then remove, and notes `can-i-deploy` as the gate that proves compatibility before promotion. *Red flag:* "coordinate a release window and deploy them together", reintroducing the big-bang coupling contracts exist to remove.
+- **"Your E2E suite is 8% flaky. What do you do, as the owner of the quality operating model?"**, *Strong:* treats flake as a trust-destroying tax with a number, shrinks the E2E surface by pushing seam confidence down into contracts, quarantines flaky tests off the blocking path, and reserves real-dependency E2E for the few journeys that justify it. *Red flag:* "add retries", which hides the signal and lets the suite rot further.
 
-**The parity contract, feature-parity discipline.** "Full parity" kills modernizations, because the legacy spec is 14 years of accreted behavior nobody can enumerate. The discipline: **parity is defined against measured usage, not the spec.** Instrument first; features below a usage floor (<1 call/day over 90 days, batch callers checked) go to the retire list with named business sign-off. What remains is *verified*, not asserted, shadow traffic through old and new with response diffing, then a canaried cutover with instant rollback at the façade. Observed behavior is the spec; the diff harness is the compliance test.
+The through-line at Director altitude: the bugs live at the seams, so you push verification down to the cheapest layer that proves each agreement, contracts for service boundaries, ephemeral-real for own infra, a thin E2E layer for critical flows, and you delegate the bake-off with a stated prior ("I'd have the platform team trial Pact against our top three service pairs and measure deploy-coupling reduction; my prior is consumer-driven contracts, because our pain is cross-team release queuing, not in-service logic bugs").
 
-<details>
-<summary>Go deeper, shadow-traffic parity harness (IC depth, optional)</summary>
+### Common mistakes / misconceptions
+- **Relying on full E2E for integration confidence.** E2E is slow, expensive, and its flake rate climbs with every service in the path; using it as the *primary* integration check couples every deploy to one environment and trains engineers to ignore failures.
+- **Mocks that drift from the real provider.** A double encodes your belief about a dependency; when the dependency changes and the double does not, tests stay green while production breaks, false confidence is worse than no test.
+- **No contracts at all, so integration breaks surface in prod.** Without a verified agreement at the seam, a renamed field or changed status code passes every in-service test and fails only when a real user hits the boundary.
+- **Coupling all deploys to one shared integration environment.** One staging env where everything must be green serializes independent teams and makes one team's broken build block everyone, the queue contracts exist to eliminate.
+- **Ignoring compatibility direction and deploy order.** Shipping a consumer's new dependency before the provider supports it, or removing a field before consumers stop reading it, is a self-inflicted outage; expand-then-contract and provider-ships-first are non-negotiable.
 
-Mirror production requests at the façade to the new implementation (fire-and-forget; new path's responses discarded, never user-visible). Diff old-vs-new on normalized responses, strip timestamps, generated IDs, ordering where contractually irrelevant; a naive byte-diff drowns you in false positives. Bucket diffs by endpoint and field; burn down top buckets weekly. Target: <0.1% unexplained diff rate sustained for 2 weeks before canary. Caveats: read paths shadow safely; **write paths cannot be naively shadowed** (double side effects), for writes, use dual-write with the new side dark (written, compared, not served) or replay sanitized production traffic in staging against a CDC-synced copy. The harness is ~2-3 engineer-months to build and pays for itself on the first prevented checkout regression (~$23K/hr exposure).
+### Practice questions
 
-</details>
+**Q1.** A team proposes deleting all contract and integration tests and relying on a comprehensive nightly E2E suite for confidence. Make the Director case against it.
+> *Model:* E2E proves the full flow but at the worst cost profile, many minutes per run and a flake rate that climbs with every service in the path (a 1% per-service flake across 10 services is a ~10% suite flake), which trains engineers to hit retry and stop reading failures, destroying the signal. It also couples every deploy to one shared environment: one team's red build blocks everyone, reintroducing a release queue. I'd invert the pyramid for distributed systems: push seam confidence down into **consumer-driven contracts** verified in each team's CI (seconds, near-zero flake, decoupled deploys), use **ephemeral-real** tests for each service's own infra, and keep a *thin* E2E layer, only the handful of critical journeys whose emergent behavior nothing else proves. Net: faster signal, independent deploys, and E2E reserved for what only E2E can verify.
 
----
+**Q2.** Two teams share a staging environment and ship on a weekly train. They want daily independent deploys. What changes, and what does it buy?
+> *Model:* Introduce consumer-driven contracts: each consumer publishes the requests/responses it depends on to a broker, each provider verifies those contracts in its own CI, and a `can-i-deploy` gate proves a version is compatible with what is actually running before promotion. That removes the need for a shared environment to gain integration confidence, so each team's deploy is gated by its own CI, not by a shared-env queue or the other team's build. Quantify the win: from one coupled weekly release (52/year, shared blast radius) to independent daily deploys (hundreds/year per team, isolated). The trade-off, *rejected: keeping the shared staging gate*, is that contracts verify the agreement but not full emergent flow, so I'd retain one thin E2E on the critical journey. The benefit is decoupling, which is an org-velocity win, not just a test win.
 
-## D: Data model
+**Q3.** A provider must rename a response field `status` to `state`, and two consumers read `status`. Walk through a zero-downtime rollout.
+> *Model:* Expand-then-contract, obeying the deploy-order rule. **Expand:** the provider ships `state` *alongside* `status` (additive, backward-compatible), so it serves both old and new consumers; this provider change ships first and breaks nothing. **Migrate:** each consumer moves to read `state`, updating its contract; provider CI re-verifies and stays green. **Contract:** once no consumer's contract references `status`, the provider removes it; the contract gate confirms no consumer depends on it before the removal merges. At no point is there a gap where a deployed consumer reads a field a deployed provider does not serve, because the provider always adds before consumers depend and removes only after consumers stop depending. `can-i-deploy` enforces this at each promotion. *Rejected: a coordinated big-bang where both deploy together*, because it reintroduces the cross-team coupling and a failure window if either side is delayed.
 
-> **Adaptation, said out loud:** D compresses to one decision, how data moves per strangled slice, because the schemas are ordinary and the migration choreography is what fails in practice.
-
-Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, continuously checksum-verified) → cut reads → cut writes (brief dual-write window, legacy now the dark copy) → contract (freeze, then *actually drop* the legacy tables; every "temporarily kept" table becomes a decade of accidental reads). *Rejected, long-lived dual-write:* two writable sources of truth drift; reconciliation becomes a permanent team. *Rejected, cutover without the dark-read phase:* you find the checksum mismatch in production, on the money path, in Q4. One schema rule: the new domain model is designed from the domain and mapped to legacy via the ACL, never reverse-engineered table-for-table from the 800, or you've re-platformed the mess.
-
----
-
-## E: Evaluation
-
-> Stress the *program* the way you'd stress an architecture. None of the fatal failure modes are technical.
-
-**Failure mode 1, the half-migrated forever-state.** Funding dies at quarter 5; you run a monolith *and* four services *and* a façade, forever. *Mitigation:* **every completed slice is independently done**, façade + slice + retired legacy code, no slice >1 quarter. The strangle's defining property is stable intermediate states; protect it when scoping. A program killed early keeps everything shipped.
-
-**Failure mode 2, parity regression on the money path.** One missed legacy behavior in checkout costs $23K/hr and, worse, the program's political capital. *Mitigation:* parity harness + canary + façade-level rollback; checkout migrates only after the pattern is proven twice on lower-stakes slices; Q4 freeze honored.
-
-**Failure mode 3, the CEO's patience.** Quarter 3, no visible features, a competitor ships something shiny: the program gets cut. *Mitigation is structural:* the value-milestone rule, **no quarter ships only migration**, plus a one-page scorecard the CEO actually reads: deploy frequency, change-failure rate, KTLO %, features shipped, dollars retired.
-
-**Failure mode 4, org fatigue and the bus.** The billing engineers leave in month 4; teams burn out on the 20% tax. *Mitigation:* billing knowledge-extraction starts in the *stabilize* phase; strangle work rotates through product teams. *Rejected, the dedicated re-platforming team:* concentrates knowledge, detaches from product, easiest line item to delete.
-
-**Re-check vs R:** revenue protected (harness, canary, Q4 freeze) ✓; features every quarter ✓; parity measured ✓; bus factor retired in stabilize ✓; EOL met by sequencing Oracle-dependent domains first ✓.
-
----
-
-## D: Design evolution
-
-> **Adaptation, said out loud:** Design evolution *is* the deliverable, the quarter-by-quarter sequence with value milestones, the slide the CEO sees. Numbers are illustrative; the audit re-prices them.
-
-**Q1: Assess + stabilize.** The 90-day audit (in parallel with delivery); observability on the money path; CI + weekly deploy train; tested restores; billing knowledge extraction starts. *Milestone:* deploys quarterly → weekly; change-failure 25% → ~15%; the audit deck itself, the first time the system's risk has been priced in dollars.
-**Q2: Prove the pattern.** Façade up; first slice (notifications) strangled end-to-end including its data and *deletion* of the legacy module; parity harness built; dead-feature retirement begins. *Milestone:* a customer-visible feature ships **on the new path**; first Oracle tables dropped.
-**Q3-Q4, The hotspot, half one.** Pricing strangled (highest churn, biggest velocity payoff); billing knowledge work completes; **Q4 = money-path freeze**, teams work cold-module stabilization and harness hardening, planned not improvised. *Milestone:* pricing changes ship in days, not the 2-month legacy cycle, the velocity proof the CEO has been waiting for.
-**Q5-Q6, The money path.** Checkout, then billing, behind the proven harness; their data decomposed via expand-contract. *Milestone:* change-failure <10% on the money path; MTTR <30 min; bus-factor-1 modules: zero.
-**Q7-Q8, Decommission + accept the end-state.** Oracle license retired or shrunk (~$500K+/yr); dead code deleted at scale; the **leave-alone list formally accepted** as end-state, not backlog. *Milestone:* KTLO 60% → ~35%, ~11 engineers returned to the roadmap, the number the program was sold on.
-
-**The rule underneath:** every quarter ships something the business can see, *and* every quarter retires risk. The ordering logic, foundation first, prove on cheap slices, money path only behind a proven harness, freeze when revenue peaks, survives any re-pricing of the specifics.
-
-**The post-acquisition variant (sidebar).** "We acquired a company; consolidate the platforms" is the same playbook plus a political dimension. The audit gains a step, *which* platform wins per domain, decided by the same churn/risk/cost evidence, **never by which side has more VPs**, and leave-alone gets more valuable: two billing systems can run behind one façade for years if integration earns less than it costs. The extra failure mode is talent flight from the "losing" platform, another reason to decide per domain rather than declare a wholesale winner.
-
-**Where I'd delegate (the explicit Director move):**
-- **CDC/data tooling:** *"Data-platform owns the CDC pipeline and checksum verification; my prior is log-based CDC (Debezium-style) over dual-write-first, because dual-write puts the consistency burden in application code where it will be forgotten."*
-- **Parity harness:** *"A senior pair owns the diff harness; my prior is shadow-reads with normalized diffing and a <0.1% threshold before any canary."*
-- **Audit instrumentation:** *"Teams self-report churn, coverage, and KTLO against a template my staff engineer owns."* What I keep, disposition, sequence, the leave-alone list, the CEO narrative, and what I hand off, with priors, is the altitude.
-
----
-
-### Trade-offs table: the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
-|---|---|---|---|---|
-| **Modernization strategy** | **Stabilize-then-strangle**, incremental, value every quarter | **Big-bang rewrite**, clean slate, all-or-nothing | **Lift-and-shift only**, rehost, change nothing | **A** default (our choice): cumulative value, survivable cancellation. **B** only small (<~100K lines) or truly unsalvageable *and* a freeze is tolerable, rare. **C** when the only forcing function is infra EOL and velocity isn't the pain. |
-| **Data migration per slice** | **CDC + expand-contract**, dark reads, verified, then cut | **Dual-write from day one**, app writes both stores | **Big-bang cutover weekend** | **A** default (our choice): consistency burden in infrastructure, verifiable before cutover. **B** when no CDC tooling reads the legacy store, accept app-level complexity. **C** only small, cold, low-risk datasets. |
-| **Who does the work** | **Product teams rotate strangle work** ~20% tax | **Dedicated migration team** | **Outsource the migration** | **A** default (our choice): knowledge spreads, program survives budget cuts. **B** when a hard deadline demands focus, accept the silo and political fragility. **C** almost never for the money path, the knowledge *is* the asset. |
-
----
-
-### What interviewers probe here (Director altitude)
-
-- **"Why not just rewrite it?"**, *Strong:* the asymmetry, rewrite value is all-or-nothing after 2 years and >$15M with failure odds north of 50%; strangle value is cumulative, survivable at any cancellation point, and names the rare case where rewrite *is* right (small, unsalvageable, freeze tolerable). *Red flag:* either instinct as dogma.
-- **"What do you do in your first 90 days?"**, *Strong:* measure before touching, revenue map, churn-×-incident hotspots, bus factor, KTLO %, tested restores, while shipping stabilization quick wins; ends the quarter with a disposition map priced in dollars. *Red flag:* drawing the target microservice architecture in week 1.
-- **"The CEO wants features, not plumbing. Sell it."**, *Strong:* sells capacity, "60% of your engineers' time is keep-the-lights-on; this returns ~11 engineers to your roadmap and retires $500K/yr of licenses, while features ship every quarter." *Red flag:* "technical debt" and "best practices", vocabulary that loses the room.
-- **"What won't you migrate?"**, *Strong:* the cold, stable, off-money-path half, data behind the call, observability added, the list *formally accepted* as end-state; the dead third retired outright. *Red flag:* an implicit plan to eventually migrate everything, it signals never having paid for a migration.
-- **"How do you know the new checkout behaves like the old one?"**, *Strong:* parity measured, not asserted, usage-scoped contract, shadow-traffic diffing below a stated threshold, canary with façade-level rollback, money path last. *Red flag:* "comprehensive testing" with no mechanism, or trusting the legacy spec to be enumerable.
-
----
-
-### Common mistakes
-
-- **Architecting before auditing.** The week-1 target diagram is always wrong, hotspots, dead features, and bus factors aren't where intuition says.
-- **Treating "leave it alone" as failure.** Migrating a stable, cold module is pure risk with no return. The data-backed, formally accepted leave-alone list is a deliverable.
-- **Full feature parity against the spec.** The legacy spec is unenumerable; parity against *measured usage* plus retiring the dead third is achievable. Parity-with-everything is how programs go two years over.
-- **The dedicated migration team.** Silos knowledge, detaches from product, first line item cut. Rotate the work through product teams at a stated capacity tax.
-- **All migration, no milestones.** A quarter that ships only plumbing is a quarter the sponsor can't defend. Every quarter ships business-visible value, structural rule, not aspiration.
-
----
-
-### Interviewer follow-up questions (with model answers)
-
-**Q1. Six months in, your sponsor (the CTO) leaves. The new CTO asks why the company is paying a 20% tax. Your answer?**
-> *Model:* I show the scorecard, not the architecture: deploys quarterly → weekly, change-failure 25% → 12%, two completed slices live with their legacy code deleted, first Oracle tables gone, KTLO trending toward ~11 recovered engineers by Q8. Then the asymmetry: cancel today and we keep everything shipped, stable intermediate states are why I chose strangle over rewrite. If it's still cut, I descope to finishing the in-flight slice, never abandon one mid-cutover. Surviving sponsor loss is why value lands quarterly instead of at the end.
-
-**Q2. The two billing engineers resign in month 2, before stabilization finishes. What changes?**
-> *Model:* Knowledge extraction becomes the quarter's P0: paired characterization-test writing during their notice period (pinning observed behavior, bugs included, the tests *are* the knowledge transfer), recorded walkthroughs of the incident-map hotspots, and a retention conversation I should have had in week 3, the audit flagged bus-factor-1; acting late is on me. What I *don't* do is accelerate billing's migration: migrating the least-understood module with its experts gone is maximum risk. Stabilize, test-pin, then strangle on schedule.
-
-**Q3. Post-acquisition: you own your platform *and* the acquired company's. The CEO wants "one platform" in a year. Respond.**
-> *Model:* Same playbook, plus politics. Audit both estates and decide *per domain* on churn/risk/cost evidence, their billing might beat ours even though "we won." Then reframe the deadline: a façade presents one platform to customers in ~2 quarters while back-ends consolidate domain-by-domain behind it; domains where integration earns less than it costs stay separate indefinitely. The per-domain split also mitigates talent flight by giving both orgs meaningful ownership. I commit to the customer-facing deadline, not the data one.
-
-**Q4. Your first strangled slice has run shadow traffic for a month and the diff rate is stuck at 2%, twenty times your threshold. Ship or hold?**
-> *Model:* Neither, yet, decompose the 2% first; diff rate aggregates three things: harness noise (timestamps, ordering, fix the normalizer), *intentional* divergence (legacy bugs we chose not to reproduce, document, exclude with sign-off), and true regressions (burn down before any canary). Usually the bulk is the first two. If true regressions persist after a burn-down sprint, the slice was cut too wide, shrink it rather than extend the deadline; slice size is the variable I control. I won't ship on "it's only 2%": this slice sets the parity bar for the money path, and that discipline is its real deliverable.
-
----
+**Q4.** Your team's mocks of a third-party payments API are comprehensive and the suite is green, yet a production integration broke. What happened and how do you prevent a recurrence?
+> *Model:* Mock drift. The mocks encode the team's belief about the third party's behavior; the third party changed (a field type, an error shape, a new required parameter) and the mocks did not, so the suite stayed green while production failed, the classic false-confidence trap. Prevention has two parts. For a third party I can't run contracts against, add a small **real-dependency contract/integration test against their sandbox** on a schedule, so drift surfaces as a failing job, not a prod incident, and treat their changelog/version as a monitored input. For internal services, replace belief-based mocks with **consumer-driven contracts** verified against the real provider code, which structurally cannot drift because the provider's own CI re-verifies them. The Director point: a mock is only as true as the day it was written; fidelity at the boundary has to be *refreshed against reality*, by contracts internally and by sandbox checks externally.
 
 ### Key takeaways
-- **Measure before touching.** The first 90 days buy the right to an opinion: revenue map, churn-×-incident hotspots, bus factor, coverage, KTLO %. The disposition map (strangle / first-slice / leave-alone / retire) falls out of data, not instinct.
-- **Stabilize-then-strangle beats the rewrite on asymmetry:** strangle value is cumulative with stable intermediate states; rewrite value is all-or-nothing after ~$15M and a freeze, with failure odds north of 50%. Foundation first, you can't strangle at a 25% change-failure rate.
-- **"Leave it alone" is a first-class disposition.** Cold, stable, off-money-path modules get observability and nothing else. The formally accepted leave-alone list is a deliverable.
-- **Feature parity is measured, not asserted:** scope to instrumented usage (retire the dead third), verify with shadow-traffic diffing, cut over by canary behind a façade with instant rollback, money path last, Q4 frozen.
-- **Sell capacity, not architecture:** ~20% tax for 8 quarters returns ~11 engineers of KTLO capacity plus the Oracle line item, with a value milestone every quarter, the rule that keeps the program funded through sponsor changes.
+- **In a distributed system the bugs live at the seams**, the integration between services owned by different teams, not inside any one service, so test investment must move toward verifying the *agreements at the boundaries*, and the cheapest way to do that is not to run the whole system.
+- **Consumer-driven contracts** let the consumer declare what it depends on and the provider verify it in CI, without standing both services up together; the real payoff is **decoupled deploys**, two teams shipping independently with no shared environment to queue behind.
+- **Contract, integration, and E2E prove different things:** integration proves a service against its real infra, contracts prove the seam agreement, E2E proves the full real flow, expensive, slow, flaky. Don't use E2E to do contracts' job.
+- **The flake-vs-fidelity tension governs doubles vs real deps:** mocks are fast/stable but **drift** into false confidence; real deps are high-fidelity but slow/flaky/costly; ephemeral-real (testcontainers) is the middle for own infra; contracts escape the tension at the seam.
+- **API compatibility has a direction and a deploy order:** keep changes backward-compatible (add, don't remove), ship the provider before its dependents, and use **expand-then-contract** to remove a field; verifying contracts in CI catches breaking changes before merge, not in prod.
 
-> **Spaced-repetition recap:** Inherited legacy = **audit → stabilize → strangle → leave-alone**, never rewrite-by-default. 90-day audit: revenue map, churn×incidents, bus factor, KTLO % (the selling number). Disposition per module: strangle the hot 15%, retire the dead third, formally leave the cold rest. Parity = measured usage + shadow-diff harness, money path last. Sequence quarter-by-quarter, **every quarter ships visible value**, the program must survive its sponsor leaving. Acquisition variant: same playbook, decide per domain on evidence, façade gives customer-facing unity first.
+> **Spaced-repetition recap:** Microservice bugs live at the **seams**, the agreements between services, not inside one. **Consumer-driven contracts** (Pact-style: consumer records what it needs → broker → provider replays it against real code in CI) prove the seam in **seconds** with near-zero flake and, crucially, **decouple deploys** so teams ship independently with no shared-env queue, where full **E2E** takes many minutes, flakes more per added service, and couples every deploy to one environment. The choice between **test doubles** (fast, stable, but **drift** into false confidence) and **real dependencies** (high-fidelity but flaky/slow/costly) is the flake-vs-fidelity tension; use **ephemeral-real** for own infra, contracts at service seams, a thin E2E layer for critical flows. Keep APIs **backward-compatible** and obey the **deploy-order rule** (provider ships before dependents; **expand-then-contract** to remove), and let CI contract verification catch breaking changes before merge.
 
 ---
 
-*End of Lesson 14.2. The inherited-legacy question is architecture strategy in its purest form: almost no new components, the grade rides on sequencing, evidence, and the discipline not to touch what doesn't need touching. It reuses the strangler façade, and it is where the line between "system design round" and "how you'd run the org" disappears.*
+*End of Lesson 14.2. The bugs live at the seams: verify the agreement between services with consumer-driven contracts in CI, reserve real dependencies and E2E for where fidelity is the actual risk, and let compatibility direction decouple every team's deploy.*

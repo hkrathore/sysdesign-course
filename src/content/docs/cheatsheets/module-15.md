@@ -1,93 +1,50 @@
 ---
-title: "Module 15 - Leadership Track Cheat Sheet"
-description: "The four answer shapes, one crux per behavioral category, the mandatory story slots, the probe-resistance rule, and 2015→2026 phrase swaps, one page."
+title: "Module 15 - Production Troubleshooting & Incident Response Cheat Sheet"
+description: "The 6 troubleshooting/incident building blocks — decision → trade-off → the number — plus the recurring laws and the Director through-line. Skimmable in 5 minutes."
 sidebar:
   order: 15
 ---
 
-### The behavioral loop is a graded technical assessment of judgment. Read the question shape, reach for the matching instrument, and survive a four-level probe.
+### 6 blocks. Each = the decision → the trade-off → the number. Skimmable in 5 minutes.
 
-> Two house rules carry over from the system-design track verbatim: **quantify everything** (a behavioral answer with no number is "it scales horizontally"), and **every position names its limit and the rejected alternative**. The loop scores three things, **altitude** (Director mechanisms, not EM rituals), **currency** (sounds like 2026, not a 2015 leadership book), and **probe-survival** (the monologue is assumed rehearsed/AI-drafted; the follow-up is the real test).
-
----
-
-## The four answer shapes: read the verb in the first 3 seconds
-
-The single most common loop-failing miscalibration is using the wrong instrument: a war story for a hypothetical (reads as dodging the decision), a five-minute STAR for philosophy (can't state a position), a chronological build-up for "give me the headline" (doesn't know how execs read).
-
-| Question shape | The tell | Framework | Time budget | What separates Director from EM |
-|---|---|---|---|---|
-| **Past-event** | "Tell me about a time…", "Walk me through when…" | **STAR-L** (~20% S/T, ~50% A, ~30% R+L) | 2-4 min | EM: "I coached him to a strong rating." Director: the **mechanism** so the *next* one surfaces in weeks ("missed committed milestone → conversation in two weeks"). The **L is mandatory** at L7+. |
-| **Hypothetical** | "How would you…", "You inherit / are handed…" | **Clarify → Principles → Options → Decide → Tripwires** | 2-3 min | EM lists options forever (advisor). Director **commits** to a path with named tripwires (owner). Fence-sitting fails. |
-| **Philosophy** | "What's your style / view on…", "Where do you stand on…" | **Position → Mechanism → Number → Limit** | ~90 sec, then **stop** | EM: "I empower my team" (no verification layer). Director: a *contextual* position + a standing **named mechanism** + one number + a real dated limit. Then let them drill. |
-| **Exec-comms** | "Tell the board/CEO…", "Give me the 30-sec version" | **SCQA / headline-first** (answer + decision-needed in sentence one) | 30-60 sec | EM starts at the beginning and builds. Director leads with the recommendation and the *decision needed*, then supports. |
+> Two probes live here. The **diagnostic round** tests structured reasoning under uncertainty (not greenfield design). The **operational-leadership** probe tests the **detect / respond / learn** system you built. Reason calmly out loud *and* show the system that survives the next outage without you in the room.
 
 ---
 
-## The nine categories: one crux row each (memorize the calibration column)
+## Recurring laws (every block leans on these)
 
-| Category | #1 question | Framework | The 2026 calibration in one line | The fatal red flag |
-|---|---|---|---|---|
-| **Philosophy & style** | "What's your leadership style?" | P→M→N→L | Founder-mode is a **false binary**, selective depth + standing mechanisms, not delegate-and-disappear; have an answer to "what did you inspect *last month*?" | "Servant leader, hire great people, get out of the way", reads as abdication. |
-| **Hiring & talent bar** | "AI writes code now, what do you even test?" | System-description | Test **direct-and-verify**, not "can they write code"; own four funnel numbers incl. quality-of-hire at 12 mo; still hire juniors (~15-20%). | "We ban AI in the interview" / "four LeetCode rounds", testing a world that ended. |
-| **Hard people calls** | "Have you fired someone? What would you do differently?" | STAR-L (6-beat spine) | **Decisive *and* humane**, weeks not quarters, but severance + references + "he wasn't surprised." A real termination story is table stakes. | The PIP/exit is the *first* feedback the person hears (surprise firing). |
-| **Managing managers & org design** | "Scale this org 15→50 in 18 months." | CPODT | First clarify: **headcount or output target?** (a manager is a cost you justify, not a default); **scaffolding before headcount** (breaks at ~30 eng). | "I promote my best engineer into management", EM altitude; reorg twice. |
-| **Operating system & metrics** | "How do you get visibility without micromanaging?" | System-description | **Metrics diagnose systems, never rank individuals**; DORA/SPACE/DX-Core-4, instrument *outcomes* not activity. | LOC / commits / story points (instant fail, worse post-AI) **or** "metrics are gamed, I lead by feel." |
-| **Execution under pressure** | "An incident you commanded" / "a call you got wrong" | STAR-L (system spine) | Scored on the **system, not the sprint**: early detection, options costed, verified postmortem follow-through, a guardrail that later *fired*. | Blaming shifting requirements; being the fixer with **no command structure** (types the fix, doesn't coordinate). |
-| **Influence, disagreement & exec comms** | "A disagreement with leadership" | STAR-L + SCQA | Scored on **up-chart backbone *and* real commit**, steel-man, costed case, lose well, **carry it down in your own voice + a tripwire**. | Down-chart-only conflict (it's just management); "leadership decided, not me" (commit theater). |
-| **Efficiency-era leadership** | "Walk me through a layoff you ran." | STAR-L (own-it-end-to-end) | Own decisions made **above** you; the **survivor-rebuild half** differentiates (cut projects not just people, re-recruit keepers in 48h). | "Finance gave me a list and I executed it", the signature distancing fail. |
-| **AI-era leadership** | "How are you using AI? Defend the ROI." | System-description | **Accountable operator**, baseline first, named pain, measure lead-time not acceptance-rate; **2025 DORA: AI amplifies the system it lands on**. | Hype ("AI made us 10x faster," no method) **or** wait-and-see ("we're still evaluating"). |
+- **Localize before you fix; mitigate before you root-cause.** Stop the bleeding (rollback = known-good in minutes), then diagnose with the clock off.
+- **Ask "what changed?"** ~**70–80%** of incidents are change-induced (deploy / config / traffic / dependency).
+- **Bisect the request path** like a binary search; a **trace** does it for you.
+- **Alert on user-facing symptoms (SLO burn), not causes** — cause-alerts are fatigue.
+- **The error budget is the arbiter** of reliability-vs-velocity: spend it, **freeze** when it's gone.
+- **One decision-maker beats a crowd** (ICS: IC / comms / ops / scribe).
+- **Blameless:** human error is a symptom of system design → contributing factors over a single root cause; action items that **close**.
+- **Systems bend, not break** (circuit-break, shed, degrade, fall back); on-call load is a system you manage.
 
 ---
 
-## The mandatory story slots: checklist (audit BEFORE the loop, not during)
+## The Diagnostic Method *(framing)*
+Structured reasoning under uncertainty. The loop: **observe** (which %ile / region / since-when, blast radius) → **what changed?** (deploy / config / traffic / dependency; us-or-downstream) → **bisect** the request path (edge → LB → service → cache → DB → dependency; a trace localizes) → **confirm** → **mitigate first** (rollback = known-good in minutes) → **root-cause** at leisure. **Mitigate-first vs root-cause-first:** stop the bleeding, trading diagnostic certainty for MTTR. Numbers: ~**70–80%** of incidents are change-induced; MTTR = detect + diagnose + mitigate; a wrong fix can **double** it. **Director move:** ask what changed, bisect to localize, mitigate before deep RCA, narrate the reasoning. *Rejected:* jump to a fix, no hypothesis, randomly tune knobs, never ask "what changed"; root-causing while the site burns.
 
-A Director loop is 5-6 interviewers, each a different competency, drilling to L3. Build a **12-15 story bank** as a coverage matrix, each story engineered to serve **2-3 categories** (so twelve cover thirty cells). The *empty slot is exactly the question they'll ask*, it's where rehearsal runs out.
+## Observability in Anger
+The point is asking **new** questions of a live system. **Metrics** = *what / how much* (cheap, aggregate); **logs** = *why* (expensive); **traces** = *where* (the slow hop); **profiling** = *what code is hot.* Localize fast with **RED** (Rate / Errors / Duration, per service) + **USE** (Utilization / Saturation / Errors, per resource). **Correlate** by trace/request ID across all pillars. Mind **cardinality** (metric explosion) and **cost** (log $/GB) → sampling (head/tail), high-cardinality wide events for unknown-unknowns. Numbers: p50-vs-p99 divergence; trace sample rates; log cost per GB. **Director move:** RED to the service → trace to the hop → log/profile to the cause; invest pre-incident, respect cost. *Rejected:* logs-only (can't find the hop); no trace-ID correlation; alerting on causes; cardinality explosion (and the bill).
 
-- ☐ **Up-chart disagreement you WON**, backbone, not authority. (Empty → all conflict is down-chart = just management.)
-- ☐ **One you LOST and committed to, with a tripwire**, disagree-and-commit. (The tripwire is what separates it from quiet compliance.)
-- ☐ **A termination you ran personally**, decisiveness-with-dignity. (Empty at this level = conflict-avoidant.)
-- ☐ **A layoff / hard constraint you OWNED**, incl. the survivor-rebuild half. (Empty / "finance gave me a list" = the efficiency-era fail.)
-- ☐ **A consequential decision you got WRONG**, self-awareness is a disqualifying dimension at L7+. (A flawless record reads as fabricated.)
-- ☐ **An incident you COMMANDED**, you coordinate under fire, you don't type the fix.
-- ☐ **A manager you GREW *and* a transition that FAILED**, checked as a pair; the contrast is the signal.
-- ☐ **A cross-org influence WIN**, influence without authority, across orgs you don't own.
+## SLOs & Error Budgets
+**SLI** (measured at the user: availability / latency / correctness / freshness) → **SLO** (internal target, stricter than the **SLA**). The **error budget = 1 − SLO = permission to ship**: under budget → ship; burned → fix reliability and **freeze**. **Burn-rate alerting** (multi-window, multi-burn: a fast burn **pages**, a slow burn opens a **ticket**) beats threshold-on-every-blip. Numbers: **99.9% = 43 min/mo**, **99.99% = 4.3 min/mo**; each extra nine ~**10×** cost; e.g. 2% of the monthly budget in 1 hr → page. **Director move:** user-centric SLIs, the budget as the reliability-vs-velocity arbiter, burn-rate alerts + a freeze policy. *Rejected:* chasing 100% uptime (infinite cost); alerting on every metric (fatigue); no budget (the fight becomes politics); SLA = SLO confusion.
 
-**Quantify honestly:** attach the metric that *proves the outcome* (p99 800→120ms), not the most impressive nearby number ("saved millions"). Claim the **decision**, share the credit on execution. A smaller true number beats a bigger invented one, the probe finds inflation at L3 and contaminates the whole loop.
+## Incident Command
+**One decision-maker beats a crowd.** The **ICS** roles: **IC** = coordinator/decider (*not* on the keyboard), **Comms** = stakeholder + status-page updates, **Ops** = the hands fixing, **Scribe** = the timeline. **Severity** (SEV1–4) with pre-agreed triggers so declaring isn't a judgment call; **declare early** (the bias against it costs MTTR). **Comms cadence** (e.g. every **30 min**, even with "no new info"); a **single source of truth** (one incident channel). The IC decides under uncertainty (others advise, disagree-and-commit); **handoffs** follow-the-sun on long incidents. **Director move:** ICS roles, a single IC coordinating, declare early, steady comms. *Rejected:* everyone debugging at once with no coordinator; the IC stuck hands-on-keyboard; not declaring (ego); silent comms (stakeholders escalate); no scribe (no timeline for the postmortem).
 
----
+## Blameless Postmortems
+Convert an outage into **organizational learning.** **Blameless:** human error is a **symptom of system/process design**, not the cause (just-culture, "second story") → design the guardrail, don't blame the human. **Contributing factors over a single root cause** (the 5-whys trap stops at a person). The **timeline** is facts, what-was-known-when (no hindsight bias). **Near-misses count.** **Action items** with owners + due dates that **actually close** (track them like bugs; beware the graveyard of open AIs); prefer **systemic fixes over "be more careful."** Psychological safety is the precondition; share widely. Numbers: AI close rate, repeat-incident rate, time-to-publish (days, not weeks). **Director move:** blameless, contributing factors, AIs that close, share the learning. *Rejected:* name-and-blame (→ hidden incidents); a single root cause; "be more careful" non-fixes; action items that never close.
 
-## The probe-resistance rule: every story holds three levels deep
-
-A framework gets you through the first 90 seconds. **The probe is the round.** Senior interviewers (Amazon bar-raiser is the archetype) drill 3-4 levels below the headline to find where your story dissolves into generalities, because that layer is where the rehearsed story began.
-
-- **L1: Specifics:** exact dates, numbers, names. "March 4," not "early that quarter." "12% of 90 people," not "a chunk of the org."
-- **L2: Mechanism:** *how* you measured or decided. "The week-3 checkpoint measured whether he'd shipped the reconciliation module, he hadn't," not "he wasn't improving."
-- **L3: The cost:** the counterfactual, what it actually cost *you*. "An engineer told me in a skip-level it was overdue, the team carried my extra quarter of hope," not "it worked out."
-
-Two delivery rules: **never announce the framework aloud** ("let me use STAR here" breaks the spell, the structure is felt, not named), and **only claim depth you actually have**, getting caught inventing at L3 contaminates every other answer in the loop.
+## Graceful Degradation & On-Call Health
+Build systems that **bend, not break:** **circuit breakers** (fail fast, half-open recovery — stop the **cascade**), **load shedding** (drop low-priority traffic to protect the core), **backpressure** (bounded queues, not infinite buffering), **bulkheads** (isolate failure domains), **fallbacks** (stale cache / default response). **Retries need jitter + a budget** (naive retries = a **retry storm**). The **"the number is wrong"** path = idempotent **replay/backfill** from retained raw. **On-call health** is a managed system: **page on user-facing symptoms only**, an **alert budget** (target ~**<2 actionable pages/shift**), follow-the-sun, recognition/comp. **Director move:** degrade to protect the core + a replay path; treat pager load as a metric you own. *Rejected:* no circuit breaker (cascading failure); retry storms; fail-hard instead of degrade; no replay path; paging on everything (fatigue → burnout).
 
 ---
 
-## "Say this, not that": the 2015 → 2026 phrase swaps
+## Director through-line (all 6)
+**Reason** your way through an unfamiliar outage calmly and out loud — observe, ask **what changed**, bisect, **mitigate before root-cause** — *and* show the **system** you built so the org survives the next failure without you: observability that localizes (RED/USE + traces), **SLO-driven response** (error budget as the arbiter, burn-rate alerts), **incident command** (one IC, clear roles, declare early), **blameless learning** (contributing factors, AIs that close), and **resilience + sustainable on-call** (degrade gracefully, symptom-only alerts). Name the trade-offs (fast mitigation vs root-cause certainty; alert sensitivity vs fatigue) and **delegate with a prior** ("I'd have SRE set multi-window burn-rate alerts on our top three SLIs; my prior is it halves pages while catching the fast burns"). Always carry the **MTTR, cost, and human-sustainability** dimension.
 
-The fix is rarely a new story; it's a reframe. Each swap below is one environmental shift the post-2022 world now penalizes.
-
-| ❌ 2015 phrase (now penalized) | ✅ 2026 phrase (scores) |
-|---|---|
-| "I scaled my org from 10 to 60." | "I asked first whether we hit the *output* target with platform and AI leverage and *fewer* people, a manager is a cost I justify, not a default of growth." |
-| "I'm a servant leader, I hire great people and get out of the way." | "My style is contextual: delegate with an operating cadence, then inspect the one or two areas a quarter where the quarter could die." |
-| "I coach indefinitely; firing is a failure of leadership." | "On a clear miss I act in **weeks, not quarters**, early dated feedback, a time-boxed plan, a decision on a deadline, delivered humanely." |
-| "Finance gave me a list and I executed it." | "I built a revenue-per-team model, argued the cut down, and **owned the number completely**, I never told my team finance made me." |
-| "Psychological safety means people feel comfortable." | "Edmondson's interpersonal **risk-taking paired with accountability**, safe to dissent and be wrong, *not* safe to underperform." |
-| "We track velocity / story points." | "I instrument **outcomes** (DORA, DevEx survey, tied to a business metric), never activity; metrics diagnose the *system*, they never rank individuals." |
-| "AI made us 10x faster." | "Lead time came down **22% in the migration-heavy teams, flat elsewhere**, and change-failure rate first went *up*, which told us review hadn't caught up." |
-| "We banned AI tools in interviews." | "Candidates use AI live on a real-ish problem; I score what they **catch, reject, and reason about**, source code is a liability now, judgment about it is scarce." |
-| "Leadership decided, so we're doing it." | "I lost the argument, then committed for real, carried the decision down **in my own voice** with the actual reasoning, and negotiated a tripwire to revisit." |
-| "It was an easy call, I just cut him." | "Twelve weeks of dated feedback first, then eight minutes, direct and humane, severance above policy, and **he wasn't surprised**." |
-| "I'd spend my first quarter listening." | "**Listen fast**, visible diagnosis by day 30, first structural decisions by 60-90; listening evidenced by *specifics*, not duration." |
-| "I brought in a strong tech lead to fix it." | "I inspected enough of the architecture myself to validate the recovery plan, at this level I own the chart, not just the staffing." |
-
----
-
-> **Spaced-repetition recap:** The leadership loop is **graded judgment**, probed 3-4 levels deep, same interviewers, same two house rules (**quantify**; **name the limit + rejected alternative**) as system design. **Four shapes, four instruments:** past-event → **STAR-L** (20/50/30, L mandatory); hypothetical → **Clarify-Principles-Options-Decide-Tripwires** (commit, don't narrate); philosophy → **Position-Mechanism-Number-Limit** (~90s, then stop); exec-comms → **SCQA** (answer-first). Build a **12-15 story bank** covering the **eight mandatory slots** (up-chart win, a loss-with-tripwire, a termination, a layoff, a wrong call, a commanded incident, a grown-+-failed-manager pair, a cross-org win), each story tagged to 2-3 categories and **quantified honestly**. Then survive the **probe**: hold every story three levels deep (dates → mechanism → cost), never announce the framework, never claim depth you can't defend. Across all nine categories the same 2026 calibration: **efficiency over headcount, decisive-and-humane, own decisions made above you, metrics diagnose-don't-rank, AI amplifies the system, commit in your own voice.**
+> **Spaced-repetition recap:** Two probes — the **diagnostic round** (reason under uncertainty) and the **operational-leadership** system. Diagnose by **observe → what-changed (~70–80% are change-induced) → bisect the path (a trace localizes) → confirm → mitigate first (rollback) → root-cause later**; never fix before localizing. **Observability** = metrics (*what*) + logs (*why*) + traces (*where*) + profiling (*hot*), localized via **RED + USE**, correlated by trace ID, watched for cardinality/cost. **SLO** (stricter than SLA) + **error budget = permission to ship**; **burn-rate alerts** (fast→page, slow→ticket); 99.9% = 43 min/mo, each nine ~10×; **freeze when the budget's gone.** **Incident command:** one **IC** (coordinator, not on keys), comms/ops/scribe, declare early, 30-min cadence. **Blameless postmortems:** contributing factors over root cause, AIs that **close**. **Degrade, don't break** (circuit-break + shed + fallback + replay), and run **on-call as a managed system** (symptom-only pages, an alert budget). Mitigate first; build the system; price the human cost.

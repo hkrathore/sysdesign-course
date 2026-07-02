@@ -52,7 +52,7 @@ export default defineConfig({
 				{ tag: 'script', attrs: { src: `${base}/mermaid-zoom.js`, defer: true } },
 			],
 			customCss: ['./src/styles/global.css'],
-			// Sidebar = 13 modules grouped into 5 Parts (the learning sequence), plus the
+			// Sidebar = 18 modules grouped into 6 Parts (the learning sequence), plus the
 			// Course Overview (start.md syllabus; the site root `/` is the bespoke landing at src/pages/index.astro) and the Cheat Sheets. Lessons autogenerate from
 			// each module directory by frontmatter sidebar.order. Module numbers are presentation
 			// only — cross-references were removed so the order can change without breaking links.
@@ -75,16 +75,16 @@ export default defineConfig({
 					{ label: 'Module 10 · Gen AI & Agentic Problems', collapsed: true, items: [{ autogenerate: { directory: 'module-10' } }] },
 				] },
 				{ label: 'Part IV · Engineering Excellence & Operations', collapsed: false, items: [
-					{ label: 'Module 11 · Security, Privacy & Trust', collapsed: true, items: [{ autogenerate: { directory: 'module-11' } }] },
-					{ label: 'Module 12 · Testing & Quality Engineering', collapsed: true, items: [{ autogenerate: { directory: 'module-12' } }] },
-					{ label: 'Module 13 · Production Troubleshooting & Incident Response', collapsed: true, items: [{ autogenerate: { directory: 'module-13' } }] },
+					{ label: 'Module 13 · Security, Privacy & Trust', collapsed: true, items: [{ autogenerate: { directory: 'module-13' } }] },
+					{ label: 'Module 14 · Testing & Quality Engineering', collapsed: true, items: [{ autogenerate: { directory: 'module-14' } }] },
+					{ label: 'Module 15 · Production Troubleshooting & Incident Response', collapsed: true, items: [{ autogenerate: { directory: 'module-15' } }] },
 				] },
 				{ label: 'Part V · Strategy & Leadership', collapsed: false, items: [
-					{ label: 'Module 14 · Architecture & Org Strategy', collapsed: true, items: [{ autogenerate: { directory: 'module-14' } }] },
-					{ label: 'Module 15 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-15' } }] },
+					{ label: 'Module 16 · Architecture & Org Strategy', collapsed: true, items: [{ autogenerate: { directory: 'module-16' } }] },
+					{ label: 'Module 17 · Leadership Track', collapsed: true, items: [{ autogenerate: { directory: 'module-17' } }] },
 				] },
 				{ label: 'Part VI · Capstone', collapsed: false, items: [
-					{ label: 'Module 16 · Capstone & Rubric', collapsed: true, items: [{ autogenerate: { directory: 'module-16' } }] },
+					{ label: 'Module 18 · Capstone & Rubric', collapsed: true, items: [{ autogenerate: { directory: 'module-18' } }] },
 				] },
 				{ label: 'Cheat Sheets', collapsed: true, items: [{ autogenerate: { directory: 'cheatsheets' } }] },
 			],

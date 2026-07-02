@@ -1,140 +1,142 @@
 ---
-title: "15.1 - The Leadership Round, Recalibrated for 2026"
-description: What the Director leadership loop actually scores, altitude, currency, and probe-survival, and the six environmental shifts since 2015 that silently re-grade every behavioral answer.
+title: "15.1 - The Diagnostic Method"
+description: The diagnostic round tests structured reasoning under uncertainty, not design — a disciplined observe → hypothesize → bisect → confirm loop, "what changed?" triage, bisecting the request path to localize, and mitigating before root-causing, all reasoned calmly out loud.
 sidebar:
   order: 1
 ---
 
-> **Why this track exists, and why it is not "soft":** You can run RESHADED flawlessly and still fail the loop in the behavioral rounds. At Director and Senior Director, the leadership interview is *not* a vibe check, it is a graded technical assessment of judgment, run by the same Principal/Staff engineers and senior leaders who scored your system design, probing **3-4 levels deep** to dismantle any rehearsed or AI-prepped surface answer. The two house rules from the system-design track carry over verbatim: **quantify everything**, and **every position names its limit and the alternative you rejected**. A philosophy answer with no numbers and no downside is the behavioral equivalent of "it scales horizontally." This lesson sets the altitude and exposes the trap most senior candidates walk into: **answers calibrated to the 2015 growth era that the post-2022 world now actively penalizes.**
-
 ### Learning objectives
-- Distinguish what the **Director leadership round scores** (altitude, currency, probe-survival) from what an **EM loop** scores (individual coaching, sprint mechanics).
-- Internalize the **six environmental shifts** since 2015 that silently re-grade every answer, and what each one rewards and penalizes *now*.
-- Use the **track map** and a recommended path to sequence your prep.
-- Carry **altitude consistency** from the RESHADED track into behavioral answers: quantify, name the trade-off, name the rejected alternative.
+- Understand why this module carries **two distinct probes**: the **diagnostic round** ("the service is down, walk me through it"), which tests structured reasoning under uncertainty, and the **operational-leadership** probe ("how do you run on-call and incidents for a large org"), which tests the detect/respond/learn system you build; this lesson owns the first.
+- Run the **diagnostic loop** as a discipline, observe symptoms and blast-radius, form hypotheses, **bisect** the system to localize, confirm, **mitigate**, and only then root-cause, instead of flailing at the first knob you can reach.
+- Triage every incident with **"what changed?"** first (a deploy, a config flip, a traffic shift, a dependency degrading), because most outages trace to a change, and answer **"is it us or a downstream dependency?"** before you touch your own code.
+- **Bisect the request path** like a binary search, edge → LB → service → cache → DB → dependency, halving the suspect space at each hop instead of inspecting components at random, and use **differential diagnosis** ("what is *different*, since when, which region, which cohort, which version") to localize fast.
+- Reason in **MTTR decomposed** (time-to-detect + time-to-diagnose + time-to-mitigate) and weigh the central trade, **mitigate-first vs root-cause-first**, knowing the cost of a wrong fix that prolongs the outage.
 
 ### Intuition first
+A senior ER doctor and a panicking intern see the same patient. The intern grabs the first plausible cause, "looks like a heart attack," and starts treating it before anyone has confirmed anything, so when the chart says it was a pulmonary embolism, twenty minutes are gone and the patient is worse. The senior doctor does the boring thing that saves the life: **observe the vitals, ask what changed (new medication? since when? sudden or gradual?), narrow the field by elimination, and stabilize the patient before chasing the perfect diagnosis.** Stop the bleeding first; the autopsy can wait, and it isn't an autopsy if the patient lives.
 
-Think of your story bank as code you wrote in 2015 and never recompiled. It still runs in your head, clean narrative, confident delivery. But the **grading compiler** was silently upgraded after the 2022 correction: ZIRP ended, founder-mode became a meme, AI ate the assistant layer, and "hire great people and get out of the way" went from wisdom to red flag. Run your old answers through the 2026 compiler and half of them now throw warnings you can't hear, *"empire-building,"* *"abdication,"* *"not operating at level."* The interviewer hears the warning; you hear applause. This track is the recompile pass. Same raw experience, re-graded against the world that exists now.
+That image is the entire diagnostic round. The interviewer is not asking you to *design* anything, the system already exists and it's on fire, they're watching whether you reason under uncertainty like the senior doctor or thrash like the intern. **The method beats the cleverness.** The strong candidate slows down, asks what changed, bisects the system to *localize* the failure before fixing anything, and mitigates (rolls back, sheds load, fails over) to stop the user pain before settling in to find the true cause at leisure. The weak candidate jumps straight to a fix, "probably the database, let me bump the connection pool," with no hypothesis and no evidence, and spends the interview tuning knobs on an organ that was never sick.
 
-The good news: the *fix* is rarely a new story. It is a reframe, adding the output-per-dollar angle, the tripwire, the "what I told my team," the number you were missing. The work is calibration, not invention.
+### Deep explanation
 
----
+**The diagnostic round tests a different muscle than the rest of this course, and naming that is the first Director move.** Every other module asks you to build a system from a blank page. This one hands you a running system and a symptom and asks you to think. The signal being scored is **structured reasoning under uncertainty**: can you stay calm, externalize a method, and converge, or do you panic and flail? The single most common failure is not ignorance of distributed systems, it's **fixing before localizing**, reaching for a remedy before you know which component is even sick. So the discipline below is the answer to "walk me through how you'd investigate," and you should literally narrate it out loud in the interview.
 
-## What the Director leadership round actually scores
+**The loop is observe → hypothesize → bisect → confirm → mitigate → root-cause, and the order is the whole point.** Each step has a job:
 
-An **EM loop** scores you as a coach of individuals: do you give feedback, run a tight sprint, grow a junior, resolve a two-person conflict. The unit is the **person and the team**. A **Director loop** scores you as an owner of a *system of teams*: the unit is the **org, the operating cadence, and the durable mechanism**. "I coached him to a strong-performer rating" is a fine EM answer and a weak Director one, at Director the interviewer wants the **mechanism** ("I instrumented regretted-attrition and a 30/60/90 calibration so the *next* low performer surfaces in weeks, not a cycle later").
+- **Observe.** Pin the symptom to numbers before theorizing. *Which* metric moved, latency, errors, saturation, throughput? *Which percentile*, the p50 or just the p99 tail? *Since when*, a sharp cliff at 14:32 or a slow drift over an hour? *What's the blast radius*, all users or one region, one cohort, one API, one tenant? A symptom with no shape ("it's slow") cannot be diagnosed; a symptom with shape ("p99 checkout latency doubled in eu-west only, starting 14:32") nearly diagnoses itself.
+- **Hypothesize.** Form two or three *competing* explanations, not one. The discipline of listing alternatives is what protects you from anchoring on the first guess. "Either the new deploy regressed, or the payments dependency is degrading, or a traffic spike saturated a pool", now you have a field to narrow.
+- **Bisect.** Cut the suspect space in half rather than inspecting components one by one. This is the highest-leverage step and gets its own treatment below.
+- **Confirm.** Prove the hypothesis with evidence before acting on it. A trace showing the time is spent in the payments call, an error-rate graph that lines up exactly with the deploy timestamp. Acting on an unconfirmed guess is how you apply the wrong fix.
+- **Mitigate.** Stop the user pain *now*, decoupled from understanding it fully. Roll back, fail over, shed load, flip the feature flag. The patient is stable; the bleeding has stopped.
+- **Root-cause.** *Only now*, with the site healthy, do you find the true cause and the durable fix, calmly, with no clock on it.
 
-Three dimensions carry the score across every round:
+**Triage with "what changed?" before anything else, because the base rate says you'll be right.** The overwhelming majority of production incidents, the practitioner figure most teams quote is on the order of **70–80%**, are triggered by a *change*: a deploy, a config flip, a feature-flag rollout, a schema migration, an infra change, a traffic shift, or a dependency that started degrading. So the first question after you've pinned the symptom's *shape* is *"what changed around 14:32?"* You pull the deploy log, the config-change feed, the flag-flip history, and the upstream status pages, and you line them up against the symptom's start time. A deploy 20 minutes before a latency cliff is not a coincidence, it's your prime suspect, and it's *cheap to test* because you can roll it back. The candidate who never asks "what changed" is electing to debug the hard way, reasoning from first principles about code that was working fine an hour ago.
 
-- **Altitude**, Director *mechanisms* (org design, operating system, span math, decision logs), not EM *rituals* (standups, 1:1 cadence). Too low reads as *not yet at level*; too high (pure vision, no hands-on depth) reads as *can't actually run it*. This is the exact two-sided failure from the system-design track (§2 of the course): hand-waving versus rat-holing.
-- **Currency**, does the answer sound like **2026** or like a re-run of a 2018 growth-era story? A "scaled 10→60" story told with no efficiency angle now codes as ZIRP empire-building (see the efficiency-era lesson). Currency is what this whole lesson arms.
-- **Probe-survival**, every story must hold **three levels of depth** below the headline: numbers, the rejected alternative, the stakeholders, the timeline. 2026 loops are sustained Socratic drilling (Amazon bar-raiser style) engineered to find the floor of a rehearsed answer. If level three is empty, the story wasn't yours. The answer-shape mechanics for surviving this live in the frameworks lesson.
+**Answer "is it us or a downstream dependency?" early, because it routes the entire investigation.** Your service rarely lives alone, it calls a database, a cache, a payment gateway, an auth provider, a dozen internal services. If the fault is *theirs*, no amount of staring at your own code will find it, and the fix is failover or a circuit breaker, not a code change. You answer this with the **blast-radius and differential signal**: is the error confined to calls that touch the suspect dependency? Does the dependency's own latency/error metric move in lockstep? Does its status page or your synthetic check show degradation? Localizing the fault to "us vs them" before diving deep is what stops you from spending the outage tuning a healthy service.
 
-```mermaid
-flowchart TB
-    START["Director loop"] --> HM["Hiring-manager round<br/>scope and altitude fit"]
-    START --> PHIL["Leadership and culture round<br/>philosophy under probe"]
-    START --> PEOPLE["People and org round<br/>hard calls and org design"]
-    START --> EXEC["Execution and influence round<br/>delivery and up-chart disagreement"]
-    START --> BAR["Bar-raiser or values round<br/>depth drilling and red-flag veto"]
+**Bisect the request path like a binary search, halving the suspect space at every hop.** A request flows through a chain: client → edge/CDN → load balancer → gateway → your service → cache → database → downstream dependency. With *n* hops, inspecting them one at a time is O(n); bisecting is O(log n), and on a real path of 6–10 hops that's the difference between checking eight things and checking three. The mechanic: find a vantage point in the *middle* of the chain and ask "is the problem upstream or downstream of here?" A distributed trace makes this nearly free, it already shows you the per-hop latency breakdown, so you read off which span added the milliseconds and recurse into *that* hop. Without tracing, you bisect with whatever you have: does the load balancer's own latency metric show the delay (problem is at or below the LB) or not (problem is above it, at the edge)? Either way you're cutting the field in half, not walking it linearly.
 
-    HM --> SCORE
-    PHIL --> SCORE
-    PEOPLE --> SCORE
-    EXEC --> SCORE
-    BAR --> SCORE
+**Differential diagnosis localizes by asking what is *different*.** Borrowed from medicine: you don't ask "what's wrong," you ask "what distinguishes the sick population from the healthy one." The four axes that crack most incidents are **since when** (timestamp → correlate to a change), **which region/zone** (one region → infra or a regional dependency; all regions → global change or shared dependency), **which cohort/tenant** (one customer → their data or config; one device/app version → a client bug), and **which build/version** (the symptom appears only on the canary → the new code is the cause). Each "what's different" answer prunes the hypothesis tree. "p99 only, eu-west only, only on app version 4.2, starting 14:32" is four cuts that often point at exactly one suspect before you've read a single line of code.
 
-    SCORE["Scored on three axes"] --> A["Altitude<br/>mechanisms not rituals"]
-    SCORE --> C["Currency<br/>sounds like 2026"]
-    SCORE --> P["Probe-survival<br/>holds three levels deep"]
-```
+**Mitigate before root-causing, and own the trade explicitly.** This is the decision the round is really testing, and it has a real cost on both sides. **Mitigate-first** (roll back, fail over, shed load) stops user pain in minutes but may *destroy the evidence* you'd need to root-cause, and it treats the symptom without proving the cause. **Root-cause-first** gives you certainty and a durable fix but keeps the site burning while you investigate, and every minute of an outage is revenue, trust, and SLO budget gone. The Director default is unambiguous: **stop the bleeding first.** If users are in pain and you have a safe mitigation (a rollback to a known-good state), you take it, *then* root-cause from logs and traces you captured. You hold root-cause-first only when there's no safe mitigation, or when mitigating would corrupt data, or when the blast radius is tiny and the diagnostic value of the live failure is high. The number that disciplines this: **MTTR = time-to-detect + time-to-diagnose + time-to-mitigate.** Mitigate-first deliberately shrinks time-to-mitigate by deferring the slow part (full diagnosis) to after recovery, and that's usually the right call, because a wrong fix that prolongs the outage can easily *double* MTTR, you spend ten minutes applying it, ten confirming it didn't work, and you're now further from a clean rollback than when you started.
 
-Note what each round is *really* testing, not its label. The hiring-manager round is leveling, does your scope match the title. The bar-raiser round exists to find the floor of your weakest story and carries **veto power** at companies like Amazon. The execution round is where business acumen is now scored *inside* the behavioral answer, not in a separate case round.
-
----
-
-## The six environmental shifts that re-score every answer
-
-These are the load-bearing change since 2015. Each one rewards a posture and penalizes its opposite. Memorize the **penalty**, because that is the warning the interviewer hears when your story is stale.
-
-**1. Post-ZIRP efficiency.** Capital got expensive in 2022; **output-per-dollar replaced headcount growth** as the proxy for good leadership. Business acumen, cloud cost per transaction, payback period, unit economics, is now scored *inside* behavioral answers, not quarantined to a case round.
-- *Rewards:* "I delivered the roadmap with a flat or shrinking team via platform leverage."
-- *Penalizes:* "I scaled the org from 10 to 60" with no efficiency angle → reads as empire-building. **Headcount is now the expensive option you must justify, not the default plan.**
-
-**2. Founder-mode (Sept 2024).** Paul Graham's essay made **pure delegation near-disqualifying** in front of founders. "Hire great people and get out of the way" now reads as absenteeism; but the overcorrection, "I'm founder-mode, I'm in the details", reads as a micromanagement confession.
-- *Rewards:* **selective depth with standing mechanisms**, "I go deep on the two decisions that turn the architecture and the one underperforming team; everything else runs on a cadence I don't sit in."
-- *Penalizes:* either pole. The whole binary is the trap.
-
-**3. AI as topic *and* format disruptor.** AI is asked directly *and* woven into hiring, org-design, and metrics, and it is **changing the interview format itself** (Meta's AI-enabled CoderPad round, Shopify's BYO-AI interview). It has no 2015 ancestor, so both ditches are well-mapped.
-- *Rewards:* the **accountable operator**, "I ran a rollout, here's the J-curve and the ROI I defend like a headcount ask."
-- *Penalizes:* "we're still evaluating / I let each team decide" (abdication) **and** "AI made us 10× faster" with no methodology (the Klarna/Salesforce overclaim). Context interviewers carry: 85%+ of engineers use assistants, Pichai's "~75% of new Google code is AI-generated," yet ~51% of leaders believe GenAI is currently net-negative, so **honest J-curve talk scores; breathlessness doesn't.**
-
-**4. RTO / hybrid norms.** Remote-execution literacy is assumed, and the answer is scored on **separating personal preference from organizational stewardship**. The known data point: Amazon's 5-day RTO polled **1.4/5** internally with **91% unhappy**, and regretted attrition concentrated among strong engineers, candidates are expected to know that trade-off math.
-- *Rewards:* a written async operating system (RFCs, decision logs) and a **retention-risk plan for whatever policy the company sets**.
-- *Penalizes:* workplace ideology in *either* direction; "management by walking around."
-
-**5. Psychological-safety-plus-accountability (post-backlash).** Naming Project Aristotle alone is now table stakes and slightly suspect. The current bar is **Edmondson's definition paired explicitly with accountability**.
-- *Rewards:* "Safety protects people who take interpersonal risks, it does **not** protect people *from* performance consequences."
-- *Penalizes:* safety as a synonym for *nice*, with no accountability mechanism attached.
-
-**6. Performance-management tightening.** The clock moved to **weeks, not quarters**. A real, well-run termination is now **table stakes** for Director (Meta's low-performer cuts, Microsoft's PIP-or-severance ultimatum, ~30% rise in formal performance procedures since 2020). And layoff experience moved from rare to near-assumed.
-- *Rewards:* decisiveness-with-dignity, early dated feedback, a real process, the call made on time, *and* a raised compassion bar (cold "easy call" answers score worse than they used to).
-- *Penalizes:* "I coach indefinitely; firing is a failure of my leadership" → now reads as **not operating at level**.
+**The cognitive traps are the real adversary, name them so you can resist them out loud.** **Anchoring** is locking onto the first hypothesis and ignoring disconfirming evidence, the cure is forcing yourself to list two or three competing causes up front. **Symptom-fixing** is treating the visible effect (restart the box, bump the pool) instead of the cause, which masks the problem until it returns worse. **Confirmation bias** is reading the graphs that support your guess and skipping the ones that don't. **Fixing while still in the dark** is the meta-trap this whole method exists to prevent: acting before you've localized. A Director who says "my first instinct is the database, but before I touch it let me confirm it's not the new deploy or the payments dependency" is demonstrating, in one sentence, that they know the traps and have a method to beat them.
 
 <details>
-<summary>Go deeper, why "calibrate to 2026" is not the same as "chase the trend" (optional)</summary>
+<summary>Go deeper — USE/RED as localization tools, and the math of bisecting (IC depth, optional)</summary>
 
-The risk in a recalibration lesson is teaching candidates to parrot whatever is current, which collapses on the first probe, because a borrowed opinion has no level-three depth. The defense: each shift above is anchored to a **named source and a number** (Graham's essay, the Amazon 1.4/5 poll, the ~30% rise in performance procedures, the McKinsey developer-productivity debate). You are not adopting a fashion; you are demonstrating that you operate in the world that produced those data points. When an interviewer pushes back, "isn't founder-mode just micromanagement?", you answer from the trade-off, not the slogan: "It's a correction against absentee delegation; the failure mode on the other side is exactly the micromanagement you're describing, which is why my version is *selective* depth with standing mechanisms." That sentence survives the probe; "I believe in founder-mode" does not.
+- **The USE method (Brendan Gregg), for resources.** For every resource (CPU, memory, disk, network, connection pools, thread pools), check three things: **U**tilization (how busy, % time the resource was serving), **S**aturation (how much queued work is waiting, run-queue length, pool wait time), and **E**rrors (error counts). USE is for answering "which resource is the bottleneck?" A pool at 100% utilization with a growing saturation queue is your culprit, you found it without guessing. It's exhaustive by construction: walk every resource, and the saturated one reveals itself.
+
+- **The RED method (Tom Wilkie), for services/requests.** For every service, watch **R**ate (requests/sec), **E**rrors (failed requests/sec), and **D**uration (latency distribution, p50/p90/p99). RED is for answering "which *service* is unhealthy and how?" It maps cleanly onto bisecting the request path: pull RED for each hop's service and the one whose Duration jumped (or Errors spiked) is where you recurse. USE finds *which resource* inside a box is sick; RED finds *which box* in the chain is sick. Use RED to bisect the path, then USE to localize inside the guilty box.
+
+- **The math of bisecting.** A request path with *n* hops has *n* possible fault locations. Linear inspection is expected *n*/2 checks; binary search is ⌈log₂ n⌉ checks. For a 10-hop path: ~5 checks linear vs ~4 worst-case bisecting, modest. The real win is at scale and with *fan-out*: a service calling 20 downstreams, each calling more, is a tree of hundreds of spans, and a trace that lets you jump to the slowest subtree turns a hopeless linear hunt into a handful of recursions. The trace *is* the bisection, pre-computed.
+
+- **The four-axes differential as a decision tree.** Each axis is a binary-ish cut: time (before/after a change), space (one region/all), population (one cohort/all), version (canary/baseline). Four independent cuts can partition the space into up to 2⁴ = 16 cells, and the symptom usually falls into exactly one, which is why "p99, eu-west, app 4.2, since 14:32" is so diagnostic, it's the intersection of four prunings.
 
 </details>
 
----
+### Diagram: the diagnostic loop and bisecting the request path
 
-## The track map and a recommended path
+```mermaid
+flowchart TD
+    OBS["Observe<br/>which metric? which %ile?<br/>since when? blast radius?"]
+    CHG{"What changed?<br/>deploy · config · flag<br/>traffic · dependency"}
+    HYP["Hypothesize<br/>2–3 competing causes"]
+    BIS["Bisect the path<br/>edge → LB → svc → cache → DB → dep<br/>halve the suspect space"]
+    CONF{"Confirm<br/>trace / metric<br/>proves it?"}
+    MIT["MITIGATE first<br/>roll back · fail over<br/>shed load · flip flag"]
+    RCA["Root-cause at leisure<br/>(site already healthy)"]
 
-Twelve more lessons, in three layers. **Frameworks first, then your story portfolio, then the nine question categories, then calibration and a live capstone.**
+    OBS --> CHG --> HYP --> BIS --> CONF
+    CONF -- no --> HYP
+    CONF -- yes --> MIT --> RCA
+    style MIT fill:#1f6f5c,color:#fff
+    style CHG fill:#e8a13a,color:#000
+    style RCA fill:#2d6cb5,color:#fff
+```
 
-| # | Lesson | What it gives you |
-|---|---|---|
-| 10.2 | **Answer frameworks & probe-resistance** | The four answer shapes (STARL, Clarify→Principles→Options→Decide→Tripwires, Position→Mechanism→Number→Limit, SCQA) and *when* each applies, and how to hold three levels deep without announcing the framework aloud. |
-| 10.3 | **The story portfolio** | A 12-15 story bank in a coverage matrix; the mandatory slots interviewers check (an up-chart disagreement you *won*; one you *lost* and committed to; a termination you ran; a layoff you owned; a decision you got *wrong*; an incident you commanded). |
-| 10.4 | Leadership philosophy & style | The calibrated "who are you as a leader" answers. |
-| 10.5 | Hiring & the talent bar | Designing the hiring system, not just passing it; AI-era assessment. |
-| 10.6 | Hard people calls | Low performers, PIPs, firing, brilliant jerks, flight risks. |
-| 10.7 | Managing managers & org design | Manager pipelines, span math, succession, skip-levels. |
-| 10.8 | Operating system, delegation & metrics | Cadence, DORA/SPACE/DX Core 4, async-first OS. |
-| 10.9 | Execution under pressure | Failing projects, incidents, your own bad calls. |
-| 10.10 | Influence & executive communication | Up-chart disagreement, disagree-and-commit, bad-news systems. |
-| 10.11 | Efficiency-era leadership | Layoffs, budget cuts, RTO and other mandates you didn't choose. |
-| 10.12 | AI-era engineering leadership | Rollout ROI, the junior pipeline, both sides of the hiring table. |
-| 10.13 | Company calibration | The *same* story scored at Amazon vs Meta vs Google vs Netflix vs a founder-led startup. |
-| 10.14 | **Demonstrate-don't-describe capstone** | Modern loops replace "tell me your philosophy" with live exercises (critique an OKR, read an org-health survey, deliver hard feedback in roleplay, present a first-90-days plan), plus a self-scoring rubric. |
+### Worked example: "checkout latency just doubled," walked live
+The interviewer says: *"Your checkout p99 just doubled from 400ms to 800ms. Walk me through it."* Here is the method out loud, which is exactly how you'd narrate it.
 
-**Recommended path.** Do the **frameworks and the story portfolio first, non-negotiable**, they are the RESHADED-spine analog; the nine category lessons are far weaker without an answer shape and a story bank behind them. Then take the category lessons **in your weakest-first order**, not sequentially, most senior candidates are strong on philosophy and execution and thin on the hard people calls and the efficiency/AI canon, which is exactly where the 2026 re-scoring bites hardest. Finish with company calibration to tune for your target company and the capstone to rehearse the live-exercise format under load. If you only have one evening: read this, the frameworks, the story portfolio, and the cheat sheet.
+- **Observe.** First I pin the shape. *Which percentile*, is it p50 too or just the p99 tail? Say it's the tail: p50 is flat, p99 doubled, so most requests are fine and a *subset* is slow, which points at contention or one slow dependency rather than a global regression. *Which region*, dashboards say eu-west only, us-east is healthy. *Since when*, a sharp cliff at 14:32, not a drift. Blast radius: checkout only, browse and search are fine. I now have a tightly shaped symptom, half the diagnosis is in the shape.
+- **What changed?** Before I theorize about my code, I ask what changed near 14:32 in eu-west. I pull the deploy log: there was a checkout-service deploy at **14:10**, twenty minutes before the cliff, rolled out region-by-region, eu-west last. The timing and the region both line up. That is now my prime suspect, *rejected (for now): a traffic spike*, because rate is flat on the dashboards, and *rejected: a global config change*, because only eu-west is affected.
+- **Hypothesize.** Two competing causes survive: (a) the 14:10 deploy regressed something in the checkout path, or (b) a downstream dependency the deploy newly leans on, most likely the **payments** call, started degrading. I won't pick yet, I'll let the bisect decide.
+- **Bisect.** Rather than read the diff, I open a distributed trace for a slow eu-west checkout request and read the per-hop breakdown. The LB and gateway spans are normal; the checkout-service span is where the extra 400ms lives, and *inside* it, the **payments-gateway call** went from 80ms to 480ms. The slowness is one hop, the payments call. That single trace did the binary search for me.
+- **Confirm.** I cross-check: the payments call's own RED metrics show Duration up 6× in eu-west since 14:32, and the deploy added a *synchronous* call to a new payments endpoint. Cause confirmed, the new code added a slow, synchronous payments hop on the critical path. It's *us* (our deploy) interacting with *them* (a slow endpoint), not a pure dependency outage.
+- **Mitigate.** Users are in pain *now*, so I stop the bleeding before I fix anything properly: **roll back the 14:10 deploy** in eu-west to the known-good build. p99 should return to 400ms within the rollout window. *Rejected: roll forward a hotfix*, because writing, reviewing, and deploying a fix takes 30–60 minutes while the site bleeds, whereas a rollback is a known-good state in minutes. *Rejected: fix-in-place by bumping a timeout*, that treats the symptom and leaves the slow synchronous hop on the critical path.
+- **Root-cause, at leisure.** Site healthy, clock off. The durable fix isn't "never call payments", it's making that call *not* block checkout: move it async, add a circuit breaker and a fast timeout, or pre-authorize earlier in the flow. That ships through normal review, not under fire.
 
----
+The sentence a Director ends on isn't "I'd check the database." It's *"shaped the symptom, asked what changed, bisected to the payments hop, rolled back to stop the pain, and the real fix is to take that call off the synchronous path, shipped calmly."*
 
-## Altitude consistency with the system-design track
+### Trade-offs table: mitigate-first vs root-cause-first, and rollback vs roll-forward vs fix-in-place
+| Approach | Speed to recover | User-pain risk | Certainty it's fixed | Use when… |
+|---|---|---|---|---|
+| **Mitigate-first** | fast (minutes) | low, bleeding stops now | low, cause not yet proven | users are in pain and a safe mitigation exists; the default |
+| **Root-cause-first** | slow (site burns while you dig) | high, outage continues | high, you fix the real thing | no safe mitigation, or mitigating would corrupt data |
+| **Rollback** | fastest, known-good state | lowest | high *if* a deploy is the cause | a recent change is the suspect and rollback is safe |
+| **Roll-forward (hotfix)** | slow, 30–60 min to ship | high while you write it | medium, new code, new risk | no clean rollback (e.g. an irreversible migration ran) |
+| **Fix-in-place (tune a knob)** | fast | medium | low, often masks not fixes | a config value is provably the cause, not a code path |
 
-The most under-appreciated fact in this whole module: **post-flattening, the same Principal/Staff interviewer often scores both your system-design and your leadership rounds**, and calibrates you *across* them. The two course laws are not a system-design quirk; they are how that interviewer reads *every* answer, and they transfer verbatim:
+The Director move is to default to **mitigate-first via rollback**, and to name *why* you're not rolling forward (it keeps the site down longer for unproven gain) and not fixing-in-place (it treats the symptom).
 
-- **Always quantify.** A behavioral answer with no number is hand-waving. "I turned the team around" is the "it scales" of the leadership round. Bring the metric: *"regretted attrition dropped from ~18% to ~7% over two quarters,"* *"shipped 80% of committed scope after I cut the bottom 20%,"* *"MTTR fell from 45 min to under 10."*
-- **Every position names its limit and the rejected alternative.** Just as no storage choice is presented without a critique, no leadership stance is presented without its downside and the path you didn't take. *"I chose to kill the project rather than push the date, the cost was three months of sunk work and a hard conversation with the VP who sponsored it; the alternative, a heroic crunch, would have shipped a fragile thing we'd pay for in on-call."*
+### What interviewers probe here
+- **"Latency doubled / the service is down, walk me through how you'd investigate."** *Strong signal:* externalizes a method, observe and shape the symptom (percentile, region, since-when, blast radius), ask **what changed**, bisect the path to *localize* before touching anything, then **mitigate before root-causing**, all narrated calmly. *Red flag:* jumps straight to a fix ("probably the DB, bump the pool"), no hypothesis, randomly tunes knobs, never asks what changed, never localizes.
+- **"How do you decide between rolling back and pushing a fix forward?"** *Strong:* default to rollback because it's a known-good state reachable in minutes while a hotfix takes 30–60 and adds new risk; reasons in MTTR and names when roll-forward is forced (an irreversible migration ran). *Red flag:* "I'd just fix the bug", missing that the site is bleeding while they write it, and that mitigation is decoupled from cause.
+- **"How would you even know whether it's your service or a dependency?"** *Strong:* uses blast-radius and differential signal, is the error confined to calls touching that dependency, does its own latency/error metric move in lockstep, what does its status page say, and localizes us-vs-them *before* diving into either. *Red flag:* assumes it's their own code and burns the outage reading a diff while a downstream is the actual culprit.
+- **"You've mitigated and the site is healthy. What now, and who's doing what?"** *Strong:* root-cause calmly from captured logs/traces, ship the durable fix through normal review, and treats the org system as the real answer, this is where the operational-leadership half lives, blameless postmortem, action items, and the detection gap that let it run for N minutes. *Red flag:* declares victory at mitigation with no learning loop, guaranteeing the same incident recurs.
 
-If you nail RESHADED and then give a vague, number-free, no-trade-off behavioral answer, you read as *inconsistent*, strong on the whiteboard, soft on judgment, and that inconsistency is itself a flag. The bar is one bar. (See the system-design rubric these axes mirror, and the org-and-cost reasoning that shows up on both sides of the loop.)
+The through-line at Director altitude: the diagnostic round scores **method under uncertainty**, observe → what-changed → bisect → confirm → mitigate → root-cause, and the operational half scores the **system** that makes the next outage survivable without you in the room. I'd reason the live outage out loud myself, and delegate the deep forensics with a stated prior, "I'd have the on-call lead drive the trace-level root-cause while I run comms and the mitigate/rollback call; my prior is it's the 14:10 deploy given the timing and region, so we roll back first and confirm second."
 
----
+### Common mistakes / misconceptions
+- **Fixing before localizing.** Reaching for a remedy before you know which component is sick, the intern's mistake; you can apply three correct fixes to the wrong organ. Localize first, always.
+- **Anchoring on the first hypothesis.** Locking onto your initial guess and reading only the evidence that supports it; the cure is forcing yourself to list two or three competing causes before you bisect.
+- **Never asking "what changed."** Debugging working code from first principles when a deploy, flag, or config flip 20 minutes ago is the cheap, likely answer; ~70–80% of incidents trace to a change.
+- **Ignoring blast-radius and differential signal.** Diving into code without first reading *which* percentile, region, cohort, and version are affected; those four cuts often localize the fault before you open an editor.
+- **Root-causing while the site is still burning.** Insisting on full certainty while users suffer and SLO budget drains; stop the bleeding with a safe mitigation, then root-cause with the clock off.
+
+### Practice questions
+
+**Q1.** Your API's error rate jumped from 0.1% to 4% at 09:15, across all regions. Walk through your first five minutes.
+> *Model:* I shape it first, all regions and a sharp 09:15 cliff means it's almost certainly a *global change*, not a regional infra fault, so I pull the change feed for 09:00–09:15: deploys, config pushes, flag flips, migrations. I form competing hypotheses, a bad deploy, a config change, or a shared dependency (auth, a gateway) degrading, and I check the dependency status pages in parallel since "all regions" also fits a shared-dependency failure. I bisect with a trace on a failing request to see whether the errors originate in my service or a downstream call. If a deploy or flag at 09:10 lines up, that's my suspect and it's cheap to test, I **roll it back / flip the flag off** to mitigate, watch the error rate fall, and only then root-cause. The whole first five minutes is shaping, what-changed, and localizing, not fixing.
+
+**Q2.** You believe a recent deploy caused an outage. Make the case for rolling back rather than writing a quick fix, with numbers.
+> *Model:* Rollback returns the system to a *known-good* state in roughly the rollout window, call it 3–5 minutes, with near-zero new risk because that build was healthy minutes ago. A roll-forward hotfix means write + review + build + deploy, realistically 30–60 minutes, during which the site keeps bleeding, and it introduces *new* untested code under fire, so it can fail and *add* a cycle. In MTTR terms (detect + diagnose + mitigate), rollback collapses time-to-mitigate to minutes; a hotfix can double total MTTR if it's wrong. So I roll back to stop user pain, then fix forward calmly through normal review. The only time I'm forced to roll forward is when rollback isn't safe, e.g. an irreversible schema migration already ran, and then I'd say so explicitly and weigh a forward-only mitigation.
+
+**Q3.** Mid-incident, a senior engineer is certain it's the database and wants to fail over to the replica. You're not convinced. How do you handle it at Director altitude?
+> *Model:* I don't overrule on authority, I ask for the *confirming evidence* the method requires, because failing over the database is a high-blast-radius action and we should be sure before we take it. "What's different that points at the DB, since when, which queries, do the DB's own RED/USE metrics (latency, saturation, connection pool) actually show the problem, or is that inferred?" If a trace shows the latency is in the DB hop and its saturation is pegged, great, we mitigate. If the trace shows the time is in a downstream call and the DB looks healthy, failing it over does nothing and adds risk. This is the anti-anchoring move done as a leader: I'm protecting the team from acting on an unconfirmed first hypothesis, and I'm modeling that mitigations follow evidence, not the loudest voice, while still moving fast.
+
+**Q4.** Why is "what's different, and since when" often more powerful than deep knowledge of the system internals during an incident?
+> *Model:* Because most incidents are *change-induced* on a system that was healthy minutes ago, so the fault isn't in the steady-state design you'd reason about from internals, it's in the delta. Differential signal, since when (correlate to a change), which region (regional vs global), which cohort (data/config vs code), which version (canary vs baseline), partitions the suspect space fast and *cheaply*, four cuts can isolate one suspect before you read any code. Deep internals knowledge matters for the *root-cause* phase, but for *localizing* under time pressure, the delta tells you where to look. The Director framing: I want the method that converges fastest with the least guessing, and "what changed and what's different" is that method; deep expertise then makes the confirmed fix correct and durable.
 
 ### Key takeaways
-- The Director leadership round is a **graded judgment assessment**, not a vibe check, scored on **altitude** (mechanisms, not rituals), **currency** (sounds like 2026), and **probe-survival** (holds three levels deep). It is run by the same senior engineers who scored your system design.
-- **Six shifts since 2015 silently re-grade every answer:** post-ZIRP efficiency, founder-mode killing pure delegation, AI as topic *and* format, RTO/hybrid stewardship, psych-safety-*plus*-accountability, and performance-management tightening to weeks-not-quarters. Memorize each shift's **penalty**.
-- The fix for a stale story is usually a **reframe, not a new story**, add the efficiency angle, the tripwire, the "what I told my team," the missing number.
-- **Do the frameworks and the story portfolio first**, then take category lessons weakest-first; finish with company calibration and the live-exercise capstone.
-- The **two course laws are one bar across both tracks**: quantify everything, and name the limit and the rejected alternative. The same interviewer calibrates your whiteboard and your behavioral answers against the same standard.
+- **The diagnostic round tests method, not design:** structured reasoning under uncertainty, run the loop, observe → hypothesize → bisect → confirm → mitigate → root-cause, calmly and out loud, and the failure mode being watched for is *fixing before localizing*.
+- **Triage with "what changed?" first:** ~70–80% of incidents trace to a deploy, config flip, flag, traffic shift, or degrading dependency, so line the change feed up against the symptom's start time before reasoning about code that was fine an hour ago, and answer **"us or downstream?"** early.
+- **Bisect the request path like a binary search:** edge → LB → service → cache → DB → dependency, halving the suspect space at each hop (O(log n), not O(n)); a distributed trace does the bisection for you, read off the guilty span and recurse.
+- **Mitigate before root-causing:** stop user pain with a safe mitigation (rollback is the default known-good state) *then* find the true cause with the clock off; MTTR = detect + diagnose + mitigate, and a wrong fix can double it.
+- **Name and beat the cognitive traps:** anchoring on the first guess, symptom-fixing, confirmation bias, acting before localizing; the cure is two-to-three competing hypotheses up front and evidence before action.
 
-> **Spaced-repetition recap:** The leadership loop scores **altitude · currency · probe-survival**, probed 3-4 levels deep. **Six shifts re-grade every answer**, efficiency over headcount, founder-mode over pure delegation, AI-as-operator, RTO-as-stewardship, safety-*with*-accountability, weeks-not-quarters performance management. A stale 2015 growth-era story throws warnings only the interviewer hears. Carry both course laws in: **quantify, and name the trade-off and the alternative rejected.** The frameworks and the story portfolio are the spine, build them first.
+> **Spaced-repetition recap:** This module carries two probes, the **diagnostic round** (this lesson) tests structured reasoning under uncertainty, the **operational-leadership** probe tests the detect/respond/learn system. The diagnostic method is a loop, **observe** the symptom's shape (which %ile, which region, since when, blast radius) → ask **what changed** (~70–80% of incidents are change-induced; us-or-downstream?) → **bisect** the request path like a binary search (a trace does it for you) → **confirm** with evidence → **mitigate first** (rollback = known-good in minutes; root-cause later with the clock off) → **root-cause** at leisure. MTTR = detect + diagnose + mitigate, and a wrong fix can double it. The fatal error is **fixing before localizing**; beat anchoring with competing hypotheses and evidence before action.
 
 ---
 
-*End of Lesson 15.1. The leadership track recompiles your experience against the world that exists now: same raw stories, re-graded by a tougher, more current rubric. Next: the four answer shapes and probe-resistance, the behavioral analog of the RESHADED spine.*
+*End of Lesson 15.1. The diagnostic round rewards a disciplined method over cleverness: shape the symptom, ask what changed, bisect to localize, mitigate before you root-cause, all reasoned calmly out loud.*

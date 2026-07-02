@@ -1,261 +1,137 @@
 ---
-title: "14.3 - Zero-Downtime Data Migration"
-description: "Migrating live production data, re-shard, engine swap, vendor exit, without loss or downtime: CDC + backfill vs dual-write, dark-read verification, and the expand-migrate-contract ladder with a rehearsed rollback at every rung."
+title: "14.3 - Test Environments & Data"
+description: Realistic environments and data are the hidden cost of testing — ephemeral per-PR environments beat a contended shared staging that everyone breaks, masked or synthetic data keeps tests PII-safe and compliant, and prod-like fidelity is a dial you buy only where the risk needs it.
 sidebar:
   order: 3
 ---
 
-> **This question has no textbook answer and no hiding place.** It shows up as the *only* technical question in real Director loops, and as the standard follow-up inside every other problem ("your shortener outgrew Postgres, migrate it live"). A junior answer describes a copy job. A Director answer describes a **risk-management program**: two systems provably in sync while traffic runs, a cutover ladder with a rehearsed way back at every rung, abort criteria written *before* the migration starts, a dual-run budget with an owner and an end date. The plumbing is the easy 30%; verification, sequencing, and go/no-go discipline are the 70%.
-
 ### Learning objectives
-- Frame any live migration, re-shard, engine swap, vendor exit, as one problem: **keep two systems provably in sync under traffic, then move trust one increment at a time.**
-- Choose between **CDC + backfill** and **application dual-write**, defending the choice on ordering, failure-atomicity, and blast radius.
-- Prove the data matches with **dark reads and partition checksums** against a quantified mismatch budget.
-- Run the **expand → migrate → contract** ladder: reads ramp before writes flip, reverse replication keeps the old system warm, every phase has abort criteria and one go/no-go owner.
-- Size the **risk window and dual-run cost**, two fleets plus a pipeline ≈ 2× infra spend; the cutover schedule is a budget line you own.
+- Frame **test environments and test data as the hidden cost of a quality program**: the place every team quietly loses days, where a shared staging box becomes the bottleneck and a cloned production database becomes a compliance breach waiting to happen.
+- Compare the three environment strategies, **shared staging vs ephemeral per-PR vs test-in-prod**, on the axes that matter to a Director: contention, drift, spin-up time, cost, and isolation, and pick the cheapest one that meets the risk.
+- Treat **production-like fidelity as a dial with a price tag**, not a default: buy seconds-fresh, full-scale, real-dependency fidelity only where the risk of being wrong justifies it, and run cheap low-fidelity environments everywhere else.
+- State the **test-data trade** crisply: cloning prod (high fidelity, a **PII landmine**), masking/anonymization (compliant, the workhorse), synthetic generation (zero PII, lower realism), and subsetting (cheap, partial coverage), and know which one to reach for and why.
+- Name the **failure modes** a Director engineers around, staging contention and drift, real PII in a test box, brittle hand-built fixtures, over-investing in fidelity everywhere, and zero teardown driving cost and environment sprawl.
 
 ### Intuition first
-You're moving a busy restaurant across the street, and it **never closes**. So you build the new kitchen fully (**expand**), then run *both* for weeks: every order cooked in the old kitchen and shadow-cooked in the new, a tester comparing the plates (**parallel-run with verification**). When the plates match for days, you serve a few tables from the new kitchen, then half, then all (**shift, incrementally**). The old kitchen stays staffed and warm, if the new stove fails on a Saturday night, you walk every table back in minutes (**rollback, rehearsed**). Only after weeks of flawless service do you sell the old building (**contract**). Paying two kitchens at once isn't waste, **it's the price of zero downtime, and deciding how long you pay it is the actual leadership decision.** The anti-pattern this kills: the big-bang weekend cutover, close, move, pray.
+Test environments are the **kitchen** where a restaurant tries new dishes before they hit the menu. A single shared test kitchen sounds efficient, until thirty cooks are fighting over the one stove, someone leaves a half-finished sauce on the burner, and nobody can tell whether their dish failed because of their recipe or because the last cook left the oven at the wrong temperature. That is shared staging: one contended room where everyone's experiments contaminate everyone else's, and "who broke the kitchen?" is a daily question with no good answer.
 
----
+The fix is not a bigger shared kitchen, it is a **pop-up kitchen per recipe**: spin up a clean, fully-equipped station when a cook starts, tear it down when the dish is plated. And the ingredients matter as much as the room. You would never test a recipe with a customer's actual half-eaten meal, that is what real production data is, somebody's name, card number, and medical history. You cook with **ingredients that look and behave like the real thing but carry no one's identity**: masked or synthetic data. Get the room and the ingredients right and testing stops being the place work goes to wait.
 
-## R: Requirements
+### Deep explanation
 
-> Adaptation, said out loud: R scopes the **migration scenario and its invariants**, not product features. The functional requirements are the things you refuse to break.
+**The probe is "where do you test this, and how do you get realistic data?", and the wrong answer is "we have a staging environment."** Quality at Director altitude is an operating model, and environments plus data are the part of that model where the cost hides in plain sight. The default everyone inherits, **one shared staging environment** every team deploys to, is the single most common and most expensive anti-pattern on this topic. It has three structural problems that compound: **contention** (teams queue to deploy and test, serializing work that should be parallel), **drift** (staging's config, data, and deployed versions diverge from production and from each other until "passes in staging" stops predicting "works in prod"), and **diffusion of blame** (when staging breaks, the failure could be any of N teams' changes, so nobody owns it and it stays broken). You **reject** "just add a second staging environment" because it halves contention for one cycle and then both drift independently, doubling the surface that lies to you. The fix is a different shape entirely.
 
-**Anchor scenario (concrete numbers beat abstractions):** the TinyURL system outgrew its single Postgres, **10 TB, 5K writes/s, 100K reads/s**, and must move live to a sharded store (the partitioning choice is its own problem; here we migrate *to* it). The same spine covers an engine swap or vendor exit; only the translation layer changes.
+**Ephemeral per-PR environments turn the shared bottleneck into N isolated, disposable ones.** When a pull request opens, a pipeline provisions a fresh environment from **infrastructure-as-code** (Terraform, Helm, a Crossplane or vcluster definition), seeds it with safe data, runs the integration and end-to-end suite against it, posts the result on the PR, and tears the environment down on merge or close. Each PR gets its own isolated namespace or stack, so there is **no contention** (your tests can't be poisoned by another team's deploy), **no drift** (the environment is rebuilt from the same IaC that defines prod, so it can't quietly diverge), and **clean ownership** (a failure in your PR's environment is your change, full stop). The numbers a Director carries: a Kubernetes-namespace preview environment spins up in **2–5 minutes** and costs **pennies to a few dollars per PR-hour**; a full multi-service stack with its own databases might take **10–20 minutes** and a few dollars. Against that, measure what a contended shared staging costs: if 8 teams each wait an average of **30 minutes a day** for a free staging slot, that is **4 engineer-hours a day, ~1,000 hours a year**, gone to queueing, plus the un-costed hours lost chasing failures that were someone else's mess. The ephemeral model trades a one-time platform investment for the recurring contention tax, and at any non-trivial team count that trade is lopsided.
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *What's forcing the move, and by when?* → Write/storage headroom; **~6 months of runway**, which must include the parallel-run, not just the build.
-- *What does "zero downtime" mean?* → No write outage beyond the SLO error budget; latency blips during cutover are negotiable, **data loss and silent corruption are not**.
-- *Mutation rate?* → Mostly append, some updates (counters, expiry). Mutation rate decides how hard verification is.
-- *Brief read-only window allowed?* → Assume **no**; if the business later grants 10 minutes, that's a bonus, never the plan.
+**Production-like fidelity is a dial, and you buy each notch only where the risk justifies the cost.** Fidelity has several independent axes, **data realism** (synthetic rows vs a masked prod subset vs full prod scale), **dependency realism** (mocks vs test doubles vs real downstream services), **scale** (a few rows vs production volume for performance testing), and **freshness** (yesterday's snapshot vs continuously refreshed). Each notch up costs money, time, and operational complexity, so you set fidelity from the requirement, not from a reflex. A unit and component test wants **low fidelity and high speed**: in-memory or containerized dependencies, a handful of synthetic rows, milliseconds to run. A pre-release end-to-end test of a payments flow wants **high fidelity**: real sandbox integrations with the payment processor, a masked subset that exercises the edge cases, production-shaped schemas. A performance or capacity test wants **production-scale volume** but not production identity. You **reject** "make every environment prod-like" because full-fidelity everywhere multiplies cost and spin-up time across thousands of CI runs to buy realism that 90% of tests don't need, and you **reject** "mock everything" because all-mock environments pass tests that fail in production when a real dependency behaves differently than its stub. The Director sentence: *fidelity is bought per-environment against the risk that path carries, not provisioned uniformly.*
 
-**Functional requirements (the invariants):** (1) **no data loss**, every existing row and in-flight write lands in the new store exactly once; (2) **no correctness regression**, both stores return the same answers within a stated staleness bound; (3) **zero (budgeted) downtime**; (4) **reversibility**, until decommission, a tested path back.
+**Test data is the part that turns a convenience into a compliance breach, so the default of "clone prod" is the trap.** Cloning the production database into a test environment gives perfect realism, and copies every customer's name, email, card number, government ID, and health record into a box with weaker access controls, looser audit, and broader engineer access than production. Under **GDPR, CCPA, HIPAA, or PCI-DSS**, that copy is regulated personal data the moment it lands, a test environment full of real PII is in scope for the same controls and breach-notification duties as production, and regulators have levied **seven- and eight-figure fines** for exactly this. So the work is getting realistic-enough data that carries no real identity. The four techniques, in order of how often a Director reaches for them:
 
-**Explicitly CUT:** the new store's own design, feature work during the window (**freeze schema changes** on migrating tables, a moving target makes verification unprovable), org-wide replatforms (same playbook, per system).
+- **Masking / anonymization** is the workhorse: take a production extract and **irreversibly transform the PII** (deterministic hashing so joins still work, format-preserving encryption so a card number stays a valid-looking 16 digits, faked-but-consistent names) while keeping the data's shape, distributions, and referential integrity. You get prod-like realism with no real person behind it. The cost is building and maintaining the masking rules (every new PII column needs a rule, and a missed column is a leak).
+- **Synthetic generation** produces data from scratch against the schema and business rules, so there is **zero PII risk by construction** and you can generate any volume and any edge case on demand. The cost is realism: synthetic data rarely captures the weird real-world distributions and corner cases that break production, so it is excellent for volume and functional tests, weaker for "does this behave like real traffic?"
+- **Subsetting** takes a **referentially-consistent slice** of production (say 1% of customers and all their related rows) rather than the whole 5 TB, so environments are cheap and fast to seed. It is almost always combined with masking, subset *then* mask. The cost is coverage: a 1% slice may miss the rare data shapes that cause the bug.
+- **Cloning prod with real PII** is the technique you name in order to **reject** it for any environment with weaker controls than production: the fidelity is unbeatable and the compliance and breach risk is unacceptable, so it is reserved (if used at all) for a tightly-controlled, audited, production-equivalent environment, never a developer's per-PR box.
 
-**Non-functional:** verification is **quantitative**, a mismatch rate with a threshold, not vibes; the dual-run window is bounded and budgeted; rollback at each phase completes in **minutes**; a pipeline crash mid-flight corrupts neither side.
+**Environment-as-code and a data lifecycle are what make all of this repeatable instead of artisanal.** Two operational disciplines hold the model together. **Environment-as-code** means every environment, including the ephemeral ones, is defined in version-controlled IaC and provisioned by automation, so it is reproducible, drift-free, and torn down by the same pipeline that built it, **no teardown is the silent cost killer** (orphaned preview environments and forgotten databases are how a cloud bill quietly grows five figures and a security surface sprawls). A TTL on every ephemeral environment (auto-destroy after 24–72 hours or on PR close) is non-negotiable. **Data lifecycle** means seeding is automated and versioned (the masked subset is a built artifact, refreshed on a schedule so it doesn't go stale against schema changes), and **service virtualization** covers the dependencies you genuinely can't run, a third-party payment gateway, a partner's mainframe, a rate-limited external API, by replaying recorded request/response pairs or simulating the contract, so the environment is realistic without depending on someone else's uptime. Virtualization is the honest middle between a brittle mock and an unavailable real service.
 
----
+<details>
+<summary>Go deeper — masking techniques and referential integrity (IC depth, optional)</summary>
 
-## E: Estimation
+The hard part of masking is keeping the data *useful* after you strip identity. Techniques, roughly in order of fidelity preserved:
 
-> Adaptation: E sizes the **risk window** (how long are we exposed?) and the **dual-run cost** (what does safety cost per week?), this problem's QPS-and-storage.
+- **Deterministic / consistent masking.** Hash or tokenize a value through a stable function so the same input always maps to the same output. This preserves **joins and referential integrity**: `customer_id` 12345 masks to the same token in the orders table and the payments table, so a join still returns the right rows. Use a keyed hash (HMAC) with the key held outside the test environment so the mapping isn't reversible by someone with the masked data.
+- **Format-preserving encryption (FPE).** Encrypt a value into the same format and length, a 16-digit card number stays 16 digits and passes a Luhn check, a phone number stays a phone number, so downstream validation and parsing still work. NIST FF1/FF3 are the standard algorithms.
+- **Substitution / shuffling.** Replace names, addresses, emails from a faked-but-realistic pool, or shuffle a column's values among rows so the distribution survives but no row carries its real value. Cheap, but shuffling can break correlations across columns.
+- **Generalization / suppression.** Replace a precise value with a range or category (exact age → age band, full ZIP → ZIP3), the basis of **k-anonymity** (every record is indistinguishable from at least k−1 others on quasi-identifiers). Useful when even masked precise values risk re-identification.
+- **Differential privacy for synthetic generation.** When generating synthetic data from a real distribution, add calibrated noise so no individual record can be inferred from the output, the formal guarantee behind "this synthetic set leaks nothing about any real person."
 
-**Backfill, the floor of the risk window.** 10 TB at an effective **200 MB/s** (throttled, the source is serving 100K reads/s) is `10 TB ÷ 200 MB/s ≈ 14 hours`. Call it **a day**; plan two with retries.
+The trap is **partial masking**: mask the obvious `name` and `email` columns, miss the free-text `notes` field that contains a customer's phone number, and you've shipped PII into a test box while believing you didn't. A masking pipeline needs **PII discovery** (automated scanning/classification of every column and free-text field) and a default-deny posture: a new column is treated as sensitive until proven otherwise.
 
-**Change rate vs copy rate, the feasibility check.** 5K writes/s × ~1 KB ≈ **5 MB/s** of change traffic, 2.5% of backfill bandwidth, trivially absorbed by CDC; post-snapshot catch-up is minutes. Inverted ratio = backfill never converges, check it first.
+</details>
 
-**Verification volume.** Row-by-row over 10 TB at 50K compares/s ≈ 2.5 days/pass, too slow to iterate. So: **partition checksums** (thousands of comparisons) for coverage, plus **dark reads** for the hot path, sampling **1%** of 100K reads/s = 1K compares/s ≈ **86M/day** on exactly the rows users touch.
-
-**Dual-run cost, the Director's number.** Old fleet ~$50K/mo + new fleet ~$50K/mo + pipeline and verification ~$10K/mo → **~$110K/mo, call it 2.2×** steady state. A 6-week parallel run is a **~$80K premium** plus 3-4 engineers. That's why "dual-run until we feel good" is not a plan: **the exit criteria define the end date, and the budget forces you to write them.**
-
-**What estimation decided:** copying takes a day, so the calendar is **verification and trust-ramping**; the pipeline absorbs the change rate (feasible); verification = checksums + sampled dark reads; at ~$13K/week, every week of parallel-run must buy a named reduction in risk.
-
----
-
-## S: Storage
-
-> Adaptation: S characterizes the **delta between the guarantees** of source and target. The store *choice* was made by whatever forced the move; the work here is the gap analysis.
-
-**The danger is never the data, it's what the application silently leans on.** Moving Postgres → a sharded/NoSQL target, audit for: **transactions** (multi-row atomic updates don't exist the same way, restructure the write or document the non-atomicity); **read-after-write** (free on single-primary Postgres, absent on an eventually-consistent target; unfound write-then-read paths surface in dark reads as "mismatches" that are really staleness); **auto-increment IDs** (they don't shard, the shortener already uses a sequencer; a system that doesn't needs that swap as a *prerequisite* migration); **sort order, collation, triggers**, each a behavior diff that surfaces at 2 a.m.
-
-**One new piece of infrastructure: the CDC log.** The source's write-ahead log (Postgres WAL via logical decoding, MySQL binlog) exposed as an ordered change stream, typically **Debezium into Kafka**, partitioned by primary key so per-key ordering holds. Replication machinery, pointed *across* engines.
-
-*Rejected, snapshot-and-diff without a change stream:* at 5K writes/s the diff never converges. The change stream is what makes "two systems, one truth" possible.
-
----
-
-## H: High-level design
-
-> Adaptation: the "architecture" is a **process with machinery**, the sync pipeline plus the phase ladder it enables. The diagram that matters is the ladder; every rung has a rollback arrow.
-
-**The sync mechanism, the load-bearing decision.**
-
-**Option A, CDC + backfill (my default).** Mark the log position, snapshot-copy the 10 TB, replay the captured stream until the target is seconds behind. The application **doesn't change until cutover**. *Pros:* source of truth untouched, zero new risk on the live write path; per-key ordering inherited from the log; failure-atomic, a pipeline crash resumes from its offset. *Cons:* real infrastructure to operate; lag to monitor; the apply path must be idempotent (the stream redelivers on recovery).
-
-**Option B, application dual-write.** The app writes old-then-new on every request. *Pros:* conceptually simple, near-zero lag. *Cons, disqualifying as the primary mechanism:* **not atomic**, old succeeds, new fails, and the stores silently diverge with no record to repair from; concurrent writers can land in **different orders** on the two stores; and it still needs backfill *plus* a reconciliation job, CDC's hard parts anyway, with new failure modes injected into every production write path. *Where B is right:* no usable change log (a closed vendor API you're exiting), one write choke point, continuous reconciliation mandatory.
-
-**Decision:** CDC + backfill; dual-write only where no log exists. *(Option C, managed tools like DMS or pglogical: Option A, operated by someone else.)*
-
-**The phase ladder, expand → migrate → contract:**
+### Diagram: the ephemeral per-PR environment lifecycle
 
 ```mermaid
-stateDiagram-v2
-    direction TB
-    Baseline --> Backfill : start CDC then snapshot
-    Backfill --> Shadow : copy done and lag near zero
-    Shadow --> DarkReads : checksums pass
-    DarkReads --> ReadRamp : mismatch under budget
-    ReadRamp --> WriteCutover : SLOs hold at full reads
-    WriteCutover --> BurnIn : reverse CDC running
-    BurnIn --> Contract : weeks clean
-    Shadow --> Backfill : checksum fail so recopy
-    DarkReads --> Shadow : mismatches found
-    ReadRamp --> DarkReads : SLO breach so flip back
-    WriteCutover --> ReadRamp : abort writes to old
-    BurnIn --> WriteCutover : regression found
+flowchart LR
+    PR["PR opened"] --> PROV["Provision from IaC<br/>Terraform / Helm<br/>(2–5 min)"]
+    PROV --> SEED["Seed data<br/>masked subset / synthetic"]
+    SEED --> TEST["Run integration<br/>+ E2E suite"]
+    TEST --> REPORT["Post result<br/>on the PR"]
+    REPORT --> MERGE{"merge / close?"}
+    MERGE -->|yes| TEARDOWN["Tear down<br/>(TTL auto-destroy)"]
+    MERGE -->|no, new commit| PROV
+    VIRT["Service virtualization<br/>(deps you can't run)"] -.-> TEST
+    style PROV fill:#1f6f5c,color:#fff
+    style SEED fill:#e8a13a,color:#000
+    style TEARDOWN fill:#2d6cb5,color:#fff
 ```
 
-**Reading the ladder:** every forward edge has a backward edge, and each backward edge is **cheap until write cutover**, flipping reads back is a config change measured in minutes. Reads ramp first (1% → 10% → 50% → 100%) because a bad read is detectable and recoverable; a lost write is forever. Writes flip last, in one switch at the data-access layer, **with reverse CDC (new → old) started at the same moment**, write-rollback stays possible through weeks of burn-in. Contract happens only when rollback has provably not been needed for weeks: **the only irreversible rung.**
+### Worked example: replacing one contended staging with per-PR environments for a 60-engineer org
+A platform group runs **8 product teams, ~60 engineers**, all sharing **one staging environment** seeded from a nightly **full clone of the production database** (it carries real customer PII). The pain is concrete: an average of **35 minutes a day per team waiting** for a staging deploy slot, weekly "who broke staging?" fire drills that eat hours, and a quietly mounting compliance exposure that the security team has flagged twice.
 
-<details>
-<summary>Go deeper, CDC pipeline mechanics and the snapshot-consistency problem (IC depth, optional)</summary>
+- **Environments.** Move integration and end-to-end testing to **ephemeral per-PR environments** provisioned from the existing Helm/Terraform definitions. Each PR gets an isolated Kubernetes namespace plus its own ephemeral databases, **~4 minutes to spin up, ~$2 of compute per PR-hour**, with a **48-hour TTL** so nothing orphans. Staging is demoted to a single thin **pre-prod soak environment** for the final release candidate, not a daily battleground.
+- **Contention removed.** The 8 teams × 35 min/day of queueing, **~4.7 engineer-hours/day, ~1,100 hours/year**, drops to near zero because PRs no longer share an environment. At a loaded ~$120/hour that is **~$130k/year** of engineering time recovered, against a per-PR compute spend in the low thousands per month and a one-time platform build.
+- **PII risk eliminated.** The nightly full clone of real customer data is **deleted**. Per-PR environments seed from a **masked 2% subset**, subset first for cost (a few GB instead of 5 TB, seeds in under a minute), then mask every PII column (deterministic tokenization so joins hold, FPE on card numbers). Result: **zero real PII** in any test environment, the box drops out of PCI/GDPR scope, and the security flags close. **Rejected: keep cloning prod but lock down staging access**, because tightened access controls don't remove the data, the breach surface and regulatory scope remain as long as real PII sits in the box.
+- **Fidelity, bought where it matters.** Most PR environments run the masked subset and **virtualized third-party gateways** (the payment processor's sandbox is rate-limited and flaky, so record/replay its contract). The one place we **buy full fidelity** is the nightly performance test, which runs against a **production-scale synthetic dataset** (real volume, zero identity) to catch regressions the 2% subset would hide.
 
-The classic race: rows changed *during* the snapshot are captured by both the copy and the change stream, in either order. The standard fix: record the log position (LSN/GTID) *before* the snapshot, replay from that position after, and make the apply path idempotent last-writer-wins, UPSERTs keyed on primary key, optionally guarded by a per-row version/timestamp so an older event never clobbers a newer row. Debezium's snapshot modes implement exactly this dance.
+The number a Director brings out of this is not "we adopted preview environments", it is *"~1,100 contention-hours a year gone, real PII out of every test box and out of compliance scope, and full fidelity spent only on the one performance path that needs it."*
 
-Apply-worker requirements: idempotent UPSERTs (the stream is at-least-once, not exactly-once), per-key ordering (partition the Kafka topic by primary key, never round-robin), schema translation in one place, and dead-letter queues for rows that fail translation rather than stalling the stream. Monitor lag end-to-end (source write timestamp vs target apply timestamp), not just consumer offsets.
+### Trade-offs table: environment and data strategies
+| Decision | Shared staging | Ephemeral per-PR | Test-in-prod (canary/flags) |
+|---|---|---|---|
+| **Contention** | high (everyone queues) | none (isolated per PR) | none (it *is* prod) |
+| **Drift / fidelity** | drifts from prod over time | rebuilt from IaC, no drift | perfect, it is prod |
+| **Spin-up / cost** | always-on, "free" but shared | 2–20 min, pennies–$ per PR-hour | ~zero infra; risk is the cost |
+| **Isolation / blast radius** | low, one break blocks all | high, failure stays in the PR | low, real users exposed |
+| **Use when…** | legacy default; demote to a thin RC soak | the daily integration/E2E default | final verification of what can't be faked pre-prod |
 
-Throughput sanity: 5K writes/s × 1 KB = 5 MB/s, one Kafka partition handles 10× that; the bottleneck is usually target write amplification, not the stream.
-
-</details>
-
----
-
-## A: API design
-
-> Adaptation: the "API" is the **seam inside your own application**, the choke point all reads and writes pass through, carrying the migration switches. If it doesn't exist, building it is phase zero, often the longest phase.
-
-```
-interface LinkStore {
-  put(link)            // routed by write-flag: OLD | NEW
-  get(shortCode)       // routed by read-flag: 0-100% to NEW, per-tenant override
-  delete(shortCode)
-}
-
-migrationControl:
-  setReadPercent(pct, tenantFilter)   // ramp dial — changes in seconds, no deploy
-  setWriteTarget(OLD | NEW)           // the one-way-ish door; flips with reverse CDC on
-  darkReadMode(on)                    // read both, serve OLD, log diffs
-```
-
-**Design notes (each with the rejected alternative):**
-- **Flags flip at runtime, not deploy time.** *Rejected: routing via deployment*, rollback becomes a 30-minute deploy during an incident; a flag flip is seconds.
-- **One choke point, not N call sites.** *Rejected: `if (migrated)` sprinkled through the codebase*, you can't atomically flip a switch that lives in forty places. If services bypass the layer with raw SQL, **funneling them is the real first milestone**, scope it honestly.
-- **Dark-read mode is part of the interface,** not a bolted-on script, comparison happens where reads happen, tenant and key on every logged mismatch.
-
----
-
-## D: Data model
-
-> Adaptation: D is the **translation map** between old and new shapes, plus the data the migration itself owns.
-
-**The translation map.** Re-shard, same engine: near-identity, the work is the partition key and verifying no query relies on single-node features. Engine swap: an explicit per-table mapping, types, nullability, collation, denormalization for the target's access patterns. **Rule: do not redesign the schema mid-migration.** *Rejected: "while we're at it" remodeling*, differences might now be *intended*, and the diff signal drowns. Redesign is a second migration after this one is stable.
-
-**Keys must survive the crossing.** The short code stays the primary key on both sides, dark reads compare by key, rollback needs no ID remapping. If the target forces a different key shape, maintain an explicit mapping table; never let the two sides hold different identities for the same row.
-
-**Migration-owned data:** the CDC checkpoint (the recovery story), the **verification ledger** (per-partition checksums, dark-read mismatch log), and flag state with an audit trail. Tiny in bytes; it's the evidence the go/no-go decision reads.
-
----
-
-## E: Evaluation
-
-> Adaptation, said plainly: **here Evaluation isn't a final re-check, it's the product.** "How do you *know* the data matches while both systems run?" is the question actually being asked.
-
-**Layer 1, completeness: partition checksums.** Carve the keyspace into ~10K ranges; compute a per-range digest on both sides (count + hash, bucketed by last-modified time so hot ranges re-check cheaply); compare continuously; a mismatched range → re-copy just that range. This audits **all 10 TB**, including cold data nobody reads. *Rejected: row counts alone*, counts match while contents diverge; a smoke alarm, not an audit.
-
-**Layer 2, correctness under traffic: dark reads.** For a 1% sample of live reads, query both stores, **serve the old**, log diffs. This catches what checksums can't: hot-path translation bugs, CDC-lag staleness, the read-after-write gaps from S. At ~86M comparisons/day, a 0.01% defect rate is visible within minutes.
-
-**Layer 3, the mismatch budget and abort criteria, written before phase one.** Numbers decided in advance, owned by one person: enter read-ramp only after a clean full-checksum pass and dark-read mismatch **< 0.01% sustained 7 days**, every mismatch class root-caused, an *understood* lag artifact can be waived; an *unexplained* mismatch stops the program by definition. Abort read-ramp on a 15-minute p99 SLO breach → flip back, diagnose, re-enter. Enter write cutover only after **2+ weeks at 100% reads**, reverse CDC tested end-to-end, and write-rollback **rehearsed in staging with a measured time-to-restore**. Pre-written matters because at 2 a.m. sunk-cost pressure says "push through", pre-committed thresholds plus a named owner are the only known defense.
-
-**The residual hard window: the write flip itself.** In-flight writes straddle the switch. Fix: a **2-5 second write-pause drain** at the data-access layer, quiesce, let CDC lag hit zero, flip, resume; a latency blip well inside the error budget. *Rejected: dual-writing through the flip*, it reintroduces every ordering problem CDC was chosen to avoid, at the most dangerous moment.
-
-**Pipeline failure:** CDC crash → resume from checkpoint; lag spikes and recovers. Lag is therefore a first-class dashboard with an alert tied to the rollback SLO: lag beyond what reverse replication can absorb takes cutover off the table that day.
-
-<details>
-<summary>Go deeper, checksum design for live, mutating data (IC depth, optional)</summary>
-
-Naive table checksums never match on a live system, the sides are read at different instants. Three workable patterns: (1) **time-bucketed digests**, hash rows with `last_modified < T` for T safely older than max replication lag; recent buckets re-verify next pass; (2) **Merkle trees over key ranges** (the Cassandra/DynamoDB anti-entropy approach, cousin of read repair), log-depth drill-down to the exact divergent range; (3) **snapshot-pinned comparison** where both engines support point-in-time reads. In practice: (1) for bulk, (2) to localize failures, (3) where available. Use order-independent digests (sum of per-row hashes) to dodge cross-engine sort-order traps, and normalize types, timestamps, float precision, collation, *before* hashing, or you'll chase phantom mismatches for a week.
-
-</details>
-
----
-
-## D: Design evolution
-
-> Adaptation: evolution is the **cutover sequencing itself**, trust moving in increments, plus the 10× variant and the ownership shape. This step and Evaluation *are* the question.
-
-**The trust ramp as a timeline (anchor scenario):**
-- **Weeks 0-2, expand:** stand up the target, build the seam, start CDC, backfill (~1 day), converge. Nothing user-visible; rollback = turn the pipeline off.
-- **Weeks 2-4, prove:** checksums to clean, dark reads 1% → 10%, burn down mismatch classes. The calendar lives or dies here, *this* is what the $13K/week buys.
-- **Weeks 4-5, shift reads:** ramp to 100%, internal tenants first, marquee customer last; each step holds for days against SLOs; rollback is a flag.
-- **Week 6, shift writes:** drain-and-flip, reverse CDC on; the *old* store is now the replica.
-- **Weeks 6-8, burn-in:** new store is system of record; the escape hatch stays warm.
-- **Week 8+, contract:** stop reverse CDC, snapshot to S3 (~$230/mo for 10 TB; keep a quarter, the rollback of last resort), decommission, **delete the migration scaffolding**, a half-dead seam is how the *next* migration becomes unreasonable.
-
-**At 10× (100 TB, 50K writes/s):** backfill is ~a week even at 1 GB/s, so **migrate shard-by-shard**, the ladder runs per shard, blast radius shrinks to 1/N, shard 1 teaches the org what shards 2-N reuse. Change-rate-vs-copy-rate now has teeth, and dual-run at ~$500K/mo of overlap makes the schedule a CFO conversation, precisely why a Director, not a tech lead, owns the end date.
-
-**Ownership and staffing (the question behind the question):** one accountable go/no-go owner at every rung, me or a named delegate, never "the team"; 2-3 engineers on pipeline + seam; one on verification tooling (the under-staffed role on every failed migration); cutovers in low-traffic hours, both stores' owners on the bridge. **Delegation with priors:** *"Data-infra owns the Debezium/Kafka pipeline and benchmarks apply throughput against our change rate; my prior is one key-partitioned topic is ample at 5 MB/s. The DBA team owns the backfill throttle; my prior is 200 MB/s off a replica, not the primary. I keep the ladder, the abort criteria, the budget, the flip decisions."*
-
-**The generic playbook, the reusable template.** Strip the scenario away and six phases govern *any* migration, vendor exit, regionalization, 10× replatform, monolith-to-services data split:
-
-1. **Assess**, inventory data, dependencies, silent guarantees (S); run the feasibility math, copy rate vs change rate, dual-run cost, rollback SLO (E).
-2. **Stabilize**, freeze schema churn; build the seam (A); verification tooling working *before* moving data.
-3. **Parallel-run**, backfill + CDC, both systems live; checksums + dark reads burn mismatches below budget (H, Eval).
-4. **Shift**, trust moves in increments: reads ramp, writes flip last, reverse-sync keeps the old side warm; every increment's abort path cheaper than continuing.
-5. **Verify**, burn-in as system of record, the old system now the shadow; exit criteria written, one owner says "go."
-6. **Decommission**, archive, kill reverse sync, delete scaffolding, retro. The only irreversible step, last, deliberately.
-
-Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliation, per H's exception); regionalization runs the ladder per region; re-shard per shard. **The phases never change; only the machinery inside phase 3 does**, and that invariance is your answer to "how would you migrate X?" for any X.
-
----
-
-### Trade-offs table: the pivotal decisions
-
-| Decision | Option A | Option B | Option C | Use when... |
+| Data technique | Prod clone (real PII) | Masking / anonymization | Synthetic generation | Subsetting |
 |---|---|---|---|---|
-| **Sync mechanism** | **CDC + backfill**, log-ordered, app untouched, resumable | **App dual-write**, simple, near-zero lag, but non-atomic + needs reconciliation anyway | **Managed tool** (DMS, pglogical) | **A** default (our choice). **B** only when no change log exists (vendor exit) and writes have one choke point. **C** when homogeneous and it fits. |
-| **Cutover style** | **Incremental ramp**, reads by %, writes last, burn-in | **Big-bang window**, one flip, maintenance downtime | **Per-shard / per-tenant waves** | **A** default (our choice). **B** only with real granted downtime *and* a dataset verifiable offline, rare. **C** at 10× or multi-tenant scale, to shrink blast radius. |
-| **Verification** | **Checksums + dark reads**, full coverage + hot-path truth, quantified budget | **Row counts + spot checks**, cheap, blind to content divergence | **Full row-by-row diff**, airtight, days per pass, stale on arrival | **A** default (our choice). **B** never sufficient alone. **C** for small/frozen datasets, or the one-time final audit before contract. |
+| **Fidelity** | perfect | high (shape preserved) | medium (misses edge cases) | partial (a slice) |
+| **Compliance risk** | severe (PII in test box) | low (no real identity) | none (no real data) | inherits source's (mask it) |
+| **Cost / effort** | cheap to copy, costly to govern | rule upkeep per PII column | generator + schema upkeep | cheap, fast to seed |
+| **Use when…** | never in a weaker-controlled box | the default for prod-like tests | volume / edge / zero-PII tests | cheap, fast envs (then mask) |
 
----
+The Director move is matching **the environment's isolation/drift needs and the data's compliance posture** to the risk the path carries, and never letting real PII sit in a box with weaker controls than production.
 
-### What interviewers probe here (Director altitude)
+### What interviewers probe here
+- **"Where do you test this, and how do you get realistic test data?"**, *Strong signal:* ephemeral per-PR environments provisioned from IaC and torn down on a TTL, seeded with a masked production subset or synthetic data so there's zero real PII, with fidelity bought per-path against risk. *Red flag:* "we have a staging environment" (one shared, contended, drifting box) or "we clone prod into the test environment" (real PII into a weaker-controlled box, a compliance breach).
+- **"Shared staging is the bottleneck and keeps breaking. What do you do?"**, *Strong:* names the structural causes (contention, drift, diffuse ownership), moves integration/E2E to isolated per-PR environments rebuilt from the same IaC as prod, quantifies the contention removed in engineer-hours, and demotes staging to a thin release-candidate soak. *Red flag:* "add a second staging" (both drift, doubling the lie) or "schedule deploy slots" (formalizes the queue instead of removing it).
+- **"How prod-like do your test environments need to be, and what does that cost?"**, *Strong:* treats fidelity as a priced dial across data/dependency/scale/freshness axes, buys high fidelity only on the high-risk paths (payments, the perf test), runs cheap low-fidelity everywhere else, and quantifies the cost of uniform fidelity. *Red flag:* "everything is prod-like" (cost and spin-up multiplied for realism most tests don't need) or "everything is mocked" (tests pass that fail in prod).
+- **"You can't run a critical downstream dependency in test. Now what?"**, *Strong:* service virtualization (record/replay or contract simulation) for the third party you can't run, so the environment is realistic without depending on someone else's uptime, plus a contract test against the real sandbox on a cadence to catch drift. *Red flag:* either a brittle hand-built mock that silently diverges, or blocking all testing on the real dependency's availability.
 
-- **"How do you know the two systems match?"**, *Strong:* layered proof, checksums for all data, dark reads for live truth, a numeric budget with a sustained-clean window; unexplained mismatches block. *Red flag:* "compare row counts," "run both and watch for errors."
-- **"Dual-write or CDC? Defend it."**, *Strong:* CDC, dual-write is non-atomic (partial failure = silent divergence, no record), unordered, and needs backfill + reconciliation anyway; names the vendor-exit exception. *Red flag:* dual-write "for simplicity" without naming divergence.
-- **"Walk me through rollback after write cutover."**, *Strong:* reverse CDC from the flip keeps the old store current; rollback is a rehearsed flip-back with a measured time-to-restore; contract deferred because it's the only irreversible step. *Red flag:* "we wouldn't need to by then," or rollback = restore a stale backup.
-- **"How long do you run both, and who decides?"**, *Strong:* quantifies the premium (~2.2×, ~$13K/week), ties the window to pre-written exit criteria, names one owner, treats schedule pressure as a risk input, never a verification override. *Red flag:* open-ended "until we're confident"; no cost awareness; decision diffused to "the team."
-- **"What breaks this plan in practice?"**, *Strong:* schema churn, raw-SQL paths bypassing the seam, read-after-write gaps masquerading as mismatch noise, under-staffed verification, sunk-cost pressure at the thresholds. *Red flag:* only technical failures, the people and process failures are the common ones.
+The through-line at Director altitude: environments and data are a **priced risk decision**, isolation and fidelity bought where the path's risk needs it, real PII kept out of every weaker-controlled box, and the contention tax removed. Delegate the build with a stated prior: *"I'd have the platform team benchmark ephemeral namespaces (vcluster) vs full per-PR stacks on our spin-up time and cost, and the data team stand up a subset-then-mask pipeline with PII discovery; my prior is namespace-level previews plus a masked 2% subset, because that kills both the contention and the PII exposure at the lowest spend, and we reserve full-fidelity for the one perf path."*
 
----
+### Common mistakes / misconceptions
+- **One shared staging as the system of record for "it works."** Contention serializes teams, drift breaks the prediction, and diffuse ownership keeps it broken; the fix is isolated per-PR environments rebuilt from IaC, not a second shared box.
+- **Cloning production with real PII into a test environment.** The moment it lands it's regulated personal data in a box with weaker controls, in scope for GDPR/HIPAA/PCI and breach duties; subset and mask (or generate synthetic) instead, the realism isn't worth the breach.
+- **Brittle hand-built fixtures and mocks.** Artisanal test data and hand-coded stubs drift from reality and rot; version the seed as a built artifact, use service virtualization with record/replay, and contract-test the real dependency on a cadence.
+- **Over-investing in prod-fidelity everywhere.** Full fidelity multiplied across thousands of CI runs buys realism 90% of tests don't need; buy each fidelity notch per-path against risk, and keep most environments cheap and fast.
+- **No teardown.** Ephemeral environments without a TTL orphan into a five-figure cloud bill and a sprawling security surface; auto-destroy on PR close or after 24–72 hours, environment-as-code so cleanup is the same pipeline that built it.
 
-### Common mistakes
+### Practice questions
 
-- **Big-bang cutover**, converting a reversible program into one bet. The ladder exists so no single moment carries the whole risk.
-- **Dual-write as the primary sync**, non-atomic, unordered, silently divergent; you build CDC's hard parts anyway, after the divergence is in production.
-- **Verification as an afterthought**, counts and vibes instead of checksums + dark reads against a numeric budget. If you can't *prove* match, you have a hope, not a migration.
-- **No rehearsed rollback past write cutover**, without reverse replication, "rollback" means restoring a stale backup and losing writes. Rehearsed = run in staging with a stopwatch, not described in a doc.
-- **Migrating a moving target**, schema churn and "while we're at it" remodeling make the diff signal meaningless. Freeze, migrate, then evolve.
+**Q1.** Your CI is blocked because 9 teams share one staging environment and someone is always mid-deploy. Walk through your fix and quantify the win.
+> *Model:* The root causes are contention, drift, and diffuse ownership, not a sizing problem, so a bigger or second staging just relocates them. I'd move integration and end-to-end testing to **ephemeral per-PR environments** provisioned from the same Terraform/Helm that defines prod (so no drift) into isolated namespaces (so no contention, and a failure is unambiguously that PR's change). Spin-up ~3–5 min, ~$1–3 per PR-hour, with a 48-hour TTL so nothing orphans. Quantify: 9 teams × ~30 min/day of queueing is ~4.5 engineer-hours/day, ~1,000+ hours/year, recovered at near-zero marginal infra cost. Staging survives only as a thin release-candidate soak, not the daily battleground.
 
----
+**Q2.** A team proposes nightly-cloning the production database into developer test environments "so the data is realistic." What's your response?
+> *Model:* I'd stop it. The moment a prod clone lands in a test box it's regulated personal data, customer names, emails, card numbers, health records, in an environment with weaker access controls, looser audit, and broader engineer access than prod. That puts the box in scope for GDPR/CCPA/HIPAA/PCI and full breach-notification duties; regulators have fined exactly this into seven and eight figures. The realism is real but the technique is wrong. Instead: **subset then mask**, take a referentially-consistent ~1–2% slice (cheap, seeds in under a minute) and irreversibly mask every PII column, deterministic tokenization so joins still work, format-preserving encryption so a card stays a valid-looking 16 digits. We keep prod-like shape with zero real identity, and the box drops out of compliance scope. For volume tests we generate synthetic data at production scale instead.
 
-### Interviewer follow-up questions (with model answers)
+**Q3.** How do you decide how production-like each test environment should be, when full fidelity is expensive?
+> *Model:* Fidelity is a dial across several axes, data realism, dependency realism, scale, and freshness, and each notch costs money, time, and spin-up latency, so I buy it per-path against the risk that path carries, never uniformly. Unit and component tests run low-fidelity and fast: in-memory or containerized deps, a few synthetic rows, milliseconds. A payments end-to-end test runs high-fidelity: the processor's real sandbox, a masked subset hitting the edge cases. A performance test runs at production-scale volume but zero identity (synthetic). I explicitly reject "make everything prod-like" (cost and spin-up multiplied across thousands of CI runs for realism most tests don't need) and "mock everything" (green tests that fail in prod when a real dependency misbehaves). The number I'd carry: full fidelity is reserved for the handful of high-risk paths, cheap low-fidelity covers the rest.
 
-**Q1. Your TinyURL Postgres is at 80% capacity, 5K writes/s. Sketch the live migration to a sharded store.**
-> *Model:* Six phases. **Assess:** backfill ≈ a day at a throttled 200 MB/s; the 5 MB/s change rate is trivial for CDC, the calendar is verification, not copying. **Stabilize:** freeze schema; funnel all access through one seam with runtime flags. **Parallel-run:** Debezium off the WAL into Kafka keyed by short code; mark the log position, snapshot, replay to convergence; verify with partition checksums plus 1% dark reads against a < 0.01% budget sustained a week. **Shift:** reads ramp 1→10→50→100% behind flags; writes flip last via a 2-5 s drain with reverse CDC started at the flip. **Verify:** 2+ weeks of burn-in, old store as warm replica, flip-back rehearsed. **Decommission:** archive to S3, kill reverse sync, delete scaffolding. Dual-run ≈ $13K/week, why the exit criteria are written before phase one and I own go/no-go.
-
-**Q2. A teammate proposes dual-writing from the application "because it's simpler than a CDC pipeline." Your response?**
-> *Model:* Three failure modes it buys. **Non-atomicity:** old write succeeds, new fails or the process dies between, silent divergence with no record to repair from; a log-based pipeline resumes from its checkpoint. **Ordering:** concurrent writers can land in opposite orders on the two stores; CDC inherits the source's per-key commit order. **It isn't simpler:** you still need backfill *plus* a reconciliation job to catch the divergence dual-write creates, CDC's hard parts, with new failure modes injected into every production write path. My prior: CDC + backfill whenever a change log exists; dual-write only on a log-less vendor exit, through one choke point, with continuous reconciliation mandatory.
-
-**Q3. Mid-ramp at 50% reads, dark reads show 0.4% mismatches. The deadline is in two weeks. What do you do?**
-> *Model:* 0.4% is 40× budget, so the pre-written criteria answer for me: **reads flip back**, a flag, minutes, invisible to users, and we diagnose. That's exactly why abort criteria predate sunk-cost pressure. Then bucket the mismatch ledger by pattern. CDC-lag staleness clustered on recently-written keys is an *understood* artifact, likely a read-after-write path missed in the guarantee audit; fix or route those reads old-side and re-enter quickly. *Unexplained* mismatches, scattered keys, content diffs, are potential corruption; nothing moves until root-caused. On the deadline: two more weeks of dual-run is ~$26K; silent corruption at 100% of reads is unbounded. That trade defends itself.
-
-**Q4. When is the old system actually safe to turn off?**
-> *Model:* Three gates. (1) The new store has been **sole system of record through real events**, a traffic peak, an on-call incident, for weeks, with zero rollback invocations. (2) A **final full checksum audit** passes immediately before severing reverse CDC, the last cheap moment to catch anything. (3) **No residual readers:** the old store's access logs show zero queries for a defined window, there's always a forgotten cron job, and logs find it before deletion does. Then "off" is staged: stop reverse CDC, snapshot to cold storage, decommission compute, delete the scaffolding. Decommission is the only irreversible rung, which is why it's last, and deliberately boring.
-
----
+**Q4.** A critical downstream service, a partner's payment gateway, can't be run in your test environments. How do you test the flows that depend on it?
+> *Model:* Service virtualization. I'd record real request/response pairs from the gateway's sandbox and replay them (or simulate its published contract) so per-PR environments get realistic gateway behavior, success, decline, timeout, retry, without depending on the partner's uptime or hitting their rate limits. That keeps the environment realistic and self-contained. The risk is the virtual service drifting from the real one, so I'd run a contract test against the real sandbox on a cadence (say nightly) to catch breaking changes early. I reject both alternatives: a hand-built mock rots and silently diverges, and blocking all testing on the live partner makes my pipeline hostage to someone else's availability and quotas.
 
 ### Key takeaways
-- Every live migration is one problem: **two systems provably in sync under traffic, then trust moved one increment at a time**, expand → migrate → contract, a rollback arrow at every rung, the irreversible step last.
-- **CDC + backfill beats dual-write** as the default sync: log-ordered, failure-atomic, resumable, production write path untouched. Dual-write diverges silently on partial failure and still needs backfill + reconciliation, reserve it for log-less vendor exits.
-- **Verification is the product:** partition checksums over all the data, dark reads on ~1% of traffic, a numeric budget (< 0.01% sustained), and *unexplained* mismatches block by definition.
-- **Reads ramp first, writes flip last**, through one runtime-flagged seam, and reverse CDC at the write flip keeps rollback a rehearsed, minutes-long flag flip through burn-in.
-- **The dual-run window is a budget line with an owner:** ~2.2× infra (~$13K/week here), exit criteria written before phase one, one named go/no-go decider, abort thresholds pre-committed against 2 a.m. sunk-cost pressure.
+- **Shared staging is the hidden tax:** contention serializes teams, drift breaks the "passes in staging → works in prod" prediction, and diffuse ownership keeps it broken; the answer is **ephemeral per-PR environments** rebuilt from the same IaC as prod, isolated, and torn down on a TTL.
+- **Real PII in a test box is a compliance breach, not a convenience:** a prod clone is regulated data in a weaker-controlled environment; **subset then mask** (or generate synthetic) so tests are realistic and PII-safe, and the box leaves compliance scope.
+- **Fidelity is a priced dial, not a default:** buy data/dependency/scale/freshness fidelity per-path against risk, full fidelity on the few high-risk paths (payments, perf), cheap low-fidelity everywhere else; reject both "all prod-like" and "all mocked."
+- **Service virtualization covers what you can't run:** record/replay or contract-simulate third-party dependencies so environments are realistic without hostage to a partner's uptime, and contract-test the real one on a cadence to catch drift.
+- **Environment-as-code with a TTL is non-negotiable:** no teardown means orphaned environments, a five-figure bill, and security sprawl; version the seed as a built artifact and let the same pipeline that provisions also destroy.
 
-> **Spaced-repetition recap:** Zero-downtime migration = **assess → stabilize → parallel-run → shift → verify → decommission**, for any variant. Sync via **CDC + backfill** (dual-write only when no log exists); prove match with **checksums + dark reads against a numeric mismatch budget**; ramp **reads first, writes last** through one flag-controlled seam; **reverse CDC** keeps rollback alive through burn-in; dual-run ≈ **2× cost**, so exit criteria are pre-written and one person owns go/no-go.
+> **Spaced-repetition recap:** Test environments are the **kitchen** and data is the **ingredients**. A single shared staging is the contended kitchen, contention, drift, "who broke it?", so move to **ephemeral per-PR environments** spun from IaC and torn down on a TTL (one-time platform cost beats ~1,000 contention-hours/year). Never cook with real meals: cloning prod PII into a weaker-controlled box is a GDPR/HIPAA/PCI breach, so **subset then mask** (deterministic tokens, format-preserving encryption) or generate **synthetic** for zero-PII volume tests. **Fidelity is a priced dial**, buy it per-path against risk, not uniformly; **service-virtualize** the dependencies you can't run; and put a TTL on everything so nothing orphans.
 
 ---
 
-*End of Lesson 14.3. Where a strongly-consistent core is protected with a queue, this lesson protects a* **transition** *with a ladder, replication, partitioning, and pub-sub machinery repurposed so two stores can be one system of record, briefly and provably, while trust moves. The playbook is the takeaway: six phases that survive any migration an interviewer can invent.*
+*End of Lesson 14.3. Environments and data are a priced risk decision: isolate and tear down, keep real PII out of every weaker-controlled box, and buy prod-like fidelity only where the risk needs it.*

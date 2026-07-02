@@ -1,282 +1,143 @@
 ---
-title: "14.6 - Build vs Buy"
-description: "The decision-memo variant of RESHADED: multi-year TCO and opportunity-cost math against the differentiation test, with reversibility and written exit triggers, buy to accelerate, build only what differentiates."
+title: "14.6 - Quality Gates, DORA & the CI/CD Platform"
+description: Quality gates encode the bar in the paved road, DORA metrics measure whether the delivery system is healthy, and the CI/CD platform makes the safe path the easy path — tied to incentives without becoming a velocity tax, with a build-vs-buy call and a platform-not-bottleneck org design.
 sidebar:
   order: 6
 ---
 
-> **This question separates Director from Staff because it isn't an engineering question.** It's attested verbatim in Director and Head-of-Engineering loops ("would you build or buy your auth/payments/search/observability/ML platform?") and it embeds inside every other case the moment you say "we'd use Stripe here." A Staff answer evaluates the technology. A Director answer evaluates the **capital allocation**: multi-year TCO where build cost is mostly *ongoing operations, not v1*; opportunity cost measured in the product work those engineers won't do; and exit triggers written down *before* the contract is signed. "Buy to accelerate, with a defined exit trigger" reads Director. "We could build it better" reads IC ego, and interviewers are listening for exactly that tell.
-
 ### Learning objectives
-- State and apply the decision rule, **build only what differentiates; buy or adopt everything commodity**, and defend it against the engineer's instinct to build.
-- Run the **TCO math both ways**: vendor bill trajectory vs loaded team cost + infra + the v1 build, over 3 years, and locate the crossover instead of comparing year-one sticker prices.
-- Price the **opportunity cost** explicitly: the scarce resource is senior engineering attention, not dollars.
-- Design the buy so it stays reversible: an abstraction seam, a data-egress plan, and **exit triggers in writing** (price, SLA, roadmap, acquisition).
-- Calibrate the five canonical domains, auth, payments, search, observability, ML platform, and know where each crossover typically sits.
+- State the **three-part frame**: quality **gates** encode the bar in the paved road, **DORA metrics** measure whether the delivery system is healthy, and the **CI/CD platform** makes the safe path the easy path, and the Director owns this delivery system, not the individual pipelines.
+- Choose **gates by ROI**, coverage, lint, SAST/dependency-scan, contract checks, performance budgets, by what each one *catches per minute of pipeline latency it adds*, and recognize the anti-pattern of a gate that taxes velocity without catching anything.
+- Read the **DORA four** (deploy frequency, lead time for changes, change-failure rate, time-to-restore) plus a reliability fifth as a **health signal you steer by, not a stick you beat teams with**, and know the elite benchmarks and how they get gamed.
+- Treat **coverage as a signal, not a target** (Goodhart's law): a coverage *target* gets met with assertion-free tests that run code and check nothing, so you measure escaped-defect rate as the outcome and coverage only as a leading hint.
+- Make the **build-vs-buy** call on the CI/CD platform with a stated prior, and design the org so quality is **everyone's job via a platform team that enables, not a QA team that gates** and becomes the bottleneck every team queues behind.
 
 ### Intuition first
-A three-star restaurant does not generate its own electricity or write its own payroll software, even though its chefs could wire a generator. Everything it *buys* is a capability customers never taste; everything it *builds*, the menu, the sourcing, the technique, is exactly what customers pay for. The failure mode: a brilliant chef spends six months building a beautiful custom oven and has produced… an oven, at the cost of two seasons of menus, while the restaurant next door bought one and shipped. And the oven never stops costing: maintenance, spares, someone who understands it at 2 a.m. **Build cost is a recurring liability disguised as a one-time project, and the real price is the menus you didn't make.** The only honest reason to build is that the thing *is* the menu.
+A quality gate is a **toll plaza on a highway**, and the design question is the same one any highway authority faces: which lanes get a barrier, and how long is the line. A toll that catches every smuggler but adds twenty minutes to every commuter's drive isn't safety, it's a traffic jam that the whole city routes around. The plazas that actually work are the ones placed where the contraband actually moves, fast for everyone else, and invisible when you've got nothing to hide. Put a barrier on every on-ramp "to be safe" and you haven't made the road safer, you've made it slower, and the first thing a frustrated city does is find the back roads.
 
----
+That image carries the design consequences. **Every gate has a latency price, and it must catch enough to earn it**, a barrier that stops nobody but slows everybody is pure tax, and a Director who can't name what a gate catches has built a toll for its own sake. **The dashboard of traffic flow is not the same as the barriers**, DORA metrics are the helicopter view of whether cars are moving and crashes are rare, and you read them to *tune the road*, not to fine the drivers, because the moment a metric becomes the drivers' performance review they start gaming it and the helicopter view goes blind. **And the authority that builds the road is not the cop standing in the lane**, a team that hand-inspects every car is a bottleneck the whole city queues behind, while a team that paints the lines and installs the automatic barriers lets a million cars drive themselves safely. Get the placement, the measurement, and the ownership right and the rest is calibration.
 
-## R: Requirements
+### Deep explanation
 
-> Adaptation, said out loud: in the decision-memo variant, R doesn't scope features, it scopes **the capability, its differentiation status, and the constraints that can veto a vendor**. Get these wrong and the rest of the memo is math on the wrong question.
+**The thesis is three layers that reinforce each other: gates encode the bar, DORA measures the system, the platform makes safe easy.** The interview probe is almost never "what's a good coverage number." It is *"design the CI/CD and quality platform for the org"* or *"what metrics tell you the delivery system is healthy."* The answer is a system, not a checklist. **Gates** are the automated checks that block a merge or a promotion: lint, type-check, unit/contract/integration suites, SAST and dependency scanning, performance budgets. They encode *the bar* into the paved road, so the engineer who does nothing special still ships at the standard. **DORA metrics** are the instrumentation: they tell you whether the delivery *system* is fast and stable, independent of any one team's heroics. **The platform** is the road itself: pipeline-as-code, build caching, parallelism, one-button rollback, given to every team from a template so the safe path is also the fastest path. The Director owns all three as a single operating concern, and the IC-altitude answer, *"set coverage to 80% and the QA team signs off,"* fails on two counts: it puts a person in the deploy path (a bottleneck that scales with headcount) and it optimizes a number that doesn't measure what you care about.
 
-**Clarifying questions I'd ask (with assumed answers):**
-- *Which capability, for what business?* → Anchor scenario: a **400-engineer, ~$150M-revenue B2B SaaS company** deciding observability (the worked example), with the other four domains as calibration points.
-- *Is this the product, near the product, or plumbing?* → The **differentiation test**: would a customer pay more, or churn less, because *ours* is better? Observability here: **no**, pure plumbing.
-- *Hard constraints?* → Compliance (PCI, SOC 2, data residency), **data gravity** (egress cost of 50 TB/day), latency (a per-request auth check can't absorb a 100 ms vendor round-trip without a cache plan).
-- *Timeline?* → Capability needed in **one quarter**. Time-to-capability is a requirement, not a preference, and it usually decides v1.
+**Gates earn their place by ROI: what each one catches, priced against the pipeline latency it adds.** A pipeline is on the critical path of every engineer who merges, so its wall-clock time is a tax paid by the whole org, every PR, every day. The discipline is to put each candidate gate on a **cost-vs-catch** ledger:
 
-**Functional requirements of the *decision*:** (1) the differentiation verdict, argued; (2) 3-year TCO both ways; (3) opportunity cost named in foregone roadmap; (4) a reversibility plan with exit triggers; (5) an owner and a review date.
+- **Lint and type-check** are the cheapest, fastest gates and they catch a real class of bug (null deref, unused imports, format drift) in **seconds**. Highest ROI, run on every change, no debate.
+- **Unit and contract tests** run in **seconds to low minutes** and catch logic bugs and cross-service seam breaks. High ROI, required on the merge path, kept fast by parallelism so they don't become the bottleneck.
+- **SAST and dependency/license scanning** (Snyk, Semgrep, Dependabot, Trivy) catch known-CVE dependencies and injection-shaped code patterns. The catch is real but the **false-positive rate** is the killer: a scanner that flags 200 criticals, 195 of them noise, gets ignored within a week, so you tune it to fail the build only on *actionable, exploitable* findings and run the full noisy scan asynchronously off the critical path.
+- **Performance budgets** (a p99 latency ceiling, a bundle-size cap, a query-cost limit) catch the slow regression that no functional test sees. They earn their place on the paths where latency is a product requirement, and nowhere else, because a perf gate on a back-office admin tool is pure tax.
 
-**The five domains, calibrated up front** (same test, different verdicts):
+The Director move is naming, for each gate, *what it catches and what minute of pipeline time it costs*, and **rejecting the gate that does neither**. You **reject** "add every scanner we can find to the required pipeline" because a 25-minute required pipeline thick with low-yield, high-noise gates doesn't make the org safer, it makes every engineer wait, and waiting engineers batch their changes into bigger, riskier merges, which is the opposite of what you wanted.
 
-| Domain | Differentiates? | Default verdict |
-|---|---|---|
-| **Auth / identity** | Almost never (unless identity *is* the product) | **Buy or adopt** (Okta/Auth0/Cognito, or self-host Keycloak). Never hand-roll crypto/session logic, a breach is existential; the vendor amortizes a security team you can't afford. |
-| **Payments** | No, until fee volume is enormous | **Buy** (Stripe/Adyen): PCI scope stays out of your codebase. Direct-acquirer builds win only when ~20-30 bps of fees on multi-billion GMV exceed a payments team, a $10B-GMV problem, not a $150M-revenue one. |
-| **Search** | Sometimes, relevance can be product | **Hybrid**: buy/host the engine (Elastic/OpenSearch/Algolia), *build the relevance layer* if search quality drives revenue. |
-| **Observability** | No | **Buy early; revisit at scale**, the canonical crossover case, worked below. |
-| **ML platform** | The models and data differentiate; the orchestration doesn't | **Assemble/buy** (SageMaker/Vertex/Databricks; serve LLMs via API until token spend crosses the self-host crossover). Build the data moat, not the pipeline plumbing. |
+**The DORA four are a health signal you steer by, not a stick.** The four are **deploy frequency** (how often you ship), **lead time for changes** (commit to running in prod), **change-failure rate** (what fraction of deploys cause a degradation needing a fix), and **time-to-restore / MTTR** (how fast you recover). A fifth, **reliability** (operational SLO adherence), was added to round out the picture. The elite benchmarks: deploy **on-demand** (multiple times a day), lead time **under an hour**, change-failure rate **under 15%**, MTTR **under an hour**. What makes these the right metrics is that they pair *throughput* (the first two) with *stability* (the last two), so you can't win one by sacrificing the other, the team that ships fast by skipping all gates blows up its change-failure rate, and the team that never breaks anything by never shipping tanks its deploy frequency. The trap a Director must avoid is turning DORA into a **performance scorecard per team**: the instant deploy frequency is on someone's review, they split one deploy into ten to pad the number, and the instant change-failure rate is graded, they stop labeling incidents as change-induced. You **reject** DORA-as-a-stick because Goodhart's law guarantees the gamed metric stops measuring the system, you use it as an **aggregate trend you steer by**, "lead time crept from 40 minutes to 3 hours this quarter, the bottleneck is the manual approval gate, let's tier it," not as a number that decides anyone's bonus.
 
-**Explicitly CUT:** vendor bake-offs (the team's job once the verdict lands), license law (delegate to counsel), and who owns the vendor relationship (a different memo).
+**Coverage is a signal, not a target, and the difference is the whole lesson on metrics.** Code coverage measures *what fraction of lines ran during the test suite*. It says nothing about whether those lines were *asserted* on. The moment you set coverage as a *target*, say "90% or the build fails", you get Goodhart's law in its purest form: teams hit the number with **assertion-free tests** that call the function, ignore the result, and check nothing, padding coverage to 92% while catching exactly zero new bugs. The coverage went up, the quality didn't move, and now you've taught the org to write theater. The Director treats coverage as a **leading hint** (a service at 20% coverage is genuinely under-tested and worth a look) and measures the *outcome* with **escaped-defect rate** (bugs that reached production per release) and **change-failure rate**, because those measure caught-vs-escaped reality, not test-suite vanity. You **reject** a coverage target because it optimizes a proxy, and you **accept** coverage as one input among several to a human judgment about where the testing gaps actually are.
 
-**Non-functional requirements:** **reversible until proven** (no one-way doors in year one); vendor specifics confined to one adapter; the analysis survives a 30% price hike without an emergency rewrite.
+**The CI/CD platform is a developer-experience product, and a slow pipeline is a tax on every engineer.** Pipeline wall-clock time is the single most-felt property of the platform, because it sits between an engineer's "I'm done" and "it's merged." The levers are concrete and quantifiable. **Build caching** (cache dependencies, compiled artifacts, Docker layers, test results for unchanged modules) turns a 12-minute cold build into a 2-minute warm one, a 6× win on the most-repeated action in the company. **Parallelism and test sharding** (split a 30-minute serial suite across 10 runners) gets you a 3-minute wall-clock at the cost of 10× the compute-minutes, a trade that's almost always worth it because *engineer-time is far more expensive than CI-time*. **Pipeline-as-code** (the pipeline definition lives in the repo, versioned and reviewed) makes the road itself a paved-road artifact teams inherit from a template rather than hand-build. The headline a Director carries: a **required pipeline over ~10 minutes p95** starts changing behavior, engineers context-switch away while waiting, batch changes to amortize the wait, and lose flow, so keeping the required path under ~10 minutes is a first-class SLO, and the expensive, slow checks (full e2e, the noisy security scan, load tests) get pushed off the critical path into post-merge or scheduled lanes. CI compute cost is real but secondary: at a few cents per build-minute, even a large org's CI bill (tens of thousands of dollars a month) is **rounding error** against the engineer-hours a slow pipeline burns, which is exactly why you spend compute liberally on parallelism to buy back wall-clock.
 
----
+**Build-vs-buy on the CI/CD platform is a default-to-buy with a narrow build exception.** The managed options, **GitHub Actions, GitLab CI, CircleCI, Buildkite**, give you runners, caching, a marketplace of pre-built steps, and a maintained control plane for cents-per-minute and zero ops headcount. Self-hosting (Jenkins, Tekton, Argo, or self-hosted runners for the managed control planes) gives you control over the execution environment, data residency, and cost at very large scale, at the price of an SRE team to keep it alive. The Director's prior is **buy the control plane**, because the value of a CI/CD platform is in *adoption and the paved-road default across many teams*, not in owning the orchestrator, and a maintained platform with a step marketplace gets you there faster. The build exception is narrow and specific: hard data-residency or air-gap requirements, a build environment so unusual (custom silicon, exotic toolchains, GPU farms) that managed runners can't host it, or a fleet so large that self-hosted runners pay for the SRE team several times over. You **reject** "build our own CI/CD platform" as a default because it commits an SRE team to undifferentiated heavy lifting that a vendor does better, and the opportunity cost is the paved-road features you didn't build on top. Note the seam: even when you buy the control plane, **self-hosted runners** on the vendor's platform are a common middle path, you get the managed orchestration and marketplace while controlling the execution environment and cost.
 
-## E: Estimation
-
-> Adaptation, the centerpiece: E is not QPS. E is **TCO both ways plus opportunity cost**, over 3 years, with the crossover located. This math *is* the interview.
-
-**The worked example: pay Datadog, or staff six engineers?**
-
-The renewal quote lands: **$2.4M/yr** for the 400-engineer org (metrics + logs + APM, observability bills commonly run **$3-6K per engineer per year** at full adoption). The platform lead says: "for that money I can hire six engineers and build it on Prometheus, Grafana, Loki, and Tempo." Run it honestly, both ways.
-
-**The build side, count everything, not just salaries:**
-- **People:** 6 engineers × **~$250K loaded** (salary + benefits + equity + overhead, never base salary) = **$1.5M/yr, forever.** Observability platforms are never "done", agents break on every runtime upgrade, retention asks grow, every new service needs onboarding.
-- **Infrastructure:** ~50 TB/day of telemetry with 30-day hot retention → object storage, ingest compute, query nodes ≈ **$0.5-0.7M/yr.** (The vendor's bill includes this; your build hides it in the cloud invoice.)
-- **The v1 build:** 6 engineers × ~12 months to reach parity *on the slice you actually use* ≈ **$1.5M one-time**, while still paying the vendor, because you can't go dark on observability mid-migration (the live-migration parallel-run discipline applies to vendor exits too).
-- **3-year build TCO:** $1.5M (v1) + 3 × $2.1M (run) ≈ **$7.8M**, plus an on-call rotation for the tool that's supposed to *support* on-call.
-
-**The buy side, price the trajectory, not the sticker:**
-- Telemetry grows faster than revenue (~2× every 2 years unmanaged), so naive 3-year spend: $2.4M → $3.1M → $4.0M ≈ **$9.5M**.
-- But Directors negotiate: a 3-year commit at this size lands **25-30% off** → ≈ **$7M**. And usage is *controllable*: an OpenTelemetry collector tier you own, filtering and sampling before egress, routinely cuts the bill **30-50%** (most telemetry is never queried).
-- **Realistic 3-year buy TCO: ~$6-7M**, with zero engineers consumed and the capability live *today*.
-
-**The verdict on raw dollars: roughly a wash** ($7.8M vs ~$7M). Which is precisely why raw dollars don't decide it, the next two numbers do.
-
-**Opportunity cost, the number juniors omit.** Six strong platform engineers are roughly two product teams' worth of roadmap. At ~$150M revenue, if dedicated product capacity drives even a few points of growth, that capacity is worth **$1M+ of revenue impact per year**, and the build consumes it rebuilding a commodity that wins zero customers. The engineer's framing is "$2.4M is six engineers." The Director's framing is "**six engineers are two product teams, what am I *not* shipping?**"
-
-**Where the crossover sits.** Build starts to win when the vendor bill durably clears **~2× the loaded cost of the team that would replace it**, the 2× margin covering infra, the v1 year, and the risk that your in-house version is worse. Here: team ≈ $2.1M/yr all-in → crossover ≈ **$4-5M/yr of vendor spend**, roughly 2× today's bill. That's the trigger to write down (Evaluation, below), not a feeling at renewal time.
-
-**What estimation decided:** buy now (capability today, ~$1M cheaper over 3 years, zero opportunity cost), **and** own the telemetry pipe (OTel collector) so the bill stays governed and the exit stays cheap, **and** put the crossover in writing: *"if spend exceeds $4.5M/yr after negotiation and pipeline controls, we commission the build."* That sentence is the Director answer.
+**The org design is the deepest decision: quality is everyone's job, enabled by a platform team, not gated by a QA team.** There are two structures, and they produce opposite outcomes. In the **QA-as-gate** model, a central QA team tests and signs off before any release, so quality is *someone else's job* and the QA team is a **bottleneck every team queues behind**, lead time balloons, the queue grows under load, and product teams learn that quality is QA's problem, not theirs. In the **platform-enabled** model, each product team owns the quality of what it ships (it writes and owns its tests, it's on call for what it breaks), and a **platform team owns the paved road**, the CI/CD platform, the standard gates, the templates, the rollback, so that doing the safe thing is the path of least resistance. The platform team *enables* (builds the machinery that makes good behavior the default) rather than *gates* (stands in the deploy path inspecting). The trade is explicit: QA-as-gate buys a single human checkpoint and a throat to choke at the cost of throughput and ownership diffusion, platform-enabled buys throughput and embedded ownership at the cost of needing real investment in the road and real discipline about teams owning their own quality. You **reject** the QA-as-gate model for a multi-team org at scale because it caps the whole org's deploy frequency at one team's review throughput, which is the structural ceiling that DORA elites broke by pushing quality into the teams and the platform.
 
 <details>
-<summary>Go deeper, line-item TCO model you can reuse (IC depth, optional)</summary>
+<summary>Go deeper — gate-latency arithmetic, DORA gaming math, and assertion-free coverage (IC depth, optional)</summary>
 
-A reusable 3-year TCO sheet, per side:
-
-**Build:** loaded headcount (engineers × $230-300K, by market) · v1 duration × team cost · infra (object storage at $0.02-0.023/GB-mo + ingest/query compute; telemetry rule of thumb: logs dominate, ~10:3:1 logs:metrics:traces by byte) · parallel-run overlap (6-12 months of double cost) · on-call load (~1 FTE-equivalent across a 6-person rotation) · hiring/ramp lag (a "6-engineer team" is 3 engineers for the first two quarters) · the maintenance tail (historically 30-50% of platform-team time after v1).
-
-**Buy:** quoted price × realistic usage growth (telemetry ~40%/yr unmanaged, ~15%/yr governed) · multi-year commit discount (20-35% at $1M+ ACV) · overage exposure (read the per-unit overage rates, that's where bills explode) · integration engineering (never zero: 1-2 eng-quarters) · egress/residency surcharges · the pipeline tier you own ($100-200K/yr, pays for itself in bill control).
-
-**Common modeling errors:** base salary instead of loaded cost (understates build ~40%); assuming v1 = done; pricing the vendor at year-one volume for all three years; counting zero opportunity cost because "we'd hire for it" (req slots are fungible, those reqs could be product engineers).
+- **Gate-latency arithmetic for a required pipeline.** If your required pipeline takes *T* minutes and the org merges *M* times a day, the gate imposes *T × M* engineer-minutes of critical-path wait per day before any context-switch cost. At T = 20 and M = 200 merges across the org, that's 4,000 minutes (~67 engineer-hours) of merge-blocking wait *per day*, ~1,400 hours a month. Shaving the required path from 20 to 8 minutes via caching + sharding gives back ~40 engineer-hours a day. The CI compute to do the sharding (say 10× runners for the test stage, a few hundred extra dollars a month) is trivially worth it: you're trading dollars of compute for hundreds of hours of engineer-time, a ratio of roughly 1:50 in dollar terms.
+- **The cost-vs-catch ledger, made concrete.** For each candidate gate, estimate `(bugs caught of class X per quarter) / (added pipeline minutes × merges per quarter)`. A type-check that adds 15 seconds and catches dozens of null-deref classes a quarter is near-infinite ROI. A full e2e suite that adds 25 minutes to the required path and catches two bugs a quarter contracts/integration didn't is *negative* ROI on the required path (the wait cost dwarfs the catch) and belongs in a post-merge scheduled lane. The ledger is a heuristic, not a spreadsheet you literally fill in, but it forces the right question: *what does this gate catch, and what does its latency cost across all merges?*
+- **Why a coverage target gets gamed (assertion-free tests).** A test that calls `processOrder(order)` and asserts nothing still marks every line of `processOrder` as "covered," because coverage instruments *execution*, not *verification*. Under a 90%-or-fail gate, the cheapest way to hit the number on a hard-to-test module is to write exactly these no-assertion tests, which is why coverage and escaped-defect rate can move in *opposite* directions: coverage climbs to 92% while real defect-catch flatlines. Mutation testing (inject a bug, check a test fails) measures assertion quality directly and is the honest version of "coverage," but it's expensive to run, so it lives in scheduled lanes, not the merge gate.
+- **DORA gaming vectors, and why aggregate-trend use defeats them.** Per-team grading creates the incentives: deploy frequency is gamed by splitting deploys; change-failure rate is gamed by mislabeling change-induced incidents as "infra"; MTTR is gamed by closing incidents fast and reopening quietly; lead time is gamed by branching late so the clock starts late. Every one of these games *helps the score and hurts the system*. Using DORA as an *aggregate org trend you steer by* (not a per-team scorecard) removes the incentive to game, because no individual's review depends on the number, so the metric stays an honest instrument.
 
 </details>
 
----
-
-## S: Storage
-
-> Adaptation: S asks **where the data lives and who can hold it hostage**, in build-vs-buy, data gravity *is* the lock-in. The store choice is the vendor's problem; the *portability* of what's in it is yours.
-
-Classify what the vendor will hold, by exit pain:
-
-- **Telemetry:** high-volume, short half-life. Exit pain is *low if* you own the pipe, an **OTel collector you operate** makes redirecting the stream a config change; dual-shipping raw data to your own S3 (~$25K/yr) preserves history. *Rejected, vendor agents writing straight to the vendor:* every emit point in 400 engineers' code speaks one vendor's dialect; the exit becomes a 2-year migration instead of a quarter.
-- **Identities (auth):** small data, **enormous** exit pain, password hashes often non-exportable, MFA enrollments don't transfer, sessions invalidate at cutover. Mitigation: integrate via **standards (OIDC/SAML/SCIM)**, never the proprietary SDK.
-- **Payment instruments:** card data lives in the PSP's vault *by design*, that's the PCI scope you're buying your way out of. Mitigation: confirm **vault portability** *at contract time*; keep your own `payment_method_id` indirection so a PSP swap is a mapping table, not a schema change.
-- **Search indexes:** derived data, rebuildable from your source of truth in hours; lowest exit pain, *provided* the index-build pipeline is yours.
-- **ML artifacts:** training data and feature definitions stay **in your own warehouse**; the platform is compute over data you own, never the system of record.
-
-**The rule:** the vendor may hold the *working copy*; **you keep the system of record or a continuously-exported stream.** Anything the vendor holds exclusively is leverage they have at renewal.
-
----
-
-## H: High-level design
-
-> Adaptation: the "architecture" is the **decision flow plus the integration seam**. The diagram worth drawing isn't boxes-and-databases, it's the loop that keeps the decision honest over time.
+### Diagram: the CI/CD pipeline with quality gates and the DORA feedback loop
 
 ```mermaid
-flowchart TD
-    CAP[New capability needed] --> DIFF{Differentiates the product}
-    DIFF -->|yes| BUILD[Build and staff it as a product]
-    DIFF -->|no| MAT{Mature vendor market}
-    MAT -->|yes| BUY[Buy behind your own seam]
-    MAT -->|no| OSS[Adopt OSS and operate it]
-    BUY --> SEAM[Abstraction seam and owned data pipe]
-    OSS --> SEAM
-    SEAM --> TRIG[Exit triggers written into the memo]
-    TRIG --> REV[Annual TCO and differentiation review]
-    REV --> DIFF
+flowchart LR
+    COMMIT["Commit / PR"] --> BUILD["Build<br/>cache · pipeline-as-code"]
+    BUILD --> TEST["Test (parallel)<br/>unit · contract · integration"]
+    TEST --> SCAN["SAST + deps<br/>fail only on actionable"]
+    SCAN --> GATE{"Quality gate<br/>lint · perf budget · green required"}
+    GATE -->|pass| CANARY["Canary 1%<br/>flagged · gated on SLO"]
+    GATE -->|fail| COMMIT
+    CANARY --> PROD["Prod rollout<br/>rollback < 60s"]
+    PROD --> DORA["DORA dashboard<br/>deploy freq · lead time<br/>change-fail rate · MTTR"]
+    DORA -.->|steer the road,<br/>not punish teams| GATE
+    style GATE fill:#1f6f5c,color:#fff
+    style CANARY fill:#e8a13a,color:#000
+    style DORA fill:#2d6cb5,color:#fff
 ```
 
-**Reading the flow:** the differentiation test gates everything; the *mature-market* test splits buy from adopt-OSS (an immature or extortionate vendor market makes self-hosted open source the middle path, you operate it, but don't *write* it); and the loop at the bottom is what juniors omit, **the verdict has a review date, because the vendor market and your scale both move.** The developer-platform lesson runs one full lap of this loop on a live case (Backstage vs an in-house developer portal, the adopt-OSS branch in detail).
+### Worked example: the CI/CD and quality-gate platform for 40 teams
+The interview prompt is *"design the CI/CD and quality platform for the org."* Forty product teams ship to production a thousand times a week. The IC instinct is "max coverage, every scanner, a QA sign-off." The Director designs the *delivery system*: which gates earn their latency, how to measure health, how to tie metrics to behavior without gaming, and what to build versus buy.
 
-**The integration shape when you buy:** every vendor sits behind a **seam you own**, an interface in your terms, vendor as one implementation (the single-choke-point discipline from live migration, built on day one when it's cheap), plus the **owned data pipe** from S. That pair makes "buy" reversible: the vendor is a plug-in, not a load-bearing wall. *Rejected, "integrate natively, abstract later":* by then the vendor's SDK idioms have metastasized across 200 services. The seam costs ~2 engineer-weeks per domain now, a rewrite-sized program afterward.
+- **The gates that earn their place, by ROI.** The required merge path is **lint + type-check** (seconds, near-infinite ROI), **unit + contract tests** (parallelized to under ~5 min, catches logic and cross-service seam breaks), and a **dependency scan tuned to fail only on actionable, exploitable CVEs** (the full noisy SAST runs async, off the critical path). A **performance budget** gate applies only on latency-sensitive paths (the checkout and search services), *rejected: a perf gate on every service*, because a budget on a back-office tool is pure tax with nothing to catch. Total required-path target: **under 10 minutes p95**, a first-class SLO, with full e2e and load tests pushed to post-merge scheduled lanes.
+- **The DORA dashboard to measure health.** An org-level dashboard of the four (deploy frequency, lead time, change-failure rate, MTTR) plus SLO adherence, read as **aggregate trends**, not per-team report cards. We target the elite band: deploy on-demand, lead time under an hour, change-failure under 15%, MTTR under an hour. *Rejected: putting each team's DORA numbers on their performance review*, because that guarantees gaming (split deploys, mislabeled incidents) and turns the instrument blind. The dashboard's job is to surface *where the road is slow*, "lead time regressed because the security gate's false-positive rate spiked", so we fix the road.
+- **Tying metrics to incentives without gaming.** The incentive is structural, not a scoreboard: teams own the quality and on-call of what they ship (the change-failure rate they cause is *their* pager at 3am, a real consequence that needs no grading), and the platform team is measured on **paved-road adoption and the required-pipeline SLO**, not on policing teams. Coverage is reported as a hint, never gated on a target, *rejected: a 90% coverage gate*, because it's met with assertion-free tests; we watch escaped-defect rate as the real outcome.
+- **The build-vs-buy call with a prior.** Buy the control plane (GitHub Actions or GitLab CI) with **self-hosted runners** for cost and environment control at our scale. *Rejected: building our own CI/CD platform on Jenkins/Tekton*, because the value is paved-road adoption across 40 teams, not owning the orchestrator, and an SRE team maintaining a homegrown control plane is undifferentiated heavy lifting a vendor does better. The CI bill (tens of thousands a month) is rounding error against the engineer-hours a slow pipeline burns, so we spend compute freely on parallelism.
 
----
+The number a Director brings out of this isn't "90% coverage and a QA sign-off." It's *"the required path is under 10 minutes and only carries gates that catch more than they cost, DORA is an aggregate health trend we steer the road by (not a stick), teams own their own change-failure rate via on-call, and we bought the control plane because the value is adoption, not the orchestrator."*
 
-## A: API design
-
-> Adaptation: the "API" is the **seam itself**, the internal interface that makes the vendor swappable. Design it in *your domain's* vocabulary, not the vendor's.
-
-```text
-# The seam, sketched (observability) — your terms, not Datadog's:
-interface Telemetry:
-    emit_metric(name, value, tags)          # OTel semantic conventions
-    log(level, message, context)
-    start_span(name, parent) -> Span
-
-# Payments seam — note what it deliberately hides:
-interface PaymentProvider:
-    create_charge(amount, currency, method_id, idempotency_key) -> ChargeResult
-    refund(charge_id, amount, idempotency_key) -> RefundResult
-    # No vendor objects leak: method_id is YOUR token,
-    # mapped to the PSP's vault reference in one adapter.
-
-# Auth seam — standards ARE the seam:
-#   OIDC for login, SCIM for provisioning. No vendor SDK
-#   outside the adapter. Swapping IdPs = config + re-auth.
-```
-
-**Design notes (each with the rejected alternative):**
-- **Idempotency keys live in *your* interface**, retry semantics survive a PSP swap. *Rejected:* relying on Stripe's idempotency as an implementation detail; the next PSP's semantics differ and every call site breaks.
-- **Standards beat SDKs wherever standards exist** (OIDC/SAML/SCIM, OpenTelemetry, SQL surfaces), the standard *is* a free seam. *Rejected:* the vendor's "richer" proprietary SDK, the richness is the lock-in.
-- **The seam is thin, not a platform.** One adapter, one mapping table, conventions enforced in review. *Rejected:* an internal "vendor abstraction framework", the build-instinct sneaking back in through the integration layer.
-
----
-
-## D: Data model
-
-> Adaptation: the data model is the **exit plan's data surface**, the artifacts that must exist *on day one of the contract* for the exit to be real rather than theoretical.
-
-Four artifacts, owned and versioned like code:
-
-1. **The continuous export.** Whatever stream the vendor consumes, **tee it**: raw telemetry to your S3, SCIM-synced identities in your directory, daily PSP settlement files into your warehouse. Cost: typically 1-3% of the vendor bill. *Rejected, "we'll export when we decide to leave":* exit-time exports happen under deadline, against a vendor with no incentive to help, rate-limited by the same API you're fleeing.
-2. **The mapping table.** Your IDs ↔ vendor IDs (`payment_method_id ↔ psp_vault_ref`, `user_id ↔ idp_subject`). This table is the entire migration key-space at exit; without it you're string-matching customers.
-3. **The contract terms that are actually data terms** (free at signing, ruinous to lack later): egress rights with no per-record fees, deletion attestation, **renewal price caps (e.g., max +7%/yr)**, vault/token portability, and a 90-day wind-down clause at current rates.
-4. **The exit runbook**, a one-pager: sequence, owner, estimated cost and duration, last reviewed date. Not because you plan to leave: **a written, costed exit is negotiation leverage at every renewal.** A vendor who knows you *can* leave in a quarter prices you differently from one who knows you can't.
-
----
-
-## E: Evaluation
-
-> Adaptation: Evaluation is the **reversibility audit**, stress the *decision* the way you'd stress a design. Three probes: lock-in, triggers, and the failure modes of each verdict.
-
-**The lock-in audit (run before signing, then annually):** score four axes, **API coupling** (vendor idioms confined to the adapter?), **data gravity** (what do they hold exclusively, and what does egress cost?), **workflow coupling** (are processes, on-call, deploys, provisioning, built around vendor-specific features?), and **skills coupling** (does anyone in-house still understand the domain?). Workflow is the one people miss: after three years on Datadog, your incident process *is* Datadog's feature set, and that costs more to unwind than the API integration.
-
-**Exit triggers, written into the memo, with numbers:**
-- **Price:** spend exceeds **$4.5M/yr** (the ~2×-team crossover from E) after negotiation and pipeline controls → commission the build.
-- **Reliability:** vendor SLA breach materially extends *our* incidents more than twice a year → re-evaluate (your observability being down during your outage is a compounding failure).
-- **Roadmap:** a differentiating product need the vendor won't serve within two quarters → build *that slice* on the seam (partial build, not wholesale exit).
-- **Corporate:** vendor acquired, or pricing-model change >20% effective increase → trigger the runbook review immediately, while the wind-down clause is fresh.
-
-**Failure modes, both directions, named honestly:**
-- *Buy gone wrong:* renewal shock with no exit leverage (no seam, no export, you ARE the captive customer the pricing model assumes); the vendor's outage becoming your outage; spend growing silently because nobody owns the bill. Mitigation: everything above, plus a named spend owner.
-- *Build gone wrong:* v1 ships, the team moves on, the platform rots, you now run a *worse* Datadog with no SLA and no one to call; the maintenance tail quietly consumes 4 of the 6 engineers forever; sunk cost keeps it alive. **"We could build it better" never prices the decade of ownership.**
-- *The hybrid trap:* buying *and* half-building ("buy Datadog but write our own metrics layer on top"), both costs, neither benefit. If you bought, use it; customize only at the seam.
-
-**Re-check vs requirements:** capability in one quarter ✓ (buy delivers now); 3-yr TCO bounded ✓ (~$7M with caps negotiated); opportunity cost zero ✓; reversible ✓ (seam + export + runbook); survives a 30% price hike ✓ (cap negotiated; trigger written for what the cap doesn't catch).
-
-<details>
-<summary>Go deeper, the lock-in audit as a scored checklist (IC depth, optional)</summary>
-
-Score each axis 1 (free to leave) to 5 (captive); anything totaling 14+ means the exit runbook is fiction until remediated.
-
-**API coupling:** count call sites importing vendor SDKs outside the adapter (grep is the audit tool). 1 = adapter only; 5 = vendor idioms in product code. **Data gravity:** what does the vendor hold exclusively, what's the export format/rate-limit, what would a full egress cost in dollars and weeks? 1 = continuous tee already running; 5 = no export path tested. **Workflow coupling:** list processes (incident response, deploy gates, paging, provisioning) that depend on vendor-specific features with no equivalent elsewhere; each is a retraining program at exit. **Skills coupling:** could anyone in-house design the replacement, or has the domain knowledge atrophied? 5 here quietly converts "build at the crossover" from an option into a hiring program.
-
-Run it before signing (sets the mitigation list), then annually (catches drift, workflow and skills scores only ever rise on their own). Attach the score to the renewal calendar so the negotiation starts from the audit, not from the vendor's quote.
-
-</details>
-
----
-
-## D: Design evolution
-
-> Adaptation: evolution asks **what makes the verdict flip later**, because build-vs-buy is a *policy with a review date*, not a one-time call.
-
-**Buy → build flips when:** spend durably crosses the written crossover (~2× team cost); or the capability *becomes* differentiating (your search relevance starts winning deals → in-source the relevance layer on the seam, keep the engine bought); or scale makes the vendor's unit economics absurd (the LLM-serving pattern: LLM-API token spend at high steady volume vs self-hosted serving, same crossover logic, different domain). The flip is usually **partial**: in-source the differentiating slice, keep buying the commodity substrate.
-
-**Build → buy flips when:** the vendor market matures past your in-house version (the team that built it in 2019 is gone, the OSS ecosystem ate the differentiation, the platform is now a liability, the honest move is a managed migration *out* of your own system, run with the live-migration playbook); or the maintaining team's opportunity cost rises (those 6 engineers are now needed for the actual product).
-
-**At 10× company scale** the calculus genuinely changes: a 4,000-engineer org's Datadog bill (~$20M+/yr) clears any team-cost crossover, in-house platform teams amortize across 10× more consumers, and negotiation leverage inverts. That's why Netflix/Uber-scale companies build observability and payments infrastructure *and are right to*, and why quoting their blog posts at a 400-engineer company is the classic altitude error. **Their crossover is behind them; yours is ahead of you.**
-
-**Where I'd delegate (the explicit Director move):**
-- **Vendor bake-off:** *"The platform team runs the Datadog-vs-Grafana-Cloud-vs-Honeycomb evaluation against our query patterns and bill model; my prior is the incumbent with a 3-year cap, because switching costs are real and the seam keeps us honest."*
-- **Contract terms:** *"Procurement and counsel own the paper; I give them the four data terms from D as non-negotiables, egress rights, price cap, portability, wind-down."*
-- **The pipeline tier:** *"The observability team owns the OTel collector and sampling policy; my prior is tail-based sampling on traces and aggressive log filtering, because that's where 40% of the bill hides."*
-
-What I keep, the differentiation verdict, the crossover number, the exit triggers, and what I hand off, with stated priors, *is* the altitude. The developer-platform lesson applies this whole memo to one concrete platform case (Backstage vs in-house IDP); the behavioral pairing is telling a build-vs-buy decision you actually owned, including the one you got wrong.
-
----
-
-### Trade-offs table: the three verdicts
-
-| Decision | A, Buy (SaaS vendor) | B, Adopt OSS, self-host | C, Build in-house | Use when... |
+### Trade-offs table: gate types, build-vs-buy, and the QA org model
+| Decision | Coverage gate | SAST / dependency scan | Performance budget | Contract check |
 |---|---|---|---|---|
-| **Time to capability** | Days-weeks | 1-2 quarters | 4+ quarters | **A** when timeline is a requirement (it usually is). |
-| **3-yr cost shape** | Opex, grows with usage, negotiable | Infra + 2-4 engineers; flatter curve | Team forever + infra + v1 + maintenance tail | **A** below the ~2×-team crossover; **B** when vendor pricing is extortionate but the OSS is mature; **C** only past the crossover *or* when it differentiates. |
-| **Opportunity cost** | ~Zero | Low-moderate | **High, the hidden headline number** | **C** only when the capability is the product, so the "opportunity cost" *is* the roadmap. |
-| **Lock-in / reversibility** | Highest, mitigated by seam + export + contract terms | Moderate (you own data; you owe ops) | None to a vendor; total to your own past decisions | **B** when exit leverage matters and ops capacity exists. |
-| **Failure mode** | Renewal shock; vendor outage = your outage | Under-resourced ops; "free" software, expensive 2 a.m. | Platform rot; sunk-cost capture | Pick the failure mode you can actually manage. |
+| **Latency cost** | low (runs with tests) | medium (scan time + false-positive triage) | low–medium (needs a perf run) | very low (ms, in provider CI) |
+| **What it catches** | nothing new if it's a *target* (gamed) | known-CVE deps, injection patterns | slow regressions no functional test sees | cross-service seam breaks before merge |
+| **Failure mode** | Goodhart: assertion-free tests | noise → ignored if not tuned to actionable | applied everywhere → pure tax | almost none; high signal |
+| **Use when…** | never as a *target*; report as a hint | tuned to fail only on exploitable findings | the path has a real latency requirement | any inter-service boundary across teams |
 
----
+| Decision | Buy managed CI/CD (Actions/GitLab/CircleCI/Buildkite) | Build / self-host (Jenkins/Tekton/Argo) |
+|---|---|---|
+| **Cost shape** | cents/build-minute, zero ops headcount | infra + a dedicated SRE team to keep alive |
+| **Speed to paved road** | fast: marketplace steps, templates, caching | slow: you build the orchestration first |
+| **Use when…** | the default; value is adoption across teams | hard air-gap/residency, exotic build env, or fleet so large self-host pays for the SRE team many times over |
 
-### What interviewers probe here (Director altitude)
+| Decision | QA team as the deploy gate | Platform-enabled (teams own quality) |
+|---|---|---|
+| **Throughput** | capped at one team's review rate; queue grows under load | scales with teams; no central bottleneck |
+| **Ownership** | quality is "QA's problem"; product teams diffuse | each team owns + is on-call for what it ships |
+| **Use when…** | tiny org, or a genuinely irreversible regulated release | any multi-team org shipping at volume (the DORA-elite shape) |
 
-- **"Your platform lead says they can build it cheaper. How do you respond?"**, *Strong:* re-run their math with loaded cost, infra, the v1 year, the maintenance tail, and opportunity cost; show the crossover; offer the pipeline-tier middle path; commit to the build *if* the numbers clear it. *Red flag:* "no, we always buy" (dogma), or accepting the six-engineers-equals-the-bill framing.
-- **"What would make you reverse this decision?"**, *Strong:* written triggers with numbers, spend crossover, SLA breach count, roadmap block, acquisition, and the runbook that makes reversal a quarter, not a rewrite. *Red flag:* "we'd re-evaluate at renewal" (when leverage is lowest and no plan exists).
-- **"Where does build-vs-buy land differently across the five domains?"**, *Strong:* runs the differentiation test per domain; knows payments' crossover is GMV-fee-driven while observability's is telemetry-volume-driven, and that search splits at the relevance layer. *Red flag:* one verdict applied to all five.
-- **"What does the buy cost you that isn't on the invoice?"**, *Strong:* lock-in across four axes (API, data, workflow, skills), the negotiation asymmetry of having no exit, and the atrophy of in-house domain understanding. *Red flag:* treats the sticker price as the cost.
-- **"You inherited an in-house system the vendor market has passed. What do you do?"**, *Strong:* an honest sunset case, TCO of keeping vs migrating out, the live-migration playbook, and managing the team whose work is being retired (the leadership half of the question). *Red flag:* defending the in-house system because killing it is politically hard.
+The Director move is choosing each gate by **cost-vs-catch**, defaulting to **buy** the control plane, and structuring the org as a **platform that enables**, never a QA team that gates, because the gate caps the whole org's deploy frequency at one team's throughput.
 
----
+### What interviewers probe here
+- **"Design the CI/CD and quality platform for the org."** *Strong signal:* a **paved road** of gates chosen by ROI (cost-vs-catch), a required path kept under ~10 minutes via caching and parallelism, expensive checks pushed off the critical path, and a build-vs-buy call with a prior toward buying the control plane. *Red flag:* "max out coverage, add every scanner, QA signs off before release", a slow required pipeline thick with low-yield gates and a human bottleneck in the deploy path.
+- **"What metrics tell you the delivery system is healthy?"** *Strong:* the **DORA four** (deploy frequency, lead time, change-failure rate, MTTR) plus reliability, read as **aggregate trends you steer the road by**, with the elite band named (on-demand, <1hr, <15%, <1hr), and an explicit guard against using them as a per-team stick. *Red flag:* a **coverage percentage** as the headline metric (Goodhart, gamed with assertion-free tests), or DORA presented as a per-team scorecard that begs to be gamed.
+- **"How do you keep gates from becoming a velocity tax?"** *Strong:* prices each gate's latency against what it catches, kills the ones that tax without catching, tunes scanners to fail only on *actionable* findings, and treats the required-pipeline wall-clock as a first-class SLO. *Red flag:* "every check is required, safety first", which slows every merge, pushes engineers to batch into bigger riskier changes, and trains them to route around the road.
+- **"How is quality owned across forty teams?"** *Strong:* a **platform team that enables** (the paved road, templates, rollback) while **each product team owns the quality and on-call** of what it ships, so the change-failure rate a team causes is its own pager, not a grade. *Red flag:* a central QA team as the deploy gate, the bottleneck that caps the whole org's deploy frequency at one team's review throughput.
 
-### Common mistakes
+The through-line at Director altitude: gates **encode the bar by ROI**, DORA **measures the system as a signal you steer by, not a stick**, and the platform **makes safe shipping the default** while teams own their own quality. You delegate the build with a stated prior: *"I'd have the platform team bake off GitHub Actions with self-hosted runners against a homegrown Tekton control plane on our build profile and team count; my prior is buy the control plane, because the value is paved-road adoption across forty teams and a maintained step marketplace, not owning the orchestrator, and the CI bill is rounding error next to the engineer-hours a slow or homegrown-flaky pipeline burns."*
 
-- **Comparing the vendor invoice to engineer salaries.** The build side is loaded cost + infra + v1 + a permanent maintenance tail; the buy side is a negotiated trajectory, not the sticker. Both numbers in the naive comparison are wrong.
-- **Pricing opportunity cost at zero.** Six engineers on commodity infrastructure are two product teams not shipping. The scarce resource is senior attention, not budget.
-- **Buying without a seam or an export.** "We'll abstract it later" is a multi-year program later and two engineer-weeks now. No seam, no export = no exit = no renewal leverage.
-- **Quoting hyperscaler blog posts as evidence.** Netflix builds observability because its crossover is behind it. Importing that verdict into a 400-engineer company is the signature altitude error of this question.
-- **"We could build it better."** Probably true, and irrelevant, *differentiating* is the test, not better. This phrase, unaccompanied by TCO math, is the exact IC-ego tell the question exists to detect.
+### Common mistakes / misconceptions
+- **Setting coverage as a target.** A coverage *target* is Goodhart's law in pure form, it's met with assertion-free tests that run code and check nothing, so coverage climbs while defect-catch flatlines; report it as a hint and gate on escaped-defect rate.
+- **Gates that tax without catching.** A required pipeline thick with low-yield, high-noise gates slows every merge, pushes engineers to batch into bigger riskier changes, and gets routed around; each gate must earn its latency by what it catches.
+- **Using DORA as a stick, not a signal.** Per-team-graded DORA gets gamed instantly (split deploys, mislabeled incidents, reopened MTTR); read it as an aggregate org trend you steer the road by, not a scorecard that decides bonuses.
+- **A QA team as the deploy gate.** A central QA sign-off makes quality "someone else's job" and caps the whole org's deploy frequency at one team's review rate; the model is a platform that enables and teams that own their own quality and on-call.
+- **Building a CI/CD platform when buying would fit.** Defaulting to a homegrown control plane commits an SRE team to undifferentiated heavy lifting a vendor does better; buy unless air-gap, an exotic build env, or extreme scale genuinely forces the build.
 
----
+### Practice questions
 
-### Interviewer follow-up questions (with model answers)
+**Q1.** A team proposes a 90%-coverage-or-fail gate across all services as this year's quality goal. React as the Director.
+> *Model:* I'd reject coverage-as-a-target, because coverage measures *what lines ran*, not *what failures we'd catch*, and a 90% gate is Goodhart's law: the cheapest way to hit it on hard-to-test modules is assertion-free tests that call the function and check nothing, so coverage climbs to 92% while real defect-catch doesn't move, and now we've trained the org to write theater. I'd report coverage as a *hint* (a service at 20% is genuinely under-tested and worth a look), and gate the *outcome* on **escaped-defect rate** and **change-failure rate**, which measure caught-vs-escaped reality. The required-path gates I actually want are the ones with ROI: lint, type-check, unit and contract tests, and a dependency scan tuned to fail only on exploitable CVEs. If we want an honest "is this tested" signal, mutation testing in a scheduled lane beats coverage, because it checks that a test actually *fails* when you inject a bug.
 
-**Q1. Your Datadog renewal comes in at $2.4M/yr, up 30%. Walk me through your decision.**
-> *Model:* Governance before strategy: do we control the volume? An OTel pipeline tier we own, with sampling and log filtering, typically cuts 30-50%, that alone may erase the increase. Then negotiate: a 3-year commit at this ACV gets 25-30% off, plus a renewal cap (~7%/yr) and egress rights in the paper. Then run the crossover: a replacement team is ~$2.1M/yr all-in, so build wins only when governed spend durably clears ~$4-5M/yr, we're at half that. Verdict: stay bought, govern the pipe, write the crossover into the memo as the trigger, and keep the exit runbook current so next renewal we negotiate with a credible alternative. What I won't do is commission a build to win one negotiation, that's a decade of ownership to dodge an invoice.
+**Q2.** Your required CI pipeline is 25 minutes and engineers are batching changes to amortize the wait. Diagnose and fix, with numbers.
+> *Model:* The 25-minute required path is the disease: at, say, 200 merges a day across the org, that's ~83 engineer-hours of merge-blocking wait *daily*, and the rational response, batching changes to pay the wait once, makes each merge bigger and riskier, raising change-failure rate, the opposite of the goal. The fix is to treat required-path wall-clock as a first-class SLO (target under ~10 min p95) and get there with **build caching** (cache deps, layers, unchanged-module test results, often a 6× win on warm builds) and **test sharding** across 10 runners (a 30-min serial suite becomes ~3 min wall-clock at 10× compute-minutes, a trade worth it because engineer-time dwarfs CI-time). Then **push the expensive, slow gates off the critical path**: full e2e, the noisy SAST scan, and load tests move to post-merge or scheduled lanes, keeping only ROI-positive checks on the required path. Net: smaller, more frequent merges, lower change-failure rate, and a CI bill increase that's rounding error against the engineer-hours recovered.
 
-**Q2. The CTO wants to build an in-house ML platform "because AI is core to our strategy." Respond.**
-> *Model:* Separate what's core from what's plumbing. Our *models, training data, and the product loop around them* differentiate, that's where the engineers go, and that we build without question. The orchestration substrate, pipelines, feature store, serving infra, GPU scheduling, is a commodity with mature options (SageMaker/Vertex/Databricks), and building it consumes the exact ML engineers who should be improving models. TCO: a credible platform team is 6-8 engineers ≈ $2M/yr before a single model improves; the managed equivalent at our scale is a fraction of that. The honest caveat: if inference volume grows to where API token spend crosses self-hosted serving cost, we in-source *serving*, a written trigger, not a day-one build. Build the moat, buy the plumbing, put the crossover in the memo.
+**Q3.** Leadership wants to put each team's DORA scores on their quarterly review to "drive accountability." What do you tell them?
+> *Model:* I'd push back hard, because grading DORA per team guarantees it gets gamed and stops measuring the system: deploy frequency gets padded by splitting one deploy into ten, change-failure rate drops because incidents get relabeled "infra" instead of change-induced, MTTR improves because incidents get closed fast and quietly reopened, and lead time shrinks because people branch late so the clock starts late, every one of these *helps the score and hurts the system*. DORA is an **aggregate health signal you steer by**, not a per-person stick: I read the org-level trend to find where the *road* is slow ("lead time regressed because the security gate's false-positive rate spiked"), and I fix the road. The real accountability is structural, not a scoreboard: teams own the on-call for what they ship, so the change-failure rate a team causes is its own 3am pager, a consequence that needs no grading and can't be gamed without the team feeling the pain directly.
 
-**Q3. How do you keep a "buy" decision from becoming irreversible?**
-> *Model:* Four artifacts, created at signing when they're cheap: a **seam**, the vendor behind an interface in our vocabulary (standards like OIDC/OTel where they exist), confined to one adapter; a **continuous export**, we keep the system of record or a teed raw stream, costing 1-3% of the bill; **contract terms**, egress rights, price caps, portability, a 90-day wind-down; and a **costed exit runbook**, reviewed annually. Then triggers with numbers: spend crossover, SLA breaches, roadmap block, acquisition. The runbook matters even if we never leave, a vendor who knows we *can* exit in a quarter prices renewals differently. The yearly audit covers four lock-in axes, API, data, workflow, skills, and workflow is the sneaky one: after three years, your incident process is shaped like the vendor's feature set.
-
----
+**Q4.** You're standing up CI/CD for a new 40-team org. Make the build-vs-buy call and defend it.
+> *Model:* My prior is **buy the control plane**, GitHub Actions or GitLab CI, with **self-hosted runners** for cost and environment control at our scale. The reasoning: the value of a CI/CD platform is *paved-road adoption across forty teams*, the templates, the marketplace steps, the caching, the one-button rollback every team inherits for free, not in owning the orchestrator, which is undifferentiated heavy lifting a vendor does better. Building our own on Jenkins or Tekton commits an SRE team to keeping a control plane alive, and the opportunity cost is the paved-road features we *didn't* build on top. The CI bill, tens of thousands a month, is rounding error against the engineer-hours a slow or homegrown-flaky pipeline burns, so we spend compute freely on parallelism to buy back wall-clock. I'd only flip to build for a hard air-gap or data-residency requirement, an exotic build environment managed runners can't host, or a fleet so large that self-hosted runners pay for the SRE team several times over, and I'd delegate the actual bake-off to the platform team against our real build profile and team count, with that prior stated.
 
 ### Key takeaways
-- **The decision rule: build only what differentiates.** Would a customer pay more or churn less because yours is better? If not, buy or adopt, engineering attention is the scarce resource, and "we could build it better" is the IC-ego tell this question exists to catch.
-- **Build cost is mostly ongoing, not v1:** loaded team forever + infra + the maintenance tail, against a vendor bill that's a *negotiable trajectory*. The Datadog math: ~$7.8M built vs ~$7M bought over 3 years, a wash on dollars, decided by opportunity cost, which the build always loses below the crossover.
-- **The crossover is a number, written down:** build wins when governed vendor spend durably clears **~2× the loaded cost of the replacing team** (~$4-5M/yr here). Hyperscalers are past their crossover; quoting their builds at a mid-size company is the altitude error.
-- **Buy reversibly:** seam (standards where they exist) + continuous export + contract data-terms + a costed exit runbook, created at signing, when they cost ~nothing. A credible exit is renewal leverage even if never used.
-- **Exit triggers in writing, price, SLA, roadmap, acquisition, with an annual review.** The verdict is a policy with a review date, not a one-time call; flips are usually partial (in-source the differentiating slice, keep buying the substrate).
+- **Three layers reinforce each other:** quality **gates** encode the bar in the paved road, **DORA metrics** measure whether the delivery system is healthy, and the **CI/CD platform** makes the safe path the easy path; the Director owns this system, not the individual pipelines.
+- **Gates earn their place by ROI, cost-vs-catch:** lint and contract checks are near-infinite ROI, SAST must be tuned to fail only on actionable findings, perf budgets belong only on latency-critical paths, and a gate that taxes without catching is killed; the required path is an SLO (under ~10 min p95).
+- **DORA is a signal you steer by, not a stick:** the four (deploy frequency, lead time, change-failure rate, MTTR) plus reliability, read as aggregate trends (elite: on-demand, <1hr, <15%, <1hr); grading them per team guarantees gaming and blinds the instrument.
+- **Coverage is a signal, not a target:** a coverage *target* is gamed with assertion-free tests (Goodhart), so report coverage as a hint and gate the *outcome* on escaped-defect and change-failure rate.
+- **Default to buy the control plane, and design platform-not-bottleneck:** buy CI/CD (Actions/GitLab/CircleCI/Buildkite) unless air-gap, exotic build env, or extreme scale forces a build; structure quality as a **platform team that enables** with **each product team owning its own quality and on-call**, never a QA team that gates and caps deploy frequency.
 
-> **Spaced-repetition recap:** Build vs buy = **a capital-allocation memo, not a tech evaluation**. Differentiation test gates everything; 3-year TCO with *loaded* build cost (team forever + infra + v1 + tail) vs *negotiated* vendor trajectory; opportunity cost is the headline number juniors omit. Crossover ≈ **2× team cost in vendor spend**. Buy reversibly: seam + export + contract terms + exit runbook; triggers (price/SLA/roadmap/acquisition) written at signing. "Buy to accelerate, with a defined exit trigger" = Director; "we could build it better" = IC ego.
+> **Spaced-repetition recap:** Quality delivery is a **toll plaza, traffic dashboard, and road authority**: **gates** encode the bar (chosen by **cost-vs-catch ROI**, required path an SLO under ~10 min, SAST tuned to actionable-only, perf budgets only where latency is a requirement, kill the gate that taxes without catching), **DORA** measures the system (deploy frequency / lead time / change-failure rate / MTTR + reliability; elite = on-demand, <1hr, <15%, <1hr; a **signal you steer the road by, not a per-team stick** that gets gamed), and the **platform** makes safe easy (pipeline-as-code, caching, parallelism, sub-60s rollback). **Coverage is a signal, not a target** (a target is met with assertion-free tests, Goodhart, so gate escaped-defect rate instead). **Default to buy** the control plane (value is paved-road adoption, not owning the orchestrator), and design quality as a **platform team that enables**, with **teams owning their own quality and on-call**, never a **QA team that gates** and caps the org's deploy frequency at one team's throughput.
 
 ---
 
-*End of Lesson 14.6. Build vs buy is the live-migration problem decided in advance, the seam and export you create at signing are what make the migration playbook runnable if the exit trigger ever fires. The developer-platform lesson applies this memo to a live platform case, Backstage vs an in-house developer portal, and the behavioral pairing tells a build-vs-buy call you owned.*
+*End of Lesson 14.6. Gates encode the bar by ROI, DORA measures the system as a signal not a stick, and the platform makes the safe path the easy path while teams own their own quality.*

@@ -1,112 +1,233 @@
 ---
-title: "16.2 - The Director Rubric: Red Flags vs Strong Signals"
-description: The self-assessment scorecard, what reads as Director-altitude signal vs anti-signal, across the 5 axes and 8 RESHADED steps.
+title: "16.2 - Inherited Legacy System"
+description: The first-90-days modernization scenario, audit before touching, stabilize-then-strangle over the rewrite instinct, and a quarter-by-quarter sequence where every quarter ships business-visible value, defended to a CEO who wants features.
 sidebar:
   order: 2
 ---
 
-### What this is
+> **This question appears nearly verbatim in Director and architect interview banks because it is the job:** "You've inherited a 15-year-old system that runs the business. Nobody fully understands it. The CEO wants features. What do you do?" It doubles as the behavioral "re-platforming you led" story. A junior answer reaches for the rewrite, new stack, clean slate, two years, and fails on the spot. A Director answer **measures before touching anything**, names the modules it will deliberately *leave alone*, sequences a strangle so **every quarter ships business-visible value**, and sells it to the CEO in capacity and risk dollars, not architecture diagrams. The interviewer is scoring whether you can run a multi-quarter change program without stopping the business.
 
-This is the scorecard the room is using on you, written down. It is not a lesson, it is a **reference you self-assess against the night before a real loop.** Run your last mock answer through both tables; if any row lands you in the red column, that is your highest-leverage fix.
+### Learning objectives
+- Run a **first-90-days assessment**, revenue map, risk map, churn-×-incident hotspots, test coverage, KTLO burn, before changing a line of code.
+- Defend **stabilize-then-strangle** against the rewrite instinct with numbers: rewrite cost, historical failure rates, and the feature-freeze the CEO will never grant.
+- Adapt the **RESHADED** spine to an architecture-strategy problem, R becomes business-continuity constraints, E becomes a risk and coverage audit, Design evolution becomes the quarter-by-quarter sequence that *is* the deliverable.
+- Apply **feature-parity discipline**: scope parity to measured usage, not the legacy spec, and make the explicit case for "leave it alone" where migration buys nothing.
+- Sell the program upward as **bought-back capacity and retired risk**, with value milestones a CEO can see each quarter.
 
-Recall the framing from the interview-scoring lesson: the system-design round is a **design review you've been asked to chair**, run by Staff/Principal engineers who will be your peers or reports. They are not scoring whether you can hand-derive a hash function. They are scoring whether they'd trust you to run the review when the architecture actually matters. That trust shows up as a specific texture in how you reason: you scope before you build, you quantify your claims, you name the alternative you rejected, you delegate detail with a stated prior, and you own the cost and on-call consequences of your call.
+### Intuition first
+You've bought a 90-year-old house the family still lives in. The wiring is a fire hazard, the foundation has one worrying crack, and three rooms were added by builders who never met. The rewrite instinct says: demolish, rebuild, move the family into a hotel for two years. But the family can't leave, they run a business from the kitchen. **Inspect first**: which walls are load-bearing, where the damage actually is, which rooms just look dated. **Then stabilize**: the foundation and the wiring, the things that can kill you. **Then renovate room by room**, each room usable when finished, the family in the house the whole time. And the guest bedroom nobody uses? **You don't touch it.** Renovation risk is real and the room earns nothing.
 
-Two warnings before the tables:
-
-- **A rubric can look complete and still be entirely IC-level.** The difference between a strong staff-IC answer and a strong Director answer is not depth, it's *delegation, cost, decisiveness, and trade-off framing*. Every strong-signal cell below carries a **Director tell**. If your answer would read identically on a staff-IC scorecard, you have not yet cleared the bar.
-- **The red-flag column is usually the hand-wavy twin of the strong column.** "It scales horizontally" is the unquantified twin of "the read path saturates first at ~50k QPS; I shard the cache by URL hash." Watch for the twin.
-
----
-
-## The two lenses
-
-These two tables are **not duplicates**, they are different views of the same answer:
-
-- **The 5 axes** are *what the interviewer is scoring.* One of them, communication & leadership, is **not** a RESHADED step at all; it runs underneath everything.
-- **The 8 RESHADED steps** are *the process you walk through.* They are the spine of the answer.
-
-The crucial relationship: **axis 4 (trade-off depth) and axis 5 (communication/leadership) are scored continuously, at every one of the 8 steps**, not in a single "trade-offs" moment near the end. Every step is a chance to name an alternative and to drive the conversation. That is why the same answer is graded twice, once per lens.
-
-The Director weighting (from the interview-scoring lesson, heaviest first): **trade-offs (4) > scope (1) ≈ communication (5) > estimation (2) ≈ design (3)**. Axis 3 has *diminishing returns*, past a clean decomposition, more boxes is not more signal, and grinding mechanics there is an **active anti-signal** ("why is this Director hand-tuning a B-tree?").
+That is the entire lesson: inspect (the 90-day audit), stabilize (observability, deploys, backups), strangle room by room (the strangler-fig lesson has the mechanics), and leave the guest bedroom alone. The interview tests whether you can resist the demolition instinct *and* articulate why, "I'd rewrite it properly this time" is the most expensive sentence in software.
 
 ---
 
-## Table A: the 5 scoring axes
+## R: Requirements
 
-| # | Axis (weight) | Strong signal, the Director tell | Red flag, the hand-wavy twin |
-|---|---|---|---|
-| 1 | **Requirements & scoping** *(heavy)* | Asks 3-4 sharp clarifying questions, then **cuts to a defensible core of 3-5 features** and explicitly defers the rest ("custom aliases and expiry are stretch"). Pins the read:write ratio and an availability bar *as numbers* before designing. | Starts drawing boxes before scoping. Tries to build every feature. "Make it scalable and reliable" with no SLO and no read:write number. |
-| 2 | **Estimation & quantification** *(medium)* | Reasons in **orders of magnitude** to make a call, "~700k writes/s, so ~10 TB/day, so this is a fleet not a box." Rounds aggressively, states assumptions, **uses the number to drive a decision** (cache it / shard it). | "It'll be a lot of traffic." No QPS, no storage figure. Or the opposite failure: a 5-minute exact arithmetic derivation that changes no decision. |
-| 3 | **High-level design & decomposition** *(medium, diminishing)* | Clean component split with **single responsibilities** and a legible happy-path data flow. Knows when to **stop adding boxes** and move to the trade-off discussion. | Either too few (a monolith blob) or a sprawling 30-box diagram with no data flow. Lingers here because it's comfortable, burning the clock that axis 4 needs. |
-| 4 | **Trade-off depth & decision-making** *(heaviest)* | Names **2-3 viable approaches**, states pros/cons of each, **commits to one**, and defends it against requirement + cost + risk. Pre-empts "why not X?" by volunteering the rejected alternative and the condition under which they'd revisit. | Lists options but never **decides**. Or decides but **cannot name a single downside of their own choice.** Presents a design as obviously correct with no critique. |
-| 5 | **Communication & leadership signal** *(heavy)* | **Drives** the conversation and structures thinking out loud. Handles "why not X?" without getting defensive. **Delegates credibly with a stated prior** ("I'd have storage benchmark leveled vs size-tiered; my prior is leveled because reads dominate"). Names cost and on-call impact unprompted. | Waits to be led; answers only what's asked. Gets defensive under pushback or silently caves. Either grinds every detail personally (won't delegate) or delegates everything (no own depth). |
+> **Adaptation, said out loud:** in a build-from-scratch problem, R scopes features. Here R scopes **business-continuity constraints**, what must keep working while you operate, and the political requirements that decide whether the program survives its second quarter.
 
-**How to read your own answer against Table A:** the offer is won or lost on axis 4, gated by axis 1, and textured by axis 5. A technically flawless design that never decides, or decides without a critique, fails the heaviest axis regardless of how clean the boxes were.
+**The scenario, made concrete (state your assumptions):** a 14-year-old order-management monolith, ~1.5M lines of Java 8, one shared Oracle schema with ~800 tables, quarterly big-bang deploys that take a weekend, **100% of ~$200M annual revenue flowing through it**. 45 engineers; the two who understand billing have one foot out the door. The CEO's stated requirement is a feature roadmap, not a re-platforming.
 
----
+**Clarifying questions I'd ask (with assumed answers):**
+- *The actual pain, velocity, reliability, or cost?* → **All three, but velocity is what the CEO feels**: features that took 2 weeks now take 2 months.
+- *Forcing functions?* → **Java 8 and the Oracle version go end-of-support in 18 months**; a PCI/SOC 2 audit lands next year. Deadlines are leverage, use them.
+- *My real budget?* → **No dedicated re-platforming budget**, everything comes out of feature capacity. This constraint *is* the design: it forces incremental delivery and kills the rewrite on arrival.
+- *Revenue seasonal?* → **40% lands in Q4.** Therefore: a money-path change freeze every Q4, planned into the sequence, not discovered in October.
 
-## Table B: the 8 RESHADED steps
+**Functional requirements (of the *program*, not the system):**
+1. The business keeps running, zero revenue-impacting regressions attributable to the modernization.
+2. Feature delivery continues every quarter, no freeze longer than a sprint.
+3. Each migrated slice reaches **measured parity** (see A) before legacy retirement.
+4. Key-person risk on billing retired within two quarters.
 
-Same answer, graded as a process. Each step has a *Director tell* distinct from the IC version of doing that step well. (Axes 4 and 5 are scored on top of every row.)
+**Non-functional requirements:** deploys quarterly → weekly within 2 quarters; change-failure ~25% → <10%; MTTR hours → <30 min on the money path; EOL/compliance deadlines met with a quarter of slack.
 
-| Step | RESHADED step | Strong signal, the Director tell | Red flag, the hand-wavy twin |
-|---|---|---|---|
-| 1 | **R: Requirements** | Separates functional from non-functional; **scopes to 3-5 core features** with the rest explicitly parked; nails read:write ratio and a numeric SLO (e.g. 99.99%) that will *drive later choices*. | Jumps to building. No scope cut. NFRs absent or vague ("highly available") with no number to design against. |
-| 2 | **E: Estimation** | "Enough math to make a defensible call", order-of-magnitude QPS/storage/bandwidth, **rounded**, used to size the fleet and justify caching/sharding. | "It scales" with no figure, *banned* (Rule 1). Or a rabbit-hole of exact computation that changes no architectural decision. |
-| 3 | **S: Storage selection** | **Matches data shape to store** and says why, "write-heavy append → LSM/Cassandra; transactional + joins → Postgres", and names the cost of the choice (compaction tax, secondary-index expense). | "I'll use a database." No family chosen, or a default reached for with **no alternative considered and no trade-off named** (violates Rule 2). |
-| 4 | **H: High-level design** | Components with clear responsibilities, happy path drawn, **read and write paths distinguished.** Stops at the altitude where the decision lives. | A diagram with no data flow, or so much detail it obscures the decision. Mistakes box-count for design signal. |
-| 5 | **A: API design** | A few clean endpoints/signatures that **expose the system's real contract** (idempotency keys, pagination, auth boundary), only as deep as the design turns on. | Either skipped, or 40 endpoints enumerated like a CRUD spec, depth with no decision in it. |
-| 6 | **D: Data model** | Schema + **keys/indexes chosen for the access pattern**; names the partition key and why; flags the write tax of each secondary index. Denormalizes deliberately and says so. | Normalized tables with no thought to access pattern or partition key. Indexes added "to be safe" with no awareness they tax every write. |
-| 7 | **E: Evaluation** | **Stresses their own design**, names the component that **saturates first**, *with a number*, and the specific lever (shard the hot key, add a read replica, add a cache). Re-checks the design against the Step-1 SLOs. | Surprise that anything would break. "Add more servers" with no mechanism and no named bottleneck. Never re-validates against the requirements they set. |
-| 8 | **D: Design evolution** | Thinks past v1: **how it behaves at 10×**, which assumption breaks, the migration path, and the **cost/operability** of the next step. Frames it as a roadmap with trade-offs, not a rewrite. | "It already scales." No 10× story, no failure mode, no awareness that the v1 choice has a ceiling. |
-
-**The single most repeated Director tell across Table B:** at every step where a detail is below the altitude of the decision, the move is *"state a default, delegate with a stated prior, move on"*, **not** resolve it personally. That one sentence, "I'd have the X team benchmark A vs B; my prior is B because [requirement]", is worth more than ten minutes of correct mechanics, because it shows judgment, trust in the org, and altitude awareness simultaneously.
+**Explicitly CUT (scoping is the signal):** no stack migration for its own sake; no microservices-by-default ("a modular monolith plus 3-5 extracted services" is the honest target); no UI re-skin riding along; and, load-bearing, **no migration of modules the audit shows stable and low-churn.** "Leave it alone" is a first-class disposition, not a failure to finish.
 
 ---
 
-## The two fatal failure modes
+## E: Estimation
 
-Both are fatal because both break the *altitude* contract, the one thing a Director round actually tests. You can be technically right and still fail by operating at the wrong altitude. Catch yourself mid-answer and say the self-correction out loud; **naming your own altitude correction is itself a strong signal.**
+> **Adaptation, said out loud:** there is no QPS to estimate. E becomes the **first-90-days assessment**, a risk map and a coverage audit. Same discipline as back-of-the-envelope math: a few load-bearing numbers, measured not guessed.
 
-| Failure mode | What it sounds like | Why it's fatal | Reads as |
-|---|---|---|---|
-| **Too high, hand-waving** | "It scales horizontally." "We'd add caching." Can't name a downside of own choice; no numbers; asserts outcomes without mechanisms. | Asserts conclusions with no mechanism. The mechanism *is* the leadership content; the conclusion isn't. | *Not technical enough to lead.* |
-| **Too deep, rabbit-holing** | 20 minutes tuning B-tree fanout or hand-deriving a hash scheme; exhaustive estimation that changes no decision; never reaches the trade-off discussion. | Spends the clock below the altitude where the decision lives; no decision gets made; axis 4 never gets exercised. | *Not operating at level.* |
+**The first-90-days framework, what to measure before touching anything:**
 
-### The one-line self-correction for each
+1. **Revenue map (weeks 1-2).** Which code paths carry money: checkout + billing carry ~$550K/day (~$200M ÷ 365); one hour of checkout downtime ≈ **$23K direct**. This number prices every risk decision that follows.
+2. **Risk map (weeks 2-5).** Twelve months of incidents mapped to modules; MTTR; **bus factor per module** (billing: 2 people, both flight risks, the scariest finding); EOL dependencies with dates; whether backup *restore* has ever been tested (assume no until proven).
+3. **Change map (weeks 3-6).** Git churn × incident density per module, the **hotspot quadrant** that drives all sequencing. Typical finding: ~80% of commits land in ~15% of modules (here: pricing, checkout, billing). High + high = strangle first; low + low = leave alone.
+4. **Coverage and deployability audit (weeks 4-8).** Line coverage (assume ~10-15%, concentrated in easy modules, not the money path); whether *anything* deploys independently (no); time-to-rollback ("restore the weekend deploy" ≈ 8+ hours, a finding worth escalating by itself).
+5. **Cost and capacity baseline (weeks 6-10).** Run cost including licenses (Oracle: ~$500K-1M/yr, a savings line for the CFO); and the **KTLO number**: % of engineering time spent keeping the lights on. Assume **~60% KTLO**, the CEO's 45 engineers are really 18. *This is the number that sells the program.*
 
-**Too high → make it concrete, attach a number and a mechanism:**
+**The strategic math the audit enables (round aggressively):**
+- **Rewrite:** 1.5M lines, ~45 engineers → realistically 2+ years and ~$15-18M loaded cost, *with* a feature freeze the CEO already refused, *and* the well-documented second-system record putting big-bang rewrite failure (late, over budget, or abandoned) **north of 50%**, stated as an assumption.
+- **Strangle:** a **~20% capacity tax** (≈9 engineers) for ~8 quarters ≈ $5-6M over two years, no freeze, value shipping each quarter, and if killed at quarter 4, **everything shipped still works.** Rewrite value is all-or-nothing at the end; strangle value is cumulative.
+- **Payback:** KTLO 60% → ~35% recovers ~11 engineers, ~$2.5M/yr, before the Oracle line item. Modernization framed as **buying back a quarter of the engineering org** is a sentence a CEO acts on.
 
-> "Let me ground that. At ~50k read QPS the redirect path saturates first, so the lever is a cache sharded by URL hash with a read replica behind it, that's the specific thing that 'scales,' and the cost is cache-stampede risk on eviction."
+<details>
+<summary>Go deeper, running the audit mechanically (IC depth, optional)</summary>
 
-**Too deep → zoom out, name the key point, delegate the tuning:**
+**Churn map:** `git log --since="24 months" --name-only` aggregated by top-level package; normalize by module size. **Incident density:** tag 12 months of postmortems/pages by module (expect to do this by hand from the ticket tracker; the tagging discipline you institute here becomes permanent). **Bus factor:** per-module distinct-author count over 24 months, weighted by share, a module where one author owns >70% of recent commits is bus-factor-1 regardless of headcount. **KTLO measurement:** two sprints of coarse time-tagging (feature / KTLO / migration) across all teams, resist the urge for finer categories; you need one defensible ratio, not a timesheet system. **Coverage:** run JaCoCo/coverage per module, but weight by the revenue map, 10% coverage on a cold admin module is fine; 10% on billing is the headline. **Dead-feature instrumentation:** access-log analysis per endpoint over 60-90 days (include batch/cron callers before declaring anything dead, monthly jobs hide for 29 days).
 
-> "I'm going deeper than this decision warrants. The point is collision-free unique IDs, which I'd solve with [approach]; the exact tuning won't change the architecture, so I'd delegate it. Let me get back to the system."
+</details>
 
-The target is the **band between these two failures**: deep enough to show real judgment where the decision turns on it, high enough to keep deciding and driving everywhere else.
+---
+
+## S: Storage
+
+> **Adaptation, said out loud:** S compresses. There's no store to select, there's a store to *escape*: **the shared database, not the code, is the real monolith.**
+
+Anyone can split code into services; if they all still read and write the same 800 Oracle tables, you've built a **distributed monolith**, every schema change still coordinates every team, plus network hops you didn't have before. So: **data ownership follows the strangle**, an extracted domain gets its own store, populated by **CDC from the legacy schema** (replication machinery, pointed at Oracle), reads cut over first, writes second, legacy tables dropped via **expand-contract**. *Rejected, extract services now, split data later:* "later" never comes; you carry the monolith's coupling plus microservices' latency indefinitely. *Rejected, one big migration weekend:* an 800-table cutover is the rewrite in disguise. The strangler-fig lesson covers the dual-write/CDC mechanics; the Director-level point is the *ownership boundary*, not the pipe.
+
+---
+
+## H: High-level design
+
+> **Adaptation, said out loud:** H is two pictures, the target end-state (brief; the strangler-fig lesson owns the façade mechanics) and the **disposition map**: which module gets which treatment. The disposition map *is* the high-level design of a modernization.
+
+**Target end-state, one sentence:** a routing façade in front of the monolith (the strangler fig), 3-5 extracted services for the hot domains each owning its data, and the cold remainder as a smaller, stabilized modular monolith that may live for years, deliberately.
+
+**The disposition map, every module gets one of four treatments, decided by the audit:**
 
 ```mermaid
 flowchart TD
-    CEIL["CEILING — too high<br/>'it scales horizontally', no numbers,<br/>no downside named → not technical enough to lead"]
-    BAND["TARGET BAND<br/>scope to a core, quantify the call,<br/>name 2-3 options + decide + defend,<br/>delegate detail with a stated prior"]
-    FLOOR["FLOOR — too deep<br/>20 min tuning a B-tree, exhaustive math,<br/>never decides → not operating at level"]
-    CEIL -.->|correct: add a number + a mechanism| BAND
-    FLOOR -.->|correct: zoom out + delegate the tuning| BAND
-    style BAND fill:#1f6f5c,color:#fff
-    style CEIL fill:#7a1f1f,color:#fff
-    style FLOOR fill:#e8a13a,color:#000
+    AUDIT[90 day audit] --> MAP[Churn x incident map]
+    MAP --> HOT[High churn high incident]
+    MAP --> EDGE[High churn low incident]
+    MAP --> COLD[Low churn stable]
+    MAP --> DEAD[Near zero usage]
+    HOT --> STRANGLE[Strangle behind facade]
+    EDGE --> FIRST[First slice proves the pattern]
+    COLD --> LEAVE[Stabilize and leave alone]
+    DEAD --> RETIRE[Retire outright]
+    FIRST --> SEQ[Quarterly sequence]
+    STRANGLE --> SEQ
 ```
+
+- **Strangle** (pricing, checkout, billing, the hotspot 15%): highest churn, highest incident density, highest payoff. Billing goes early for bus-factor reasons, *especially* because it's scary.
+- **First slice** (a high-churn, *low-risk* edge module, notifications): the cheapest place to prove the façade, the CDC pipe, the parity harness, and the team's muscle memory before betting the money path on them.
+- **Leave alone** (the cold half): stable, low-churn, off the money path, gets observability and a deploy pipeline, then nothing. **Migration risk is real and these modules earn nothing from it.** Saying this list out loud, with data, is a top-three Director signal here.
+- **Retire** (the dead ~third): instrumentation will show a surprising fraction of endpoints get near-zero traffic. Deleting them is the cheapest modernization there is, parity with nothing.
+
+**Sequencing principle:** stabilize → prove → strangle → decommission. You cannot strangle safely at a 25% change-failure rate with quarterly deploys, **stabilization makes the strangle survivable**. Foundation: observability on the money path, CI and a weekly deploy train, tested restores, **characterization tests** pinning current behavior, bugs included, on the modules about to move.
 
 ---
 
-## The 60-second pre-loop self-check
+## A: API design
 
-Run these five questions against your last mock. A "no" on any is a red-flag row to fix before the real thing:
+> **Adaptation, said out loud:** A compresses to two strategic artifacts, the **seam inventory** and the **parity contract**. The interfaces that matter are the ones between old and new.
 
-1. **Did I cut scope to 3-5 features** and park the rest out loud? *(axis 1 / step R)*
-2. **Did every number drive a decision**, and did I refuse to say "it scales" without one? *(Rule 1 / axes 2 / step E)*
-3. **Did every choice name the alternative I rejected and why**, and a downside of the choice I made? *(Rule 2 / axis 4)*
-4. **Did I name the component that breaks first under load, with a number and a lever?** *(step E, Evaluation)*
-5. **Did I delegate at least one below-altitude detail with a stated prior**, rather than grind it myself? *(axis 5 / altitude dial)*
+**The seam inventory.** Before extracting anything, define the contract *at the seam*: each strangle target gets an explicit interface (REST/gRPC) with an **anti-corruption layer** translating between the legacy schema's tangled vocabulary and the new domain model. *Rejected, new services speaking the legacy schema's language:* that exports the monolith's worst abstractions into the systems meant to replace them.
 
-> **Spaced-repetition recap:** The room scores trade-off judgment and communication over mechanics. Strong signals quantify the claim and name the rejected alternative; red flags are their hand-wavy twins. Two fatal modes, too high (add a number + mechanism) and too deep (zoom out + delegate). Aim for the band: decide everywhere, go deep only where the decision turns on it.
+**The parity contract, feature-parity discipline.** "Full parity" kills modernizations, because the legacy spec is 14 years of accreted behavior nobody can enumerate. The discipline: **parity is defined against measured usage, not the spec.** Instrument first; features below a usage floor (<1 call/day over 90 days, batch callers checked) go to the retire list with named business sign-off. What remains is *verified*, not asserted, shadow traffic through old and new with response diffing, then a canaried cutover with instant rollback at the façade. Observed behavior is the spec; the diff harness is the compliance test.
+
+<details>
+<summary>Go deeper, shadow-traffic parity harness (IC depth, optional)</summary>
+
+Mirror production requests at the façade to the new implementation (fire-and-forget; new path's responses discarded, never user-visible). Diff old-vs-new on normalized responses, strip timestamps, generated IDs, ordering where contractually irrelevant; a naive byte-diff drowns you in false positives. Bucket diffs by endpoint and field; burn down top buckets weekly. Target: <0.1% unexplained diff rate sustained for 2 weeks before canary. Caveats: read paths shadow safely; **write paths cannot be naively shadowed** (double side effects), for writes, use dual-write with the new side dark (written, compared, not served) or replay sanitized production traffic in staging against a CDC-synced copy. The harness is ~2-3 engineer-months to build and pays for itself on the first prevented checkout regression (~$23K/hr exposure).
+
+</details>
+
+---
+
+## D: Data model
+
+> **Adaptation, said out loud:** D compresses to one decision, how data moves per strangled slice, because the schemas are ordinary and the migration choreography is what fails in practice.
+
+Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, continuously checksum-verified) → cut reads → cut writes (brief dual-write window, legacy now the dark copy) → contract (freeze, then *actually drop* the legacy tables; every "temporarily kept" table becomes a decade of accidental reads). *Rejected, long-lived dual-write:* two writable sources of truth drift; reconciliation becomes a permanent team. *Rejected, cutover without the dark-read phase:* you find the checksum mismatch in production, on the money path, in Q4. One schema rule: the new domain model is designed from the domain and mapped to legacy via the ACL, never reverse-engineered table-for-table from the 800, or you've re-platformed the mess.
+
+---
+
+## E: Evaluation
+
+> Stress the *program* the way you'd stress an architecture. None of the fatal failure modes are technical.
+
+**Failure mode 1, the half-migrated forever-state.** Funding dies at quarter 5; you run a monolith *and* four services *and* a façade, forever. *Mitigation:* **every completed slice is independently done**, façade + slice + retired legacy code, no slice >1 quarter. The strangle's defining property is stable intermediate states; protect it when scoping. A program killed early keeps everything shipped.
+
+**Failure mode 2, parity regression on the money path.** One missed legacy behavior in checkout costs $23K/hr and, worse, the program's political capital. *Mitigation:* parity harness + canary + façade-level rollback; checkout migrates only after the pattern is proven twice on lower-stakes slices; Q4 freeze honored.
+
+**Failure mode 3, the CEO's patience.** Quarter 3, no visible features, a competitor ships something shiny: the program gets cut. *Mitigation is structural:* the value-milestone rule, **no quarter ships only migration**, plus a one-page scorecard the CEO actually reads: deploy frequency, change-failure rate, KTLO %, features shipped, dollars retired.
+
+**Failure mode 4, org fatigue and the bus.** The billing engineers leave in month 4; teams burn out on the 20% tax. *Mitigation:* billing knowledge-extraction starts in the *stabilize* phase; strangle work rotates through product teams. *Rejected, the dedicated re-platforming team:* concentrates knowledge, detaches from product, easiest line item to delete.
+
+**Re-check vs R:** revenue protected (harness, canary, Q4 freeze) ✓; features every quarter ✓; parity measured ✓; bus factor retired in stabilize ✓; EOL met by sequencing Oracle-dependent domains first ✓.
+
+---
+
+## D: Design evolution
+
+> **Adaptation, said out loud:** Design evolution *is* the deliverable, the quarter-by-quarter sequence with value milestones, the slide the CEO sees. Numbers are illustrative; the audit re-prices them.
+
+**Q1: Assess + stabilize.** The 90-day audit (in parallel with delivery); observability on the money path; CI + weekly deploy train; tested restores; billing knowledge extraction starts. *Milestone:* deploys quarterly → weekly; change-failure 25% → ~15%; the audit deck itself, the first time the system's risk has been priced in dollars.
+**Q2: Prove the pattern.** Façade up; first slice (notifications) strangled end-to-end including its data and *deletion* of the legacy module; parity harness built; dead-feature retirement begins. *Milestone:* a customer-visible feature ships **on the new path**; first Oracle tables dropped.
+**Q3-Q4, The hotspot, half one.** Pricing strangled (highest churn, biggest velocity payoff); billing knowledge work completes; **Q4 = money-path freeze**, teams work cold-module stabilization and harness hardening, planned not improvised. *Milestone:* pricing changes ship in days, not the 2-month legacy cycle, the velocity proof the CEO has been waiting for.
+**Q5-Q6, The money path.** Checkout, then billing, behind the proven harness; their data decomposed via expand-contract. *Milestone:* change-failure <10% on the money path; MTTR <30 min; bus-factor-1 modules: zero.
+**Q7-Q8, Decommission + accept the end-state.** Oracle license retired or shrunk (~$500K+/yr); dead code deleted at scale; the **leave-alone list formally accepted** as end-state, not backlog. *Milestone:* KTLO 60% → ~35%, ~11 engineers returned to the roadmap, the number the program was sold on.
+
+**The rule underneath:** every quarter ships something the business can see, *and* every quarter retires risk. The ordering logic, foundation first, prove on cheap slices, money path only behind a proven harness, freeze when revenue peaks, survives any re-pricing of the specifics.
+
+**The post-acquisition variant (sidebar).** "We acquired a company; consolidate the platforms" is the same playbook plus a political dimension. The audit gains a step, *which* platform wins per domain, decided by the same churn/risk/cost evidence, **never by which side has more VPs**, and leave-alone gets more valuable: two billing systems can run behind one façade for years if integration earns less than it costs. The extra failure mode is talent flight from the "losing" platform, another reason to decide per domain rather than declare a wholesale winner.
+
+**Where I'd delegate (the explicit Director move):**
+- **CDC/data tooling:** *"Data-platform owns the CDC pipeline and checksum verification; my prior is log-based CDC (Debezium-style) over dual-write-first, because dual-write puts the consistency burden in application code where it will be forgotten."*
+- **Parity harness:** *"A senior pair owns the diff harness; my prior is shadow-reads with normalized diffing and a <0.1% threshold before any canary."*
+- **Audit instrumentation:** *"Teams self-report churn, coverage, and KTLO against a template my staff engineer owns."* What I keep, disposition, sequence, the leave-alone list, the CEO narrative, and what I hand off, with priors, is the altitude.
+
+---
+
+### Trade-offs table: the pivotal decisions
+
+| Decision | Option A | Option B | Option C | Use when... |
+|---|---|---|---|---|
+| **Modernization strategy** | **Stabilize-then-strangle**, incremental, value every quarter | **Big-bang rewrite**, clean slate, all-or-nothing | **Lift-and-shift only**, rehost, change nothing | **A** default (our choice): cumulative value, survivable cancellation. **B** only small (<~100K lines) or truly unsalvageable *and* a freeze is tolerable, rare. **C** when the only forcing function is infra EOL and velocity isn't the pain. |
+| **Data migration per slice** | **CDC + expand-contract**, dark reads, verified, then cut | **Dual-write from day one**, app writes both stores | **Big-bang cutover weekend** | **A** default (our choice): consistency burden in infrastructure, verifiable before cutover. **B** when no CDC tooling reads the legacy store, accept app-level complexity. **C** only small, cold, low-risk datasets. |
+| **Who does the work** | **Product teams rotate strangle work** ~20% tax | **Dedicated migration team** | **Outsource the migration** | **A** default (our choice): knowledge spreads, program survives budget cuts. **B** when a hard deadline demands focus, accept the silo and political fragility. **C** almost never for the money path, the knowledge *is* the asset. |
+
+---
+
+### What interviewers probe here (Director altitude)
+
+- **"Why not just rewrite it?"**, *Strong:* the asymmetry, rewrite value is all-or-nothing after 2 years and >$15M with failure odds north of 50%; strangle value is cumulative, survivable at any cancellation point, and names the rare case where rewrite *is* right (small, unsalvageable, freeze tolerable). *Red flag:* either instinct as dogma.
+- **"What do you do in your first 90 days?"**, *Strong:* measure before touching, revenue map, churn-×-incident hotspots, bus factor, KTLO %, tested restores, while shipping stabilization quick wins; ends the quarter with a disposition map priced in dollars. *Red flag:* drawing the target microservice architecture in week 1.
+- **"The CEO wants features, not plumbing. Sell it."**, *Strong:* sells capacity, "60% of your engineers' time is keep-the-lights-on; this returns ~11 engineers to your roadmap and retires $500K/yr of licenses, while features ship every quarter." *Red flag:* "technical debt" and "best practices", vocabulary that loses the room.
+- **"What won't you migrate?"**, *Strong:* the cold, stable, off-money-path half, data behind the call, observability added, the list *formally accepted* as end-state; the dead third retired outright. *Red flag:* an implicit plan to eventually migrate everything, it signals never having paid for a migration.
+- **"How do you know the new checkout behaves like the old one?"**, *Strong:* parity measured, not asserted, usage-scoped contract, shadow-traffic diffing below a stated threshold, canary with façade-level rollback, money path last. *Red flag:* "comprehensive testing" with no mechanism, or trusting the legacy spec to be enumerable.
+
+---
+
+### Common mistakes
+
+- **Architecting before auditing.** The week-1 target diagram is always wrong, hotspots, dead features, and bus factors aren't where intuition says.
+- **Treating "leave it alone" as failure.** Migrating a stable, cold module is pure risk with no return. The data-backed, formally accepted leave-alone list is a deliverable.
+- **Full feature parity against the spec.** The legacy spec is unenumerable; parity against *measured usage* plus retiring the dead third is achievable. Parity-with-everything is how programs go two years over.
+- **The dedicated migration team.** Silos knowledge, detaches from product, first line item cut. Rotate the work through product teams at a stated capacity tax.
+- **All migration, no milestones.** A quarter that ships only plumbing is a quarter the sponsor can't defend. Every quarter ships business-visible value, structural rule, not aspiration.
+
+---
+
+### Interviewer follow-up questions (with model answers)
+
+**Q1. Six months in, your sponsor (the CTO) leaves. The new CTO asks why the company is paying a 20% tax. Your answer?**
+> *Model:* I show the scorecard, not the architecture: deploys quarterly → weekly, change-failure 25% → 12%, two completed slices live with their legacy code deleted, first Oracle tables gone, KTLO trending toward ~11 recovered engineers by Q8. Then the asymmetry: cancel today and we keep everything shipped, stable intermediate states are why I chose strangle over rewrite. If it's still cut, I descope to finishing the in-flight slice, never abandon one mid-cutover. Surviving sponsor loss is why value lands quarterly instead of at the end.
+
+**Q2. The two billing engineers resign in month 2, before stabilization finishes. What changes?**
+> *Model:* Knowledge extraction becomes the quarter's P0: paired characterization-test writing during their notice period (pinning observed behavior, bugs included, the tests *are* the knowledge transfer), recorded walkthroughs of the incident-map hotspots, and a retention conversation I should have had in week 3, the audit flagged bus-factor-1; acting late is on me. What I *don't* do is accelerate billing's migration: migrating the least-understood module with its experts gone is maximum risk. Stabilize, test-pin, then strangle on schedule.
+
+**Q3. Post-acquisition: you own your platform *and* the acquired company's. The CEO wants "one platform" in a year. Respond.**
+> *Model:* Same playbook, plus politics. Audit both estates and decide *per domain* on churn/risk/cost evidence, their billing might beat ours even though "we won." Then reframe the deadline: a façade presents one platform to customers in ~2 quarters while back-ends consolidate domain-by-domain behind it; domains where integration earns less than it costs stay separate indefinitely. The per-domain split also mitigates talent flight by giving both orgs meaningful ownership. I commit to the customer-facing deadline, not the data one.
+
+**Q4. Your first strangled slice has run shadow traffic for a month and the diff rate is stuck at 2%, twenty times your threshold. Ship or hold?**
+> *Model:* Neither, yet, decompose the 2% first; diff rate aggregates three things: harness noise (timestamps, ordering, fix the normalizer), *intentional* divergence (legacy bugs we chose not to reproduce, document, exclude with sign-off), and true regressions (burn down before any canary). Usually the bulk is the first two. If true regressions persist after a burn-down sprint, the slice was cut too wide, shrink it rather than extend the deadline; slice size is the variable I control. I won't ship on "it's only 2%": this slice sets the parity bar for the money path, and that discipline is its real deliverable.
+
+---
+
+### Key takeaways
+- **Measure before touching.** The first 90 days buy the right to an opinion: revenue map, churn-×-incident hotspots, bus factor, coverage, KTLO %. The disposition map (strangle / first-slice / leave-alone / retire) falls out of data, not instinct.
+- **Stabilize-then-strangle beats the rewrite on asymmetry:** strangle value is cumulative with stable intermediate states; rewrite value is all-or-nothing after ~$15M and a freeze, with failure odds north of 50%. Foundation first, you can't strangle at a 25% change-failure rate.
+- **"Leave it alone" is a first-class disposition.** Cold, stable, off-money-path modules get observability and nothing else. The formally accepted leave-alone list is a deliverable.
+- **Feature parity is measured, not asserted:** scope to instrumented usage (retire the dead third), verify with shadow-traffic diffing, cut over by canary behind a façade with instant rollback, money path last, Q4 frozen.
+- **Sell capacity, not architecture:** ~20% tax for 8 quarters returns ~11 engineers of KTLO capacity plus the Oracle line item, with a value milestone every quarter, the rule that keeps the program funded through sponsor changes.
+
+> **Spaced-repetition recap:** Inherited legacy = **audit → stabilize → strangle → leave-alone**, never rewrite-by-default. 90-day audit: revenue map, churn×incidents, bus factor, KTLO % (the selling number). Disposition per module: strangle the hot 15%, retire the dead third, formally leave the cold rest. Parity = measured usage + shadow-diff harness, money path last. Sequence quarter-by-quarter, **every quarter ships visible value**, the program must survive its sponsor leaving. Acquisition variant: same playbook, decide per domain on evidence, façade gives customer-facing unity first.
+
+---
+
+*End of Lesson 16.2. The inherited-legacy question is architecture strategy in its purest form: almost no new components, the grade rides on sequencing, evidence, and the discipline not to touch what doesn't need touching. It reuses the strangler façade, and it is where the line between "system design round" and "how you'd run the org" disappears.*
