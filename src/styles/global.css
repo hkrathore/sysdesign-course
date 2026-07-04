@@ -235,3 +235,96 @@ body {
 	padding: 0.35rem 0.75rem;
 	pointer-events: none;
 }
+
+/* ================================================================== *
+ * Collapsible left sidebar — manual slide-out + edge handle.
+ * Why: the "On this page" TOC is off site-wide and --sl-sidebar-width is
+ * 25rem, so on 800-1250px screens the nav eats a third of the viewport with
+ * no built-in way to dismiss it (Starlight only auto-collapses BELOW 800px
+ * into the hamburger). This adds a manual toggle for that desktop band.
+ *
+ * Mechanism (see PageFrame.astro / Page.astro): at >=50em the layout is
+ * driven by --sl-content-inline-start (= --sl-sidebar-width; it pads
+ * .main-frame) and the fixed .sidebar-pane. Collapsing sets
+ * --sl-content-inline-start:0 so the reading column reclaims the width, and
+ * slides the pane out with translateX(-100%). We override the DERIVED offset
+ * rather than --sl-sidebar-width itself, so the pane keeps its full width and
+ * therefore fully clears the viewport when translated. State + the handle are
+ * wired in public/sidebar-collapse.js; a no-flash setter runs in <head>
+ * (registered in astro.config.mjs) so a saved collapsed state never flashes.
+ * Manual only — nothing auto-collapses by screen width. Below 50em none of
+ * this applies (the mobile hamburger drawer keeps working untouched).
+ * ================================================================== */
+@media (min-width: 50em) {
+	.main-frame {
+		transition: padding-inline-start 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+	}
+	.sidebar-pane {
+		transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+	}
+	html[data-sidebar-collapsed] {
+		--sl-content-inline-start: 0rem;
+	}
+	html[data-sidebar-collapsed] .sidebar-pane {
+		transform: translateX(-100%);
+	}
+	[data-has-sidebar] .sidebar-toggle {
+		display: flex;
+	}
+}
+
+/* Edge handle — a slim tab straddling the sidebar's right border. Hidden by
+   default; only shown at >=50em on sidebar pages (rule above). Injected into
+   <body> by the wiring script, so it inherits --sl-content-inline-start from
+   <html> and rides the same offset the content does. */
+.sidebar-toggle {
+	display: none;
+	position: fixed;
+	top: calc(var(--sl-nav-height) + 0.6rem);
+	inset-inline-start: var(--sl-content-inline-start, 0rem);
+	transform: translateX(-50%);
+	z-index: calc(var(--sl-z-index-menu) + 1);
+	align-items: center;
+	justify-content: center;
+	width: 1.5rem;
+	height: 2.75rem;
+	padding: 0;
+	border: 1px solid var(--sl-color-gray-5);
+	border-radius: 0.5rem;
+	background-color: var(--sl-color-bg);
+	color: var(--sl-color-gray-3);
+	cursor: pointer;
+	box-shadow: var(--sl-shadow-sm);
+	transition: inset-inline-start 0.26s cubic-bezier(0.4, 0, 0.2, 1),
+		background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.sidebar-toggle:hover {
+	color: var(--sl-color-accent);
+	border-color: var(--sl-color-accent);
+	background-color: var(--sl-color-accent-low);
+}
+.sidebar-toggle:focus-visible {
+	outline: 2px solid var(--sl-color-accent);
+	outline-offset: 2px;
+}
+.sidebar-toggle svg {
+	width: 1rem;
+	height: 1rem;
+	transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* Collapsed: handle hugs the left edge and the chevron flips to "expand". */
+html[data-sidebar-collapsed] .sidebar-toggle {
+	transform: translateX(0);
+}
+html[data-sidebar-collapsed] .sidebar-toggle svg {
+	transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.main-frame,
+	.sidebar-pane,
+	.sidebar-toggle,
+	.sidebar-toggle svg {
+		transition: none !important;
+	}
+}

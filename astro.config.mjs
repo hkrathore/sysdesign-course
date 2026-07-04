@@ -50,6 +50,15 @@ export default defineConfig({
 			head: [
 				// Click-to-zoom for Mermaid diagrams (readability for dense diagrams).
 				{ tag: 'script', attrs: { src: `${base}/mermaid-zoom.js`, defer: true } },
+				// Collapsible sidebar: apply a saved collapsed state before first paint
+				// (no flash), then load the handle/toggle wiring. See global.css +
+				// public/sidebar-collapse.js. Inline setter runs in <head> synchronously.
+				{
+					tag: 'script',
+					content:
+						"try{if(localStorage.getItem('sidebarCollapsed')==='1')document.documentElement.setAttribute('data-sidebar-collapsed','');}catch(e){}",
+				},
+				{ tag: 'script', attrs: { src: `${base}/sidebar-collapse.js`, defer: true } },
 			],
 			customCss: ['./src/styles/global.css'],
 			// Sidebar = 18 modules grouped into 6 Parts (the learning sequence), plus the
