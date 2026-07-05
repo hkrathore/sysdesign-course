@@ -4,6 +4,7 @@ description: Three high-leverage trade-off tools, a probabilistic filter that tr
 sidebar:
   order: 9
 ---
+import BloomFilterVisualizer from '@components/widgets/BloomFilterVisualizer.jsx';
 
 ### Learning objectives
 - Explain a **Bloom filter**, probabilistic set membership with **no false negatives** and a **tunable false-positive rate**, size one with the rule of thumb (~9.6 bits/element ≈ 1% FP), and connect it to LSM reads and cache/CDN guards.
@@ -46,6 +47,10 @@ For `n` inserted elements, `m` bits, and `k` hashes, the false-positive probabil
 </details>
 
 **Concrete sizing (the back-of-envelope an interviewer wants):** **1,000,000 keys** at `p = 1%` → `m ≈ 9.6 Mbit ≈ 1.2 MB`. The actual keys, say 40-byte strings, would be 40 MB, so the filter is **~30× smaller** than the data it guards and lives entirely in RAM. *Trade-off named:* you spend bits to lower `p`; the rejected alternative, an exact hash set, gives `p = 0` but costs the full 40 MB. You pick the Bloom filter precisely when "occasionally do a wasted lookup" is far cheaper than "store the whole set."
+
+Insert a few items below and watch the `k` bits light up, then query a word that was **never** inserted, or hit **find a false positive**, to see "definitely absent" flip to "probably present" as the array fills:
+
+<BloomFilterVisualizer client:load />
 
 **Where it earns its keep:**
 - **LSM-tree reads (callback to the indexing lesson).** An LSM point lookup may have to check many SSTables newest→oldest; each carries a Bloom filter, and "absent" lets the read **skip the file entirely, guaranteed safe**, avoiding a random read (~100 µs SSD, ~10 ms HDD) per SSTable. This is what keeps LSM read amplification from exploding; Cassandra, RocksDB, HBase, and Bigtable all do it.
