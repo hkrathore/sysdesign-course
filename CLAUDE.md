@@ -131,6 +131,7 @@ import EstimationCalculator from '@components/widgets/EstimationCalculator.jsx';
 | CAP / PACELC explorer (pick P → C vs A, real DB examples) | 2.7 | ✅ built (`CapPacelcExplorer.jsx`) |
 | Quorum calculator (N/W/R sliders → strong-consistency + availability) | 2.8 | ✅ built (`QuorumCalculator.jsx`) |
 | Caching strategies simulator (cache-aside/write-through/write-back; hits/misses/staleness) | 2.10, 3.x | ✅ built (`CachingStrategiesSimulator.jsx`) |
+| Bloom filter visualizer (insert/query bits, find-a-false-positive, live FP rate) | 2.9 | ✅ built (`BloomFilterVisualizer.jsx`) |
 | Load-balancing comparison (round-robin/least-conn/hashing; animated) | 3.2 | ✅ built (`LoadBalancerComparison.jsx`) |
 | Story-coverage matrix (leadership story × category, gap highlighting + mandatory slots) | 10.3 | ✅ built (`StoryCoverageMatrix.jsx`) |
 | Probe simulator (3-levels-deep follow-up drill per leadership question) | 10.2 | ✅ built (`ProbeSimulator.jsx`) |

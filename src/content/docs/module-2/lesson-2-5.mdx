@@ -7,9 +7,9 @@ sidebar:
 import ShardingVisualizer from '@components/widgets/ShardingVisualizer.jsx';
 
 ### Learning objectives
-- Explain *why* we partition, when data volume or write throughput outgrows a single node, and distinguish partitioning from replication (the topic of 2.4).
+- Explain *why* we partition, when data volume or write throughput outgrows a single node, and distinguish partitioning from replication (the topic of the replication lesson).
 - Contrast the three partitioning strategies, **range**, **hash**, and **directory/lookup**, and state the trade-off each makes on routing, range scans, and skew.
-- Reason about **hot spots / celebrity keys**, and know which strategy each one is vulnerable to and how it's mitigated.
+- Reason about **hot spots / celebrity keys**, know which strategies are vulnerable to them, and how each is mitigated.
 - Quantify the **rebalancing tax**, how much data moves when N changes, and choose a **partition key** that spreads load *and* matches the read pattern.
 
 ### Intuition first
@@ -21,19 +21,25 @@ Three rules, three different things you're optimizing and giving up. That choice
 
 ### Deep explanation
 
-**Why partition at all (and the clean distinction from replication).** Two independent ceilings force the split: **data volume** (50 TB does not fit a 2 TB NVMe box, ~25 shards just to hold the bytes) and **write throughput** (the 700k writes/s metrics-ingest figure against ~30k writes/s per node, replicas don't help, because every replica must absorb *every* write). Hold the distinction precisely: **replication = the same data copied to many nodes** (availability, read scale); **partitioning (sharding) = different data split across many nodes** (capacity, write scale). They're orthogonal, and nearly every real system does both, partition first, then replicate each partition ~3×. "Partition" is the textbook word, "shard" the operational one.
+**Why partition at all (and the clean distinction from replication).** Two independent ceilings force the split: **data volume** (50 TB does not fit a 2 TB NVMe box, ~25 shards just to hold the bytes) and **write throughput** (a metrics-ingest workload at ~700k writes/s against ~30k writes/s per node, replicas don't help, because every replica must absorb *every* write). Hold the distinction precisely: **replication = the same data copied to many nodes** (availability, read scale); **partitioning (sharding) = different data split across many nodes** (capacity, write scale). They're orthogonal, and nearly every real system does both, partition first, then replicate each partition ~3×. "Partition" is the textbook word, "shard" the operational one.
 
 **Horizontal vs vertical.** *Vertical* partitioning splits by **columns**, move the rarely-read `bio`/blob columns out so the hot row stays cache-dense; a locality optimization, still capped at one machine. *Horizontal* partitioning splits by **rows** and is the only one that raises the data/throughput ceiling, it's what "sharding" means, and what this lesson means by "partitioning."
 
-**1) Range partitioning.** Contiguous key ranges per partition (`A-F`, `G-M`, `N-Z`; Jan-Mar on shard 1). *Win:* **range scans are cheap and local**, and keys arrive sorted, exactly what an LSM-tree wants. *Cost:* **skew is the default failure mode**, range-partition by timestamp and *all* of today's writes land on the single newest shard (the "hot-shard-of-the-day"). Used by HBase, Bigtable, MongoDB (ranged), CockroachDB, Spanner, these lean on **automatic range splitting**: a too-big or too-hot range splits in two and one half migrates, no human required.
+**1) Range partitioning.** Contiguous key ranges per partition (`A-F`, `G-M`, `N-Z`; Jan-Mar on shard 1). *Win:* **range scans are cheap and local**, and keys arrive sorted, exactly what an LSM-tree wants. *Cost:* **skew is the default failure mode**, range-partition by timestamp and *all* of today's writes land on the single newest shard (the "hot-shard-of-the-day"). Used by HBase, Bigtable, MongoDB (ranged), CockroachDB, and Spanner; these systems lean on **automatic range splitting**: a too-big or too-hot range splits in two and one half migrates, no human required.
 
 **2) Hash partitioning.** Hash the key and let the hash decide, naively, `partition = hash(key) mod N`. *Win:* uniform scatter; sequential/time-ordered keys stop hot-spotting. *Cost:* **locality destroyed**, range scans become a scatter-gather across every partition, and `mod N` has a second, vicious cost: **change N and almost every key remaps** (below). Used by Cassandra and DynamoDB (partition-key hashing), Redis Cluster (hash slots), MongoDB (hashed). The common refinement: **hash a high-cardinality prefix to pick the shard, keep a sortable suffix for local ordering**, Cassandra's compound partition/clustering keys, buying even spread *and* local range scans within a partition.
 
 **3) Directory / lookup partitioning.** An explicit **lookup table** mapping key → partition, consulted on every request. *Win:* **total flexibility**, place any key anywhere, move a single hot key, run heterogeneous shards. *Cost:* an **extra hop on every request and a potential SPOF/bottleneck**, replicate and cache it aggressively. The model behind **Vitess** (sharded MySQL at YouTube/Slack) and the **HDFS NameNode / GFS master**, the directory's availability *is* the system's availability.
 
-**Hot spots / celebrity keys.** Even a perfect hash assumes key *access* is uniform; real workloads are Zipfian, a Justin Bieber tweet or a Black-Friday SKU concentrates traffic onto **one key**, and one key lives on one partition. **Hashing spreads keys, not a single key's load.** Mitigations, in escalating order: (a) **salting**, append a bucket suffix to spread one hot key across ~10 physical partitions, scatter-gather on read (DynamoDB's "write sharding"); (b) a **dedicated shard** for known whales (placed via a directory); (c) **cache the hot key** in Redis, the most common real answer for read-hot keys; (d) **fan-out-on-read** for celebrities instead of fan-out-on-write (Twitter's hybrid timeline). The Director signal: *uniform key spread ≠ uniform load*, and naming the salt/cache/dedicated-shard fix.
+**Hot spots / celebrity keys.** Even a perfect hash assumes key *access* is uniform; real workloads are Zipfian, a Justin Bieber tweet or a Black-Friday SKU concentrates traffic onto **one key**, and one key lives on one partition. **Hashing spreads keys, not a single key's load.** Mitigations, in escalating order:
+- **Salting**: append a bucket suffix to spread one hot key across ~10 physical partitions, at the cost of a scatter-gather on read (DynamoDB's "write sharding").
+- A **dedicated shard** for known whales (placed via a directory).
+- **Cache the hot key** in Redis, the most common real answer for read-hot keys.
+- **Fan-out-on-read** for celebrities instead of fan-out-on-write (Twitter's hybrid timeline).
 
-**Rebalancing, the `mod N` cliff.** When N changes, reassignment means **copying real bytes over the network while serving live traffic.** Under `hash(key) mod N`, going from 4 to 5 nodes remaps roughly **80% of all keys**, on a 50 TB dataset that's ~40 TB of movement and a cache-miss storm just to add 25% capacity. That pain is precisely what **consistent hashing** exists to fix: only ~**K/N keys** move when a node joins or leaves. Range systems avoid the cliff by splitting/merging individual ranges; directory systems edit the lookup table for just the moved keys.
+The Director signal: *uniform key spread ≠ uniform load*, and naming the salt/cache/dedicated-shard fix.
+
+**Rebalancing, the `mod N` cliff.** When N changes, reassignment means **copying real bytes over the network while serving live traffic.** Under `hash(key) mod N`, going from 4 to 5 nodes remaps roughly **80% of all keys**, on a 50 TB dataset that's ~40 TB of movement and a cache-miss storm just to add 25% capacity. That pain is precisely what **consistent hashing** exists to fix: only ~**1/N of keys** move when a node joins or leaves. Range systems avoid the cliff by splitting/merging individual ranges; directory systems edit the lookup table for just the moved keys.
 
 **Choosing a partition key, the decision that quietly governs everything.** A good key has **high cardinality**, **uniform access**, and **alignment with the dominant query**, and the three pull against each other. `user_id` spreads writes beautifully but makes "all orders in the last hour" a global scatter-gather; `timestamp` makes the time query local but hot-spots the newest shard. **The partition key pre-commits which query is cheap and which query you've made expensive**, so pick it from RESHADED's R step (the dominant access pattern and read:write ratio) and name the query you deliberately sacrificed. Composite keys (hash the user, sort by time within the partition) often reconcile the tension.
 
@@ -44,9 +50,9 @@ flowchart TD
 
     subgraph RANGE[Range: by key bounds]
       K --> RR{Which range?}
-      RR -->|A–F| R1[(Shard 1<br/>A–F)]
-      RR -->|G–M| R2[(Shard 2<br/>G–M)]
-      RR -->|N–Z| R3[(Shard 3<br/>N–Z)]
+      RR -->|A-F| R1[(Shard 1<br/>A-F)]
+      RR -->|G-M| R2[(Shard 2<br/>G-M)]
+      RR -->|N-Z| R3[(Shard 3<br/>N-Z)]
     end
 
     subgraph HASH[Hash: hash key mod N]
@@ -70,12 +76,14 @@ flowchart TD
 Range keeps neighbors together (cheap scans, skew risk, red = the hot newest shard). Hash scatters for even load (green = uniform spread, scans fan out). Directory adds a flexible-but-load-bearing lookup hop (amber = the bottleneck/SPOF you must replicate).
 
 ### Try it: partitioning strategies and skew, live
-The widget places a stream of keys across N shards under each strategy so you can *watch the load distribution*. Add a **celebrity key** and see hashing fail to flatten it until you apply salting; switch to **range** and watch sequential keys pile onto the newest shard; then **add or remove a node**, naive `hash mod N` lights up almost the whole keyspace as "moved," while range-split and directory move only the affected slice. It makes the rebalancing tax and the celebrity-key problem visible before 2.6 formalizes the fix.
+The widget places a stream of keys across N shards under each strategy so you can *watch the load distribution*. Add a **celebrity key** and see hashing fail to flatten it until you apply salting; switch to **range** and watch sequential keys pile onto the newest shard; then **add or remove a node**: naive `hash mod N` lights up almost the whole keyspace as "moved," while range-split and directory move only the affected slice. It makes the rebalancing tax and the celebrity-key problem visible before the consistent-hashing lesson formalizes the fix.
 
 <ShardingVisualizer client:load />
 
 ### Worked example: Discord's message store (and a Twitter celebrity)
-Discord stores **trillions of messages** on Cassandra/ScyllaDB; the dominant query, "recent messages **in this channel**", dictates the partition key. The pattern: a **composite partition key of `channel_id` plus a coarse time bucket, hashed together, with messages time-ordered within the partition** (the exact schema is the data team's to own; the decision is the shape). Hashing the composite gives even spread (no hot-shard-of-the-day); the channel query resolves to **one partition**, already time-sorted; and because the time bucket is *in* the partition key, no megachannel grows one unbounded partition. The accepted cost: a query spanning many time windows reads several partitions, and a cross-channel search is a full fan-out, rare queries deliberately made expensive so the common one stays cheap. That is the whole game: **choose the key from the dominant access pattern, and name the query you made expensive.**
+Discord stores **trillions of messages** on Cassandra/ScyllaDB; the dominant query, "recent messages **in this channel**", dictates the partition key. The pattern: a **composite partition key of `channel_id` plus a coarse time bucket, hashed together, with messages time-ordered within the partition** (the exact schema is the data team's to own; the decision is the shape). Hashing the composite gives even spread (no hot-shard-of-the-day); the channel query resolves to **one partition**, already time-sorted; and because the time bucket is *in* the partition key, no megachannel grows one unbounded partition.
+
+The accepted cost: a query spanning many time windows reads several partitions, and a cross-channel search is a full fan-out, rare queries deliberately made expensive so the common one stays cheap. That is the whole game: **choose the key from the dominant access pattern, and name the query you made expensive.**
 
 <details>
 <summary>Go deeper, Discord's exact Cassandra schema (IC depth, optional)</summary>
@@ -101,14 +109,14 @@ Now the **celebrity** version: a Twitter user with 100M followers. Even with per
 - **"Replication or partitioning, which problem are you solving?"**, *Strong:* names them as orthogonal (replication for availability/read-scale, partitioning for capacity/write-scale) and does both, partition for the bytes/writes, replicate each partition ~3×. *Red flag:* "add replicas" to fix a write-throughput ceiling.
 - **"What's your partition key, and what query did you just make expensive?"**, *Strong:* high cardinality + uniform access + alignment to the dominant read, *and* explicit ownership of the now-costly scatter-gather query. *Red flag:* no key in mind, or a key like `timestamp`/`country` that hot-spots, with no awareness of it.
 - **"A single celebrity key melts one shard, now what?"**, *Strong:* recognizes hashing can't split one key; reaches for salting, a dedicated shard, caching the hot key, or fan-out-on-read. *Red flag:* "hash it" (hashing spreads *keys*, not one key's load).
-- **"You add a node to a 4-shard hash cluster, what happens?"**, *Strong:* under `mod N` ~80% of keys relocate (a data-movement and cache-miss storm), which is *why* consistent hashing exists (~1/N moves); sets up 2.6. *Red flag:* assuming adding a node is cheap/instant.
+- **"You add a node to a 4-shard hash cluster, what happens?"**, *Strong:* under `mod N` ~80% of keys relocate (a data-movement and cache-miss storm), which is *why* consistent hashing exists (~1/N moves). *Red flag:* assuming adding a node is cheap/instant.
 - **"How does this rebalance operationally?"**, *Strong:* live migration cost, throttled backfill to protect tail latency, automatic split/merge (Bigtable/Cockroach) or consistent hashing (Cassandra/Dynamo) keeping it humane. *Red flag:* treats rebalancing as free (a Director owns this operational pain).
 
 ### Common mistakes / misconceptions
 - **Conflating partitioning with replication**, they solve different problems and you almost always need both.
 - **Thinking hashing cures *all* hot spots**, it cures skewed *key distribution*, not a single overloaded *key*; celebrity keys need salting/caching/dedicated shards.
 - **Range-partitioning by timestamp** without realizing all current writes pile onto one shard (the hot-shard-of-the-day).
-- **Ignoring the `mod N` rebalancing cliff**, naive hash sharding makes adding capacity move almost the entire dataset (the motivation for 2.6).
+- **Ignoring the `mod N` rebalancing cliff**, naive hash sharding makes adding capacity move almost the entire dataset (the motivation for consistent hashing).
 - **Picking a low-cardinality/skewed key** (`country`, one giant `tenant_id`) **or one that fights the dominant read**, a few shards swell while every query scatter-gathers.
 
 ### Practice questions
@@ -131,4 +139,4 @@ Now the **celebrity** version: a Twitter user with 100M followers. Even with per
 - **`hash mod N` rebalancing is catastrophic**, ~80% of keys move to grow a 4-node cluster by one; exactly what consistent hashing fixes (~1/N moves).
 - **Pick the partition key from the dominant access pattern**, high cardinality + uniform access + query alignment, and explicitly name the query you made expensive.
 
-> **Spaced-repetition recap:** Replication copies the same data (read scale); partitioning splits different data (write/capacity scale), do both. Range = local scans + skew; hash = even spread, no scans, `mod N` reshuffles everything; directory = flexible placement + a load-bearing lookup. Hashing can't split one celebrity key (salt/cache/dedicate it). The partition key pre-commits the query you made expensive; `mod N`'s rebalancing pain is what 2.6 solves.
+> **Spaced-repetition recap:** Replication copies the same data (read scale); partitioning splits different data (write/capacity scale), do both. Range = local scans + skew; hash = even spread, no scans, `mod N` reshuffles everything; directory = flexible placement + a load-bearing lookup. Hashing can't split one celebrity key (salt/cache/dedicate it). The partition key pre-commits the query you made expensive; `mod N`'s rebalancing pain is what the consistent-hashing lesson solves.

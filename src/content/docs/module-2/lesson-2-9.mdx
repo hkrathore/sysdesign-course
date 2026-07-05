@@ -10,7 +10,7 @@ import BloomFilterVisualizer from '@components/widgets/BloomFilterVisualizer.jsx
 - Explain a **Bloom filter**, probabilistic set membership with **no false negatives** and a **tunable false-positive rate**, size one with the rule of thumb (~9.6 bits/element ≈ 1% FP), and connect it to LSM reads and cache/CDN guards.
 - Distinguish **latency** from **throughput**, show why pushing one can hurt the other, and use **Little's Law** (`concurrency = throughput × latency`) and **tail latency (p99/p99.9)** to reason about it.
 - Choose between **batch** and **stream** processing from a freshness/cost/complexity requirement, and name the systems (Spark vs Flink / Kafka Streams) and the **Lambda vs Kappa** architectural split.
-- Across all three: state the trade-off you're taking and the alternative you're rejecting, in numbers, these are tools you *tune against a requirement and a budget*, not facts to recite.
+- Across all three: state the trade-off you're taking and the alternative you're rejecting, in numbers; these are tools you *tune against a requirement and a budget*, not facts to recite.
 
 ### Intuition first
 Three small, unrelated ideas, so three short analogies, each before its jargon.
@@ -68,7 +68,9 @@ They are independent axes, and the classic mistake is treating "make it fast" as
 
 `L = λ × W` → **concurrency = throughput × latency**
 
-Worked: a service at **10,000 QPS** with **200 ms** average latency holds `10,000 × 0.2 = 2,000` requests **in flight at any instant**. (The QPS here comes straight from the back-of-envelope estimation muscle of the estimation lesson, Little's Law is what turns that throughput number into a *concurrency* number.) That in-flight count sizes your thread pools, connection pools, and memory. The Director-grade consequence: a **latency regression silently raises concurrency**. If latency doubles to 400 ms at the same 10k QPS, in-flight work doubles to **4,000**, you may exhaust the connection pool or thread pool, requests queue, queueing *further* raises latency, and the pool tips into **collapse** (a feedback loop, not a linear slowdown). A "small" p99 latency bump can take down a service that looked nowhere near its throughput ceiling.
+Worked: a service at **10,000 QPS** with **200 ms** average latency holds `10,000 × 0.2 = 2,000` requests **in flight at any instant**. (The QPS here comes straight from the back-of-envelope estimation muscle of the estimation lesson; Little's Law is what turns that throughput number into a *concurrency* number.) That in-flight count sizes your thread pools, connection pools, and memory.
+
+The Director-grade consequence: a **latency regression silently raises concurrency**. If latency doubles to 400 ms at the same 10k QPS, in-flight work doubles to **4,000**, you may exhaust the connection pool or thread pool, requests queue, queueing *further* raises latency, and the pool tips into **collapse** (a feedback loop, not a linear slowdown). A "small" p99 latency bump can take down a service that looked nowhere near its throughput ceiling.
 
 **Tail latency, why you write SLOs on p99, not the mean.** The average hides the pain. What users (and dependent services) feel is the **tail**, p99, p99.9. This matters most under **fan-out**: a request that calls many backends (recall the scatter-gather of partitioned stores, the partitioning lesson) is only as fast as its **slowest** dependency. If each backend is slow 1% of the time, the probability that a request touching `N` of them hits **at least one** slow path is `1 − (0.99)^N`:
 
@@ -78,12 +80,12 @@ Worked: a service at **10,000 QPS** with **200 ms** average latency holds `10,00
 | **100** | **~63%** |
 | 1000 | ~99.99% |
 
-So with **100-way fan-out, a backend that's slow only 1% of the time makes ~63% of requests slow.** This is *tail amplification*: the rare tail of one component becomes the *common* case of the aggregate. Mitigations, **hedged/backup requests** (send a duplicate to a second replica after a short delay, take the first to answer), **tail-tolerant timeouts**, and **request budgets**, are how Google-scale systems keep p99 sane. The Director framing: you specify the SLO on **p99/p99.9** because that's the number that governs both user experience *and* (via Little's Law) the concurrency your fleet must absorb.
+So with **100-way fan-out, a backend that's slow only 1% of the time makes ~63% of requests slow.** This is *tail amplification*: the rare tail of one component becomes the *common* case of the aggregate. Mitigations: **hedged/backup requests** (send a duplicate to a second replica after a short delay, take the first to answer), **tail-tolerant timeouts**, and **request budgets**. These are how Google-scale systems keep p99 sane. The Director framing: you specify the SLO on **p99/p99.9** because that's the number that governs both user experience *and* (via Little's Law) the concurrency your fleet must absorb.
 
 #### 3. Batch vs stream: freshness vs cost vs complexity
 
-- **Batch processing** runs over a **bounded** dataset on a schedule: read a big chunk, compute, write results. High throughput per dollar, simple to reason about and re-run, but results are **stale by the batch interval** (minutes to hours). Tech: **MapReduce, Spark, Hive, dbt**, nightly ETL, billing, model training, rollups.
-- **Stream processing** runs over an **unbounded** dataset **continuously**: results update within **milliseconds to seconds** of an event. Low latency, but you now own hard problems, **windowing**, **out-of-order/late events** (watermarks), **exactly-once** semantics, and checkpointed **state**. Tech: **Flink, Kafka Streams** (true per-event, sub-second); **Spark Structured Streaming** (micro-batch, ~seconds), fraud detection, dashboards, alerting, personalization.
+- **Batch processing** runs over a **bounded** dataset on a schedule: read a big chunk, compute, write results. High throughput per dollar, simple to reason about and re-run, but results are **stale by the batch interval** (minutes to hours). Tech: **MapReduce, Spark, Hive, dbt**. Canonical uses: nightly ETL, billing, model training, rollups.
+- **Stream processing** runs over an **unbounded** dataset **continuously**: results update within **milliseconds to seconds** of an event. Low latency, but you now own hard problems, **windowing**, **out-of-order/late events** (watermarks), **exactly-once** semantics, and checkpointed **state**. Tech: **Flink, Kafka Streams** (true per-event, sub-second); **Spark Structured Streaming** (micro-batch, ~seconds). Canonical uses: fraud detection, dashboards, alerting, personalization.
 
 The freshness ladder, with the cost you pay for each rung:
 
@@ -91,10 +93,10 @@ The freshness ladder, with the cost you pay for each rung:
 |---|---|---|
 | Batch | minutes-hours | MapReduce, Spark, Hive |
 | Micro-batch | ~1-10 s | Spark Structured Streaming |
-| True streaming | sub-second-ms | Flink, Kafka Streams |
+| True streaming | ms to sub-second | Flink, Kafka Streams |
 
 **The two architectures that combine them, and the trade between them:**
-- **Lambda architecture:** run a **batch layer** (accurate, complete, slow) *and* a **speed/streaming layer** (fast, approximate) in parallel; serve a merge of both. You get correctness *and* freshness, but at the cost of **two codebases computing the same logic in two engines**, which drift and double your maintenance and on-call surface. *Rejected-alternative reasoning lives in the next bullet.*
+- **Lambda architecture:** run a **batch layer** (accurate, complete, slow) *and* a **speed/streaming layer** (fast, approximate) in parallel; serve a merge of both. You get correctness *and* freshness, but at the cost of **two codebases computing the same logic in two engines**, which drift and double your maintenance and on-call surface.
 - **Kappa architecture:** **stream-only**. Treat the immutable log (Kafka) as the source of truth; if you need to "reprocess" history (a bug fix, a new metric), you **replay the log** through the same streaming job. One codebase, one engine. The trade: you give up the batch layer's simple, cheap full-history recompute, and replay of a long retention window can be expensive and slow. *Director framing:* Lambda buys correctness-plus-freshness at the price of dual maintenance; Kappa buys operational simplicity at the price of expensive replays and a hard dependency on log retention. You choose Kappa when your logic fits a single streaming model and your replay window is bounded; you keep Lambda (or just plain batch) when full-history recomputation is cheaper or the batch logic genuinely differs.
 
 **The decision rule (say this out loud):** drive it from the **freshness requirement** in the R step. "Results an hour old are fine" (billing, reports, training data) → **batch**: cheaper per unit, far simpler to operate; streaming would buy freshness nobody asked for. "We must act within seconds" (block the fraud *before* settlement, alert *now*) → **stream**: batch's interval is a non-starter no matter how cheap. Many shops run **both**: stream for the live path, batch to recompute the accurate ground truth nightly.
@@ -142,16 +144,16 @@ The interview-grade point: each tool is chosen **against a stated requirement an
 ### Trade-offs table: batch vs micro-batch vs stream
 | | **Batch** | **Micro-batch** | **True streaming** |
 |---|---|---|---|
-| Latency | minutes-hours | ~1-10 s | sub-second-ms |
+| Latency | minutes-hours | ~1-10 s | ms to sub-second |
 | Throughput / $ | highest | high | lower (always-on) |
 | State & windowing | none (bounded data) | windowed, simpler | continuous, watermarks, checkpoints |
 | Exactly-once | trivial (re-run the job) | engine-managed | hardest (checkpointed state) |
 | Operational complexity | lowest | medium | highest (always-on, stateful) |
 | Tech | Spark, MapReduce, Hive | Spark Structured Streaming | Flink, Kafka Streams |
-| **Use when…** | hourly/daily freshness is fine; cost & simplicity win (billing, reports, training) | seconds of lag acceptable; want near-real-time without per-event state | must act within ms-s (fraud block, alerting, live personalization) |
+| **Use when…** | hourly/daily freshness is fine; cost & simplicity win (billing, reports, training) | seconds of lag acceptable; want near-real-time without per-event state | must act within ms to seconds (fraud block, alerting, live personalization) |
 
 ### What interviewers probe here
-- **"Why does an LSM read use a Bloom filter, and what does a false positive cost you?"**, *Strong:* "absent" is guaranteed correct, so it safely skips an SSTable seek (the read-amplification fix from 2.3); a false positive only costs one wasted lookup, never a wrong result, and at ~9.6 bits/element you buy ~1% FP for ~30× less space than the keys. *Red flag:* thinks a Bloom filter can return false negatives, or can't say what a false positive actually costs.
+- **"Why does an LSM read use a Bloom filter, and what does a false positive cost you?"**, *Strong:* "absent" is guaranteed correct, so it safely skips an SSTable seek (the read-amplification fix from the indexing lesson); a false positive only costs one wasted lookup, never a wrong result, and at ~9.6 bits/element you buy ~1% FP for ~30× less space than the keys. *Red flag:* thinks a Bloom filter can return false negatives, or can't say what a false positive actually costs.
 - **"At 10k QPS and 200 ms latency, how many requests are in flight, and why do you care?"**, *Strong:* Little's Law → 2,000; it sizes pools, and a latency regression silently raises concurrency toward pool exhaustion and queue collapse. *Red flag:* treats latency and throughput as the same knob, or can't connect a latency bump to a capacity failure.
 - **"You'd add batching to raise throughput, what does it cost?"**, *Strong:* it raises per-request latency (you wait to fill the batch); right call only if the latency budget has room, name the budget. *Red flag:* "batching makes everything faster" with no awareness of the latency hit.
 - **"Why is the SLO written on p99, not the average?"**, *Strong:* the tail is what users and fan-out feel; with 100-way fan-out a 1%-slow backend makes ~63% of requests slow, so you design for the tail (hedged requests, timeouts). *Red flag:* optimizes the mean and is surprised by user-visible slowness.
@@ -177,13 +179,13 @@ The Director-altitude signal throughout: you treat each as a **lever set against
 > *Model:* Interrogate the freshness NFR. "Daily revenue" almost always tolerates minutes of lag, so **micro-batch** (Spark Structured Streaming on a few-minute trigger) or hourly **batch** meets it at a fraction of true streaming's cost and complexity, no per-event windowing/watermark/exactly-once burden. I'd only build sub-second Flink if a concrete requirement needs it (ops alerting on the *current minute*). "Real-time is better" isn't a requirement; quantify acceptable staleness and pick the cheapest tier that meets it.
 
 **Q4.** Why does a 1%-slow backend become a *63%*-slow request, and what do you do about it?
-> *Model:* Fan-out. A request that calls 100 backends is as slow as its slowest one; `1 − 0.99^100 ≈ 63%` of requests hit at least one slow backend (tail amplification, the rare tail of a component becomes the common case of the aggregate). This is why SLOs target p99/p99.9 and why you don't just optimize the mean. Mitigations: **hedged/backup requests** (duplicate to another replica after a short delay, take the first reply), tight **tail-tolerant timeouts** with retries on idempotent calls, reducing fan-out where possible, and isolating slow dependencies. Connects to the partitioned scatter-gather reads of 2.5-2.6.
+> *Model:* Fan-out. A request that calls 100 backends is as slow as its slowest one; `1 − 0.99^100 ≈ 63%` of requests hit at least one slow backend (tail amplification, the rare tail of a component becomes the common case of the aggregate). This is why SLOs target p99/p99.9 and why you don't just optimize the mean. Mitigations: **hedged/backup requests** (duplicate to another replica after a short delay, take the first reply), tight **tail-tolerant timeouts** with retries on idempotent calls, reducing fan-out where possible, and isolating slow dependencies. Connects to the scatter-gather reads of partitioned stores.
 
 **Q5.** When would you accept Lambda's dual codebase instead of going Kappa (stream-only)?
 > *Model:* When full-history **recomputation is cheaper or simpler in batch** than replaying a long log, or when the accurate logic genuinely differs from the fast/approximate logic, e.g., a quarterly financial restatement over months of data, where a Spark recompute beats replaying months of Kafka and finance needs the exact number. Lambda's price is two implementations that can drift and double on-call; you accept it when the batch path's value (cheap full recompute, an independent correctness check) outweighs that. Choose Kappa when the logic fits one streaming model and the replay window is bounded enough to be affordable.
 
 ### Key takeaways
-- A **Bloom filter** trades a tunable false-positive rate for huge space savings and **never** has false negatives, so "absent" safely **skips** work (LSM SSTable seeks per 2.3, cache/origin hits per 2.10). ~9.6 bits/element → ~1% FP at k=7; each 10× lower FP costs ~+4.8 bits/element.
+- A **Bloom filter** trades a tunable false-positive rate for huge space savings and **never** has false negatives, so "absent" safely **skips** work (LSM SSTable seeks, cache/origin hits). ~9.6 bits/element → ~1% FP at k=7; each 10× lower FP costs ~+4.8 bits/element.
 - **Latency** (one op) and **throughput** (ops/sec) are different axes; **batching** trades latency *for* throughput. They are not one knob.
 - **Little's Law**, `concurrency = throughput × latency`, sizes pools and explains why a latency regression silently drives concurrency toward **queue collapse**. Write SLOs on **p99/p99.9**, because under fan-out a 1%-slow backend makes ~63% of 100-fan-out requests slow.
 - **Batch** (Spark, minutes-hours, cheap/simple) vs **stream** (Flink/Kafka Streams, sub-second, windowing/state/exactly-once cost): choose from the **freshness requirement**, not "real-time is better."
@@ -191,6 +193,3 @@ The Director-altitude signal throughout: you treat each as a **lever set against
 
 > **Spaced-repetition recap:** Bouncer with a "definitely-not-on-the-list" crib-sheet, no false negatives, so "absent" safely skips a lookup; ~9.6 bits/elem = ~1% FP, ~30× smaller than the keys (LSM/cache guard). Latency ≠ throughput: batching trades one for the other; `concurrency = throughput × latency` (Little's Law), so a latency bump can collapse a pool, SLO on p99 because 1%-slow × 100 fan-out ≈ 63% slow. Batch (cheap, stale) vs stream (fresh, complex); combine via Lambda (two arms) or Kappa (replay the log). Pick from the requirement; name the cost of the side you drop.
 
----
-
-*End of Lesson 2.9. Next: 2.10, REST vs RPC vs GraphQL; stateful vs stateless, where the Bloom-filter cache guard meets caching strategies (+ Caching simulator).*

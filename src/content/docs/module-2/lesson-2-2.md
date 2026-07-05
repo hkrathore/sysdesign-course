@@ -33,12 +33,14 @@ sidebar:
 
 **The decision framework (what to say out loud):**
 - Strong transactional integrity + complex ad-hoc queries + moderate scale → **relational (Postgres/MySQL)**.
-- Massive write throughput + simple/known access patterns + horizontal scale + AP availability → **wide-column (Cassandra)** or **KV (DynamoDB)**.
+- Massive write throughput + simple/known access patterns + horizontal scale + AP availability (stays available under partition, at consistency's cost) → **wide-column (Cassandra)** or **KV (DynamoDB)**.
 - Flexible, nested, fast-evolving schema → **document (Mongo)**.
 - Queries that are fundamentally about *relationships and traversal* → **graph**.
 - Need both scale and ACID → **NewSQL (Spanner/CockroachDB)** or **sharded SQL (Vitess)**.
 
-**The Director-level nuance, and the strongest signal here:** "Just use Postgres" is correct far more often than candidates assume. Modern Postgres scales further than its reputation (read replicas, declarative partitioning, `JSONB` for document-style flexibility, logical replication), and premature NoSQL adoption *gives away* transactions and ad-hoc query power you will miss, and pushes consistency/joins into application code. The mature move is to **choose by access pattern and consistency need**, acknowledge **polyglot persistence** (real systems use several stores, relational for core entities, blob for media, KV for cache, wide-column for feeds), and treat the database choice as reversible-with-cost rather than dogma.
+**The Director-level nuance, and the strongest signal here:** "Just use Postgres" is correct far more often than candidates assume. Modern Postgres scales further than its reputation (read replicas, declarative partitioning, `JSONB` for document-style flexibility, logical replication), and premature NoSQL adoption *gives away* transactions and ad-hoc query power you will miss, and pushes consistency/joins into application code.
+
+The mature move is to **choose by access pattern and consistency need**, and to treat the database choice as reversible-with-cost rather than dogma. Real systems practice **polyglot persistence**: relational for core entities, blob for media, KV for cache, wide-column for feeds.
 
 ### Diagram: store-selection decision tree
 ```mermaid
@@ -61,6 +63,7 @@ flowchart TD
 - **Photo binaries** → **blob store (S3)** + CDN, never the database; DBs are terrible at large opaque bytes.
 - **Photo metadata + home feed** → **wide-column (Cassandra)** or precomputed **KV**: write-heavy, partition by user, tunable consistency, eventual is fine for feeds.
 - **Hot read cache** → **Redis** for sessions and hot timelines.
+
 Justify each by access pattern + consistency need. The signal isn't picking one database, it's recognizing that *different data has different needs* and matching deliberately.
 
 ### Trade-offs table: the four store types head-to-head
@@ -89,7 +92,7 @@ Justify each by access pattern + consistency need. The signal isn't picking one 
 > *Model:* **Key-value (DynamoDB)**. Access is pure `shortcode → long URL` lookup, no joins, no ad-hoc queries, with enormous read skew and a need for high availability. KV gives O(1) lookups, horizontal scale, and AP behavior; the redirect tolerates eventual consistency. Relational would add overhead with no benefit for this access pattern.
 
 **Q2.** When is wide-column (Cassandra) clearly better than relational?
-> *Model:* Write-heavy, massive-scale, partition-friendly workloads, time-series, event logs, messaging, feeds, where you can design tables around known queries, tolerate eventual/quorum consistency, and need linear horizontal scale and multi-region availability without a single leader. The trade is no ad-hoc joins and you must model for the read up front.
+> *Model:* Write-heavy, massive-scale, partition-friendly workloads (time-series, event logs, messaging, feeds) where you can design tables around known queries, tolerate eventual/quorum consistency, and need linear horizontal scale and multi-region availability without a single leader. The trade is no ad-hoc joins and you must model for the read up front.
 
 **Q3.** What's the senior case for defaulting to Postgres?
 > *Model:* It gives ACID, rich queries, mature operability, and `JSONB` flexibility, and scales via replicas/partitioning past most products' real needs. NoSQL trades away transactions and query power that you'll likely miss; adopting it prematurely adds distributed-systems complexity before you've hit the limit that justifies it. Choose by evidence (measured limits), not fashion.

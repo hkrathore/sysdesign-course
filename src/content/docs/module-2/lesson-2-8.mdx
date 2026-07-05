@@ -9,16 +9,16 @@ import QuorumCalculator from '@components/widgets/QuorumCalculator.jsx';
 ### Learning objectives
 - Place the major **consistency models** on a spectrum, from linearizable down to eventual, plus the session guarantees **read-your-writes** and **monotonic reads**, and say what each costs (callback to the replication-lag anomalies).
 - State the quorum rule **W + R > N**, what it buys, and what it does *not* guarantee.
-- Distinguish the two quorum rules that matter, `W + R > N` (read sees latest write) and `W > N/2` (two writes can't both commit), and reason about availability and tail-latency in numbers.
+- Distinguish the two quorum rules that matter, `W + R > N` (read sees latest write) and `W > N/2` (two writes can't both commit), and reason about availability and tail latency in numbers.
 - Explain **sloppy quorums + hinted handoff** and name the exact guarantee they trade away to buy write availability.
 - Choose a model per data-flow (money/inventory vs feeds/likes) and defend it against cost and risk, turning the PACELC dial into concrete `N/W/R` settings.
 
 ### Intuition first
-Imagine a fact that lives in several notebooks at once, three assistants, each holding a copy of a customer's account balance. Two questions decide everything.
+Imagine a fact that lives in several notebooks at once: three assistants, each holding a copy of a customer's account balance. Two questions decide everything.
 
 **When you write, how many notebooks must you update before you call it "done"? When you read, how many must you consult before you trust the answer?** Call those numbers **W** (write quorum) and **R** (read quorum), out of **N** copies total.
 
-Update *all three* before confirming a write and any single-notebook read sees the latest number, but one absent assistant blocks every write. Update *one* and move on and writes never block, but a reader might hold a stale copy and never know. The art is in the middle: **as long as the set you wrote and the set you read are forced to share at least one notebook, the reader cannot miss the latest write**, and two sets out of three *must* overlap the moment their sizes sum to more than three. That counting fact, `W + R > N`, is the entire quorum mechanism.
+If you update *all three* before confirming, any single-notebook read sees the latest number, but one absent assistant blocks every write. If you update *one* and move on, writes never block, but a reader might hold a stale copy and never know. The art is in the middle: **as long as the set you wrote and the set you read are forced to share at least one notebook, the reader cannot miss the latest write**, and two sets out of three *must* overlap the moment their sizes sum to more than three. That counting fact, `W + R > N`, is the entire quorum mechanism.
 
 The broader backdrop: "consistency" is a **dial**, not a binary, from *every reader instantly sees the latest write* (expensive, coordinated) down to *copies drift and eventually re-converge* (cheap, fast, available). Quorums are how you set that dial to a number.
 
@@ -26,7 +26,7 @@ The broader backdrop: "consistency" is a **dial**, not a binary, from *every rea
 
 #### The consistency spectrum (strongest to weakest)
 
-Each model is a **promise to the reader**, and the promises form a spectrum: at the top, **linearizable**, everyone sees the latest write instantly, as if there were one copy, which is expensive because every operation coordinates across replicas (quorum, leader, or consensus round trips); at the bottom, **eventual**, replicas drift and re-converge if writes stop, which is cheap and stays available. In between sit weaker orderings (sequential, causal) and, most usefully in practice, **session guarantees** like read-your-writes that promise recency only to the client who needs it. Stronger promise = more coordination = more latency and less availability: the **E → L vs C** trade from PACELC, now made specific.
+Each model is a **promise to the reader**, and the promises form a spectrum. At the top sits **linearizable**: everyone sees the latest write instantly, as if there were one copy; expensive, because every operation coordinates across replicas (quorum, leader, or consensus round trips). At the bottom sits **eventual**: replicas drift and re-converge if writes stop; cheap, and it stays available. In between sit weaker orderings (sequential, causal) and, most usefully in practice, **session guarantees** like read-your-writes that promise recency only to the client who needs it. Stronger promise = more coordination = more latency and less availability: the **E → L vs C** trade from PACELC, now made specific.
 
 <details>
 <summary>Go deeper, formal definitions of the four models (IC depth, optional)</summary>
@@ -38,12 +38,12 @@ Each model is a **promise to the reader**, and the promises form a spectrum: at 
 
 </details>
 
-**Two session guarantees that sit beside the spectrum**, these are scoped to *one client's view over time*, not to the whole system, which is exactly why they're cheap (callback to the 2.4 anomalies and their fixes):
+**Two session guarantees sit beside the spectrum.** These are scoped to *one client's view over time*, not to the whole system, which is exactly why they're cheap (callback to the replication lesson's lag anomalies and their fixes):
 
 - **Read-your-writes (read-after-write):** once *you* have written a value, *your* subsequent reads never see a version older than your write. Fixes the "I posted a comment, refreshed, and it vanished" anomaly.
 - **Monotonic reads:** if you read a value, later reads never return an *earlier* value, time doesn't appear to run backwards for you. Fixes "the comment count flickered 5 → 4 → 5" as your reads bounced between a fresh and a lagging replica.
 
-The Director-grade distinction: **these are per-session, not system-wide.** You deliver read-your-writes *without* linearizability, pin the user's reads to a current replica, sticky-route the session, or track their last-write version (the cheap fixes). A full quorum buys something stronger and more expensive: recency for **every** reader. Knowing you usually only need the session guarantee, and shouldn't pay for global recency to get it, is the senior move.
+The Director-grade distinction: **these are per-session, not system-wide.** You deliver read-your-writes *without* linearizability: pin the user's reads to a current replica, sticky-route the session, or track their last-write version (the cheap fixes). A full quorum buys something stronger and more expensive: recency for **every** reader. Knowing you usually only need the session guarantee, and shouldn't pay for global recency to get it, is the senior move.
 
 #### The quorum rule: W + R > N
 
@@ -81,20 +81,20 @@ If every write requires a strict majority, two writes can't both commit without 
 
 Setting `W = R = ⌊N/2⌋ + 1` (majority quorum) satisfies **both** at once, which is why "majority read, majority write" is the canonical *strong* configuration for leaderless stores.
 
-#### Availability and latency: the price of a higher quorum (RULE 1)
+#### Availability and latency: the price of a higher quorum
 
 Quorums are not free, and the cost is quantifiable:
 
 - **Failure tolerance.** Writes succeed as long as `W` replicas are reachable, so writes tolerate **N − W** failures; reads tolerate **N − R**. With `N=3, W=R=2`: you survive **1** replica down for both reads and writes. Push to `W=3` for cheap `R=1` reads and **any single failure now blocks every write**, you traded write availability for read speed.
 - **Tail latency.** A quorum operation can't return until its slowest required replica answers, it waits on the **W-th (or R-th) fastest** replica. Raising the quorum means waiting on a slower node, which **lifts p99.** Reusing the numbers for continuity: a local `R=1` read is ~**1-5 ms**; a cross-AZ majority read is ~**5-15 ms**; a cross-region strong read is **tens to hundreds of ms** (each cross-region RTT ~150 ms). The arithmetic of the quorum is also the arithmetic of your latency budget.
 
-This is the dial 2.7 promised: cranking `W` and `R` up to satisfy `W + R > N` moves a store's **E** behavior from **EL** (fast, eventual) toward **EC** (consistent, coordinated), the same store, *dragged along the PACELC axis* by these numbers.
+This is the dial the CAP/PACELC lesson promised: cranking `W` and `R` up to satisfy `W + R > N` moves a store's **E** behavior from **EL** (fast, eventual) toward **EC** (consistent, coordinated), the same store, *dragged along the PACELC axis* by these numbers.
 
 #### Sloppy quorums + hinted handoff (and the guarantee they break)
 
-A **strict** quorum talks to the key's **home replicas**, the N nodes that own that key's slice of the ring, and **refuses the write** when W of them are unreachable (the CP move). A **sloppy** quorum instead accepts the write on the first N *reachable* nodes, even if some aren't home replicas; the stand-ins store a **hint** and forward the write home when the owner recovers (**hinted handoff**), how Dynamo/Cassandra stay write-available through failures.
+A **strict** quorum talks to the key's **home replicas**, the N nodes that own that key's slice of the ring, and **refuses the write** when W of them are unreachable (the CP move). A **sloppy** quorum instead accepts the write on the first N *reachable* nodes, even if some aren't home replicas; the stand-ins store a **hint** and forward the write home when the owner recovers (**hinted handoff**), which is how Dynamo/Cassandra stay write-available through failures.
 
-**The trade, in one line (RULE 2): a sloppy quorum buys write availability by suspending the `W + R > N` guarantee, a home-set read can miss the write until hinted handoff completes.** Right call for a feed or cart write (a brief recency gap is invisible); wrong call for a balance decrement that must read-its-own-write immediately. The rejected alternative, strict quorum, preserves recency but refuses writes during the failure. Naming this trade is the most-missed nuance on the topic.
+**The trade, in one line: a sloppy quorum buys write availability by suspending the `W + R > N` guarantee, a home-set read can miss the write until hinted handoff completes.** Right call for a feed or cart write (a brief recency gap is invisible); wrong call for a balance decrement that must read-its-own-write immediately. The rejected alternative, strict quorum, preserves recency but refuses writes during the failure. Naming this trade is the most-missed nuance on the topic.
 
 ### Diagram: the quorum decision and where the guarantee lives
 ```mermaid
@@ -104,10 +104,10 @@ flowchart TD
     STRONG -->|Yes| OVER[Read set overlaps write set<br/>read observes latest write<br/>versioning picks the winner]
     STRONG -->|No| EVENT[No forced overlap<br/>read may miss latest write<br/>eventually consistent]
     OVER --> WW{"Is W a majority, W greater than N/2 ?"}
-    WW -->|Yes| SAFE[Two writes cannot both commit<br/>on disjoint sets — strong]
+    WW -->|Yes| SAFE[Two writes cannot both commit<br/>on disjoint sets, strong]
     WW -->|No| DIVERGE[Concurrent writes may diverge<br/>on disjoint sets]
     Q --> FAIL{Cannot reach W home replicas?}
-    FAIL -->|Strict quorum| REFUSE[Refuse write — choose C / lose A]
+    FAIL -->|Strict quorum| REFUSE[Refuse write, choose C / lose A]
     FAIL -->|Sloppy quorum| HINT[Accept on N reachable nodes<br/>store hint, hand off later<br/>choose A / lose the overlap guarantee]
     style OVER fill:#1f6f5c,color:#fff
     style SAFE fill:#1f6f5c,color:#fff
@@ -125,13 +125,17 @@ The interactive **Quorum Calculator** below turns these letters into a dial you 
 
 Both descend from the Dynamo paper and expose `N`, `W`, `R` *per operation*, the same physical cluster serves two opposite consistency contracts, which is the whole point.
 
-**Shopping-cart writes and the home feed, `N=3, W=1, R=1` (eventual, PA/EL).** Requirement (the R step): the cart must *always* accept an add, even during a partition, and a half-second of staleness on another device is invisible. So `W=1` (write returns on the first ack, lowest latency, survives 2 of 3 replicas down) and `R=1` (read the nearest replica, ~1-5 ms). Here `W + R = 2`, which is **not** `> 3`, deliberately eventual. Conflicts (the same cart edited on phone and laptop) are reconciled by version vectors / read-repair; Amazon famously let a re-added deleted item win rather than lose a sale. Under a partition this runs as a **sloppy quorum**, the add lands on whatever node is reachable, hinted-handed-off later, knowingly forgoing the overlap guarantee for the seconds before the hint delivers. **Rejected alternative:** majority quorum on the cart would lift every write to ~5-15 ms cross-AZ and refuse adds when ⌊N/2⌋+1 replicas are unreachable, paying a latency and availability tax to buy recency that a cart simply does not need.
+**Shopping-cart writes and the home feed, `N=3, W=1, R=1` (eventual, PA/EL).** Requirement (the R step): the cart must *always* accept an add, even during a partition, and a half-second of staleness on another device is invisible. So `W=1` (write returns on the first ack, lowest latency, survives 2 of 3 replicas down) and `R=1` (read the nearest replica, ~1-5 ms). Here `W + R = 2`, which is **not** `> 3`, deliberately eventual. Conflicts (the same cart edited on phone and laptop) are reconciled by version vectors / read-repair; Amazon famously let a re-added deleted item win rather than lose a sale. Under a partition this runs as a **sloppy quorum**, the add lands on whatever node is reachable and is forwarded home later by hinted handoff, knowingly forgoing the overlap guarantee for the seconds before the hint delivers.
 
-**Inventory decrement / "charge the card once", `N=3, W=2, R=2` (strong, EC).** Requirement: never sell the last unit twice, never double-charge. Now `W + R = 4 > 3`, every read overlaps the latest write, so a decrement reads its own effect immediately; and `W = 2 > 3/2` (majority) means two concurrent decrements can't both commit on *disjoint* replica sets, their write sets are forced to share a node. The price, stated honestly: every read and write waits on the 2nd-fastest of 3 replicas (often cross-AZ, ~5-15 ms), and the path goes **unavailable** the moment 2 of 3 replicas are unreachable, you need a quorum, not just any one node. **Rejected alternative:** `W=1,R=1` on inventory would stay available and fast under partition but could oversell; the cost of an oversell (refund, support ticket, lost trust, possibly a fraud vector) dwarfs the cost of asking the user to retry. We reject availability *here* on purpose, the mirror image of the cart decision.
+**Rejected alternative:** majority quorum on the cart would lift every write to ~5-15 ms cross-AZ and refuse adds when ⌊N/2⌋+1 replicas are unreachable, paying a latency and availability tax to buy recency that a cart simply does not need.
 
-**But the quorum alone does *not* finish the job, and saying so is the senior move.** A decrement is a **read-modify-write**, and a majority quorum makes the *read* strong, not the *sequence* atomic: two concurrent decrements can each read `stock = 1` through their own quorum and each write `0`, oversold, with `W + R > N` holding throughout. To actually prevent the lost update you layer a **conditional write / compare-and-set** on top, DynamoDB's `ConditionExpression` or a Cassandra **lightweight transaction** (`UPDATE … IF stock > 0`), which serializes the contending writes. Quorum overlap delivers recency; serializing a read-modify-write is a separate machine you bolt on.
+**Inventory decrement / "charge the card once", `N=3, W=2, R=2` (strong, EC).** Requirement: never sell the last unit twice, never double-charge. Now `W + R = 4 > 3`, every read overlaps the latest write, so a decrement reads its own effect immediately; and `W = 2 > 3/2` (majority) means two concurrent decrements can't both commit on *disjoint* replica sets, their write sets are forced to share a node. The price, stated honestly: every read and write waits on the 2nd-fastest of 3 replicas (often cross-AZ, ~5-15 ms), and the path goes **unavailable** the moment 2 of 3 replicas are unreachable, you need a quorum, not just any one node.
 
-The interview-grade takeaway: **the same store, the same three replicas, two quorum settings, chosen per data-flow from the requirement, with the cost of the rejected side quantified each time.** That is exactly the PACELC-dial-as-numbers idea from 2.7, made concrete.
+**Rejected alternative:** `W=1,R=1` on inventory would stay available and fast under partition but could oversell; the cost of an oversell (refund, support ticket, lost trust, possibly a fraud vector) dwarfs the cost of asking the user to retry. We reject availability *here* on purpose, the mirror image of the cart decision.
+
+**But the quorum alone does *not* finish the job, and saying so is the senior move.** A decrement is a **read-modify-write**, and a majority quorum makes the *read* strong, not the *sequence* atomic: two concurrent decrements can each read `stock = 1` through their own quorum and each write `0`, oversold, with `W + R > N` holding throughout. To actually prevent the lost update you layer a **conditional write / compare-and-set** on top, DynamoDB's `ConditionExpression` or a Cassandra **lightweight transaction (LWT)** (`UPDATE … IF stock > 0`), which serializes the contending writes. Quorum overlap delivers recency; serializing a read-modify-write is a separate machine you bolt on.
+
+The interview-grade takeaway: **the same store, the same three replicas, two quorum settings, chosen per data-flow from the requirement, with the cost of the rejected side quantified each time.** That is exactly the PACELC dial, made concrete as numbers.
 
 ### Trade-offs table: quorum configurations on N = 3
 | Config (N=3) | `W+R` vs N | Consistency | Write availability | Read availability | Tail latency | Use when… |
@@ -180,6 +184,3 @@ The Director-altitude signal throughout: you treat `N/W/R` as a **lever set agai
 
 > **Spaced-repetition recap:** Three notebooks (N): how many to write (W), how many to read (R)? Two sets in a pool of N must share one the moment `W + R > N`, the read can't miss the latest write (versioning picks the winner). Second rule, `W > N/2`, stops two writes diverging. Higher quorum = less availability + higher p99 = the PACELC dial in numbers. Sloppy quorum trades the overlap guarantee for write availability. Money → majority plus a conditional write/LWT for decrements; feeds → `W=R=1`; read-your-writes is a cheap session fix, not full quorum.
 
----
-
-*End of Lesson 2.8. Next: 2.9, Bloom filters, latency vs throughput, and batch vs stream, the supporting mechanics that keep the read/write paths in this module fast.*

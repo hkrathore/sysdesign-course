@@ -36,11 +36,15 @@ Read the right column: the *minimum* data you must move to rebalance onto one ne
 - **Add a node:** it takes over only the arc between it and its predecessor, stealing keys from exactly **one** successor. Expected data moved ≈ **K/N**.
 - **Remove a node:** its arc merges into its clockwise successor; only ≈ K/N keys move, to one place.
 
-For replication, you don't stop at the first node, you keep walking clockwise and place the next `RF−1` distinct physical nodes as replicas. Cassandra's `NetworkTopologyStrategy` does exactly this, skipping nodes to land replicas in different racks/AZs. The ring isn't just a partitioner; it's also the **replica-placement** function.
+For replication, you don't stop at the first node, you keep walking clockwise and place the next `RF−1` (replication factor minus one) distinct physical nodes as replicas. Cassandra's `NetworkTopologyStrategy` does exactly this, skipping nodes to land replicas in different racks/AZs. The ring isn't just a partitioner; it's also the **replica-placement** function.
 
 **Why a naive ring is lumpy, and why that's unacceptable.** Random placement of a handful of nodes does **not** carve the ring into equal arcs: with 10 nodes placed once each, the busiest node owns roughly **1.7×** the average load, so you over-provision the whole fleet to the peak. Worse, when a node dies, **all** of its load lands on its single clockwise neighbor, instantly doubling that neighbor's traffic, a cascading-overload hazard. A plain ring fixes the *rebalancing* problem but creates a *load-balance* problem.
 
-**Virtual nodes (vnodes), the fix, and the trade.** Place each physical node at **many** ring points (say 100-256) instead of once, so every machine owns many small, interleaved arcs. **Vnodes smooth the plain ring's ~1.7× peak imbalance down to ~1.1×, the difference between provisioning the fleet for 1.7× and 1.1× fair share, roughly a 35% capacity saving; the cost is more ring metadata and gossip.** Two further payoffs: a dead node's many little arcs scatter to many successors, so failure load **spreads across the cluster** instead of cascading onto one neighbor; and capacity becomes "number of vnodes," so a 2×-sized box simply gets 2× the vnodes, heterogeneous fleets without manual key juggling. The full trade you're accepting: larger routing tables, more ranges to stream and repair, and fragmented range scans, which is why vnode count is a **tuning decision, not "max it out"** (Cassandra walked its default back from 256 to 16 for exactly this reason; numbers below). The rejected alternative, no vnodes, is operationally simpler but gives you the lumpy load and cascade-on-failure; you'd choose it only when ranges must stay large and contiguous and you balance manually.
+**Virtual nodes (vnodes), the fix, and the trade.** Place each physical node at **many** ring points (say 100-256) instead of once, so every machine owns many small, interleaved arcs. **Vnodes smooth the plain ring's ~1.7× peak imbalance down to ~1.1×.** That is the difference between provisioning the fleet for 1.7× and 1.1× of fair share, roughly a **35% capacity saving**. The cost: more ring metadata and gossip.
+
+Two further payoffs: a dead node's many little arcs scatter to many successors, so failure load **spreads across the cluster** instead of cascading onto one neighbor; and capacity becomes "number of vnodes," so a 2×-sized box simply gets 2× the vnodes, heterogeneous fleets without manual key juggling.
+
+The full trade you're accepting: larger routing tables, more ranges to stream and repair, and fragmented range scans, which is why vnode count is a **tuning decision, not "max it out"** (Cassandra walked its default back from 256 to 16 for exactly this reason; numbers below). The rejected alternative, no vnodes, is operationally simpler but gives you the lumpy load and cascade-on-failure; you'd choose it only when ranges must stay large and contiguous and you balance manually.
 
 <details>
 <summary>Go deeper, vnode smoothing numbers and the Cassandra 256→16 story (IC depth, optional)</summary>
@@ -65,13 +69,13 @@ At 256 vnodes the hottest node sits within ~9% of fair share instead of 73% over
 ### Diagram: the ring, virtual nodes, and a key walking clockwise
 ```mermaid
 flowchart TD
-    subgraph RING[Hash ring · fixed space 0 to 2^32-1 · independent of node count]
+    subgraph RING[Hash ring · one fixed hash space · independent of node count]
       direction LR
       K[hash of key<br/>lands at point p] -->|walk clockwise<br/>to first node| OWN[Owner node]
       OWN -->|next RF-1 distinct nodes<br/>clockwise become replicas| REP[Replicas in other AZs]
     end
     subgraph VN[Why virtual nodes]
-      P1[Node A placed once<br/>peak/mean 1.73x] -->|place A at 256 points| P2[Node A times 256<br/>peak/mean 1.09x]
+      P1[Node A placed once<br/>peak/mean 1.73×] -->|place A at 256 points| P2[Node A times 256<br/>peak/mean 1.09×]
       P2 --> CAP[More vnodes claim more keys<br/>weight by node capacity]
       P2 --> FAIL[Node death scatters load<br/>to ~256 successors · no cascade]
     end
@@ -84,14 +88,14 @@ flowchart TD
 ```
 
 ### Interactive widget: feel the remap
-The widget renders a live hash ring. Drag the **node count**: the ring recolors only the one arc a new node steals (≈ K/N of the dots), while the side-by-side `hash mod N` panel recolors almost everything, the 80% / 90% / 99% figures made visual. Toggle **virtual nodes** (1 → 256) to watch the load bars converge from a lumpy ~1.7× peak toward ~1.1×, weight one node to see it claim more keys, and check the counter for the exact **percentage of keys moved** on the last change.
+The widget renders a live hash ring. Drag the **node count**: the ring recolors only the one arc a new node steals (≈ 1/N of the dots), while the side-by-side `hash mod N` panel recolors almost everything, the 80% / 90% / 99% figures made visual. Toggle **virtual nodes** (1 → 256) to watch the load bars converge from a lumpy ~1.7× peak toward ~1.1×, weight one node to see it claim more keys, and check the counter for the exact **percentage of keys moved** on the last change.
 
 <ConsistentHashingRing client:load />
 
 ### Worked example: scaling a Cassandra ring vs resizing a memcached fleet
-**Database (Cassandra), scale-out under load.** A 10-node cluster holding 10 TB is at 75% disk and you add 2 nodes. Because vnodes are scattered across the existing ring, the newcomers each claim ~1/12 of the token space *from many existing nodes at once*, each streams out a thin slice rather than one node dumping everything on one neighbor. Total data moved ≈ `2/12 × 10 TB ≈ 1.7 TB`, in parallel from all 10 sources, versus `mod N`, where 10→12 reshuffles ~83% (≈ 8.3 TB). The Director-altitude point is *operational*: that 1.7 TB stream competes with live traffic for network and disk I/O, so you **throttle streaming** and add nodes one at a time in low-traffic windows, accepting slower, capacity-planned scale-out (hours) to protect the latency SLO. This is also where you say "I'd have the storage team validate streaming throughput and repair time per node", delegating the IC depth while owning the decision.
+**Database (Cassandra), scale-out under load.** A 10-node cluster holding 10 TB is at 75% disk and you add 2 nodes. Because vnodes are scattered across the existing ring, the newcomers each claim ~1/12 of the token space *from many existing nodes at once*; each existing node streams out a thin slice rather than one node dumping everything on one neighbor. Total data moved ≈ `2/12 × 10 TB ≈ 1.7 TB`, in parallel from all 10 sources, versus `mod N`, where 10→12 reshuffles ~83% (≈ 8.3 TB). The Director-altitude point is *operational*: that 1.7 TB stream competes with live traffic for network and disk I/O, so you **throttle streaming** and add nodes one at a time in low-traffic windows, accepting slower, capacity-planned scale-out (hours) to protect the latency SLO. This is also where you say "I'd have the storage team validate streaming throughput and repair time per node", delegating the IC depth while owning the decision.
 
-**Cache (memcached + Ketama), capacity change.** A memcached fleet fronting your database uses a **Ketama** consistent-hashing client (the de-facto standard, ~160 vnodes per server). Scaling 9 → 10 nodes moves only ~10% of keys, which miss once and refill, a brief, bounded miss bump. With a plain `mod N` client, ~90% of keys would miss simultaneously and **all** of those re-reads slam the database at once: a self-inflicted thundering herd that can take it down precisely when you were adding capacity. The decision, Ketama over `mod N`, is justified by "10% gradual miss bump vs 90% miss storm," and the rejected alternative is rejected for the cache-stampede risk, not on aesthetics.
+**Cache (memcached + Ketama), capacity change.** A memcached fleet fronting your database uses a **Ketama** consistent-hashing client (the de-facto standard, ~160 vnodes per server). Scaling 9 → 10 nodes moves only ~10% of keys, which miss once and refill, a brief, bounded miss bump. With a plain `mod N` client, ~90% of keys would miss simultaneously and **all** of those re-reads slam the database at once: a self-inflicted thundering herd that can take it down precisely when you were adding capacity. The decision, Ketama over `mod N`, is justified by "10% gradual miss bump vs 90% miss storm," and the alternative is rejected for the cache-stampede risk, not on aesthetics.
 
 ### Trade-offs table: how to spread keys across nodes
 | Approach | Movement on Δnode | Load balance | Lookup cost | Use when… |
