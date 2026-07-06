@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> RAG turns the closed-book exam into an **open-book one**: retrieve the right passages at query time, hand them to a frozen model, and get fresh, private, **citable** answers without retraining. The system is two pipelines: an **ingest** path whose latency is your freshness, and a **query** path that retrieves wide (top 20–50) then reranks to a shortlist of 3–8. The tension the lesson turns on: **the model is rarely the problem, retrieval is**, and the signature failure is a confident, well-cited, wrong answer.
+
 ### Learning objectives
 - Explain **why RAG exists** — grounding a stateless, knowledge-frozen model in private, fresh, citable data — and when it beats the two alternatives (long-context stuffing, fine-tuning), each rejected for a stated reason.
 - Draw the **two pipelines** that every RAG system is: an **ingest** path (connect → parse → chunk → embed → index) and a **query** path (embed → retrieve → rerank → assemble → generate-with-citations), and name the decision that lives at each stage.

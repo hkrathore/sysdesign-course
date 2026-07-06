@@ -79,7 +79,7 @@ A locker bank is a **coat check with no attendant**. The system must pick a cubb
 
 **The two-phase allocation (the design's spine):**
 
-1. **Checkout, reserve a promise, not a slot.** Atomically decrement the `(location, size_class)` availability counter; no physical slot is bound, so nothing sits empty during transit. *Rejected, hard slot binding at checkout:* the 60% throughput tax from §E. *Rejected, pure assign-on-arrival:* couriers hit full lockers and redirect constantly; the customer was promised nothing. The middle path holds capacity in the cheapest unit that still makes the promise, a counter.
+1. **Checkout, reserve a promise, not a slot.** Atomically decrement the `(location, size_class)` availability counter; no physical slot is bound, so nothing sits empty during transit (the cubby chosen only when the coat arrives). *Rejected, hard slot binding at checkout:* the 60% throughput tax from §E. *Rejected, pure assign-on-arrival:* couriers hit full lockers and redirect constantly; the customer was promised nothing. The middle path holds capacity in the cheapest unit that still makes the promise, a counter.
 2. **Courier arrival, bind late.** The scan picks the smallest free slot ≥ package size via the strategy, flips it `AVAILABLE → OCCUPIED`, opens the door, marks the package `DELIVERED`, issues the code, fires the notification (the pipeline, one line).
 
 ```mermaid
@@ -161,7 +161,7 @@ class NearestFallback decorates AllocationStrategy {
 }
 ```
 
-**Smallest-fit is the default, defended in one sentence:** L slots are 20% of inventory but the only home for L packages; first-fit burns them on S packages and converts a *size* mismatch into *rejected large packages* days later. *Rejected, score-based placement across locations at checkout:* optimizing distance × fill × size when the customer already chose their location solves a problem nobody has; keep the fallback for bind-time misses only.
+**Smallest-fit is the default, defended in one sentence:** L slots are 20% of inventory but the only home for L packages; first-fit burns them on S packages and converts a *size* mismatch into *rejected large packages* days later (the scarf in the overcoat cubby). *Rejected, score-based placement across locations at checkout:* optimizing distance × fill × size when the customer already chose their location solves a problem nobody has; keep the fallback for bind-time misses only.
 
 ---
 
@@ -173,7 +173,7 @@ class NearestFallback decorates AllocationStrategy {
 
 **Leak 2, courier arrives, no physical slot.** The ledger said yes at checkout, but bind-time finds the bucket physically full, expired packages awaiting return ate the slack, or a package mis-declared its dims. *Fix:* the `NearestFallback` chain (size up → adjacent location → redirect as last resort), plus the real fix upstream: **count `AWAITING_RETURN` slots as unavailable in the promise ledger**, steel you cannot promise. Redirect rate < 2% is the system's primary health metric.
 
-**Leak 3, expiry treated as reclaim.** The classic wrong answer flips the slot `AVAILABLE` when the code expires, with a package still inside. *Fix:* expiry transitions the *package* (`DELIVERED → EXPIRED`, code `VOID`, return manifest queued); the *slot* moves `OCCUPIED → AWAITING_RETURN` and frees only at `return-collect`. The capacity model carries this dead time, it's why dwell averaged 1.5 days, not 1.0, in §E.
+**Leak 3, expiry treated as reclaim.** The classic wrong answer flips the slot `AVAILABLE` when the code expires, with a package still inside (the unclaimed coat at closing time). *Fix:* expiry transitions the *package* (`DELIVERED → EXPIRED`, code `VOID`, return manifest queued); the *slot* moves `OCCUPIED → AWAITING_RETURN` and frees only at `return-collect`. The capacity model carries this dead time, it's why dwell averaged 1.5 days, not 1.0, in §E.
 
 **Leak 4, double scans and replayed codes.** Couriers re-scan; kiosks retry on flaky networks. *Fix:* `deliver` idempotent on packageId; code redemption single-use via conditional update; kiosk attempt counter (5 tries → lockout + alert). Three one-line conditional writes, named in passing, spending five minutes here is over-engineering theater.
 

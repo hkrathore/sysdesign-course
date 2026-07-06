@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> Spark and Flink run the processing layer on opposite physics. Spark builds a lazy DAG over ~128 MB partitions and pays its bill in bursts at the shuffle, the all-to-all exchange that writes a terabyte to disk and drags it back over the network; Flink processes each event as it lands and pays continuously in keyed state, watermark delay, and checkpoint I/O. The freshness requirement makes the pick (seconds: micro-batch Spark; sub-second stateful: Flink); the work here is naming each engine's bottleneck and what the rejected one costs.
+
 ### Learning objectives
 - Explain **Apache Spark** as a batch/micro-batch engine, the DataFrame/RDD abstraction, **lazy evaluation** building a DAG (directed acyclic graph), the scheduler splitting that DAG into **stages at shuffle boundaries**, and why **the shuffle, the all-to-all data exchange, is the dominant cost center** (wide vs narrow transformations).
 - Explain **Apache Flink** as a true per-event streaming engine, **event-time vs processing-time**, **watermarks** for out-of-order and late events, the **windowing** choices (tumbling/sliding/session), **RocksDB-backed keyed state**, and **Chandy-Lamport checkpoint barriers** that give it exactly-once recovery.

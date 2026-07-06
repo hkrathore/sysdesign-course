@@ -87,7 +87,7 @@ I'll design for the **harder, increasingly-standard case: the lakehouse**, becau
 > This is the heart of the problem. Three nested decisions: **object storage** (where), **file format** (how each file), **table format** (how files become an ACID, evolvable table), and then warehouse-vs-lakehouse falls out.
 
 **1. Object storage as the substrate (decoupled storage).**
-- *Choice:* **S3 / GCS / ADLS** holds every byte, one copy, cheap, durable (11 nines), infinitely scalable, tier-able. Compute is separate and elastic.
+- *Choice:* **S3 / GCS / ADLS** holds every byte, one copy, cheap, durable (11 nines), infinitely scalable, tier-able (the basement keeping one master copy of every book). Compute is separate and elastic.
 - *Rejected, coupled storage+compute (classic Hadoop/HDFS (Hadoop Distributed File System) or a warehouse that owns its disks):* you scale the two together and pay for an always-on cluster sized to peak; decoupling is the entire modern premise.
 
 **2. File format: columnar Parquet (or ORC).**
@@ -95,7 +95,7 @@ I'll design for the **harder, increasingly-standard case: the lakehouse**, becau
 - *Rejected, row formats (CSV/JSON/Avro) for the query layer:* they force full-row reads and compress poorly; fine as a landing/interchange format, wrong as the analytical store.
 
 **3. Table format: an open table format (Iceberg / Delta Lake / Hudi), the decision that makes a lake a lakehouse.**
-- *The problem it solves:* a directory of Parquet files is **not a table**, no atomic multi-file commits, no schema evolution, no concurrent-writer safety, no time travel, and a metadata nightmare as files pile up. An **open table format** adds a metadata layer over the Parquet files that delivers exactly those: **ACID commits, snapshot isolation, schema and partition evolution, time travel, and concurrent readers/writers**, on open files any engine can read.
+- *The problem it solves:* a directory of Parquet files is **not a table**, no atomic multi-file commits, no schema evolution, no concurrent-writer safety, no time travel, and a metadata nightmare as files pile up. An **open table format** adds a metadata layer over the Parquet files that delivers exactly those: **ACID commits, snapshot isolation, schema and partition evolution, time travel, and concurrent readers/writers**, on open files any engine can read (the open card catalog any reader can use).
 - *Choice:* **Apache Iceberg** (engine-neutral, strong partition/schema evolution, broad multi-engine support) as the default, with **Delta Lake** equally valid (especially Databricks-centric shops); the *category* is the decision, the specific format is a delegated bake-off.
 - *Rejected, raw Parquet directories:* you reinvent transactions and metadata badly (the "hive table" era's pain). *Rejected, proprietary warehouse storage:* it gives all this turnkey but **locks the data inside one vendor's engine**, so your ML/Spark workloads can't read it without export, and you pay warehouse storage prices at PB scale. The open table format is what lets **one copy serve every engine.**
 
@@ -236,7 +236,7 @@ CDC needs to apply updates and deletes (GDPR erasure, late corrections), which r
 
 **Bottleneck 4, workload contention.**
 A heavy ML scan or a runaway transform starves interactive BI.
-*Fix:* **separate compute pools** sized per workload (interactive BI, batch ETL, ML), all on one data copy, the decoupling payoff. *Trade-off:* more pools to manage vs guaranteed isolation; cheap insurance for a central store.
+*Fix:* **separate compute pools** sized per workload (interactive BI, batch ETL, ML), all on one data copy, the decoupling payoff (each workload its own reading room). *Trade-off:* more pools to manage vs guaranteed isolation; cheap insurance for a central store.
 
 **Bottleneck 5, metadata and catalog scaling / governance.**
 Thousands of tables, millions of files, many teams, who can read PII, what's authoritative, where did this number come from?

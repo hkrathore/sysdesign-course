@@ -82,7 +82,7 @@ flowchart LR
     API -.-> SWEEP[TTL sweeper<br/>hygiene only]
 ```
 
-**Division of labor:** the **facade** owns the public contract, the store, capacity accounting, and *when* eviction happens (insert past capacity). The **policy** owns *who* gets evicted - and **owns its own bookkeeping structure**: a recency list for LRU, frequency buckets for LFU, an expiry ordering for TTL. The facade calls it through four narrow hooks: *recorded an access, recorded an insert, removed a key, give me a victim.*
+**Division of labor:** the **facade** owns the public contract, the store, capacity accounting, and *when* eviction happens (insert past capacity). The **policy** owns *who* gets evicted - and **owns its own bookkeeping structure**: a recency list for LRU, frequency buckets for LFU, an expiry ordering for TTL (the attendant's private re-hanging habit). The facade calls it through four narrow hooks: *recorded an access, recorded an insert, removed a key, give me a victim.*
 
 **Why this seam and not the alternatives:**
 - *Rejected: inheritance* (`LRUCache extends BaseCache`). Policies multiply (LRU×TTL? LFU with weight?) and inheritance forces a class per combination, with subclasses touching internals they shouldn't. Composition keeps the policy a sealed component - Strategy over template-method, and naming the pattern is cheap credibility.
@@ -129,7 +129,7 @@ interface EvictionPolicy<K>
 
 The **entry** carries key, value, weight, optional expiry, and **a handle to the policy's bookkeeping node** for that key - the back-pointer that makes everything O(1): when `get` hits the map, the policy splices its node without searching for it.
 
-**The O(1) result, in one sentence:** a hash map gives O(1) lookup, a doubly-linked recency list gives O(1) move-to-front and O(1) evict-from-tail, and the entry's node pointer ties them - **hash map for *finding*, linked list for *ordering*, neither doing the other's job.** State that, offer depth if wanted, and spend your minutes on the contract. Reciting the pointer surgery unprompted is the too-deep failure mode the altitude lesson warns of.
+**The O(1) result, in one sentence:** a hash map gives O(1) lookup, a doubly-linked recency list gives O(1) move-to-front and O(1) evict-from-tail, and the entry's node pointer ties them - **hash map for *finding*, linked list for *ordering*, neither doing the other's job.** (Tags find; rack order evicts.) State that, offer depth if wanted, and spend your minutes on the contract. Reciting the pointer surgery unprompted is the too-deep failure mode the altitude lesson warns of.
 
 <details>
 <summary>Go deeper, HashMap + DLL mechanics and the LFU variant (IC depth, optional)</summary>
@@ -178,7 +178,7 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 
 > Design evolution adapts from "10× the traffic" to **"10× the requirements"** - then to the question that ends the LLD frame entirely.
 
-**Near-term, already paid for by the seams:** byte-weight capacity; LFU/TTL as new classes on the same four hooks; striping behind the facade if profiling demands; read-through loading as a *decorator* over the same `Cache` interface, not a contract change.
+**Near-term, already paid for by the seams:** byte-weight capacity; LFU/TTL as new classes on the same four hooks (new re-hanging habits, same customer window); striping behind the facade if profiling demands; read-through loading as a *decorator* over the same `Cache` interface, not a contract change.
 
 **The production honesty (Directors say this; juniors don't):** *in real life I would not build this.* Caffeine (JVM), `lru-cache` (Node), or an `OrderedDict` wrapper beat anything written in 40 minutes - Caffeine's TinyLFU admission alone is worth several hit-rate points over textbook LRU. The exercise tests whether you can **design what those libraries are** - then designing it anyway with full command is the strongest frame.
 

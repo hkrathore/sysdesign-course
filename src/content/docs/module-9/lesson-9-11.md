@@ -5,6 +5,8 @@ sidebar:
   order: 11
 ---
 
+> An agent's context window is a small desk that you pay to re-read in full on every turn: at ~$3 per million input tokens, a context grown to 100k costs ~$0.30 of input per turn, and the model loses whatever is buried in the middle. Memory is therefore a keep-vs-retrieve-vs-drop decision, not "store everything." The structural trade the lesson turns on: summarization saves tokens but loses fidelity; retrieval keeps fidelity but can miss invisibly. The production answer layers both, and a hierarchical design cuts per-turn input cost ~10×.
+
 ### Learning objectives
 - Treat the **context window as finite and metered RAM**: every token costs money and latency *every turn*, and answer quality degrades as it fills ("context rot" / lost-in-the-middle). Memory is therefore a **keep-vs-retrieve-vs-drop** decision, not "store everything."
 - Distinguish **short-term / working memory** (the in-context conversation + scratchpad) from **long-term memory**, and name the three long-term types — **episodic** (past events), **semantic** (durable facts), **procedural** (learned skills/preferences) — and the store each maps to.

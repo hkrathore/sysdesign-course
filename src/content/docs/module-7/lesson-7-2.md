@@ -5,6 +5,8 @@ sidebar:
   order: 2
 ---
 
+> A row store files each entity's fields side by side; a column store files each field's values side by side, and that byte-order choice sets the cost of every query for the table's life. A single-column aggregate on a 50-column table reads ~1/50 of the bytes, compressed 3–10× because the column is homogeneous, crunched 10–100× faster per core vectorized: that triple is the "orders of magnitude," and it is layout, not caching. The boundary to respect: point lookups and row-level updates still belong on the row store.
+
 ### Learning objectives
 - Explain the **physical layout** difference between a **row store** and a **column store** on disk, and derive why an N-column table answers a single-column aggregate by reading roughly **1/N of the bytes** in a column store.
 - Connect layout to workload: why **OLTP (online transaction processing) point access wants rows** (one entity = one contiguous read/write) and **OLAP (online analytical processing) scans want columns** (one metric across all entities), the mechanics under the OLTP/OLAP divide.

@@ -5,6 +5,8 @@ sidebar:
   order: 5
 ---
 
+> There are two analytical stores, not one: the warehouse answers hard questions in seconds-to-minutes for tens of analysts, and a real-time OLAP engine (Druid, Pinot, ClickHouse) answers simple aggregations in sub-second p99 at hundreds-to-thousands of QPS over seconds-fresh data. The whole lesson turns on refusing to force one engine into both corners. The price of instant-for-everyone is rollup at ingest: 10–100× fewer rows, raw granularity gone, the queryable dimensions pre-decided.
+
 ### Learning objectives
 - Name the **second analytical store** as a distinct class: a warehouse/lakehouse answers *complex, flexible* queries in seconds-to-minutes at *low* concurrency; a **real-time OLAP (online analytical processing) / serving engine** (Druid, Pinot, ClickHouse) answers *simple aggregation* queries in **sub-second p99** at **hundreds-to-thousands QPS** (queries per second) over **seconds-fresh** data, and the gap between those two profiles is the whole reason this class exists.
 - Explain the four mechanics that make sub-second-at-high-concurrency possible, **columnar time-partitioned immutable segments**, **pre-aggregation / rollup at ingest**, **inverted/bitmap indexes** for fast filtering, and **memory-resident hot data**, at decision altitude (mechanics in Go-deeper).

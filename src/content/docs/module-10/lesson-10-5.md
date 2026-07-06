@@ -137,7 +137,7 @@ flowchart TB
 
 **Happy path — a knowledge answer:** user message → orchestrator assembles context (system prompt + history + RAG retrieval over the KB) → input moderation/injection screen → LLM → it's a knowledge question, so stream the answer back **with citations** to the source docs.
 
-**Action path — the part that matters:** the LLM decides to call a tool (say `issue_refund`). The call does **not** execute directly. It goes to the **guardrail/policy layer first**, which checks, server-side: is this tool permitted for this agent role (least privilege)? Is the customer eligible per the actual policy (within the return window, owns the order)? Is the amount within the **auto-approval cap**? If all yes → execute via the tool adapter **with a deterministic idempotency key**, write to the audit log, return the result, the model confirms to the user. If over cap, irreversible, or low-confidence → **do not execute**: create a HITL item carrying the *proposed* action for a human to approve, and tell the user it's being reviewed.
+**Action path — the part that matters:** the LLM decides to call a tool (say `issue_refund`). The call does **not** execute directly. It goes to the **guardrail/policy layer first**, which checks, server-side: is this tool permitted for this agent role (least privilege)? Is the customer eligible per the actual policy (within the return window, owns the order)? Is the amount within the **auto-approval cap**? If all yes → execute via the tool adapter **with a deterministic idempotency key**, write to the audit log, return the result, the model confirms to the user. If over cap, irreversible, or low-confidence → **do not execute**: create a HITL item carrying the *proposed* action for a human to approve (the manager's desk), and tell the user it's being reviewed.
 
 **Escalation path:** out-of-scope intent, low confidence, repeated tool failure, abuse, or an explicit user request → hand off to the human queue **with the full transcript and context**, so the human starts warm.
 
@@ -185,7 +185,7 @@ GET  /v1/audit?sessionId=                    # internal: full action trail
 
 - **`Idempotency-Key` is mandatory on every mutating tool call, derived deterministically** from `(sessionId, tool, orderId, intent)` — so if the model re-emits the same tool call (a retry, a crash-resume, a double-render), the second call is a **no-op replay**, not a second refund. *Rejected:* a random key per call, or no key — that's how you double-refund. (This is the payments idempotency pattern, reused.)
 - **Refund returns `202 needs_approval` when over cap or ineligible**, instead of executing. The decision to refund $5,000 is *structurally* a human's. *Rejected:* auto-executing and "flagging for review later" — the money's already gone.
-- **Tools are scoped per agent role (least privilege).** The customer-support agent simply does not hold a `delete_account` or `refund_unlimited` capability. *Rejected:* one broad "do-anything" tool guarded only by the prompt.
+- **Tools are scoped per agent role (least privilege).** The customer-support agent simply does not hold a `delete_account` or `refund_unlimited` capability (no company hands those to a junior rep). *Rejected:* one broad "do-anything" tool guarded only by the prompt.
 
 ---
 
@@ -222,7 +222,7 @@ The policy layer is **deterministic code outside the model**. It receives the mo
 
 **Failure 2 — Wrong or duplicate action.** The model emits `issue_refund` twice (a retry, a crash-resume, a double-click). The deterministic idempotency key + unique DB constraint make the second call a replay returning the original result. On a durable runtime, a crash mid-action resumes from the checkpoint without re-executing the side effect. This is precisely the payments guarantee: **exactly-once *effect* on at-least-once infrastructure.**
 
-**Failure 3 — Hallucinated policy.** The model invents an eligibility rule ("you're entitled to a refund after 90 days"). Mitigation: ground every policy claim in **RAG with citations**, and — decisively — enforce the *real* eligibility in the policy layer, which doesn't care what the model believes. When the model is unsure, it refuses or escalates rather than inventing.
+**Failure 3 — Hallucinated policy.** The model invents an eligibility rule ("you're entitled to a refund after 90 days"). Mitigation: ground every policy claim in **RAG with citations**, and — decisively — enforce the *real* eligibility in the policy layer, which doesn't care what the model believes (the rep checking the actual rulebook, not the customer's claim). When the model is unsure, it refuses or escalates rather than inventing.
 
 **Failure 4 — Bad escalation calibration.** Over-escalate and deflection collapses (no business value); under-escalate and the agent acts when it shouldn't. Route on a blend of model confidence + action risk + repeated-failure detection; tune the thresholds against real outcomes.
 

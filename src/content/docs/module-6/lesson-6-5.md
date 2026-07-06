@@ -45,7 +45,7 @@ The LLD question is not "which mechanism is best." It is: **design the turnstile
 
 **Hot-path budget.** One server at **5K req/s**, handler p50 ~2 ms. At 50 µs, `allow()` adds 2.5% latency and `5K × 50 µs = 0.25` CPU-sec/sec, a quarter core. At 1 ms (a careless contended implementation): 5 full cores for rate limiting alone. The budget rules out anything heavier than a map lookup plus arithmetic under a brief lock.
 
-**Why a global lock dies.** A 10 µs critical section under one global lock: at 5K req/s the lock is 5% busy, fine. At 50K req/s (a beefy gateway box): **50% utilization**, and by the queueing math waits explode well before saturation, every request queues behind one lock. Contention must be per-client.
+**Why a global lock dies.** A 10 µs critical section under one global lock: at 5K req/s the lock is 5% busy, fine. At 50K req/s (a beefy gateway box): **50% utilization**, and by the queueing math waits explode well before saturation, every request queues behind one lock (the whole building behind one guard). Contention must be per-client.
 
 **Memory per client, this decides the algorithm.** Token bucket: 2 longs ≈ **50 B with overhead**; 1M clients ≈ **50 MB**, trivial. Sliding-window log: a timestamp per request in the window, at 1,000 req/min, `1,000 × 8 B = 8 KB`/client; 1M clients ≈ **8 GB**, dead as a default. The same log on *5 attempts/hour* (password resets): 40 B, fine for **low-limit, high-stakes rules.**
 
@@ -88,7 +88,7 @@ flowchart TD
 **The flow:** the facade resolves the **rule**, fetches-or-creates the client's **state entry**, and dispatches to the rule's **Strategy**, which checks-and-updates *under the entry's lock*, returning a `Decision`.
 
 **The load-bearing decision, the Strategy seam.** Algorithms are objects behind one interface; the rule names which it wants.
-- *Why:* requirements demand different algorithms per endpoint (burst-friendly bucket for charges, exact log for logins). Hardcoding one makes the next requirement a rewrite; the seam makes it a config line, and each strategy unit-tests against a fake clock.
+- *Why:* requirements demand different algorithms per endpoint (burst-friendly bucket for charges, exact log for logins), the vault's logbook, the lobby's coin cup. Hardcoding one makes the next requirement a rewrite; the seam makes it a config line, and each strategy unit-tests against a fake clock.
 - *Rejected, one über-algorithm with a strictness knob:* conflates genuinely different state shapes (two longs vs a timestamp deque) behind leaky parameters; you inherit the union of all bugs.
 - *Rejected, subclassing per algorithm:* welds the algorithm to the facade, so one limiter can't serve mixed rules, our actual requirement. Composition over inheritance, chosen from the requirement.
 
@@ -132,7 +132,7 @@ interface RateLimitStrategy {                           // the Strategy seam
 
 **State records, per strategy:** token bucket, `tokens` + `lastRefillNanos` (~50 B); sliding-window log, a deque of timestamps (8 B × limit); fixed window, `windowStart` + `count` (~50 B). Each entry also carries **its own lock** and `lastAccessNanos` for eviction, the data model anticipates Evaluation's concurrency and Storage's TTL.
 
-The fixed-window flaw, once: rule 100/min, 100 requests at 0:59 and 100 at 1:01 are both allowed: **200 in two seconds**, because the reset is a cliff. Fine for coarse abuse caps; unacceptable where the limit *is* the contract. (Algorithm internals are the material; here we need only state shapes and costs.)
+The fixed-window flaw, once: rule 100/min, 100 requests at 0:59 and 100 at 1:01 are both allowed: **200 in two seconds**, because the reset is a cliff (the tally counter flipping to zero). Fine for coarse abuse caps; unacceptable where the limit *is* the contract. (Algorithm internals are the material; here we need only state shapes and costs.)
 
 <details>
 <summary>Go deeper, full token-bucket strategy listing with per-entry locking (IC depth, optional)</summary>

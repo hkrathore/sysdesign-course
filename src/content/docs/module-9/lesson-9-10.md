@@ -5,6 +5,8 @@ sidebar:
   order: 10
 ---
 
+> A tool-less LLM is a brilliant intern who can only talk; tools hand it a phone and a corporate card, and the whole safety story is that the intern never swipes the card itself. The model emits a structured request slip (name plus JSON args); your orchestrator is the single place that validates, gates, and executes. The tension the lesson turns on: every tool is both the agent's value and its blast radius; ask of each one what it can do if the model is tricked into calling it.
+
 ### Learning objectives
 - Explain the **function-calling contract** — tools advertised as JSON schemas, the model emits a *structured call*, your code executes it and returns the result, the loop continues — and why "the model never runs anything itself" is the load-bearing boundary.
 - Design a **tool surface the model can actually use**: clear names/descriptions/typed schemas, few well-scoped tools over many overlapping ones, instructive error returns, parallel calls — and know why selection degrades as the count climbs into the dozens.

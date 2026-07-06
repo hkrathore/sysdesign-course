@@ -5,6 +5,8 @@ sidebar:
   order: 6
 ---
 
+> An LLM erases the boundary every secure system is built on: **instructions and data share one text stream**, so anything the model reads, a user message, a RAG chunk, a web page, can become a command. Prompt injection therefore has **no complete fix**; it is structural, not a bug. The design that survives: put the **trust boundary outside the model**, grant least privilege, gate irreversible actions, and treat every token it emits as untrusted input. Size defenses to the **blast radius**, not to hope of prevention.
+
 ### Learning objectives
 - Map the **new attack surface** an LLM opens that a traditional service does not: a single text stream where instructions and data are indistinguishable, so anything the model *reads* can become a command.
 - Distinguish **input risks** (direct and indirect prompt injection, jailbreaks, PII/secrets in prompts) from **output risks** (hallucination, policy-violating content, PII/system-prompt leakage, and **insecure downstream handling** of model output), and name the defense each calls for.

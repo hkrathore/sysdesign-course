@@ -5,6 +5,8 @@ sidebar:
   order: 9
 ---
 
+> The worst data failure is not a crash, it is a chart that renders beautifully and is 40% wrong for six days while a VP reprices off it. Trust is engineered against that with seven quantified test dimensions, and the whole design turns on two placements: prevent the break at the producer (a contract, zero detection lag, costs org buy-in) or catch it after it lands (observability, broad but late). Per data product you then pick the consequence: circuit-break when wrong costs more than stale, alert when freshness wins.
+
 ### Learning objectives
 - Name the **seven data-quality dimensions** a designer engineers around, freshness, volume, schema, distribution/values, uniqueness, referential integrity, completeness, and state which failure each one catches, so "is the data good?" becomes a set of quantified, testable assertions instead of a vibe.
 - Treat **tests in the pipeline** (dbt tests, Great Expectations, Soda) as the **regression suite for data**, the exact analog of the eval gate for LLMs: a fixed set of assertions every model run must pass before its output is trusted downstream.

@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> An LLM is not software you run: it is a **frozen next-token predictor rented by the token**, stochastic, stateless, and metered on every word in and out. Everything follows from that: "memory" is context you resend each call, cost scales with **usage, not servers**, and latency splits into **prefill** (sets time to first token, grows with the prompt) and **decode** (~10–50 ms per output token). Build the token model first; context size, output caps, streaming, and model choice all fall out of it.
+
 ### Learning objectives
 - Describe an LLM at **architecture altitude**: a frozen, **stochastic, stateless, token-metered** next-token predictor you *compose*, not train, and say what each of those four words costs you in a design.
 - Reason in **tokens**: estimate token counts, explain why the **context window** is a finite, shared input+output budget, and why "just use a bigger context" is not free.
@@ -27,8 +29,8 @@ That single image carries most of the design consequences. **No memory** means e
 Four properties of that function drive every architecture decision:
 
 - **Stochastic.** It samples from a probability distribution, so the same prompt can yield different outputs. You **reject** "the model will return the same JSON every time" as a design assumption; you validate and constrain output instead.
-- **Stateless.** A call carries no memory of prior calls. **All** conversational state is context you resend. This is liberating (any replica serves any request, like a stateless web tier) and expensive (you pay to resend history every turn).
-- **Token-metered.** Cost and the context limit are denominated in tokens, not requests or megabytes. You design in tokens.
+- **Stateless.** A call carries no memory of prior calls (the contractor kept no notes). **All** conversational state is context you resend. This is liberating (any replica serves any request, like a stateless web tier) and expensive (you pay to resend history every turn).
+- **Token-metered.** Cost and the context limit are denominated in tokens, not requests or megabytes (the per-word meter, always running). You design in tokens.
 - **Frozen + cut off.** Its knowledge ends at a training cutoff and doesn't update. Anything newer or private must be supplied at call time (→ RAG).
 
 **Tokens are the unit of everything.** Models don't see characters or words; they see **tokens**, subword chunks produced by a byte-pair-encoding tokenizer. A useful back-of-envelope: **~4 characters per token, ~0.75 words per token, so ~750 words ≈ 1,000 tokens.** Code, rare words, and non-English text tokenize less efficiently (more tokens per word). You estimate token budgets the way you estimate QPS (queries per second) and storage elsewhere in this course: roughly, out loud, with stated assumptions. A 20-page document is ~10–12k tokens; a paragraph of chat is ~100–200 tokens; a typical system prompt is a few hundred.
@@ -68,7 +70,7 @@ Order-of-magnitude in 2026: frontier-model **output** runs on the order of **sin
 
 **The failure modes you must design around (before any framework).** These are not edge cases; they're properties of the machine:
 
-- **Hallucination**: fluent, confident, plausible, and wrong. The model optimizes for likely-sounding tokens, not truth. Mitigate with grounding/citations (RAG) and evaluation; never assume output is correct.
+- **Hallucination**: fluent, confident, plausible, and wrong. The model optimizes for likely-sounding tokens, not truth (the contractor improvising past a fact it can't see). Mitigate with grounding/citations (RAG) and evaluation; never assume output is correct.
 - **Knowledge cutoff / staleness**: the model knows nothing past training and nothing private. Anything fresh or proprietary must be supplied at call time (RAG, tools).
 - **Non-determinism**: same prompt, different output. Even at temperature 0 you should not contract on bit-exact reproducibility. Validate and constrain, don't assume.
 - **Prompt sensitivity**: small wording changes shift behavior; treat prompts as versioned artifacts under eval.

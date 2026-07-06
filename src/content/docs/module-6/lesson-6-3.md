@@ -104,7 +104,7 @@ The three transitions that earn the offer: **Collecting → Refunding** (change 
 
 **Approach A, conditional/flag soup.** One class; enums, booleans, a `switch (state)` in every handler. *Pros:* fastest to write; fine at 2-3 states. *Cons:* one state's logic smears across every handler, **adding a state touches every method** (~8 edit sites); flag combos make illegal states representable (16 for 6, per E); the matrix lives implicitly in branches nobody can audit. This version ships the missing-refund bug.
 
-**Approach B, the State pattern (my choice).** One class per state implementing a common event interface; each handler **returns the next state**. *Pros:* each state's behavior in one file; **adding a state = adding a class**; illegal events rejected by a base-class default in *one* place; the diagram maps 1:1 to the class list. *Cons:* more classes (~8 vs 1); shared data threads through the context, mild ceremony.
+**Approach B, the State pattern (my choice).** One class per state implementing a common event interface (one specialist clerk per mood); each handler **returns the next state**. *Pros:* each state's behavior in one file; **adding a state = adding a class**; illegal events rejected by a base-class default in *one* place; the diagram maps 1:1 to the class list. *Cons:* more classes (~8 vs 1); shared data threads through the context, mild ceremony.
 
 **Approach C, table-driven FSM.** A literal table `(state, event) → (guard, action, nextState)` plus a tiny interpreter. *Pros:* the matrix is **data**, auditable, diffable, exhaustiveness trivially checkable. *Cons:* guards and actions with real logic degrade into named function pointers, indirection, not clarity.
 
@@ -218,9 +218,9 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 
 **Failure 4, cancel races the dispense.** *Handling:* `Dispensing.onCancel()` returns `this`, too late, the motor committed. Handlers process events serially against one explicit state, so the race collapses to event order, flag-soup designs genuinely lose this one to interleaved boolean updates.
 
-**Failure 5, refund itself fails** (hopper fault mid-refund). *Handling:* `Refunding → OutOfService`, journal the amount owed, alert the route driver. **Fail safe and stop trading.** *Rejected: keep vending, settle later*, every vend compounds an unaccounted liability.
+**Failure 5, refund itself fails** (hopper fault mid-refund). *Handling:* `Refunding → OutOfService`, journal the amount owed, alert the route driver. **Fail safe and stop trading.** (The clerk closes the desk for repairs.) *Rejected: keep vending, settle later*, every vend compounds an unaccounted liability.
 
-**Closing re-check:** every cent exits as price, change, or refund in all five walks; illegal transitions hit the base-class rejection; the 48-cell test pins the matrix. Invariant holds.
+**Closing re-check:** every cent exits as price, change, or refund in all five walks; illegal transitions hit the base-class rejection (no slot on the desk); the 48-cell test pins the matrix. Invariant holds.
 
 ---
 

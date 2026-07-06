@@ -156,7 +156,7 @@ flowchart TB
 **Query pipeline (happy path):**
 
 1. Embed the question; in parallel run a **BM25 lexical** retrieval (hybrid — vectors miss exact IDs, error codes, and rare proper nouns that keyword search nails).
-2. **ACL pre-filter:** the ANN/keyword query carries the user's group set and only returns chunks whose `acl_tags` intersect it. **Permissions are applied *inside* retrieval, before any chunk is read or ranked.**
+2. **ACL pre-filter:** the ANN/keyword query carries the user's group set and only returns chunks whose `acl_tags` intersect it (the "Partners only" folder never leaves the shelf). **Permissions are applied *inside* retrieval, before any chunk is read or ranked.**
 3. **Rerank** the ~50–100 survivors with a cross-encoder to get the truly top ~5–10 (first-stage ANN recall is good but ordering is coarse).
 4. **Assemble** context within the token budget, ordering for **lost-in-the-middle** (put the strongest chunks at the start and end, not buried in the middle where models attend least).
 5. **Generate** with an instruction to answer *only* from the provided context and to cite chunk IDs.
@@ -238,9 +238,9 @@ Tombstones matter because ANN indexes don't love hard deletes — removing a vec
 
 Now the failure modes.
 
-**Failure 1 — confidently wrong on bad retrieval (the trust-killer).** Retrieval missed the relevant chunk (recall@k miss); the model fluently answered from whatever it got. *Detection:* low retrieval recall on the eval set; faithfulness check flags claims with no supporting chunk. *Fix:* improve chunking/hybrid weighting/reranking — **fix retrieval first**, never reach for a bigger model. This is why the eval gate separates the two metric families.
+**Failure 1 — confidently wrong on bad retrieval (the trust-killer).** Retrieval missed the relevant chunk (recall@k miss); the model fluently answered from whatever it got (eloquence over the wrong shelf). *Detection:* low retrieval recall on the eval set; faithfulness check flags claims with no supporting chunk. *Fix:* improve chunking/hybrid weighting/reranking — **fix retrieval first**, never reach for a bigger model. This is why the eval gate separates the two metric families.
 
-**Failure 2 — stale index (freshness breach).** A policy changed 5 minutes ago; the answer cites the old version. *Detection:* `updated_at` on cited chunks vs. source; freshness-lag dashboards per connector. *Fix:* incremental ingestion with low-latency change feeds and tombstones; surface `updated_at` in every citation so staleness is visible, not silent.
+**Failure 2 — stale index (freshness breach).** A policy changed 5 minutes ago; the answer cites the old version (the 2019 binder, handed over confidently). *Detection:* `updated_at` on cited chunks vs. source; freshness-lag dashboards per connector. *Fix:* incremental ingestion with low-latency change feeds and tombstones; surface `updated_at` in every citation so staleness is visible, not silent.
 
 **Failure 3 — permission leak (the breach, NFR #2).** A chunk the user can't see appears in an answer. *Detection:* this must be *impossible by construction* (pre-filter), backed by an automated audit that replays queries as different identities and asserts zero forbidden chunks. *Fix:* the architecture, not a patch — ACLs are enforced inside retrieval. A leak is a reportable security incident; this is why post-filtering is unacceptable (you've already loaded forbidden content into the candidate set and into model context).
 

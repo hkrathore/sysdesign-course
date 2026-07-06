@@ -44,7 +44,7 @@ That paragraph quantifies the work, proposes a contract instead of asking permis
 
 **The state is trivial, say so in one breath:** 64 squares, ≤32 piece objects, a packed board ~32 bytes; a move encodes in ~4 bytes; average legal moves per position ≈ 35. Nothing is a scale problem; the only scarce resource is **interview minutes**.
 
-**The line-count asymmetry that justifies the split:**
+**The line-count asymmetry that justifies the split (the two boxes, weighed):**
 - *Geometry:* rook/bishop/queen share one ray-sliding helper (~15 lines); knight and king are offset-table lookups (~5 each); the pawn is the diva, direction asymmetry, two-square first move, diagonal-only capture, ~25 lines. **Total ≈ 150 lines, ~20 minutes.**
 - *Legality:* castling = **5 preconditions** (king unmoved, rook unmoved, path empty, king not in check, king doesn't cross an attacked square, two need history or attack maps); en passant needs the *previous move*; checkmate needs generate-all-moves-and-simulate; threefold repetition needs the full game log. **Total 400+ lines, hours**, 3:1 the work for the layer with the *least* design signal.
 
@@ -103,7 +103,7 @@ classDiagram
 
 **The load-bearing decision, polymorphic `Piece.canMove()` for geometry.** Composition-over-inheritance is good dogma *because* most taxonomies are open and most behaviors combine. Chess geometry is the counter-case: a **closed taxonomy** (six types, fixed for 500 years), behavior that **varies entirely by type**, **zero combination** (no piece is "a bishop that also jumps"). Exactly the conditions where inheritance is the clearest tool, one class per type, independently unit-testable, no indirection tax. *Rejected, a `MoveValidator` strategy per piece type:* it buys runtime-swappable movement rules, what you'd want for fairy-chess variants, and is pure ceremony when variants aren't a requirement. The Director sentence: *"I'd use Strategy the day variants enter the requirements; today it's an abstraction with no second implementation."* *Rejected, one centralized `validateMove` switch:* how engines do it for speed, but it collapses six testable units into one 200-line conditional and erases the OO signal being scored.
 
-**The second load-bearing decision, game-state legality does *not* live in pieces.** The litmus test, stated out loud: *can this rule be decided from the piece's own movement shape alone?* Check, castling, en passant, and promotion all fail it, they need the board, the history, or both, so they live behind `RulesEngine`. This is why "check detection in `King.canMove()`" is the classic wrong answer: check is a predicate over *every enemy piece's* geometry, not a property of the king's movement.
+**The second load-bearing decision, game-state legality does *not* live in pieces.** The litmus test, stated out loud: *can this rule be decided from the piece's own movement shape alone?* (the box-sorting question) Check, castling, en passant, and promotion all fail it, they need the board, the history, or both, so they live behind `RulesEngine`. This is why "check detection in `King.canMove()`" is the classic wrong answer: check is a predicate over *every enemy piece's* geometry, not a property of the king's movement.
 
 **Move flow, compressed:** `Game.makeMove(from, to)` → bounds/turn/ownership guards → `piece.canMove(board, from, to)` (geometry) → `rulesEngine.isLegal(board, history, move)` (stubbed true, structure shown) → `board.apply(move)` → append to history → flip turn.
 
@@ -159,7 +159,7 @@ class Game {
 
 **Probe 1, "Where does check detection live?"** In `RulesEngine`, and the cheap version if time permits: `isInCheck(board, color)` = *does any enemy piece's `canMove` reach this king's square*, ~10 lines that **reuse the geometry layer verbatim**. The expensive-sounding rule is a loop over the cheap layer. Full legality ("no move may leave your own king in check") then needs apply-test-undo simulation, name it, stub it, don't write it.
 
-**Probe 2, "Your pawn is wrong."** It usually is, the pawn carries 5 special behaviors and is where geometry bugs cluster. Direction asymmetry, double-step, diagonal-only capture: pure geometry → inside `Pawn`. En passant and promotion **fail the litmus test** → `RulesEngine`. Drawing that line through one piece beats six perfect classes.
+**Probe 2, "Your pawn is wrong."** It usually is, the pawn carries 5 special behaviors and is where geometry bugs cluster. Direction asymmetry, double-step, diagonal-only capture: pure geometry → inside `Pawn`. En passant and promotion **fail the litmus test** → `RulesEngine`. Drawing that line through one piece beats six perfect classes (the pawn straddles both boxes).
 
 **Probe 3, "Isn't an interface with one stub implementation over-engineered?"** No: `RulesEngine` is **negotiated scope made structural**, the receipt for the deal cut in R, with check/castling/en passant as *named, certain* future implementations. Abstraction with named clients is design; with imagined clients, theater, and the Strategy-per-piece you *declined* on those grounds shows the judgment is a policy, not a coin flip.
 

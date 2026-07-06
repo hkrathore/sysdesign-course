@@ -165,11 +165,11 @@ flowchart TB
 
 **Happy path, a coding task ("fix issue #482"):**
 
-1. User submits the goal with autonomy level and a budget (e.g., 3M tokens / 30 min / 50 steps). The **budget guard** initializes a ledger.
-2. A **sandbox** is leased from the warm pool; the repo is cloned in.
+1. User submits the goal with autonomy level and a budget (e.g., 3M tokens / 30 min / 50 steps). The **budget guard** initializes a ledger (the contractor's hour cap).
+2. A **sandbox** is leased from the warm pool (the contractor's scoped workspace); the repo is cloned in.
 3. The **orchestrator** plans: reproduce the bug, locate the cause, fix, run tests. Each step is **checkpointed** to the durable runtime before execution.
 4. The orchestrator works the steps via sandboxed tools (read code, edit, run the test suite). Because this task is a **single coupled thread of control** (each edit depends on the last), it stays **single-agent** — no fan-out.
-5. The **verifier** runs the repo's failing test: green = the ground-truth definition of done. Red = the orchestrator re-plans and retries the step (this is what raises effective per-step reliability).
+5. The **verifier** runs the repo's failing test: green = the ground-truth definition of done (the acceptance test, not the contractor's word). Red = the orchestrator re-plans and retries the step (this is what raises effective per-step reliability).
 6. Tests pass → the diff hits the **HITL gate**. Opening a PR for human review is reversible, so it's allowed under bounded autonomy; *merging to main* is not, and stays gated.
 7. The verified diff, the full trace, and the cost are returned. The sandbox is destroyed.
 

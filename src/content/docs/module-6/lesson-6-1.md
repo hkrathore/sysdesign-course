@@ -74,7 +74,7 @@ Everything a weak answer adds, `AbstractVehicleFactory`, a `Car`/`Truck`/`Motorc
 > Adapted: the "box diagram" becomes a **class-collaboration sketch plus the spot's state machine**, in LLD, the state diagram is the architecture.
 
 **The entities, locked to three, plus one value object:**
-- **`ParkingLot`**, the facade and sole mutator of spot state: owns the free-spot pools, assigns and releases spots, issues tickets.
+- **`ParkingLot`**, the facade and sole mutator of spot state: owns the free-spot pools, assigns and releases spots, issues tickets (the lot attendant, in code).
 - **`ParkingSpot`**, id, size, status (lifecycle below).
 - **`Ticket`**, spot id, vehicle plate + type, entry time; finalized with exit time and fee.
 - **`Vehicle`**, a value object: plate + `VehicleType` enum. *Deliberately not a class hierarchy*, `Car`/`Truck`/`Motorcycle` subclasses would differ by zero methods; an enum mapping to allowed spot sizes carries all the behavior that exists. Inheritance with no behavioral variation is the canonical gold-plate.
@@ -114,7 +114,7 @@ interface PricingStrategy
 ```
 
 **Design notes (each with its rejected alternative):**
-- **`PricingStrategy` is the only abstraction in v1, because R surfaced a requirement that varies** ("pricing may change"; weekend rates, lost-ticket flat fee are known-likely). The seam costs one interface. *Rejected: hardcoding the fee inside `unpark`*, the one change we're told is coming would then edit core flow logic.
+- **`PricingStrategy` is the only abstraction in v1, because R surfaced a requirement that varies** ("pricing may change"; weekend rates, lost-ticket flat fee are known-likely). The seam costs one interface (swapping the price card on the booth window). *Rejected: hardcoding the fee inside `unpark`*, the one change we're told is coming would then edit core flow logic.
 - **No `SpotAssignmentStrategy`.** No requirement says assignment policy varies, "first free compatible spot" is the spec. *Rejected: a pluggable assigner interface*, that's the same Strategy pattern, but applied to a requirement nobody stated. **Same pattern, opposite verdict, and the difference is the requirement.** That sentence is the lesson.
 - **`park` throws on full rather than returning a nullable spot**, a full lot is a normal business outcome the gate must handle explicitly, not a null to forget to check.
 - **`unpark` takes the ticket, not the spot**, the ticket is the durable record and the unit of payment audit; the spot is derivable from it.
@@ -187,7 +187,7 @@ The correctness hinges on one line: `poll()` on `ConcurrentLinkedQueue` is an at
 
 > Adapted, and this is where the Director answer is won: stress your own design **unprompted**. The bottleneck here isn't load, it's a race. Volunteering it is the single strongest signal in the interview.
 
-**The race, stated before they ask:** *"Two cars at two entry gates, one regular spot left. Both gate threads read 'one available,' both assign it, two tickets, one spot, an argument in lane 3. Two gates make this physically concurrent, so assignment must be atomic."*
+**The race, stated before they ask:** *"Two cars at two entry gates, one regular spot left. Both gate threads read 'one available,' both assign it, two tickets, one spot, an argument in lane 3. Two gates make this physically concurrent, so assignment must be atomic."* (Two attendants crossing off the same clipboard line.)
 
 **Three viable fixes, name all three, pick one, defend it:**
 

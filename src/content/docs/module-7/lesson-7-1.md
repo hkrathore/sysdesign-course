@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> A data platform is not a database of record: it is a **continuously rebuilt, scan-optimized projection** of your operational truth, copied off the OLTP stores and reshaped for questions that sweep all entities over time. The whole discipline turns on one refusal: never run the analytical scan against the store that serves users. You stop reasoning in QPS and start reasoning in **freshness, scan-cost, volume, and trust**, where cost ≈ bytes scanned × \$/TB, and one unpartitioned 1 TB scan at \$5 a query becomes \$50k/day at 10,000 queries.
+
 ### Learning objectives
 - State the **OLTP (online transaction processing) ↔ OLAP divide** as the foundational split: an operational store answers *"what is the state of this one entity right now?"*, an analytical platform answers *"what happened across all entities over time?"*, and the two access patterns force different storage, engines, and cost models.
 - Describe a data platform at **architecture altitude**: a **continuously-rebuilt, append-mostly, scan-optimized, decoupled storage/compute projection of operational data** you reshape for questions, not a database of record.
@@ -22,7 +24,7 @@ That single image carries the design consequences. **You are working on a copy, 
 
 ### Deep explanation
 
-**The OLTP ↔ OLAP divide is the foundational fact, and everything else falls out of it.** the earlier modules of this course live in the **OLTP** world, *online transaction processing*: serve a user, read or write one entity (a user, an order, a message) with millisecond latency, keep it normalized and consistent, optimize for high-concurrency point access. A data platform lives in the **OLAP** world, *online analytical processing*: scan billions of rows, group and aggregate across time and dimensions, return a comparatively tiny result, optimize for throughput-over-volume rather than latency-per-row. The Director-altitude statement: *OLTP answers questions about one entity now; OLAP answers questions about all entities over time, and trying to serve one with the other's machinery is the most common and most expensive mistake on this whole topic.* You **reject** "just run the analytics query against the production Postgres" because a full-table aggregate scan competes with, and starves, the point-lookup traffic that pays the bills, and the row-oriented layout reads every column to use one. The divide is why analytical systems exist as a separate discipline.
+**The OLTP ↔ OLAP divide is the foundational fact, and everything else falls out of it.** the earlier modules of this course live in the **OLTP** world, *online transaction processing*: serve a user, read or write one entity (a user, an order, a message) with millisecond latency, keep it normalized and consistent, optimize for high-concurrency point access. A data platform lives in the **OLAP** world, *online analytical processing*: scan billions of rows, group and aggregate across time and dimensions, return a comparatively tiny result, optimize for throughput-over-volume rather than latency-per-row. The Director-altitude statement: *OLTP answers questions about one entity now; OLAP answers questions about all entities over time, and trying to serve one with the other's machinery is the most common and most expensive mistake on this whole topic.* You **reject** "just run the analytics query against the production Postgres" because a full-table aggregate scan competes with, and starves, the point-lookup traffic that pays the bills (the analyst elbowing customers away from the register), and the row-oriented layout reads every column to use one. The divide is why analytical systems exist as a separate discipline.
 
 **A data platform is a projection, not a database of record, and that word governs its architecture.** The operational stores are the source of truth; the platform holds a **derived, reshaped, denormalized copy** of their data, continuously rebuilt and optimized for questions. Four consequences a designer must internalize:
 
@@ -33,10 +35,10 @@ That single image carries the design consequences. **You are working on a copy, 
 
 **You design in four quantities, not in QPS alone: freshness, scan-cost, volume, and trust.** OLTP design reasons in requests/sec, latency, and storage. Analytical design adds and reweights:
 
-- **Freshness** is how stale the served data is, the lag from an event happening to it being queryable. It is a *requirement you extract*, not a default, and every rung up the ladder (hours → minutes → seconds) costs more money and operational complexity (the batch-vs-stream trade).
+- **Freshness** is how stale the served data is, the lag from an event happening to it being queryable (the time a receipt takes to reach her desk). It is a *requirement you extract*, not a default, and every rung up the ladder (hours → minutes → seconds) costs more money and operational complexity (the batch-vs-stream trade).
 - **Scan-cost** is the dominant cost axis: analytical cost scales with **bytes scanned**, not rows returned or requests served. A query that returns one number can cost dollars if it scans a terabyte.
 - **Volume** grows effectively without bound, you retain history, so the design must assume TB→PB and lean on storage/compute separation, partitioning, and tiering rather than a bigger box.
-- **Trust** is whether the number is *right*, the analytical analog of correctness. It is engineered with data-quality tests, contracts, and lineage, and its absence is the failure mode nobody sees until a decision is made on a wrong figure.
+- **Trust** is whether the number is *right*, the analytical analog of correctness. It is engineered with data-quality tests, contracts, and lineage, and its absence is the failure mode nobody sees until a decision is made on a wrong figure (a register quietly mislabeling receipts).
 
 **The cost model is bytes-scanned, and the lever is how much data each query touches.** Two pricing shapes dominate, and you design the model, not this month's price (the same discipline you apply to LLMs):
 

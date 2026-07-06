@@ -5,6 +5,8 @@ sidebar:
   order: 7
 ---
 
+> Shipping an LLM feature without an eval harness is shipping code with no tests, except the output is non-deterministic and there is no answer key to assert against. Quality here is an essay exam graded on judgment, so the whole discipline is building a calibrated grader: a golden set, an LLM-as-judge whose biases you engineer around, humans as the anchor. The decision everything turns on: make eval a CI gate that blocks every prompt, model, or RAG change, because "looked fine in the demo" is how quality silently regresses.
+
 ### Learning objectives
 - Articulate **why LLM evaluation is uniquely hard** — non-deterministic output, open-ended tasks, no single ground truth, and a quality bar that is *multi-dimensional* (correct? grounded? safe? on-tone?) — and why that makes "it looked fine in the demo" a failure mode, not a sign-off.
 - Build an **offline eval harness**: a curated golden set, reference-based metrics where a right answer exists, and **LLM-as-judge** for open-ended quality — while naming the judge's biases (position, verbosity, self-preference) and the mitigations that make it trustworthy.
