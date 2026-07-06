@@ -13,11 +13,13 @@ import ConsistentHashingRing from '@components/widgets/ConsistentHashingRing.jsx
 - Treat the **tunable-consistency knobs** (`N/W/R`, conflict policy, repair cadence) as levers set against a requirement and a budget, and quantify the cost of the side you drop.
 
 ### Intuition first
-Picture a **left-luggage counter that has outgrown one desk into a hall of identical desks.** A traveller hands over a bag (a `put(key, value)`); later someone returns with a ticket and asks for it back (a `get(key)`). Three questions run the whole operation:
+Picture a **paper-era bank with branches all over the city**. Every customer's file lives at a branch chosen by a simple rule from the account number (the key); updating the file is a `put(key, value)`, pulling it is a `get(key)`, and any teller can work out where to look without phoning head office. Three questions run the whole operation:
 
-1. **Which desk takes the bag?** A rule maps each ticket number to a desk: the **partitioning** function, the consistent-hashing ring, so opening a new desk doesn't force the hall to re-file every bag.
-2. **How many desks hold a copy?** One desk is a single point of failure, so you stash **identical copies at the next few desks clockwise**: the **replication factor**, and when you store or fetch, you decide *how many* copies you insist on touching: the **quorum** `W` and `R`.
-3. **Whose copy is the real one when two disagree?** If the same ticket's bag got swapped on two desks while the phone line between them was down, which wins on return? That's **conflict resolution**, and the honest answer is sometimes "we hand you both bags and let you sort it out."
+1. **Which branch holds the file?** The rule that maps account number to branch is the **partitioning** function, the consistent-hashing ring, chosen so that opening a new branch pulls in only the files nearest to it instead of forcing the whole city to re-file.
+2. **How many branches hold a copy, and how many must you touch?** One branch is a fire away from losing everything, so each file is **photocopied to the next few branches down the road**: the **replication factor**. On every update or lookup you also decide how many branches must stamp the change, or answer the query, before you trust it: the **quorum** `W` and `R`. Ask one branch and you're fast but might read last month's address; insist on two of three and the newest stamp is guaranteed to be somewhere in the pile.
+3. **Whose copy is the truth when two disagree?** You changed your address at one branch while the inter-branch courier was delayed, and your spouse changed it at another. Which copy wins? That's **conflict resolution**, and the honest answer is sometimes "the bank keeps both and asks you on your next visit."
+
+The rest of this lesson is the bank keeping its photocopies honest: couriers that forward the updates a closed branch missed, periodic audits that compare file summaries between branches, and a managers' phone round that tracks which branches are open.
 
 A key-value store is the smallest interesting distributed system because it strips away schemas, joins, and transactions and leaves exactly these three questions naked. Get them right and you have the **Dynamo** design, the lineage behind **DynamoDB, Cassandra, Riak, and Voldemort**, and the substrate under most of the building blocks that follow.
 
@@ -150,7 +152,7 @@ The throughline at Director altitude: treat `N/W/R`, the conflict policy, and th
 - **Three healers converge replicas with no leader:** read repair (hot keys), hinted handoff (transient failures), Merkle-tree repair (cold data), the last a **throttled, scheduled operational tax** whose neglect resurrects deleted data.
 - **Gossip** spreads membership in O(log N) rounds with no central directory, the decentralised choice that preserves the no-SPOF posture; and quorum gives recency, not atomic read-modify-write (add a conditional write/LWT for counters and decrements).
 
-> **Spaced-repetition recap:** A KV store = a hall of left-luggage desks. Which desk? **Consistent-hashing ring** (~K/N moves, not 90%). How many copies? **RF = 3 across 3 AZs.** How many to touch? The **`N/W/R` quorum** (`W+R>N` for recency, 2× cost for DynamoDB strong reads). Whose copy wins? **LWW** (silent loss, needs NTP) / **version vectors** (siblings) / **CRDTs** (auto-merge). Converge via **read repair + hinted handoff + Merkle repair**, membership via **gossip**. Quorum ≠ atomic read-modify-write, add a conditional write/LWT.
+> **Spaced-repetition recap:** A KV store = a bank's photocopied files across branches. Which branch? **Consistent-hashing ring** (~K/N moves, not 90%). How many copies? **RF = 3 across 3 AZs.** How many to touch? The **`N/W/R` quorum** (`W+R>N` for recency, 2× cost for DynamoDB strong reads). Whose copy wins? **LWW** (silent loss, needs NTP) / **version vectors** (siblings) / **CRDTs** (auto-merge). Converge via **read repair + hinted handoff + Merkle repair**, membership via **gossip**. Quorum ≠ atomic read-modify-write, add a conditional write/LWT.
 
 ---
 
