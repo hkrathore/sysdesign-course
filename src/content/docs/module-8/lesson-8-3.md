@@ -302,19 +302,49 @@ register_schema(table="users", schema=v2)   # additive: new nullable column 'cou
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through how a single UPDATE on a production Postgres row ends up correctly reflected in the lakehouse.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The UPDATE commits to the **WAL**; **Debezium** tails it (the same log a replica reads) and emits a change event, `op=u` with before/after-images, source `lsn`, and primary key, to **Kafka**, **partitioned by primary key** so this row's changes stay strictly ordered. **Flink** applies an **atomic MERGE** into the **bronze** Iceberg table keyed on the primary key, guarded by `source_lsn` (apply only if newer), committing the offset transactionally with the write (effectively-once). The bronze row now mirrors the source; the silver/gold take it from there, and a re-delivery is a no-op by the `lsn` guard. Seconds end-to-end, correct under retries because the apply is idempotent.
 
+</details>
+
 **Q2. Polling is so much simpler than running Debezium and Kafka. Justify the complexity.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* For an append-only table with no deletes and lax freshness, I'd *use* polling. The complexity earns out the moment **deletes matter** or **freshness is tight**: polling structurally cannot see a deleted row (it just stops appearing, so the lake silently keeps data the source erased, breaking counts and GDPR erasure), it misses intra-interval changes, and it loads the production database with repeated scans. Log-based CDC reads the WAL the database writes anyway, so it captures every change including deletes, in order, with near-zero source impact, and it's replayable. The complexity is the price of *correctness and low source impact*, preventing a silent failure: every downstream number quietly wrong. Below the bar (no deletes, minutes-fresh OK) I wouldn't pay it; for the operational mirror it's non-negotiable.
 
+</details>
+
 **Q3. A duplicate change arrives, and separately, two updates to the same row arrive out of order. Walk me through why the lake still ends correct.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two mechanisms. **Order**: Kafka is partitioned by **primary key**, so a row's changes land on one partition in commit order and Flink applies them in sequence, no cross-partition reordering. **Idempotency**: the MERGE applies a change only if its `source_lsn` is *newer* than what's landed, so a duplicate (same `lsn`) is a no-op and an out-of-order *older* change is rejected rather than clobbering the newer value, no lost update. The transactional checkpoint commits the offset atomically with the write, so crash-replay re-applies safely. This is the effectively-once as a version-guarded upsert: idempotent regardless of delivery count or order, ~10–30% overhead, worth it for a mirror that feeds money.
 
+</details>
+
 **Q4. The source adds a column one week and renames another the next. What does each do to your pipeline?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Different outcomes by design. The **added (nullable) column** is backward-compatible, the schema registry marks it `COMPATIBLE` and it **flows automatically** into the table format's evolvable bronze schema (a metadata-only `ALTER`), existing rows read null for it, no break. The **rename** is the dangerous one: it *looks* additive (a new column appears, the old goes null) but it actually moved data, so the registry's compatibility check flags it `BREAKING` and it's **surfaced for human review, not silently applied**. That gate is exactly what prevents the silent corruption where a rename lands nulls and every downstream aggregation quietly drops the column's data. The discipline is: additive auto-flows, drop/rename/type-narrow gates, drift is never swallowed.
 
+</details>
+
 **Q5. What does this pipeline cost, and what would you delegate?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The spend concentrates in the **Kafka + Flink tier** (~110 MB/s peak, ~16–32 partitions per high-volume topic, effectively-once adding ~10–30% overhead) and **retained raw** in S3. At 4.3B changes/day, **self-hosting beats per-row managed pricing** (five-to-six figures/month), so I self-host the firehose and keep managed connectors for low-volume sources. I own the **contracts**, log-based capture with deletes, PK-ordered transport, effectively-once idempotent apply, drift-surfaced-not-swallowed, slot-lag as an SLO, and delegate with priors: **connector + WAL ops**, **Flink checkpoint tuning** (~10s), **per-table CoW/MoR + compaction** (MoR for streaming CDC), and the **registry policy** (additive auto, breaking gated). I keep the architecture; I hand off the tuning with a prior.
+
+</details>
 
 ---
 

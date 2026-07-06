@@ -362,15 +362,30 @@ The cascade structure holds; the per-tier mechanics change:
 
 **Q1. Your firehose is 5M items/s. An exec proposes classifying every item with a frontier LLM "for maximum accuracy." Evaluate.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's economically impossible and too slow. 5M/s × ~300 tokens = ~1.3×10^14 tokens/day; at ~$3/1M (frontier) that's ~$390M/**day** — ~$140B/year, exceeding nearly any company's revenue, before output tokens or retries. Even the cheapest model is ~$26M/day. And the LLM's latency blows the <100–300ms inline budget. The fix is a tiered cascade: tier-0 hashes and tier-1 cheap classifiers (~$0.000001/item) confidently clear ~99%, so only the ambiguous ~1% reaches the LLM (~$95M/year — a budget line, not an existential one), and ~0.1% reaches humans. Accuracy on the *hard cases* comes from the LLM/human tail; the cheap tiers exist to keep the easy 99% out of them.
+
+</details>
 
 **Q2. Policy says "we must never miss CSAM" but also "stop over-blocking legitimate political speech." How does one system do both?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* These are different policies with different knobs, not one accuracy target. For CSAM: tier-0 perceptual hashing on known content (recall ≈ 1.0, near-free) plus a very low block threshold and a wide escalate band, accept high false-positive *escalation* cost to never miss; precision is recovered by the LLM/human tail. For political speech: a high allow threshold and precision-sensitive thresholds so borderline items escalate to humans rather than auto-block, because over-blocking is real censorship harm. Same cascade, different per-policy/per-surface threshold rows, tuned jointly by policy/legal (the CSAM recall floor is a legal mandate) and finance/eng (the cost ceiling). Precision/recall is a business knob, set differently per policy, there is no single global setting that satisfies both.
+
+</details>
 
 **Q3. After a calibration model update, your monthly LLM bill doubles with no change in traffic. What happened and how do you respond?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The new tier-1 model is *less confident* on the same items, so more of them fall into the escalate band, and the fraction reaching the LLM went from ~1% to ~2%; LLM cost scales linearly with that fraction (1%→2% = 2× bill). It's a **calibration regression**, not a traffic change: the model may be more accurate by F1 but worse-calibrated, over-escalating. Response: treat it as a **cost incident** (it should page, monitored like a budget), roll back or recalibrate the model, and re-measure escalation fraction before the rollout's confidence bands are accepted. Reinforces that in a cascade, tier-1 *calibration*, not headline accuracy, is what controls cost; the dedupe-cache hit rate is the other lever to check.
+
+</details>
 
 ---
 

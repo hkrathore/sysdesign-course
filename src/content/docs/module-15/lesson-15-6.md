@@ -108,16 +108,40 @@ The through-line at Director altitude: resilience is engineered on purpose, in t
 ### Practice questions
 
 **Q1.** Your checkout flow calls a fraud-scoring service and a recommendations service. The fraud service is critical; recommendations is not. Design the failure behavior for each.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Different classifications, different behavior. **Recommendations (non-critical):** wrap it in a circuit breaker (opens at >50% errors over a 10s window, 5–10s cool-down, half-open probe to recover), give it its own thread pool via a bulkhead so it can't starve checkout, and on failure serve a pre-decided fallback, the cached "popular items" list, or just render the page without the carousel. The user never notices; checkout is untouched. **Fraud (critical):** I can't simply skip it, but failing every checkout when fraud is down is also unacceptable. So I design a *deliberate* degraded mode: a breaker that, when fraud is unavailable, falls back to a conservative rule, auto-approve transactions under a low-risk threshold (small amount, established account) and queue the rest for async review, accepting a quantified, bounded fraud-risk exposure for the outage window rather than dropping all revenue. The point a Director makes: even the "critical" dependency gets a designed degradation with a stated risk trade-off, not a hard fail.
 
+</details>
+
 **Q2.** A downstream service hiccups for 2 seconds. Twenty minutes later it's still down and the whole region is degraded. What most likely happened and how do you prevent it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **retry storm** turned a 2-second blip into a self-sustaining outage. When the service hiccuped, every client retried immediately, often 3×, synchronized into a wave, so the recovering service got hit with ~4× normal load the instant it came back, knocked it over again, and the cycle locked in (a metastable failure). Prevention is three controls: **exponential backoff with full jitter** so retries spread out instead of synchronizing; a **retry budget** capping retries at ~10% of base traffic so a system-wide failure can't multiply load (when the budget's exhausted, fail fast); and a **circuit breaker** that opens during the failure so most calls short-circuit to a fallback instead of retrying into the fire. With those, the 2-second blip stays a 2-second blip. The Director framing: naive retries are an *amplifier*, and an unbounded amplifier on a shared dependency is how small failures become regional outages.
 
+</details>
+
 **Q3.** On-call for your platform team is generating 18 pages a shift and engineers are burning out. Walk me through fixing it as a system, not a morale problem.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I treat pager load as a metric with a budget, target under ~2 actionable pages/shift and effectively zero overnight, and I measure the *actionable ratio*. At 18 pages/shift it's near-certainly mostly noise. First, audit what's paging: I'll bet most alerts fire on **causes** (CPU 80%, a host's disk filling, a transient error blip) that are auto-healing and not user-facing. I re-cut alerts to **symptoms only**, things a user feels, SLO breaches on latency or success rate, and route everything else to a dashboard or ticket, not the pager. Second, the services that page most get *engineering* investment: a circuit breaker so transient downstream failures self-heal without paging, fixing the actual flaky component. Third, structural relief: **follow-the-sun** to kill the 3am page if we're global, or **primary/secondary** so the primary has backup. And I make pager-load-reduction action items real, prioritized work, not "when we have time," plus on-call compensation/recognition. The Director point: 18 pages a shift is a *system defect* I fix with breakers and alert hygiene, not a toughness problem I push onto people.
 
+</details>
+
 **Q4.** Your real-time metrics pipeline shipped a bug that double-counts events for the last 5 days. The numbers feed an exec dashboard. What's your move, and what made it possible (or impossible)?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Whether this is a one-hour fix or a multi-day crisis was decided *before* the bug, by whether the pipeline was built to replay. The good case: I retained the **raw immutable events**, every transformation is **idempotent and partitioned by day**, so I correct the logic, **replay the 5 affected day-partitions** (each re-run overwrites that day's output cleanly, keyed by day, no duplication), recompute the mart, and the dashboard is right within an hour, with a note to the exec on which days were restated and why. I reject a manual SQL patch, it risks a *second* error and can't be repeated. The bad case is if we mutated aggregates in place with no retained raw; then the original events are gone and the only recovery is a painful partial reconstruction. So the real action item is structural: retain raw, make transforms idempotent and time-partitioned, and treat the replay path as a first-class capability, the difference between "the number is wrong" being a routine re-run versus an incident.
+
+</details>
 
 ### Key takeaways
 - **Bend, don't break:** when a non-critical dependency fails, serve a degraded-but-working experience (feature off, stale-cache or default fallback) and keep the revenue path alive; reserve fail-hard only for dependencies the request genuinely cannot succeed without.

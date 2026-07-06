@@ -136,16 +136,40 @@ The throughline at Director altitude: choose from the **requirement**, **name th
 
 ### Practice questions
 **Q1.** A team wants to add Neo4j to power a "people you may know" feature on a product already running Postgres and Redis. Walk the decision.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First the signature: friends-of-friends at 2-3 hops is graph's sweet spot, constant-time hops where SQL needs nested joins that blow up with depth. So the *technical* match is real. But the Director question is **operational cost**: Neo4j is a new on-call competency, backup posture, and failure mode on top of two stores already run. If traversals are shallow and computable offline (a nightly batch into a table the serving path reads), a **recursive CTE or precomputed adjacency table in the Postgres we already operate** likely gets 80% of the value with *zero* new operational surface. Adopt Neo4j only if traversals are deep, real-time, and central enough to clear the bar of a new datastore rotation, and prefer **managed (Neptune/Aura)** to avoid standing up graph-DBA expertise. The signal: technical fit is necessary but not sufficient; marginal operational cost decides it.
 
+</details>
+
 **Q2.** Your orders service runs on a single Postgres primary, saturated at ~15k writes/s with p99 write latency climbing. The team proposes "add three read replicas." Right call?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No, **wrong lever for the pressure.** Replicas scale *reads*; every replica still absorbs every write, so they do nothing for a write ceiling. The lever is **partitioning**: shard on a high-cardinality key aligned to the dominant query (likely `user_id`, hashed). But before sharding, which adds cross-shard queries and rebalancing, exhaust the cheaper levers: is write amplification from over-indexing the real cause (drop unused indexes)? Is some load actually *read* load that replicas would offload? If a genuine write ceiling remains, choose **sharded SQL (Vitess/Citus)** vs **a write-scale store (Cassandra/Dynamo)** based on whether orders still need ACID, they likely do, so sharded SQL/NewSQL. The red flag in the proposal: reaching for "add nodes" without distinguishing read-scale from write-scale.
 
+</details>
+
 **Q3.** Finance asks why the data-tier bill is `$40k/month` when "it's just databases." How do you frame the managed-vs-self-hosted trade?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Reframe from "databases are expensive" to **"we're buying back engineering time and risk."** The managed premium (~2-4× raw compute) buys HA, automated failover, backups, patching, and point-in-time restore, otherwise a dedicated DBA/SRE function. A fully-loaded senior infra engineer is ~`$250k+/year`; two to run our stores 24/7 is `$500k+/year` ≈ `$40k+/month` *before* the cost of outages a less-practiced team would incur. So the managed bill is at or below the headcount it replaces, and it converts a variable risk (a botched failover mid-incident) into a fixed line item. My ask back: put **"managed premium vs equivalent headcount"** on a dashboard and revisit per-store, the highest-volume store is the first candidate to bring in-house when the math flips.
 
+</details>
+
 **Q4.** A candidate says "we'll use DynamoDB for everything, it scales infinitely and never goes down." What do you probe?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two problems. First, **"for everything" ignores the signature**: Dynamo is superb for `key → value` at scale, but has no joins or ad-hoc queries, you model every access pattern up front, and the moment a flow needs relational integrity or reporting (the ledger), you're reinventing joins in application code. Second, **"never goes down" misreads the guarantees**: Dynamo is AP/EL by default, it favors availability and can serve stale reads, and "infinite scale" is conditional on a good partition key (a hot key still pins to one partition; mitigate with write-sharding/salting). Push for the **per-data-flow** decision: Dynamo for high-scale KV flows, relational/NewSQL for transactional ones, and an explicit hot-key plan. The red flag: treating one store as universal and confusing "highly available" with "always correct."
+
+</details>
 
 ### Key takeaways
 - **Derive the access-pattern signature first**, read:write ratio, query shape, scale (bytes + throughput), and per-operation consistency, *then* pick the family; never start at "Cassandra vs Mongo."

@@ -146,16 +146,40 @@ The through-line at Director altitude: **put the trust boundary outside the mode
 ### Practice questions
 
 **Q1.** An interviewer says "make this RAG chatbot injection-proof." How do you respond?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd correct the framing: prompt injection **can't be made fully preventable** — system prompt, user message, and retrieved chunks share one text stream, and the model decides what's an instruction by meaning, so a clever payload always exists. The goal is **blast-radius containment**. I'd layer defenses to raise the bar (input/output classifiers, instruction-hierarchy-aware model, structured output) *and* — the load-bearing part — put the trust boundary outside the model: per-chunk retrieval ACLs, least privilege, an allow-list on any action, PII redaction out, and a human gate on anything irreversible. Then I'd ask "what's the worst a successful injection can do here?" and design until that answer is small. And I'd stand up an adversarial red-team suite run on every change, because the threat evolves.
 
+</details>
+
 **Q2.** Your assistant generates SQL from natural language and runs it against the prod DB. What's the risk and how do you contain it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is **insecure output handling** with a manipulable source: via injection, the model can be made to emit `DROP TABLE` or a data-exfiltrating `SELECT`. Treat the generated SQL as **untrusted input**. Contain it: run it as a **read-only** role with no DDL/DML (DDL = data definition language) grants (least privilege); restrict to an **allow-list** of tables/columns and reject anything else; prefer **parameterized templates** over free-form SQL where possible; validate the parsed query against a schema before execution; and gate any write behind explicit human approval. The model never gets a direct, privileged line to prod — its output passes through a deterministic guard that caps what any query can touch.
 
+</details>
+
 **Q3.** Users paste customer PII into prompts. The provider is a third party. What governance do you put in place?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First, **know the data flow** — that PII now leaves your boundary to the provider and may land in your own request logs/traces, with retention and possible training implications. Controls: **PII detection + redaction on the way in** (Presidio/DLP) so identifiers never reach the provider or logs unless required; a **retention/scrubbing policy** on traces; provider settings that disable training on your data, or a BAA/enterprise agreement, or **self-hosting** for regulated data. And redaction on the way **out** so the model can't surface one user's PII to another. This is a data-governance decision a Director owns, not a code detail — tie it to the compliance regime (GDPR/HIPAA/etc (GDPR = General Data Protection Regulation).).
 
+</details>
+
 **Q4.** Walk me through an *indirect* prompt injection and why it's harder than the direct kind.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* In **direct** injection the attacker is the user typing "ignore your instructions" — visible, and the threat model is obvious. In **indirect** injection the attacker plants the payload in **content the model reads on a victim's behalf** — a poisoned RAG doc, a web page it browses, an email it summarizes, a code comment it reads. A legitimate user later triggers retrieval of that content, and the embedded instruction executes against *them*. It's harder because the victim wrote nothing hostile, the payload arrived through trusted-looking data days earlier, and your input filters never saw a suspicious *user* message. Defense: treat all retrieved/read content as untrusted, filter it like user input, and contain via least privilege and action gates so an executed injection still can't reach anything that matters.
+
+</details>
 
 ### Key takeaways
 - **The LLM erases the code/data boundary:** system prompt, user message, and retrieved content share one text stream the model reads by *meaning*, so anything it reads can become a command. That single property is the root of every LLM-specific vulnerability.

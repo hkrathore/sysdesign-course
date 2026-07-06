@@ -243,13 +243,31 @@ Convoying fix without a full cost function: stagger idle-parking floors so cars 
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Riders on floor 28 complain of five-minute waits at lunch while the lobby gets instant service. Diagnose and fix.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The signature of nearest-first dispatch (or an over-greedy cost function): lunch traffic concentrates calls on floors 1-5, and a closest-call policy always finds a nearer call than 28, its wait is unbounded by construction. Car-level fix: SCAN/LOOK, which reaches 28 within one sweep (~4 min worst case). Bank-level fix: an aging term so a waiting call outbids closer fresh calls. Verify with telemetry, p95 wait *by floor*, before and after; if floor-28 p95 doesn't collapse, the bug is in assignment, not car policy.
 
+</details>
+
 **Q2. One of your eight cars gets stuck with twelve assigned hall calls. What happens to those riders?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Nothing bad, if assignment is a lease, not a promise. Hall calls live in a bank-level pending registry; on a fault event (no movement + doors closed + timeout) the bank marks the car out of service, recycles its twelve calls, and re-scores them across the remaining seven cars, degraded ETAs rather than orphaned riders. The choice that makes this cheap is keeping hall-call ownership *above* the car; the car owns only in-car destinations (those passengers are physically inside, firmware owns that path). One wedged car degrades the bank, never deadlocks it.
 
+</details>
+
 **Q3. The CFO asks why the new tower's elevator consultant wants destination dispatch. Make the argument both ways.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* For: grouping riders by destination cuts stops per trip; vendor studies claim ~25-30% more up-peak capacity. On a 3,000-person tower moving ~360 people per 5 minutes, that's the difference between 8 shafts and 6-7, and shaft space is leasable floor area on every floor: a capex/revenue argument, not a UX nicety. Against: riders lose in-car control, mis-keys strand people, and the gains are vendor-published, I'd require the consultant to replay *our* projected traffic through a simulation, not accept brochures. My prior: yes for a 30+ floor tower with hard up-peak; no where the peak is diffuse, the gain doesn't pay for the rigidity.
+
+</details>
 
 ---
 

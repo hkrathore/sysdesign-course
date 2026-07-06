@@ -234,16 +234,40 @@ Vendor exit swaps the CDC source (no log → API-level dual-write + reconciliati
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Your TinyURL Postgres is at 80% capacity, 5K writes/s. Sketch the live migration to a sharded store.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Six phases. **Assess:** backfill ≈ a day at a throttled 200 MB/s; the 5 MB/s change rate is trivial for CDC, the calendar is verification, not copying. **Stabilize:** freeze schema; funnel all access through one seam with runtime flags. **Parallel-run:** Debezium off the WAL into Kafka keyed by short code; mark the log position, snapshot, replay to convergence; verify with partition checksums plus 1% dark reads against a < 0.01% budget sustained a week. **Shift:** reads ramp 1→10→50→100% behind flags; writes flip last via a 2-5 s drain with reverse CDC started at the flip. **Verify:** 2+ weeks of burn-in, old store as warm replica, flip-back rehearsed. **Decommission:** archive to S3, kill reverse sync, delete scaffolding. Dual-run ≈ $13K/week, why the exit criteria are written before phase one and I own go/no-go.
 
+</details>
+
 **Q2. A teammate proposes dual-writing from the application "because it's simpler than a CDC pipeline." Your response?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three failure modes it buys. **Non-atomicity:** old write succeeds, new fails or the process dies between, silent divergence with no record to repair from; a log-based pipeline resumes from its checkpoint. **Ordering:** concurrent writers can land in opposite orders on the two stores; CDC inherits the source's per-key commit order. **It isn't simpler:** you still need backfill *plus* a reconciliation job to catch the divergence dual-write creates, CDC's hard parts, with new failure modes injected into every production write path. My prior: CDC + backfill whenever a change log exists; dual-write only on a log-less vendor exit, through one choke point, with continuous reconciliation mandatory.
 
+</details>
+
 **Q3. Mid-ramp at 50% reads, dark reads show 0.4% mismatches. The deadline is in two weeks. What do you do?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* 0.4% is 40× budget, so the pre-written criteria answer for me: **reads flip back**, a flag, minutes, invisible to users, and we diagnose. That's exactly why abort criteria predate sunk-cost pressure. Then bucket the mismatch ledger by pattern. CDC-lag staleness clustered on recently-written keys is an *understood* artifact, likely a read-after-write path missed in the guarantee audit; fix or route those reads old-side and re-enter quickly. *Unexplained* mismatches, scattered keys, content diffs, are potential corruption; nothing moves until root-caused. On the deadline: two more weeks of dual-run is ~$26K; silent corruption at 100% of reads is unbounded. That trade defends itself.
 
+</details>
+
 **Q4. When is the old system actually safe to turn off?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three gates. (1) The new store has been **sole system of record through real events**, a traffic peak, an on-call incident, for weeks, with zero rollback invocations. (2) A **final full checksum audit** passes immediately before severing reverse CDC, the last cheap moment to catch anything. (3) **No residual readers:** the old store's access logs show zero queries for a defined window, there's always a forgotten cron job, and logs find it before deletion does. Then "off" is staged: stop reverse CDC, snapshot to cold storage, decommission compute, delete the scaffolding. Decommission is the only irreversible rung, which is why it's last, and deliberately boring.
+
+</details>
 
 ---
 

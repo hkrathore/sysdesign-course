@@ -322,19 +322,49 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Why no durable per-viewer inbox, when WhatsApp has one?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because the value of a comment is *now*. In WhatsApp a missed message matters and fan-out is to ~2.5 recipients, so a durable per-recipient inbox is worth its cost. Here a comment seen 30 s late is noise and fan-out is to **millions**, durable per-viewer queues across 5M viewers would be enormous cost for *negative* value. So we delete-by-default, route toward *streams* not *users*, and a small `stream_id`-partitioned archive (Cassandra/Kafka) covers moderation and replay off the hot path. Side benefit: reconnect is trivial, no backlog to replay, just re-attach to "now."
 
+</details>
+
 **Q2. SSE, WebSocket, or long-poll, and prove it.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* SSE. Viewers overwhelmingly *receive* and post via a cheap separate POST, so I don't need full-duplex. SSE runs at roughly half WebSocket's per-connection memory, so at ~60K vs ~30K connections/server a 5M stream is **~84 vs ~168 connection servers**, platform-wide, hundreds of machines running 24/7. The transport is a line item on the fleet bill; the math makes the call. Long-poll wastes connections and adds latency at millions of viewers.
 
+</details>
+
 **Q3. A 5M-viewer stream goes live. Walk the fan-out.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* One stream is a hot partition, so fan-out is a **tiered dispatch tree**, never flat. A posted comment hits moderation + rate-limit (cheap, ~1,700 writes/s), is archived, then enters the dispatch root. A **sampler caps displayed rate to ~20/s**, then root → ~10 tier-2 nodes → ~84 connection servers, each fanning to tens of downstreams. Every connection server holds ~60K SSE sockets and pushes the sampled trickle. ~Tens of ms per hop, trivial against the 2 s budget, and no single node concentrates the hot stream.
 
+</details>
+
 **Q4. Load spikes past fleet capacity. What's your degradation plan?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A named ladder, in order: (1) **sample harder**, drop displayed rate 20/s → 5/s, barely noticeable; (2) **drop strict ordering**, deliver per-server arrival order, removing cross-tree coordination; (3) **coalesce**, batch pushes into 1 s windows; (4) **last resort, shed new connections** with a "stream busy" notice to protect existing viewers. The rule is **quality before availability**, sacrifice completeness, then ordering, then immediacy, and only at the end refuse *new* joins. I never drop a connected viewer.
 
+</details>
+
 **Q5. Why is the database almost an afterthought here?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The write rate is tiny, ~1,700 comments/s, ~150 GB/day platform-wide, and we **don't serve the real-time path from storage**; viewers want *now*, not *all*. The archive is a cheap append-only `stream_id`-partitioned log for moderation/audit/replay, never read on the hot path. The real state is **5M live connections in RAM across ~250 servers**, that's the cost and scaling story. Sizing a giant database mistakes this for a storage problem; it's a connection-state problem.
+
+</details>
 
 ---
 

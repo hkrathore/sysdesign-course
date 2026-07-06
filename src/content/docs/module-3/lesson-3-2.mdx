@@ -134,16 +134,40 @@ The through-line at Director altitude: **cost, risk, and delegation.** Name the 
 ### Practice questions
 
 **Q1.** You front 200 stateful app servers with a single load balancer using sticky sessions. Walk me through what happens when (a) one app server dies and (b) the load balancer dies, and how you'd fix both.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* (a) Every session **pinned to that server is lost**, those users are logged out or lose in-progress work. Fix: go **stateless**, move session state to **Redis** (or a signed JWT), so any server serves any user and a server death loses nothing. (b) The single LB is a **total outage**, all 200 servers are unreachable behind it. Fix: make the LB HA, an **active-passive pair with a floating VIP** (1-3s failover) for one DC, or **active-active behind an ECMP/anycast VIP** so a dead LB just stops being routed to. Each fix attacks a different SPOF: stickiness makes the *backend* failure lossy; the single LB makes the *front door* a SPOF.
 
+</details>
+
 **Q2.** A team puts an L7 load balancer in front of a high-throughput plain-TCP service and complains latency and CPU are higher than expected. What's going on and what would you change?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The L7 LB is **terminating TLS and parsing every request** to make a routing decision it doesn't need, there's no path/host routing, it just needs connections spread across backends. Switch to an **L4 LB** that routes on the 4-tuple at near-line-rate, or use TLS **passthrough**. The principle: **don't pay L7's per-request tax for a decision that lives at L4.** Caveat: for **HTTP/2 / gRPC**, one long-lived connection multiplexes many calls, so a connection-level LB pins them all to one backend, there you want **L7 or client-side (mesh) balancing** so each *call* is balanced.
 
+</details>
+
 **Q3.** One backend has silently degraded, it still accepts connections but answers 3× slower. Which algorithms cope and which don't, and what else do you add?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Round-robin** and **weighted RR** don't cope, blind to live load, they keep sending the degraded node its full share. **Least-connections** copes: in-flight requests stack on the slow node, its count rises, and it stops receiving new work. **Least-response-time** copes even better, reacting to latency before connections fully back up. Add **passive outlier ejection** (eject on consecutive errors or a latency threshold) so a node that's erroring is removed entirely, with an ejection cap so a global slowdown doesn't eject the whole fleet.
 
+</details>
+
 **Q4.** Justify your load-balancer HA design for a 3-region service to a skeptical architect, the failure each layer covers, and its cost.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Three layers by altitude.** *DNS/GSLB (health-checked, latency-based):* the only layer that survives a **whole-region loss**, cost: TTL caching makes it coarse and slow, so it's never the only mechanism. *ECMP/anycast active-active L7 LBs per region:* survives a **single LB failure** with no idle standby and scales horizontally, cost: needs BGP/network control. *Active-passive per region would be simpler*, but half the LB capacity sits idle and there's a failover gap, rejected at this scale. Net: DNS covers region loss, anycast covers LB-node loss, in-region health checks cover backend loss, each layer's blast radius is bounded by the one above it.
+
+</details>
 
 ### Key takeaways
 - **L4 sees the connection (4-tuple), L7 sees the content (path/host/cookie).** L4 is microsecond-cheap and high-throughput; L7 costs hundreds of µs-ms per request to buy content routing, TLS termination, and HTTP-aware health/retries. Often run both in series.

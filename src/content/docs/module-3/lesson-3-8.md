@@ -107,19 +107,49 @@ A checkout service must, on each order, **charge the card, reserve inventory, an
 
 ### Practice questions
 **Q1.** Your team says "we need exactly-once delivery for payments." How do you respond at a whiteboard?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Reframe: exactly-once **delivery** is impossible across an unreliable network (the ack can always be the lost message). I'll guarantee **at-least-once delivery** and make the charge **idempotent**, dedupe on `order_id` with a unique constraint, so a redelivery after a lost ack is a no-op. That's **effectively-once**, which is what "exactly-once for payments" actually means. Kafka's transactional EOS would apply only topic→topic; we call an external gateway, so idempotency on the business key is the real mechanism.
 
+</details>
+
 **Q2.** A message in your queue fails every time and your consumers are pinned at 100% CPU. What's happening and what do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **poison message** under at-least-once is redelivering forever and the fleet is burning cycles retrying it. Fix: a **retry budget**, after N attempts (say 5) route it to a **dead-letter queue** so the main queue keeps flowing, plus **exponential backoff with jitter** between attempts. Alarm on **DLQ depth > 0**; on-call inspects, fixes, **redrives**. The DLQ converts a silent outage into a visible, bounded operational task.
 
+</details>
+
 **Q3.** You must process events for 1M users; same-user events must stay ordered, but you need throughput. How do you design the queue, and what's the scaling limit?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Partition by `user_id`**, same user → same partition → in-order; different users spread across partitions → parallel. I get **ordering per key, parallelism across keys**, which is exactly the requirement (no need for global order). The **ceiling is the partition count**: active consumers in a group ≤ partitions, so I size partitions for **peak future parallelism** (e.g. 100-200), knowing that increasing them later re-keys the mapping and disrupts per-user ordering for in-flight data. I autoscale consumers up to that cap on **consumer lag**.
 
+</details>
+
 **Q4.** When would you *not* use a queue and call the service synchronously instead?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When the caller **needs the result now** (a read, or a write whose outcome gates the user's next step), latency must be minimal, and load isn't spiky. A queue adds latency, an extra system to operate, and duplicate/ordering handling, pure cost if the work can't be deferred. Use the queue for **deferrable, bursty, fire-and-forget** work where decoupling and load-leveling pay for that complexity; otherwise REST/RPC is simpler and faster.
 
+</details>
+
 **Q5.** Producers are enqueuing faster than consumers can drain. Walk me through what happens and how you'd respond, contrast pull vs push brokers.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* With a **pull** broker (Kafka/SQS), the backlog simply **grows in the durable queue**, natural backpressure. The signal is **consumer lag**; I **autoscale consumers** on it up to the partition-count cap, and the buffer covers transient bursts. With a **push** broker (RabbitMQ), unbounded push **floods and OOMs** slow consumers, so I must set a **prefetch/QoS limit**, flow control is my responsibility. If lag grows structurally (not a spike), consumers are under-provisioned or a downstream dependency is the true bottleneck, and adding consumers past the partition count won't help.
+
+</details>
 
 ### Key takeaways
 - A point-to-point queue does two jobs: **decoupling** (producer never blocks on the consumer) and **load-leveling** (a buffer lets a fixed fleet drain a spike), name which one you're using, with numbers.

@@ -288,16 +288,40 @@ What I keep, the cardinality-as-cost-function framing, the retention budget, the
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. What's the single number that drives this system's cost, and why?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Cardinality, the count of distinct active series**, which is `hosts × series-per-host`, here 10K × 1K = **10M series**. It's the cost driver because each active series carries an in-memory index entry (low-KB of RAM), so 10M series sizes the TSDB memory, and on a SaaS billed per unique series it sizes the invoice too. Crucially it's *not* the same as the write rate: two fleets emitting the same 1M samples/sec cost 100× differently if one smuggled a `user_id` label in. That's why I govern cardinality at the collector with a hard per-tenant cap, the cheapest series is the one I never admit.
 
+</details>
+
 **Q2. A team adds `user_id` to their main counter. Walk me through what happens.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Cardinality explosion.** `user_id` is unbounded, ~1,000 distinct users per host, so active series goes from 10M to **10 billion**, ingest from 1M/s to 1B/s, and the index alone is terabytes I don't have. It doesn't degrade; it OOMs. On a per-series SaaS bill, the same blowup turns a multi-million bill into nine figures overnight. The fix is structural: the collector drops the label before storage, and a per-tenant series cap returns 429 so the blast radius is one team, not the platform. `user_id` belongs in a trace span attribute or log field, never a metric label.
 
+</details>
+
 **Q3. Justify your retention design. Why not just keep everything?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* 13 months of 10-second raw is `1M/s × 86,400 × 395 × 1.5 B ≈ 150 TB ×3`, and nobody queries year-old data at second granularity. So I tier: raw 10 s for ~14 days (forensics), roll to **1-minute after 14 days, 1-hour after 60 days**, expire raw, cold tiers to object storage, the 13-month tier collapses to single-digit TB, a 30-360× reduction. The explicit trade: I permanently lose sub-minute detail on old data, acceptable because old data answers *trend* questions ("is p99 worse than last quarter?"), not forensics, and the query layer auto-selects the tier by range, so a 13-month dashboard reads the 1-hour rollup, not the firehose.
 
+</details>
+
 **Q4. Build this in-house or buy Datadog? Walk me through the decision.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A cardinality-driven capital-allocation call, not a tech preference. The vendor bills per host × per unique series, so at 10K hosts and 10M series the bill is multi-million/yr, but it's a *negotiable trajectory*: a 3-year commit is 25-30% off, and an OTel collector I own (dropping unqueried series) cuts 30-50%, landing governed spend in the low-single-digit millions. Build is ~6 engineers × $250K loaded = $1.5M/yr *forever*, plus infra and a $1.5M v1 year and a maintenance tail, ~$7-8M over 3 years, plus on-call for the monitoring tool itself. So the crossover: build only when governed spend durably clears ~2× the team cost (~$4-5M/yr). We're below it, so I **buy, govern the pipe, and write the trigger into the memo**. The deciding number is opportunity cost, six platform engineers are two product teams not shipping a commodity that wins zero customers. Cardinality governance pays off either way, which is why I own it regardless of the verdict.
+
+</details>
 
 ---
 

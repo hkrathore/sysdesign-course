@@ -269,16 +269,40 @@ Pairwise Signal sessions would force the sender to encrypt each group message on
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. WhatsApp is E2E-encrypted. How do you do *group* fan-out if the server can't read the message?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Encryption is the client's job, the server can't make one plaintext copy and broadcast. Naive pairwise encryption is O(N) crypto per message; **Sender Keys** makes it **O(1) per message with an O(N) re-key only when membership changes** (rotate on leave so the departed member can't read on). The server's role is pure routing: a fan-out worker expands the group into per-recipient delivery jobs on Kafka, each delivered like a 1:1 message. The protocol internals belong to the security team; the architecture guarantees it only ever routes sealed envelopes.
 
+</details>
+
 **Q2. A gateway holding ~1M connections crashes. What happens?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Bounded impact, by design. Sockets drop and clients **auto-reconnect with jittered backoff** (no thundering herd); the dead box's registry entries **self-expire by TTL**; and **no accepted message is lost**, published messages are in Kafka, undelivered ones in Cassandra, and each user drains their inbox on reconnect. Net effect: a sub-second blip. The design choice that makes this safe: the gateway is the only stateful tier and holds **no source-of-truth state**. It's also why I run gateways at ~60% capacity, a failover surge has to fit.
 
+</details>
+
 **Q3. Product wants full chat history on a newly-added device. Your design deletes on delivery. What changes, and what does it cost?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* My model can't satisfy it, the server threw the history away, which is exactly what kept storage at ~5 TB/day transient instead of ~7 PB/yr. The change: **server-side E2E-encrypted history**, opaque blobs encrypted to keys the user's devices share. Costs I'd name: (a) the petabyte-scale storage bill, now real and growing; (b) **key management**, getting the history key to the new device without the server learning it (encrypted backups with a PIN/HSM (hardware security module), the iMessage/Telegram model, the genuinely hard part, delegated to security); (c) retention/compliance policy I now own. I'd take the trade only when multi-device-with-history is a hard requirement.
 
+</details>
+
 **Q4. How do presence and "last seen" scale when they change constantly for hundreds of millions of users?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Presence is high-churn, ephemeral, best-effort, **Redis with a short TTL**, refreshed by the same heartbeat that keeps the connection alive, so it's nearly free. The scaling trick is **don't push every transition to every contact**, that's an N² fan-out storm that would dwarf the message load. Subscribe lazily (only contacts in the currently-open chat list), coalesce flapping. *Trade:* presence can be a few seconds stale, completely acceptable for "last seen," and it saves an enormous fan-out.
+
+</details>
 
 ---
 

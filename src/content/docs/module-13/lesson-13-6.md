@@ -139,16 +139,40 @@ The through-line at Director altitude: own the **posture** (layered defense, fri
 ### Practice questions
 
 **Q1.** An interviewer adds "now protect this login service from abuse" on top of your HLD (high-level design). Walk through your layered answer.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd layer it. At the **edge**, a per-IP token-bucket limit to blunt crude floods plus a **strict sliding-window login limiter**, say 5 attempts per account per 15 minutes, enforced on shared Redis state at the gateway, not per instance, so an attacker can't evade the global count and rejected requests never touch my auth service. On **anomaly** (fresh device, datacenter IP, burst of failures) I escalate to a silent JS challenge, then CAPTCHA only on strong bot signal, never a CAPTCHA on every login because that's a permanent few-percent conversion tax. At the **account** layer, breached-password checks at signup/login and **risk-based MFA**, step-up on anomalous logins, which cuts automated ATO by >99% without hard-MFA on every login. And I'd avoid naive account lockout after N failures, since an attacker weaponizes it into a DoS against real users. The whole thing is tuned so legitimate users see near-zero friction and only the suspicious minority gets challenged.
 
+</details>
+
 **Q2.** You're hit with a 1.2 Tbps flood and a separate burst of expensive search queries. Are these the same problem? How do you respond?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No, they're two different attacks needing opposite answers. The 1.2 Tbps flood is **volumetric (L3/L4)**, I cannot absorb terabits at my origin no matter how I scale, so it's absorbed at the **edge**: anycast spreads it across hundreds of PoPs, scrubbing centers filter the attack packets, and the CDN fronts my origin so the flood never reaches it. That's Cloudflare/AWS Shield capacity I buy, not infrastructure I build. The expensive-search burst is **application-layer (L7)**, modest bandwidth but devastating cost per request, so I rate-limit the expensive endpoints, apply WAF rules and a JS challenge to drop the bots, and use auto-scaling only as headroom to ride it out, not as the defense, because scaling alone just raises my bill to match the attacker. The Director point: name which problem is which, and don't try to solve a volumetric flood with auto-scaling.
 
+</details>
+
 **Q3.** Your team proposes a fraud rule that cuts chargebacks 20%. What do you ask before shipping, and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I ask for the **false-positive rate and its dollar value** before anything else. A rule that catches more fraud by also declining legitimate orders can easily cost more than it saves: if we do \$10M/day in checkout and the rule blocks an extra 1% of *good* orders, that's \$100k/day of lost revenue plus the lifetime value of customers we annoy into leaving, against perhaps a fraction of that in chargebacks avoided, a losing trade. So I want both numbers, fraud caught and legitimate orders blocked, and the threshold set on the **business cost of each error**, not raw accuracy. At the margin I'd rather **step up** (3-D Secure or manual review) than hard-decline, pushing friction onto the suspicious minority instead of blocking them. And confirmed outcomes (chargebacks, false-positive reversals) feed back to retrain. Optimizing only the fraud-caught number is the classic, expensive mistake.
 
+</details>
+
 **Q4.** Why enforce rate limits at the edge gateway rather than inside each application instance, and what's the cost of getting this wrong?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two reasons. First, **correctness**: a per-instance counter only sees the traffic that instance handled, so an attacker spread across a 50-node fleet sends 50× my intended limit while each node thinks it's within budget, the global rate is unenforced. The fix is shared state, a Redis token bucket at the gateway, so the limit is global. Second, **cost**: a request I reject at the edge costs almost nothing, while a request I let reach the application has already consumed a connection, auth work, and possibly a database query before I reject it, so enforcing late means I pay for the abuse I'm trying to stop. Getting it wrong means the limiter is both **evadable** (per-instance) and **expensive** (late), the worst of both. Enforce globally, early, at the edge.
+
+</details>
 
 ### Key takeaways
 - **This is adversarial: you make attacks expensive, detectable, and contained, in layers.** Edge (rate-limit, WAF, volumetric absorption) → application (challenge on anomaly, fraud scoring) → account (MFA, breached-password, velocity), so no single bypass is total. Reject the lone rate limiter.

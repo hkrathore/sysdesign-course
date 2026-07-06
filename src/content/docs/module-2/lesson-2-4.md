@@ -80,13 +80,31 @@ flowchart LR
 
 ### Practice questions
 **Q1.** Your async follower is 30 seconds behind during a traffic spike. What breaks for users, and what do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Stale reads, users may not see their own recent writes (read-your-writes broken) and counts/feeds lag. Mitigations: route a user's own-data reads to the leader for a short window after their write; cap acceptable lag and shed read-replica traffic (or fail over) when exceeded; for monotonic reads, pin a session to one replica. Longer term, add replica capacity or reduce the write volume each replica must absorb.
 
+</details>
+
 **Q2.** Why doesn't leaderless replication need a failover procedure?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* There's no single leader to lose. With N replicas and quorum W/R, a request simply uses whichever replicas are reachable; a downed node reduces available replicas but the quorum can still be met. Convergence is restored later by read repair and hinted handoff. You trade failover complexity for quorum-tuning and conflict-resolution complexity.
 
+</details>
+
 **Q3.** A team proposes multi-leader across US and EU "for low latency." What do you make them answer first?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* How will they resolve concurrent conflicting writes to the same key, and is that data conflict-tolerant? If LWW is acceptable they must accept silent data loss; otherwise they need version vectors, CRDTs, or app-merge, which only some data models support. If most data is single-region-owned (users mostly write to their home region), partition ownership by region to sidestep most conflicts. Multi-leader without a conflict answer is a trap.
+
+</details>
 
 ### Key takeaways
 - We replicate for availability, read scale, latency, and durability; replication ≠ partitioning.

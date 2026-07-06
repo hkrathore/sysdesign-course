@@ -129,16 +129,40 @@ The through-line at Director altitude: **own the capacity, cost, and SLO call; d
 ### Practice questions
 
 **Q1.** A team serves a 70B model on single 80 GB H100s in fp16 and is confused why it keeps OOM-ing on startup before any traffic arrives. What's wrong, and what are their two options?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* fp16 weights are `70B × 2 = 140 GB`, which **exceeds a single 80 GB card** — it OOMs (out-of-memorys) loading weights, before any KV cache exists. Two fixes: **(a) span 2 GPUs** with tensor parallelism (140 GB across 160 GB, TP=2) for full quality at double the hardware; or **(b) quantize** — int8 (~70 GB) fits one card with room for a small KV batch, int4 (~35 GB) fits comfortably with a much bigger batch, both for a model-dependent, eval-measured accuracy loss. The principle: **always check `params × bytes-per-param` against HBM before sizing anything else** — it decides GPU count.
 
+</details>
+
 **Q2.** Throughput is too low and you've been told "no new GPUs this quarter." Walk me through what you'd try, in order, and the cost of each.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **First, continuous batching** if you're on static — it's the biggest lever (2–4×) and costs only scheduler complexity (use vLLM/TGI; don't write it). **Then quantization** — fp16→int8 roughly halves the weight footprint, freeing HBM for a bigger KV cache and therefore a bigger batch; cost is a small, **eval-gated** accuracy loss the ML team signs off. **Then PagedAttention** to kill KV fragmentation (~2–4× more sequences packed in the same memory). **Then segment** real-time from batch traffic so latency-relaxed jobs run at giant batch sizes off-peak. Each step raises tokens/sec/GPU without a single new card; only after exhausting these do I argue for hardware.
 
+</details>
+
 **Q3.** A request with a 100K-token context is tanking the whole node's throughput. Why, and what do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The **KV cache grows linearly with sequence length** and lives in HBM, so a 100K-token request consumes ~25× the KV of a 4K one — it **monopolizes the batch capacity** that throughput depends on, and its long prefill blocks the decode loop (hurting everyone's TTFT). Fixes: **per-request context caps** and **token-based rate limits (TPM)** so no tenant's long contexts dominate; **chunked prefill** (an inference-team lever) so a giant prompt doesn't stall the decode loop; **priority/fair-share scheduling** in the queue; and route huge-context or latency-relaxed work to the **async batch path**. The root cause to name: KV cache, not CPU.
 
+</details>
+
 **Q4.** Defend separating a real-time path from a batch path to a skeptical architect who wants "one fleet, one batch size."
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's a **trilemma** — you cannot maximize TTFT, throughput, and cost at once. A **big batch** amortizes the weight-read over many sequences (cheap $/token) but makes new requests wait for a KV slot and lets long prefills block decode (high TTFT) — fine for offline jobs, fatal for a chat UI. A **small batch** keeps TTFT snappy but leaves expensive GPUs idle (high $/token). One global batch size therefore *must* sacrifice either the interactive product or the budget. **Segmenting** lets the interactive pool run small, latency-bounded batches (paying slightly more per token to protect TTFT) while the async pool runs giant off-peak batches at the cheapest possible $/token — which is exactly why a serious LLM API exposes both a streaming and a `/batches` endpoint.
+
+</details>
 
 ### Key takeaways
 - **The GPU is the unit of cost and HBM is the binding resource** — not disk or CPU. Two consumers fight over HBM: **weights** (`params × bytes-per-param`; 70B fp16 = 140 GB > one 80 GB card) and the **KV cache**. Decode is **memory-bandwidth-bound** (every weight streamed per token), which is *why* batching multiplies throughput nearly for free.

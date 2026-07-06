@@ -135,16 +135,40 @@ The through-line at Director altitude: reason in **tokens**, predict latency fro
 ### Practice questions
 
 **Q1.** A chat feature's p95 latency is fine for short replies but users complain long answers "take forever to load." A teammate proposes a faster network and a bigger instance. What's actually happening and what do you change?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's **decode**, not network or CPU. Long answers generate token-by-token at ~10–50 ms/token, so a 1,500-token answer is ~15–40 s of generation regardless of bandwidth. Two fixes that actually move it: **(1) stream tokens (SSE)** so the user reads from the first token (~one TTFT) instead of waiting for the whole response, fixing *felt* latency; **(2) cap and tighten output** (shorter answers, structured format) to cut the real decode time. A bigger instance helps prefill/TTFT and throughput, not the per-token decode wall. The teammate is optimizing the wrong phase.
 
+</details>
+
 **Q2.** Estimate the monthly token cost of an assistant: 500k requests/day, ~4k input tokens/request (system + RAG), ~400 output tokens. Then name the cheapest lever.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Input: 500k × 4k = 2.0B input tokens/day. Output: 500k × 400 = 0.2B output tokens/day. At ~$3/1M in and ~$15/1M out: input ≈ 2,000 × $3 = **$6,000/day**; output ≈ 200 × $15 = **$3,000/day**; **~$9k/day ≈ $270k/month.** The cheapest lever is **trimming the 4k input context** (it's two-thirds of the bill): fewer/better-ranked retrieved chunks and a leaner system prompt cut the dominant cost, before considering a cheaper model or caching.
 
+</details>
+
 **Q3.** Your extraction pipeline parses the model's JSON output and breaks ~1% of the time in production. Root cause and design fix?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The model is **stochastic**, occasionally it emits prose around the JSON, a trailing comma, or a slightly different shape. The fix is to stop assuming determinism: use the provider's **structured-output/JSON-schema mode** to constrain generation, **validate against a schema** on receipt, and **retry or repair** on failure, treating model output as untrusted input (the same posture as user input, and a precursor to agent action safety). Never let a downstream system assume the bytes are identical run-to-run.
 
+</details>
+
 **Q4.** Leadership asks, "we have a 1M-token context model now, can we drop the vector database and just send the whole knowledge base each time?" How do you respond?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No, and here's the math: sending, say, 800k tokens of context per request at ~$3/1M is ~$2.40 *per request* in input cost alone, plus a multi-second prefill TTFT, plus degraded accuracy from lost-in-the-middle. Retrieving the right ~5k tokens costs a fraction of a cent, answers faster, and is *more* accurate. The big window is useful for genuinely whole-document tasks; it is not a substitute for retrieval. I'd keep RAG and use the long window selectively.
+
+</details>
 
 ### Key takeaways
 - **An LLM is a frozen, stochastic, stateless, token-metered next-token predictor.** You compose it with context; you don't train it. Every "memory" is context you resend, every interaction is on the token meter.

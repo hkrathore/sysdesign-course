@@ -123,16 +123,40 @@ The through-line at Director altitude: you own the **culture that makes the trut
 ### Practice questions
 
 **Q1.** An engineer ran a database migration that locked a table and caused a 15-minute outage. Your VP wants to know "who's accountable and what we're doing about it." How do you respond?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd reframe "accountable" away from "who to blame." A competent engineer ran a migration that the system permitted to lock production, so the failure is the system's, not theirs, the second story is *why did running that migration look safe?* Likely: no required online-migration tooling, no staging dataset large enough to surface the lock, no guardrail that blocks lock-taking DDL (data definition language) on a hot table. The contributing factors, not one cause: missing online-migration standard, missing lock-detection in CI, a runbook that didn't flag the table's traffic. Action items, owned and dated: adopt an online-schema-change tool with a single owner, add a CI check that rejects blocking DDL on high-traffic tables, both in the bug tracker with a 2-week SLA. To the VP: holding the engineer "accountable" via blame buys us silence on the next incident; the durable fix is the guardrail so no engineer can take that lock, and I'll report the close rate in ops review.
 
+</details>
+
 **Q2.** Your postmortem dashboard shows 60 open action items, the oldest 14 months old, and a repeat-incident rate climbing to 25%. What's broken and what do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The two numbers are linked, action items aren't closing, so contributing factors aren't getting fixed, so incidents repeat, the close loop is broken and the program is generating paper. Concretely: AIs probably live on wiki pages, not in the bug tracker, so they never surface in sprint planning and rot. Fixes: migrate every open AI into the bug system next to real work, assign a single named owner and due date to each (a team is not an owner), set a close-rate SLA (say 90% of high-priority within 30 days) with stale items auto-escalating to me, and review the dashboard in every ops review. I'd also triage the 60: many 14-month-old items are probably stale or superseded, close them honestly rather than carry fiction. The target is repeat rate trending down within a quarter, the proof the loop closed.
 
+</details>
+
 **Q3.** A team only writes postmortems for customer-facing SEV1s. An engineer mentions a failover drill that "took 40 minutes instead of the 5 the runbook promised, but no customers noticed." Should that get a postmortem? Why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Yes, it's a near-miss and it's the cheapest lesson on the table. The 40-vs-5-minute gap is the exact latent fault that turns the next *real* failover, the one during an actual outage, into a 40-minute customer-facing SEV1 instead of a 5-minute blip. Buying the lesson now costs a fifteen-minute near-miss review; buying it during a real incident costs the outage, the trust, and the same action items anyway. The review's contributing factors are likely a stale runbook and untested automation; the action items, fix the runbook, add the failover to a regular game-day so the 40 becomes 5, owned and dated. The Director point: orgs that only postmortem SEV1s pay full price for every lesson; near-miss review is how you learn before the customer feels it.
 
+</details>
+
 **Q4.** In a postmortem review, the responders are getting visibly defensive and the timeline keeps drifting into "well, I assumed X because the dashboard looked fine." How do you steer it, and why does it matter?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* That drift is actually the gold, "I assumed X because the dashboard looked fine" is a system gap (the dashboard lied or the alert didn't fire), not a person gap, so I'd explicitly name it as a contributing factor against observability and thank them for surfacing it. The defensiveness signals the room doesn't yet feel blameless, so I'd reset: state out loud that we're looking for what the system let happen, not who to blame, and that a competent team going down that path is information about the system. I'd rewrite any timeline line that reads as judgment ("they should have known") into what-was-known-when ("the dashboard was green, the alert hadn't fired"). Why it matters: if responders feel hunted, they minimize and the timeline goes vague, and a vague timeline can't generate the systemic action items that are the whole point. Psychological safety is the precondition; without it the artifact is worthless.
+
+</details>
 
 ### Key takeaways
 - **A postmortem's deliverable is the delta, not the document:** a guardrail, runbook fix, or alert that didn't exist this morning. Judge the program on repeat-incident rate falling and action items closing, not on the write-up existing.

@@ -250,16 +250,40 @@ Two riders must not be offered the same car, and a crashed matcher mid-dispatch 
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate the driver-location write QPS, and explain why that number drives the architecture.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* ~5M registered drivers, ~20% online at peak ≈ **1M concurrent**, pinging every **4 s** → `1M ÷ 4s = 250K/s`, ~**0.5M writes/s** peaked. Nearby reads are only ~**20K/s**, so it's **~25:1 write:read - write-dominated**, the inverse of a feed. That inversion is the whole architecture: keep the ~100 MB index **in RAM**, shard **by region**, and make the write path cheap (202 fire-and-forget, eventually streamed ingest with dynamic ping rate). No giant read cache - there's barely any read load.
 
+</details>
+
 **Q2. Why does a naive grid hot-spot, and what do you use instead?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A uniform grid has equal-area cells but wildly unequal density - a downtown cell holds thousands of drivers, a rural one three, so one bucket saturates its shard while most sit empty. Shrinking the global cell size just makes sparse queries scan hundreds of empty cells. The fix is **variable resolution**: a quadtree that splits on capacity, or hierarchical cell schemes - S2, or H3, Uber's production choice, whose hexagons have six equidistant neighbors so ring-expansion is uniform. I'd pick via a measured bake-off on real metro density; my prior is H3.
 
+</details>
+
 **Q3. Do you store driver location in a database? Defend the consistency and durability choice.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **No durable database for the live position** - in-memory (Redis-geo or a sharded geo-index), async-replicated, eventually consistent, loss-tolerant. From the requirements: a position is overwritten every 4 s, so it has no archival value and losing one ping is invisible. Paying durability and strong consistency on 0.5M writes/s of disposable data is the classic over-engineering trap. The durable store is reserved for trips, matches, and profiles - different durability requirement → different store.
 
+</details>
+
 **Q4. A driver is 50 m from the rider but in the next cell over and gets missed. What's wrong?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The **cell-boundary problem** - a query reading only the rider's own cell misses closer drivers in adjacent cells. Fix: query the cell **plus its neighbor ring**, union the buckets, then rank by true ETA. H3's hexagonal k-ring makes this clean (6 equidistant neighbors, no edge-vs-corner asymmetry). Trade: a few extra buckets read per query - cheap and necessary for correctness.
+
+</details>
 
 ---
 

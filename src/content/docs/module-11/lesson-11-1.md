@@ -123,16 +123,40 @@ The through-line at Director altitude: the client is a **first-class design surf
 
 ### Practice questions
 **Q1.** An interviewer says, "You've drawn a clean backend for a mobile note-taking app. Now tell me about the client." Where do you start?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I start by placing the client on the thin-thick spectrum, and for a note app the requirement forces a **thick, device-authoritative** design: users expect to type offline and see edits instantly, so the device holds the working copy in a local store and renders from it with zero network latency. That immediately raises the two costs I have to own: **sync**, the device reconciles with the origin in the background on reconnect, and **conflict resolution**, because the same note edited on two devices offline must merge deterministically rather than silently losing an edit. I keep the origin as the durable source of truth and the merge authority where I can, and I note that because this is a native client I cannot hotfix the on-device logic, so the API stays backward-compatible and I ship the merge logic behind config I can adjust. The point is that "the client" is not a render layer here, it is a partitioned replica with real state, and I designed for the partition first.
 
+</details>
+
 **Q2.** A peer proposes computing the user's discount and their access-to-premium-features on the device to save a round trip. Respond.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Latency-wise the instinct is right, push work toward the user, but not this work. Price and entitlement are **security-sensitive and authoritative**, and the device is an untrusted, inspectable box; a user can patch the app or forge the request and grant themselves the discount or premium access. So this is exactly the logic that must stay at the **origin**. What I *can* push to the device to recover the latency is a **cached, display-only** copy of the entitlement for instant rendering, while every action that depends on it is re-checked and enforced server-side. That is the general rule: push cache and UX toward the user, keep the source of truth and anything a malicious client could exploit at the server. We trade a re-check round trip on the sensitive action for integrity, which is not negotiable.
 
+</details>
+
 **Q3.** You shipped a client bug that corrupts local data on a specific action. On the server you would deploy a fix in ten minutes. What is different here, and what do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The difference is that I cannot patch the client on demand. A fixed build goes through **app-store review, roughly 1 to 3 days**, and then users update on their own schedule, so weeks out a large tail is still on the broken version and some never update. So the first move is not the app fix, it is the levers I built in advance: a **remote-config feature flag or kill switch** to disable the offending action immediately for all versions without a release, and **server-side validation** to reject or quarantine the corrupt writes so the blast radius stops now. Then I ship the fixed build and, if the bug is severe enough, gate old versions with a **forced-update** prompt. The lesson this reinforces is why those levers, flags, kill switch, forced-update, backward-compatible API, have to exist before the incident, because release latency means the app store is never your fast path.
 
+</details>
+
 **Q4.** For a consumer app targeting users in regions with unreliable, expensive mobile data, how does that market shape your client architecture?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Unreliable and expensive networks push me toward a **thicker, cache-first, offline-tolerant client**, because offline capability here is not a nicety, it is **addressable market**: a round-trip-per-tap app is unusable on a spotty connection and costs the user real money on metered data, so those users churn. Concretely I render from a local cache for instant, offline-capable use, sync opportunistically when connectivity and cost allow, and I aggressively minimize payload size and request frequency to respect **battery and metered-data budgets**. I also design to older, lower-end devices and older OS versions, since that is what the market runs. The framing for the interviewer is that this is a growth decision: I am trading client complexity and eventual-consistency handling for reach and retention in a market a thin client cannot serve.
+
+</details>
 
 ### Key takeaways
 - The **client is a first-class distributed node**, and it is the one that gets **partitioned** from the server constantly (elevator, subway, offline), so consistency-versus-availability reasoning applies at the last hop, not just between datacenters.

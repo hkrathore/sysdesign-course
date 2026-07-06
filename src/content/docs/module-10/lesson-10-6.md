@@ -329,15 +329,30 @@ Someone fans out a tightly-coupled task (refactor one file, debug one stack trac
 
 **Q1. Your coding agent resolves 70% of issues in eval but only 35% in production. What's going on and what do you change?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Production tasks are **longer and less constrained**, so the pᴺ chain is longer and success decays. First, instrument it: the **trace** shows where trajectories diverge. Then attack N and p: **decompose** long tasks into verified subtasks so errors don't compound across 40 steps; strengthen the **verifier** (run the full suite, not a smoke test) so bad steps are caught and **retried**, raising effective reliability; ensure the eval set actually mirrors production task length/ambiguity (a too-easy eval is why the numbers diverged). A bigger model is the *last* lever — the structural fix is shorter, verified chains.
+
+</details>
 
 **Q2. A teammate wants to fan every task across 8 agents for speed. Evaluate.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Only correct for tasks whose subtasks are **parallel and independently verifiable** — e.g., researching 8 independent sub-questions, each returning cited findings the orchestrator verifies and merges. For a **coupled** task (one diff, one debugging thread), fan-out is wrong twice: it pays the **~10–15× token multiplier** and it creates shared-state coordination problems that *lower* quality. The rule: default single agent; reach for multi-agent when the work is genuinely parallel and each piece is independently checkable; use a deterministic workflow when the path is known. Speed is rarely the real win — most "slow" is sequential dependency that more agents can't break.
+
+</details>
 
 **Q3. An indirect prompt injection in a fetched web page tells the agent to email a customer database to an attacker. Trace what stops it.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Defense-in-depth, no single layer trusted. The agent runs in a **sandbox** with **controlled egress**, so an arbitrary outbound connection is blocked. **Least-privilege tools** mean the agent has no "dump the customer DB" or "email arbitrary address" capability in the first place. Any irreversible/external action hits a **HITL gate**. All fetched content is treated as **untrusted input**. You **assume injection is possible** and design so the blast radius is contained — the worst case is a wasted step the verifier rejects, not data exfiltration. The residual control is the **audit trace** for detection. Prevention isn't fully possible; containment is the design.
+
+</details>
 
 ---
 

@@ -105,16 +105,40 @@ The through-line at Director altitude: own the **posture** (authN federated and 
 ### Practice questions
 
 **Q1.** A team proposes putting all of a user's permissions inside a long-lived JWT (24-hour TTL) so services never have to look anything up. Critique it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two problems, both serious. First, **revocation**: a 24-hour self-contained token cannot be withdrawn, so a fired employee, a stolen token, or a downgraded permission stays live for up to a day, which is unacceptable for anything sensitive. The fix is short access TTLs (~10 min) + refresh tokens revoked at the IdP, plus a denylist check on high-value actions. Second, **staleness and size**: baking the full permission set into the token means a permission change doesn't take effect until the token refreshes, and the payload bloats every request's header. I'd carry identity + a few coarse claims in the token and resolve fine-grained permissions server-side via a centralized `Check(U, A, R)`. Net: short-lived token for *who*, a PDP for *what*, revocation bounded to minutes and to zero on sensitive ops.
 
+</details>
+
 **Q2.** Your product is adding per-document sharing to a workspace app currently on RBAC. What changes, and what do you reject?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* RBAC handles org-shaped access (owner/admin/member/viewer) and stays for workspace roles. But "Alice can edit *this* doc because Bob shared it" is **resource-shaped** and RBAC can't express it without minting a role per document, which explodes. I'd introduce **ReBAC** (a Zanzibar-style store, OpenFGA/SpiceDB) with relationship tuples like `doc:42#editor@user:alice`, and every access becomes a single cached `Check(user, action, resource)` in a few ms. *Rejected: ABAC*, because while it could express the sharing rule, the product needs the reverse query "who can access doc 42?" for the sharing UI and audits, and ABAC answers that by scanning rules while a relationship store answers it by graph lookup. So: RBAC for the org, ReBAC for resources, both behind one PDP.
 
+</details>
+
 **Q3.** Estimate the worst-case exposure window for a stolen access token under a 15-minute TTL, and explain how you'd cut it to near zero for admin actions without making every request stateful.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Worst case, the token was stolen the instant it was issued, so exposure is the full **15 minutes** until it expires and the refresh is (now) refused. For 99% of traffic that's an acceptable, deliberately-priced window that keeps requests stateless and fast. To close it on admin/billing/delete actions without re-introducing a lookup everywhere, I add a **revocation denylist** in Redis (revoked token/session IDs) and check it **only on those sensitive endpoints**. That's a single ~1 ms lookup on a small subset of requests, exposure drops to effectively zero on the operations that matter, and the common read path stays stateless. It's a scoped, intentional trade of a little statelessness for tight revocation exactly where 15 minutes is too long.
 
+</details>
+
 **Q4.** A reviewer says "we enforce tenant isolation by always adding `WHERE tenant_id = ?` in our queries." Why is that not enough, and what would you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's a hope, not a guarantee. Across hundreds of endpoints and joins, **one forgotten filter** (a new query, a refactor, a sub-select, an ORM that drops the clause) leaks one customer's data to another, which is a company-ending incident. App-code discipline can't be the isolation boundary. I'd enforce it **below the application**: **Postgres Row-Level Security** with a policy per table keyed off a session-set `tenant_id`, so a query *physically cannot* return another tenant's rows even if the filter is forgotten; isolation becomes true by construction. For the largest or regulated tenants who demand it, I'd go to **database-per-tenant** for hard isolation and noisy-neighbor protection, accepting the higher per-tenant operating cost the contract justifies. The principle: isolation enforced by the platform, not by every developer remembering.
+
+</details>
 
 ### Key takeaways
 - **AuthN and authZ are different problems in different places:** authentication establishes *who* once at the edge (federate to an IdP via OIDC/SAML, never roll your own); authorization decides *what* on every request near the resource. Conflating them is the classic, costly mistake.

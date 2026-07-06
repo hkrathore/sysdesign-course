@@ -276,16 +276,40 @@ They are not checking whether you can name "GSP", they are checking that you gra
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me from an ad request to a served ad in under 50 ms. Where does the time go?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **funnel**. Retrieval intersects the request against an inverted index to ~1,000 eligible ads (~5-10 ms). A **cheap pre-filter** trims that to a top ~50 (~5-10 ms), because scoring all 1,000 with the heavy model is ~100M inferences/s across the fleet, impossible in budget. The **calibrated heavy model** scores just the top ~50 as one batched pass, with features fetched in a single multi-get (~10-20 ms). The **auction** ranks by eCPM = pCTR × bid × quality and prices via GSP (~1 ms), and the **pacing filter** drops any winner whose campaign is out of budget using a locally-cached signal, no round-trip (~1 ms). Time goes into model inference, which is exactly why the funnel exists, to run the expensive model on the fewest candidates.
 
+</details>
+
 **Q2. Your predicted CTRs are well-ranked but poorly calibrated (predicted 4%, actual 2%). What breaks, and how do you fix it without touching the model?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Pricing breaks. GSP computes the winner's cost-per-click from the runner-up's eCPM divided by the winner's pCTR, so a 2× inflated pCTR inflates eCPM (the wrong ads win) and mis-derives the price, advertisers pay for clicks that do not come, budgets drain, they churn. Without retraining, add a **calibration layer** (isotonic / Platt) that maps raw scores to calibrated probabilities using recent predicted-vs-realized data, and monitor calibration per bucket as an SLO with drift alerts. The deep model stays; the calibration layer makes its outputs pricing-safe.
 
+</details>
+
 **Q3. A big-brand campaign with a huge daily budget launches and floods a few hot campaigns' counters. How do you keep pacing correct without a hot key or blowing latency?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Never a synchronous counter on the request path. Spend goes through the event firehose to a **pacing controller** that aggregates near-real-time per-campaign spend (using **sharded** sub-counters so a hot campaign's writes spread), compares it to the campaign's ideal daily schedule, and pushes a **pacing signal** (serve-probability or bid multiplier) to every host, applied locally with zero round-trips. As the campaign nears its cap, the signal throttles it and bid-shading smooths the approach. I accept ~1-5% drift from the feedback lag and reconcile the **exact** spend from the immutable log for the invoice. No host ever waits on a shared counter, so the ~50 ms budget holds.
 
+</details>
+
 **Q4. Someone is click-bombing a competitor's ad to drain its budget. How does your billing stay honest?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The fast pacing counter may briefly see the inflated clicks, that only throttles the victim's serving, which we can detect. The **invoice** is never taken from that counter. Billing recomputes the **exact** count offline from the immutable event log, deduped on the signed **tracking token** (one click per legitimate impression) and passed through a **fraud filter** (bot user-agents, impossible click-through per IP/session, timing anomalies) before any charge. Fraudulent clicks are dropped pre-billing, and because the raw log is retained, a fraud-rule update can re-run against history to issue a correction. The fraud models are trust-and-safety's; the exact, auditable pipeline is mine.
+
+</details>
 
 ---
 

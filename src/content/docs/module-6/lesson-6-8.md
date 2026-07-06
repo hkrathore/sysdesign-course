@@ -245,16 +245,40 @@ That table is the interview move: **the atomic claim and the TTL hold are the in
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through the exact moment two users win and lose seat F14.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Both requests hit the claim as a conditional update: `UPDATE show_seats SET status='HELD', hold_id=?, expires_at=? WHERE show_id=? AND seat_id='F14' AND (status='AVAILABLE' OR (status='HELD' AND expires_at < now()))`. The DB serializes writes to the row: the first statement reports 1 row; the second matches nothing and reports 0. Zero rows = lost race, roll back the multi-seat transaction, return the conflicting seats, the UI re-offers. No lock outlives the transaction, no read-then-write window exists, and the invariant holds on any number of app instances because the row is the single arbiter.
 
+</details>
+
 **Q2. Payment succeeds one second after the hold's TTL expired. What does the user experience?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three layers make this rare, then safe. The 10-min TTL sits far above gateway worst case, so it almost never happens. When it does, `confirm()` re-asserts the hold inside the booking transaction, `WHERE hold_id=? AND status='HELD' AND expires_at > now()`, and a short rowcount fails the confirm despite the successful payment, triggering an automatic refund. Deliberate ordering: refunding money is recoverable, double-booking is not. If nobody re-claimed the seat in that second, a friendlier variant re-claims and proceeds, an optimization, not a correctness requirement.
 
+</details>
+
 **Q3. The interviewer says: "Why not just `synchronized(seat)`, it's one service."**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because "one service" is a deployment accident, not an invariant. Run two instances behind a load balancer, any production booking flow does, for availability alone, and two JVMs each hold their own monitor for F14; both claims succeed. It also evaporates on restart mid-checkout. In-process locks are fine as a fast-fail filter to shed hopeless contention cheaply, but the arbiter must be the transactional store, the only component every instance shares and the only one whose state survives a crash.
 
+</details>
+
 **Q4. Bookings open for the year's biggest release and one show's traffic goes 100×. What changes first?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Nothing in the claim mechanism, the conditional update and the TTL hold are altitude-invariant. What changes is the protection around them, in the order things break: seat-map reads move to a cache fed by change events (the map was always a hint); if one show's claim rate exceeds the primary's write budget, shard by show/event for transaction locality; if the spike is hostile, Ticketmaster shape, 2M users at one instant, add a waiting room that caps the claim rate to what the shard sustains. That's Ticketmaster exactly, and it *contains* this design as its core: the climb adds layers, never replaces the atomic claim. For a GA flash sale, per-seat rows collapse to a bounded counter, conditional decrement while `avail > 0`, sharded if the counter becomes the hotspot.
+
+</details>
 
 ---
 

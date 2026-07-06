@@ -323,19 +323,49 @@ An ML model says "anomaly" with no *why*; on-call can't tell a real break from d
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. How do you detect a problem across thousands of tables without the monitoring bill exceeding the warehouse bill?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* By never scanning what I can read for free. Three of the five pillars, **freshness** (last-modified time), **volume** (row count), and **schema** (column list) come straight from the warehouse's `information_schema`/system tables, **zero scan**, for all 5,000 tables. The **distribution** pillar (null rates, ranges, cardinality) runs as **sampled aggregate queries** over `TABLESAMPLE` or column statistics, scanning ~MBs, not the whole table, and I put a **hard per-warehouse scan budget** in front of it that 429s overflow. Naive full profiling would scan ~250 TB/interval, ~\$900k/month, more than the platform itself; metadata-first + sampling lands it in the low thousands, a ~500× cut. Full scans are reserved for the rare tier-1 exact assertion. The principle is the same as the metrics platform: the cost is bytes scanned, and the lever is scanning less, not buying more compute.
 
+</details>
+
 **Q2. You catch an anomaly with ML and a hard test disagrees. How do you think about trusting each?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* They're scoped to different jobs by blast radius. **ML anomaly detection** is my *broad* net, on by default across all 5,000 tables, because no team will hand-write checks for the long tail, and ML catches the *unknown* failures and seasonality-aware drift. But it has false positives and it's opaque, so I don't bet a revenue pipeline on a bare ML score. **Declarative tests** are my *deep* guarantee on the ~100–200 tier-1 tables (revenue, regulatory, exec), deterministic, explainable, no false positives, but they only catch what I anticipated. So I trust ML for *coverage and early warning*, and I trust tests for *the decision to block or escalate on a critical table.* When they disagree on a tier-1 table, the **test wins for action** (it's deterministic and the stakes are highest) and the ML signal becomes context, and that disagreement itself is a useful signal that my baseline or my test needs tuning. On the long tail, ML is all I have, and I keep it actionable by returning the expected-range/observed/z-score so on-call can judge it.
 
+</details>
+
 **Q3. A dashboard is showing a wrong number. Walk me through what the platform does.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First, **detect**, a freshness or volume anomaly on the table behind the dashboard fires (caught within ~1–2 hourly intervals, or ~30 min if it's tier-1), instead of nobody noticing for a week. Then **root-cause via lineage**: traverse **upstream** from the dashboard's table to the *first* node that's itself anomalous, say `raw.payments_cdc` stopped loading at 03:14, so the cause is one upstream node, not the dashboard. Then **impact via lineage**: traverse **downstream** from that root, collecting every affected consumer, 37 dashboards, two ML models, a regulatory extract. Then **dedup and route**: all 37 downstream symptoms collapse into **one incident** keyed by the root cause, routed to the *owner of `payments_cdc`*, not 37 separate pages. If `payments_cdc` is tier-1 with circuit-breaking on and a test confirms the defect, downstream propagation is **quarantined** until a human confirms. On-call gets one actionable incident: "payments_cdc broke at 03:14, here's the blast radius, here's the owner," not a flood of symptoms.
 
+</details>
+
 **Q4. Should this platform block bad data from flowing downstream, or just alert? Defend it.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Alert-and-continue by default; circuit-break only tier-1, opt-in, test-confirmed, quarantine-first.** The risk on each side is real: alert-only lets bad data propagate to dashboards and ML training before a human reacts; circuit-breaking on a **false positive** halts a pipeline, the monitoring tool *causes* the outage it exists to prevent. I resolve it by blast radius and confidence. For the long tail, **alert** (a false positive must never halt the business; the cost of bad data flowing for an hour is bounded). For the **tier-1 critical few**, I allow circuit-breaking, but only on an **explicit, test-confirmed** defect (not a bare ML anomaly), and I prefer **quarantine-and-confirm**, mark the partition suspect, hold propagation, page a human, over a hard pipeline kill. So the highest-stakes data *can* be stopped before it poisons the regulatory report, but a single ML false positive can never silently halt the company. The posture is scoped, not absolute, and that scoping is the judgment.
 
+</details>
+
 **Q5. What does this platform cost to run, and what would you delegate?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The dominant cost is **the scan cost of collection**, governed to the low thousands/month by metadata-first (three free pillars) + sampling (distribution at ~MBs) + a scan budget, versus ~\$900k/month naive. The TSDB for health metrics is single-digit TB (the metrics-platform problem machinery, ~100k series), and the lineage graph and incident store are small. So the platform is an *order of magnitude cheaper than the data platform it watches*, which is the whole point, and the line I own is the **scan budget** that keeps it that way. I delegate, with priors: the **anomaly-detection model** (prior: interpretable seasonal baselines first, learned models only where false-positive rate justifies the opacity), the **lineage capture depth** (prior: column-level on tier-1 paths, table-level on the tail, with completeness flagged, owned by the 13.10 team), and **tier-1 designation + test authoring** (owned by data owners and governance against the contracts of the data-quality lesson). What I keep is the architecture: **metadata-first collection under a scan budget, ML-broad + tests-on-the-critical-few, lineage-based dedup and impact, and scoped/confirmed circuit-breaking.**
+
+</details>
 
 ---
 

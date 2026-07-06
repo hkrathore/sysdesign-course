@@ -142,19 +142,49 @@ Requirements (the RESHADED **R** and **E** steps): **200M products**, **5,000 se
 
 ### Practice questions
 **Q1.** Walk me through what happens, end to end, when a user searches "wireless headphones" across a 30-shard, document-partitioned index, and tell me where the latency risk is.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The query hits a **coordinating node**. **Scatter (query phase):** it fans out to **one copy of each of the 30 shards** (primary or replica, picked by adaptive replica selection); each shard intersects the postings lists for `wireless` and `headphones`, scores candidates with **BM25**, and returns just its **top-K doc IDs + scores**. The coordinator **merges** the 30 top-Ks into a global top-K. **Gather (fetch phase):** it fetches the **full documents** for only the final K winners. The latency risk is the **tail**: the query can't finish until the **slowest of the 30 shards** responds, so even if each shard's p99 is good, the *query's* p99 is dominated by the chance that any one of 30 is in its slow tail. Mitigate with replica selection, hedged requests, modest shard count, caches, and (if the access pattern allowed) routing to cut fan-out.
 
+</details>
+
 **Q2.** A teammate proposes term-partitioning ("each shard owns a slice of the vocabulary") to make searches hit fewer shards. You run a write-heavy product catalog. What do you say?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Term-partitioning *does* make **single-term** reads narrow, but it has two disqualifying costs for us. **(1) Write fan-out:** every indexed document has terms spanning many vocabulary slices, so each write must update **many shards' postings lists**, with continuous catalog syncs that cripples ingest and complicates consistency and rebalancing. **(2) Hot-term hotspots:** common/trending terms concentrate load on one shard. And our queries are **multi-word**, so we'd rarely get the narrow-read benefit anyway. The industry default is **document-partitioning** for exactly this reason: cheap, linearly-scalable writes, with the scatter-gather read cost mitigated by replicas, caching, and routing. I'd reject term-partitioning here and engineer the read tail instead.
 
+</details>
+
 **Q3.** Your logging cluster ingests 500k log lines/s but indexing keeps falling behind and search is slow. Two-part question: how do you relieve ingest, and why is search slow?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Relieve ingest via the refresh knob.** Logs only need "searchable within tens of seconds," so raise `refresh_interval` from 1 s to e.g. **30 s**, far fewer, larger segments per second means less refresh overhead and merge pressure, multiplying indexing throughput. Use **time-based indices** (daily) so you write to one active index and the rest are read-only and fully merged. **Search is slow** for two compounding reasons: too **many segments** (frequent refresh → many small immutable segments, and a query must search *all* of them, LSM read amplification), and likely **over-sharding** (every query scatter-gathers across too many shards, inheriting a straggler tail). Fix: longer refresh, force-merge old indices, right-size shards, and search only the relevant time-range indices instead of all of them.
 
+</details>
+
 **Q4.** Why is Elasticsearch described as "near-real-time," and when does that property bite you?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because a newly indexed document is **not searchable until a `refresh`** turns the in-memory buffer into a new searchable segment, and the default refresh interval is **1 second**, durability is immediate (translog WAL), but **search visibility lags** by up to ~1 s. It bites when a workflow assumes read-your-writes through search, "create order, immediately search for it, don't find it." Fixes: `?refresh=wait_for` on the critical write, read that doc by ID from the source DB instead of via search, or accept the window. The deeper point: search is a **derived, eventually-consistent** view, not a strongly-consistent store.
 
+</details>
+
 **Q5.** Defend BM25 over plain TF-IDF in two sentences, and tell me when you'd go beyond BM25.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* BM25 keeps TF-IDF's two intuitions (frequent terms matter, rare terms discriminate) but fixes its two real flaws, **term-frequency saturation** and **document-length normalization**, which makes it robust across mixed-length corpora, hence the Lucene/ES default since 2016. I'd go beyond BM25 only when relevance is a **product differentiator**: function-score boosting (recency, popularity, business rules), a **learning-to-rank** re-rank of the top-K, or **hybrid lexical+vector retrieval** for semantic recall, scoping the investment to the requirement rather than gold-plating relevance everywhere.
+
+</details>
 
 ### Key takeaways
 - The **inverted index** (term → sorted postings list) makes text search **O(matches), not O(corpus)**, a copy-and-restructure of your text that, like any index, taxes writes and storage (the index law applied to text).

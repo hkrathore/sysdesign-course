@@ -193,19 +193,49 @@ A product needs two scheduled workloads on one platform: **(a)** user-set **one-
 
 ### Practice questions
 **Q1.** A teammate says "we'll elect a leader scheduler, so each job fires exactly once." Pressure-test that at the whiteboard.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Election only prevents two schedulers firing the same job *simultaneously*. Two gaps remain: (1) the **failover window**, for up to the lease TTL no one fires, so jobs due then are late or missed; (2) a **zombie leader** that paused, lost its lease, and resumed will double-fire unless every enqueue is **fenced with a monotonic epoch** the store rejects when stale. So firing is at-least-once at best, and execution is also at-least-once. The real guarantee is **exactly-once-*effect***: an idempotent guard on `(job_id, scheduled_fire_time)`, `INSERT … ON CONFLICT DO NOTHING`, so duplicates from either source collapse to one effect while the next recurrence (a different `fire_time`) still runs.
 
+</details>
+
 **Q2.** Design the firing path for 100M live timers at ~tens-of-thousands of fires/sec. Where's the bottleneck and how do you scale it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Timers in a **durable, replicated store** (sharded by `job_id`), the source of truth; an in-memory ZSET/timing-wheel index accelerates the due-now lookup and is rebuilt on restart. A **single leader scanning everything** is the bottleneck, one node's scan/lock throughput caps the platform and its failover gap stalls all firing. So **partition the timer space**: shard `job_id` across *P* shards via consistent hashing, give each shard an etcd **lease**, and have each owner poll its shard with the SKIP LOCKED pattern. Throughput scales ~linearly in *P*; a failure affects only 1/P of timers. The cost to name: **rebalancing on churn**, with a brief per-shard gap during handoff. Firing enqueues onto a durable queue; stateless workers execute, autoscaled on lag.
 
+</details>
+
 **Q3.** Most jobs are scheduled for `0 0 * * *`. Walk me through what happens at midnight and how you'd fix it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Thundering herd.** Say 10M daily jobs, 30% at midnight UTC → **3M fires at 00:00:00** against a fleet sustaining **50k/s**, a **~60 s** drain, a daily latency spike, and a synchronized load spike on every downstream (DB, payment gateway, email). Fix: **jitter / a fire window**, hash `job_id` into an offset within, say, 5 minutes, smearing 3M fires across ~300 s at **~10k/s**. For most scheduled work the exact second is irrelevant (a report cares about the *date*), so I trade minutes of fire imprecision for a **flat load curve and a smaller fleet**, versus provisioning everything for a 60-second peak that sits idle the rest of the day.
 
+</details>
+
 **Q4.** When would you choose **at-most-once firing** (skip missed runs) over **at-least-once firing** (catch up)? Give a concrete example of each.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Catch-up** when the run *must happen* and a late run still carries value, billing, reports, pipelines: if a failover gap missed the nightly billing fire, the recovered leader fires it late, and idempotency on `(account_id, billing_date)` makes any duplicate a no-op. **Skip** when a *stale* run is worse than no run, "emit the current price every minute": a 5-minute-old price is misleading, so resume from now. Kubernetes CronJob exposes exactly this knob and deliberately refuses to stampede through a big backlog of missed schedules. The decision is pure requirements: does a delayed run still carry value (catch up) or is freshness the point (skip)?
 
+</details>
+
 **Q5.** How do you detect that a scheduled job *failed to fire at all*, not that it ran and errored, but that it silently never ran?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The **silent-miss** problem, "nothing happened" raises no alarm, so build *proactive* observability. (1) A **missed-fire monitor**: compare `expected_fire_time` to `actual_enqueue_time` per job and alarm when overdue. (2) For critical jobs, a **dead-man's switch**: the job pings a watchdog on success; the watchdog **pages if the ping doesn't arrive** by `fire_time + grace`, stronger, because it fires even if the scheduler never tried (it's down entirely). Pair with `DLQ depth > 0` paging and **stuck-run detection** (a run in `running` past its expected duration). The Director framing: a missed batch job is otherwise discovered by the customer or finance days later, building the alarm for the *non-event* is the on-call discipline.
+
+</details>
 
 ### Key takeaways
 - **Split the scheduler from the executor** via a durable queue: the scheduler only moves a due job `scheduled → enqueued`; the queue + stateless workers own execution (retries, backoff, DLQ). This isolates blast radius and reuses, not rebuilds, the delivery machinery, Airflow's scheduler/executor/worker split is this shape.

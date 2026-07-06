@@ -127,19 +127,49 @@ The messaging-queue building block ended its checkout example with the tee-up: *
 
 ### Practice questions
 **Q1.** A teammate says "let's use SNS so we can replay the order stream for a new analytics consumer next quarter." What do you correct, and what do you propose?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* SNS **can't replay**, it's a push fan-out router with **no retention**; once it has delivered to current subscribers the message is gone, so there's nothing to replay for a future consumer. Two fixes: (1) if we just need **durable buffering today**, **SNS→SQS** gives each subscriber its own queue with retries/DLQ, but SQS still tops out at **14 days** and isn't a true replay log. (2) If the requirement is genuinely **"backfill a brand-new consumer from history,"** we need a **retained log**, **Kafka/MSK** (default 7d, tunable, replay by offset) or **Kinesis**, or **Google Pub/Sub** (7d default / 31d max via seek/snapshot) if bounded replay suffices. The choice is **how far back** we must replay and our **ops appetite**.
 
+</details>
+
 **Q2.** Explain how the *same* Kafka topic can behave as a queue for one team and as pub-sub for the company. What's the mechanism?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's the number of **consumer groups**. One topic read by **one** consumer group → the group's members **split the partitions** and **compete** to drain it → each message handled **once** → that's a **queue** (work distribution, bounded by partition count as in 3.8). The **same** topic read by **multiple** consumer groups → each group keeps its **own committed offset** and **independently reads the full stream** → each gets every message → that's **pub-sub** (fan-out). The data isn't copied per group; it's read multiple times, each group tracking its own position. So "queue vs pub-sub" reduces to **how many independent offsets read the log.**
 
+</details>
+
 **Q3.** Your event topic has 5 consumer groups today and product wants to add 4 more. Walk me through the cost and how you'd manage it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Fan-out is **read+egress amplification**: 9 groups means **9×** the publish bandwidth in downstream reads off the **same 1× write**, with the producer entirely unaffected, at this topic's volume that's roughly doubling today's ~$1.3k/month cross-AZ egress line, and cross-region/internet egress runs 2-9× worse. Management levers: **server-side filtering** (Pub/Sub/SNS filters, or narrower Kafka topics) so a group that wants 10% of events doesn't read 100%; **co-locate** heavy consumers in the producer's AZ/region; and treat **per-subscriber lag and egress as SLOs** with a lightweight subscription-governance step, because each new subscriber is a recurring cost nobody explicitly approves.
 
+</details>
+
 **Q4.** When is push delivery the right call, and when does it bite you?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The rule: **push for latency, pull for throughput.** **Push** wins for low-latency serverless/webhook fan-out, **SNS→Lambda** or an HTTP endpoint where you want delivery as events arrive without polling. It bites when the consumer is **slow or flaky**: the broker owns flow control, falls back to retry-with-backoff, and you **must** configure a **dead-letter** target or messages drop after the retry budget, unbounded push at a slow endpoint is the flooding problem from 3.8. **Pull** (Kafka, Pub/Sub pull) is better for high-throughput stream consumers: they fetch at their own rate, **lag** under load with free backpressure, and stay isolated from peers.
 
+</details>
+
 **Q5.** Same-key ordering matters but you have 9 subscribers and need throughput. How do you design it, and what stays unchanged from the queue lesson?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Partition by the ordering key** (e.g. `user_id`/`order_id`) so same-key events land on one partition and are delivered **in order**; different keys spread across partitions for parallelism, **ordering per key, parallelism across keys**, *unchanged from 3.8*. The **fan-out twist:** each of the 9 subscribers gets that **same per-partition order independently**, off its **own offset**, so they don't interfere. Within any one subscriber, members of its **consumer group ≤ partitions** (the 3.8 ceiling still applies *per group*). Also unchanged: **at-least-once + idempotency per consumer** for effectively-once. New from this lesson: ordering is **opt-in** (Pub/Sub ordering keys / SNS FIFO), I scope it only to keys that need it, and I price the **9× amplification**.
+
+</details>
 
 ### Key takeaways
 - **Queue = one message to one competing consumer (work distribution); pub-sub = one message to every subscriber (broadcast).** A partitioned log is a **queue with one consumer group and pub-sub with many**, the difference is the number of independent subscriptions/offsets reading the same log.

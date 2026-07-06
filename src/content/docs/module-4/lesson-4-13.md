@@ -320,19 +320,49 @@ At Director altitude the probes are about **judgment, cost, and delegation**, no
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. How do you stop a duplicate notification when your pipeline is at-least-once and retries?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two layers. At **ingest**, the caller supplies an `idempotency_key` and I `SETNX` it in Redis with a TTL equal to my dedup window, a replayed request is a no-op. At the **worker**, before re-sending after a crash/retry I check whether I already have a `gateway_msg_id` recorded for that `(notification_id, channel)` in the tracking store, so a "sent-but-didn't-commit-offset" case doesn't re-send. This **minimizes** dupes within a window; it is not a global exactly-once guarantee, because the gateways themselves are often at-least-once. For money-sensitive notifications ("you were charged"), I push idempotency up into the **producing** service's content so even a rare dupe is harmless. The honest framing is at-least-once + aggressive dedup.
 
+</details>
+
 **Q2. A campaign goes out to 50M users. Trace it, and protect the transactional traffic.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The campaign is submitted with a **rate cap** and lands on the **`marketing` topic**, separate from `txn`. Fan-out resolves the 50M recipients, filters by **preferences** (many opted out of marketing, this also *saves cost*), checks **quiet-hours** (deferring night-time recipients via the scheduler), and emits per-channel messages. **Outbound rate-limiters** (Redis token bucket per gateway) feed each provider at/under its allowed rate, so the blast **drains over minutes** while Kafka holds the backlog, we **buffer, not match**. Crucially, **`txn` consumers run on their own topic/pool**, so an OTP submitted mid-blast is delivered in seconds, completely unblocked. The blast is a controlled drain; the OTP never queues behind it.
 
+</details>
+
 **Q3. Where is the money, and how would you cut it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **SMS dominates**, 3% of volume (~30M/day) but ~**$82M/year** at $0.0075/msg, versus ~$4.4M/yr for 4× the email volume and **$0 for push**. Levers, highest to lowest: (1) **channel downgrade**, deliver via free push when the device is reachable and registered, fall back to SMS only when it isn't; (2) **per-user SMS budgets** and tight preference/category gating so we don't SMS where push/email suffices; (3) **negotiated carrier/aggregator rates** at volume; (4) suppress SMS for low-value categories entirely. At 10× the SMS bill is ~$820M, so this is a *business strategy* lever I'd set targets for and delegate the carrier negotiation, not an infra tuning task.
 
+</details>
+
 **Q4. Your delivery latency spiked for push only. Diagnose.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Push-specific means it's **downstream of the channel split**, so I look at the **push topic and pool**: (a) is **APNs/FCM throttling us** (we exceeded their rate), check the outbound rate-limiter and 429s; (b) has the **push circuit breaker** tripped or is it flapping, gateway errors causing backoff; (c) is the **push consumer lag** climbing in Kafka (under-provisioned workers vs a blast); (d) a bad **device-token** cleanup issue causing futile retries. Fixes with their trades: scale push workers (more cost), tighten outbound rate to match APNs' limit (slower drain, fewer 429s), shard across **multiple provider accounts** (ops complexity), prune dead tokens (fewer wasted retries). Because channels are **isolated**, none of this touches SMS/email/in-app, which both confirms the diagnosis and contained the blast radius.
 
+</details>
+
 **Q5. Kafka or SQS for the backbone, when would you actually choose SQS?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd choose **SQS/SNS** at **low-to-mid scale** (say <100M/day), or early in a product's life, where the priorities are **operational simplicity** (no brokers to run/patch), **built-in dead-letter queues**, and pay-per-use. SQS is a genuinely good answer there and I wouldn't over-engineer Kafka onto it. I move to **Kafka/Pulsar** when I need **replay** (reprocess after a bad deploy), **ordering within a partition**, **very high sustained per-partition throughput** at billions/day, and **multiple independent consumer groups** reading the same stream (delivery + analytics + audit), which is exactly the fan-out shape at our scale, and where Kafka's per-message cost wins. The trade I'm accepting with Kafka is running the cluster; I'd delegate the final benchmark to messaging-infra with that prior.
+
+</details>
 
 ---
 

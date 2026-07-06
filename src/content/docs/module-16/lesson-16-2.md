@@ -206,16 +206,40 @@ Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, co
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Six months in, your sponsor (the CTO) leaves. The new CTO asks why the company is paying a 20% tax. Your answer?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I show the scorecard, not the architecture: deploys quarterly → weekly, change-failure 25% → 12%, two completed slices live with their legacy code deleted, first Oracle tables gone, KTLO trending toward ~11 recovered engineers by Q8. Then the asymmetry: cancel today and we keep everything shipped, stable intermediate states are why I chose strangle over rewrite. If it's still cut, I descope to finishing the in-flight slice, never abandon one mid-cutover. Surviving sponsor loss is why value lands quarterly instead of at the end.
 
+</details>
+
 **Q2. The two billing engineers resign in month 2, before stabilization finishes. What changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Knowledge extraction becomes the quarter's P0: paired characterization-test writing during their notice period (pinning observed behavior, bugs included, the tests *are* the knowledge transfer), recorded walkthroughs of the incident-map hotspots, and a retention conversation I should have had in week 3, the audit flagged bus-factor-1; acting late is on me. What I *don't* do is accelerate billing's migration: migrating the least-understood module with its experts gone is maximum risk. Stabilize, test-pin, then strangle on schedule.
 
+</details>
+
 **Q3. Post-acquisition: you own your platform *and* the acquired company's. The CEO wants "one platform" in a year. Respond.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Same playbook, plus politics. Audit both estates and decide *per domain* on churn/risk/cost evidence, their billing might beat ours even though "we won." Then reframe the deadline: a façade presents one platform to customers in ~2 quarters while back-ends consolidate domain-by-domain behind it; domains where integration earns less than it costs stay separate indefinitely. The per-domain split also mitigates talent flight by giving both orgs meaningful ownership. I commit to the customer-facing deadline, not the data one.
 
+</details>
+
 **Q4. Your first strangled slice has run shadow traffic for a month and the diff rate is stuck at 2%, twenty times your threshold. Ship or hold?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Neither, yet, decompose the 2% first; diff rate aggregates three things: harness noise (timestamps, ordering, fix the normalizer), *intentional* divergence (legacy bugs we chose not to reproduce, document, exclude with sign-off), and true regressions (burn down before any canary). Usually the bulk is the first two. If true regressions persist after a burn-down sprint, the slice was cut too wide, shrink it rather than extend the deadline; slice size is the variable I control. I won't ship on "it's only 2%": this slice sets the parity bar for the money path, and that discipline is its real deliverable.
+
+</details>
 
 ---
 

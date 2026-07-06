@@ -130,19 +130,49 @@ The through-line at Director altitude: **the platform's hardest problems at scal
 ### Practice questions
 
 **Q1.** Your company has grown from one product to twelve, each with its own engineering team, and the central data team's backlog is now ~4 months deep; domains have started building shadow pipelines to route around them. Diagnose the situation and recommend an org model.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is the textbook **central-team-as-bottleneck** signal, a deep backlog, shadow pipelines, and a central team that lacks the domain context to model twelve products' data well. Conway's law (8.x) says the architecture should mirror the org, and the org is now twelve domains, so the data architecture should distribute ownership. I'd move toward **data mesh / hybrid**: each domain owns its data as a product (models it, guarantees its quality and freshness SLAs, publishes it), the former central team pivots to a **platform team owning the self-serve paved road** (storage, catalog, CI/CD, lineage) and the **federated governance policy engine** (classification, security, contract standards enforced as code), and **data contracts** become the load-bearing interface between domains. I would *not* go pure-mesh overnight, I'd start with the highest-throughput, most-blocked domains and keep shared dimensions (the company-wide `customer`, `date`) centrally owned to prevent definition drift. The decision is on the **org axis** (domain count + bottleneck), not the tech, and the shadow pipelines are the proof the bottleneck is real.
 
+</details>
+
 **Q2.** A 25-person startup with one data engineer asks you to set up "a data mesh because that's the modern architecture." What do you tell them?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd reject it, this is **mesh as cargo-cult**. Data mesh solves a Conway's-law bottleneck that appears when *many* data-producing domains overwhelm a *central* team; a 25-person startup has neither many domains nor a central team to bottleneck. Imposing mesh here manufactures the exact costs mesh trades for scale, inconsistency (everyone defines "revenue" differently), duplicated platforms, and federation overhead, to relieve a bottleneck that doesn't exist, and it demands a platform-tooling and governance maturity they don't have. The right call is **centralized**: one data engineer, one warehouse/lakehouse, a single set of governed definitions, and a catalog the moment table count makes discovery hard. I'd tell them to revisit mesh only when they have *dozens* of domains and the central function is provably the bottleneck, and to invest the saved energy in clean modeling and contracts now, which is what makes a *later* mesh possible.
 
+</details>
+
 **Q3.** Analysts need to query the `transactions` table, which holds `amount`, `merchant`, `card_number`, and `customer_country`. EU analysts must not see non-EU customers' rows, and no analyst may see raw card numbers. Design the access control, and explain why table-level grants fail.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Table-level grants fail because they're all-or-nothing on the whole table, granting read leaks both `card_number` and every country's rows to every analyst; denying it blocks the legitimate `amount`/`merchant` analysis. The fix composes three fine-grained controls, anchored at the **catalog as chokepoint**: (1) **column masking**, tag `card_number` as `PII` and write one tag-based policy that masks any `PII` column for roles lacking `pii-reader` (so analysts see `***-****-1234`); (2) **row-level security**, attach a predicate to the EU-analyst role so they see only rows where `customer_country` is in the EU set; (3) **audit logging** of every read for compliance. The key scaling move is **tag-based / attribute-based policy**, classify the column once and write the policy once so it applies across all tables, rather than hand-writing a grant per table (which becomes datasets × roles × columns rules nobody can audit). And enforcement must be at the catalog/credential layer so it holds no matter which engine (Spark, Trino, the warehouse) reads the open table.
 
+</details>
+
 **Q4.** Six months after launch, a Director asks "where does the `active_users` number on the exec dashboard actually come from, and what happens if we rename the source `events.uid` column?" What capability answers both, and how?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Column-level lineage** answers both. For provenance: lineage traces `active_users` backward through every transform, the dbt models that count distinct `uid`s, the silver table that cleaned the event stream, back to the source `events.uid` column, giving an auditable "this number comes from these sources via these transforms," which is the trust/compliance backbone (and what regulators demand). For the rename: the *same* lineage runs **forward** for **impact analysis**, listing every downstream column, mart, and dashboard that reads `events.uid`, so the rename becomes a *planned migration with a known blast radius* instead of a silent break that surfaces as broken dashboards days later (the contract-break problem). Lineage is captured by parsing the transform SQL or via OpenLineage and surfaced in the catalog, it's a system, not documentation, and "we'd grep the codebase" is the red-flag answer because it misses runtime/dynamic transforms and column-level edges.
 
+</details>
+
 **Q5.** Argue both sides of "buy a data catalog vs build one," then make the call for a 6,000-table, multi-engine lakehouse.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Build** buys you exact fit to your engines and metadata model and no license cost, but catalog capabilities, search, lineage capture (especially *column-level*, across multiple engines), tag-based access policy, audit, are genuinely hard, commodity, and undifferentiated, so building them is a large, ongoing side quest that competes with your actual mission. **Buy/adopt** (Unity Catalog, AWS Glue/Lake Formation, Apache Polaris + OpenLineage, or Collibra/Alation) gives you those as a product and lets you focus on what's differentiated, *your data and your definitions*. For a 6,000-table multi-engine lakehouse, I'd **adopt** a catalog that doubles as the governance chokepoint and integrates with the open table format, and build only thin glue (custom metadata, internal search UX). My stated prior for delegation: "platform team benchmarks the managed catalog vs an open Polaris/OpenLineage stack on our Spark+Trino+warehouse mix and our PII-masking needs; prior is the managed catalog for governance ergonomics unless open-format lock-in is the binding strategic constraint." The differentiation is never the catalog software, so building it is rarely the right use of the team.
+
+</details>
 
 ### Key takeaways
 - **At scale the hardest platform problems are organizational**, can people *find* the right data (catalog/discovery), are they *allowed* to see it (access control), can you *trace* a number's provenance (lineage), and *who owns* its quality (ownership/contracts). The governance plane answers these four, and they're people problems with technical surfaces.

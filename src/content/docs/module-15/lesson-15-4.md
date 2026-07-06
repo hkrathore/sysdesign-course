@@ -141,16 +141,40 @@ The through-line at Director altitude: a major incident is a coordination proble
 ### Practice questions
 
 **Q1.** Your most senior engineer is also the only person who deeply understands the failing subsystem. Should they be the Incident Commander? Why or why not?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No. The IC must coordinate, hold the whole picture, and decide, and explicitly stay off the keyboard. The deep expert is most valuable as the Ops lead actually diagnosing and fixing, because that's the scarce skill in the room. If I make them IC, I get a half-coordinating expert and a half-debugging coordinator, and neither job gets done. I'd put a trained IC (a senior engineer or EM who's run incidents before, not necessarily the most senior person) in command and keep the expert on the keyboard. The whole point of the role split is that nobody fights the fire and runs the fire at once, the expert is too valuable on the hose to also work the radio.
 
+</details>
+
 **Q2.** Define the severity triggers you'd set so that declaring a SEV1 is a lookup, not a judgment call. What's the trade-off in where you set the bar?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd make SEV1 mechanical: a core flow (checkout, login, the primary read path) down or degraded for more than X% of users, or an active data-loss or security event. SEV2 ties to the SLO, error-budget burn rate ≥ 14× (budget gone in ~2 days) or p99 latency > 2× the SLO for 5 minutes. The point is that an anxious on-call at 3am reads the table and declares without a meeting. The trade-off is over- vs under-declaring: too low a bar and we cry wolf, on-call burns out and SEV1 stops meaning emergency; too high and real outages run 40 minutes as a "weird blip." I bias slightly toward over-declaring on customer-facing impact, a five-minute false alarm is cheap, a forty-minute undeclared outage isn't, and I tune the thresholds from actual page volume rather than guessing once.
 
+</details>
+
 **Q3.** An incident has been running for four hours and your IC is clearly fatigued. What's your protocol, and what makes it safe to execute?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A planned IC handoff, ideally follow-the-sun to a fresh IC in another time zone. Fatigue degrades judgment exactly when it matters, so a long incident must change hands deliberately rather than run a tired commander into the ground. What makes it safe is the single source of truth: the incident channel and the scribe's live timeline mean the incoming IC reads current status, ruled-in/ruled-out hypotheses, the next planned action, and who holds each role, and is current in minutes instead of re-deriving the incident. The outgoing IC does a brief verbal handoff against that document with a few minutes of overlap, then formally transfers command in the channel so everyone knows who's in charge. A handoff with no written state resets the incident to minute zero, which is why the timeline is load-bearing, not bureaucracy.
 
+</details>
+
 **Q4.** A VP keeps DMing three of your responders for status during a SEV1, and they're falling behind on the fix. How do you handle it, structurally, not just this once?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is a missing-Comms-role problem, not a VP problem. Structurally: every incident has a dedicated Comms/Liaison lead and a fixed cadence (15 min for a SEV1), posting to one source of truth even when there's no new information. I'd point the VP, and everyone, to the incident channel and the exec summary Comms is maintaining, and make it a norm that responders don't field individual status pings, that's Comms's job. The reason silence drives the DMs is that when stakeholders hear nothing they assume the worst and escalate; a reliable drumbeat removes the anxiety that causes the interruptions. The status page does the same for customers. The Director framing: I don't fix this by asking the VP nicely, I fix it by building a comms function into the incident process so the responders are structurally insulated.
+
+</details>
 
 ### Key takeaways
 - **A major incident is a coordination problem first.** The bottleneck is rarely skill, it's the lack of a single owner, so the first move under fire is to declare and assign roles, not to start debugging, because one decision-maker beats a flailing crowd.

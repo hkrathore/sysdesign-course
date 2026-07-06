@@ -289,19 +289,49 @@ At Director altitude the probes are about **judgment, cost, and delegation**, no
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through why a trie beats just storing every prefix → top-k in a hash map.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The flat hash map is O(1) and dead simple, and I *do* use it, at the edge and in Redis for the ~1M hottest prefixes. But as the **primary** store it materializes a row for every prefix of every phrase with **no structural sharing**: "dell laptop" forces separate entries for `d`, `de`, `del`, … each carrying the string, which multiplies storage well past the trie's ~100 GB. The trie shares stems (the string lives once in a phrase table, referenced by id) and answers "all completions under prefix p" in one walk if requirements ever grow. So: trie at origin for compactness and prefix-nativeness, flat KV at the edge for O(1) on the bounded hot set. Right tool per tier.
 
+</details>
+
 **Q2. A brand-new query term starts trending hard. Trace how, and how fast, it shows up in suggestions.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Submitted queries flow to Kafka in real time. The **Flink streaming job** detects the surge (rate spike over a short window) within **seconds** and emits a trending overlay that merges on top of the batch base, so the term can appear in suggestions in seconds-to-a-minute *without* waiting for the hourly trie rebuild. The full **Spark batch** job folds it into the base corpus at the next hourly rebuild for durable ranking. This is the hybrid freshness model: stream the few terms where seconds matter, batch the rest, we spend streaming compute only where freshness has user value.
 
+</details>
+
 **Q3. Your p99 is fine but p99.9 is breaching 100 ms. Diagnose.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The tail is the **edge-miss path**, the ~10% (and the colder slice within it) that round-trip to origin, plus any request landing on a **hot shard** mid-spike or during a **trie publish/swap**. Fixes, each with its trade: warm the edge/Redis with popular prefixes at publish time so fewer requests go cold (more publish-time work); add **replicas to hot shards** with load-aware routing (more memory/cost); make the trie swap **atomic and non-blocking** via immutable snapshots so a publish never stalls reads; and bound edge TTL so staleness is controlled. If a slice still can't meet p99.9, I'd **degrade it**, empty suggestions beat a 200 ms hang, since the feature is best-effort.
 
+</details>
+
 **Q4. The business wants suggestions personalized to the user. How, without blowing the latency budget?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I would **not** recompute per user on the path. I'd keep the global precomputed top-k as the candidate set and add a thin **per-user re-rank** that *reorders* those ~5-20 candidates using a small, cached user-affinity signal (recent categories, locale), reordering a tiny candidate list is microseconds and stays in budget. Per-user state is small and cacheable. This is also why I'd cut personalization from v1 and add it as a layer: it's a separable re-rank, not a rebuild of the serving structure. I'd delegate the affinity-model design to the ranking team with a CTR-based A/B as the success metric.
 
+</details>
+
 **Q5. Defend the cost of this system to a CFO.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The dominant cost saver is the **edge cache**: it absorbs ~90% of a ~700k peak QPS so we run ~a dozen origin trie boxes instead of ~40+, and CDN egress is cheap relative to compute. The persistent corpus sits in **object storage** (cents/GB at PB scale), not an expensive transactional DB. The **batch-first freshness** model means we pay for heavy streaming compute only on the small trending set, not on all 5B daily events. The deliberate **99.9% (not 99.99%)** target and graceful degradation avoid the multi-million-dollar tax of five-nines on a feature that's allowed to soft-fail. Every architectural choice here is also a cost choice, and I can name the dollar lever behind each.
+
+</details>
 
 ---
 

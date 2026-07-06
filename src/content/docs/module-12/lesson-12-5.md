@@ -294,16 +294,40 @@ Scale the design under the new constraints an enterprise business puts on it.
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through exactly how a cross-tenant leak is prevented, end to end.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The tenant identity comes only from the validated **JWT claim**, never a request parameter, and is set as `app.tenant_id` on the DB session. Reads go through an **always-scoped repository**, and behind it **Postgres RLS with FORCE** re-applies `tenant_id = current_setting('app.tenant_id')` in the engine, so even a query that forgets its filter returns only the current tenant's rows. The **cache and search paths carry the same predicate** (`tenant_id`-prefixed Redis keys, a mandatory tenant filter on the shared index). The app connects as a non-owner role so it cannot bypass RLS, and the pooler resets the session var on checkout so a reused connection cannot inherit the last tenant's context. **Canary tenants** and CI tests assert a cross-tenant read returns empty. The point is that a leak is impossible **by construction**, not merely unlikely by discipline.
 
+</details>
+
 **Q2. Justify pooling with real numbers, why not just give everyone their own database?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Density is the business model. A pooled shard packs **~5,000 SMB tenants** at **~$0.50/tenant/month** of infra; an SMB paying ~$120/month is then >99% infra gross margin, and pooling is the only reason the 90,000-tenant long tail is viable at a 70 to 80% company gross margin. Give everyone a silo and that $0.50 becomes ~$2,500, wiping out the margin. So I **pool the tail** and **silo only the ~1% of enterprise tenants** that require physical isolation, residency, or per-tenant restore, where the deal size ($50k to $500k/yr) absorbs the cost and isolation is what closes the sale. The tenancy model is a **unit-economics decision I own with the density and margin numbers stated out loud.**
 
+</details>
+
 **Q3. An enterprise demands their data stays in the EU and is encrypted with their own key. What changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two moves. **Residency:** the **control plane stays global** (registry, routing, billing) but the tenant's **data plane is pinned to an EU region**, so their traffic routes to EU infrastructure and their rows and attachments never leave it. **BYOK:** the tenant gets a **silo database and a per-tenant S3 bucket encrypted with a customer-managed KMS key**, so we operate the data but cannot read it without their key, and they can revoke access. Both are **enterprise-tier features priced into the contract**; the pool cannot offer them, which is precisely why the platform runs a pooled long tail and a siloed, per-region head at once.
 
+</details>
+
 **Q4. A pooled tenant grows into a whale and starts hurting its shard-mates. What is the sequence?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Detection first, the control plane watches **per-tenant usage counters** (users, QPS, storage) and flags the tenant when it crosses a threshold. Immediate mitigation is **fairness**: tighten its **per-tenant rate limit**, cap its connections, and enforce `statement_timeout` so a runaway query cannot pin the shard, protecting the co-tenants' SLA. Then the durable fix is an **online pool-to-silo migration**: stand up a dedicated database, **logically replicate** the tenant's rows, verify with checksums, cut over at the gateway's routing map, and tombstone the source rows, all with no downtime and no leak. I own the **trigger policy** and delegate the migration tooling to storage with a prior of logical replication plus a checksum gate.
+
+</details>
 
 ---
 

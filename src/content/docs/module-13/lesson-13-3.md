@@ -135,16 +135,40 @@ The through-line at Director altitude: own the **posture**, what the paved road 
 ### Practice questions
 
 **Q1.** Walk through how you'd encrypt a multi-tenant object store so that a single key compromise can't expose every customer.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Envelope encryption with a per-tenant key hierarchy. Each object gets a fresh DEK that encrypts it locally at AES-256-GCM line rate; the DEK is wrapped by a **per-tenant KEK** held in the KMS, and the KEKs' master key sits in an HSM and never leaves it. I store the wrapped DEK alongside each object. The blast radius is now bounded by design: a leaked DEK exposes **one object**, a leaked tenant KEK exposes **one tenant**, and the root is HSM-protected. Every unwrap is logged, so a compromise is both detectable (anomalous unwrap spike) and attributable. I rotate KEKs every 90 days, which re-wraps DEKs cheaply without re-encrypting the petabytes underneath. I reject one global key because it turns any leak into a total breach with no containment, the whole reason for the hierarchy is to make "a key leaked" a one-tenant incident, not a company-ending one.
 
+</details>
+
 **Q2.** Your team wants to "just encrypt the card number column" to get PCI-compliant faster. What's wrong with that framing, and what do you do instead?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Encrypting the PAN doesn't shrink PCI scope, you still hold the decryption key, so every system that touches the column is still in audit scope, and the assessment stays as large and expensive as before. The move that actually reduces cost is **tokenization**: replace the PAN with a token at ingestion, store the real card number in one hardened token vault, and hand every downstream service a token. Those services now never see card data and fall **out of PCI scope entirely**. If ~40 internal services exist and only the 2 at the payment edge plus the vault touch a real PAN, that pulls ~38 services out of audit, turning a sprawling assessment into a tight one around three components. I'd still field-level encrypt the PAN inside the vault, but the scope win is tokenization, not encryption. The cost is running and securing the token vault, which is the right thing to concentrate hardening on.
 
+</details>
+
 **Q3.** An engineer says they'll keep the database password in an environment variable so it's "not in the code." Is that good enough? What's the better posture?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No, env vars are not a secrets store. They leak through crash dumps, process listings, child processes, and accidental logging, and they have **no rotation, audit, or revocation** story, a leaked env-var password is valid until a human notices and changes it, often weeks. The better posture is a dedicated secrets manager (Vault, cloud Secrets Manager): the app fetches the credential at runtime over an authenticated channel, every read is access-controlled and audited, and ideally the credential is **dynamic with a 1-hour TTL** minted per app, so a leak is dead in an hour instead of living until someone reacts. Rotation becomes an automated pipeline, not a calendar reminder. The integration tax is small and buys audit, rotation, and revocation for free, which is exactly what env vars can never offer.
 
+</details>
+
 **Q4.** Why is envelope encryption used instead of just encrypting data directly with a KMS key, and what does it buy you operationally?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Encrypting data directly with a KMS key puts the KMS on every I/O (a network call per read and write) and makes rotation a re-encrypt-the-whole-dataset event, both non-starters at scale. Envelope encryption splits the job: a local DEK encrypts the data at AES line rate (no KMS in the hot path), and the KMS only **wraps the small DEK** with a KEK it never exports. Operationally this buys three things. Rotation is cheap, rotating the KEK re-wraps the few-hundred-byte DEKs, not the petabytes they protect. KMS load is bounded, one small wrap/unwrap per object or per cached session at ~\$0.03/10k requests and single-digit-ms latency, and I cache unwrapped DEKs briefly to keep the KMS off the per-row path. And the root key stays in hardware, the KEK's master is HSM-backed and non-exportable. The only cost is one extra wrapped-key blob stored per object, which is trivial against what it buys.
+
+</details>
 
 ### Key takeaways
 - **Encryption is table stakes; key management is the engineering.** AES-256 and TLS 1.3 are commodities running at near-zero cost; the signal is who holds the keys, how they rotate, and what one leak exposes. Never roll your own crypto.

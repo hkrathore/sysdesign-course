@@ -250,19 +250,49 @@ Drag N, W, R: when `W + R ≤ N` the read and write sets can miss each other →
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Eventual or strong consistency for this cache, defend your choice.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I make it **per-request**, defaulting by use case. For a **look-aside cache** fronting a database, eventual + read-repair: I write to the owner, replicate async, read the fastest replica, and repair stragglers. A stale read here is just a slightly-old copy of data the DB still authoritatively holds, invisible to correctness, and I'm buying sub-millisecond p99 and survival when replicas diverge under partition. For a **session store or rate-limit counter that is itself the source of truth**, I switch to strong quorum with W+R>N (N=3, W=2, R=2) for read-your-writes, a stale read there is a logged-out user or a breached limit. The cost of quorum is real: higher tail latency (wait for the 2nd-fastest replica) and lower availability under partition (fail if you can't reach W). So I keep the strong surface as small as the use case demands. The wrong answer is one fixed posture, it either slows the cache or breaks the session.
 
+</details>
+
 **Q2. One key, a celebrity's profile, takes 30% of your reads. Walk me through it.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* That's a **hot key**, and the trap is that consistent hashing does nothing for it, the key is singular, so it always lands on one node, which now saturates while the rest idle. I layer three fixes. First, a **near-cache**: a tiny LRU on each app server absorbs repeat reads so they never reach the ring, this alone often kills the problem, at the cost of a second short staleness window. Second, **key replication**: store the hot key on extra replicas beyond RF and read from a random one, spreading the load, costs extra memory for that key. Third, **detection**: track per-key request rate and auto-promote hot keys into the replicated set so we don't depend on knowing them in advance. "Add more nodes" is the reflex answer and it's useless here, N doesn't matter when everyone wants one key.
 
+</details>
+
 **Q3. That hot key's TTL expires. What happens at the next millisecond?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Thundering herd.** Ten thousand clients miss simultaneously and all stampede the backing DB to refill the same key, and the DB falls over. Three defenses: **single-flight coalescing** (the first miss takes a brief lock and refills; the rest await that one result instead of all hitting the DB), **probabilistic early expiration** (refresh hot keys slightly before TTL with jitter, so they never hard-expire under load), and **stale-while-revalidate** (serve the slightly-stale value while one background request refreshes). Note shorter TTLs make this *worse*, not better, more frequent stampedes. The trades: single-flight adds a per-key lock; stale-while-revalidate briefly serves known-stale data, both cheap next to a synchronized DB outage.
 
+</details>
+
 **Q4. Why not just `hash(key) % N` to pick the node?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because changing N, adding a node or losing one, remaps **almost every key**, not just a fraction. Every remapped key becomes a miss, so the cache effectively **cold-starts**, and all that traffic falls through to the backing DB at once, a 10-100× load spike until the cache re-warms, which can take minutes and can itself take down the DB. **Consistent hashing** with virtual nodes caps movement at ~K/N (K keys, N nodes) and keeps load smooth, the rest of the keys keep hitting warm cache. That bounded-reshuffle property is the entire reason consistent hashing exists; `mod N` is only safe when N never changes, which in a system designed to scale it always does.
 
+</details>
+
 **Q5. This is one component. Where does your depth stop, and what do you hand off?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I keep the decisions that shape the system: the **consistency posture** (per-request, eventual-vs-quorum by use case), the **replica placement rule** (RF copies on the next distinct physical nodes, AZ-aware), and the **three failure-mode mitigations** (hot key, herd, resharding). I delegate the internals with a stated prior: **eviction**, Memcached slab/LRU vs Redis LFU is the cache team's call, my prior is Memcached for a pure look-aside cache on memory efficiency, pending their benchmark on our value-size distribution; **membership**, gossip vs an etcd control plane is a reliability call, my prior is gossip off the hot path; and the **consistency-cost benchmark**, I'd have them measure the real p99 delta and stale-read rate of eventual vs quorum on our traffic and set policy from those numbers. Keeping the policy and handing off the mechanism with a prior is the altitude.
+
+</details>
 
 ---
 

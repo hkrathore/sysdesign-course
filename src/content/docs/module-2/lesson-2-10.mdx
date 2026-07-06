@@ -167,16 +167,40 @@ The signal isn't any single pick, it's that **each boundary chose its style and 
 
 ### Practice questions
 **Q1.** Your mobile team complains the feed screen makes 4 sequential API calls and over-fetches huge JSON on a slow network. What do you propose, and what's the cost?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Collapse the 4 round trips into **one** by letting the client specify exactly the fields it needs, **GraphQL** or a **REST backend-for-frontend (BFF)** that aggregates server-side. One round trip instead of 4 saves ~150-450 ms of mobile RTT (round-trip time), and only the needed fields cross the wire. Costs to name: GraphQL gives up free HTTP/CDN caching, needs resolver batching (DataLoader) and query-complexity limits; a BFF avoids those but adds a per-client service to maintain. I'd choose on how many *heterogeneous* clients exist, one client → BFF; several divergent clients → GraphQL.
 
+</details>
+
 **Q2.** A team wants to scale the web tier by "just adding more servers," but sessions are stored in each server's memory. What breaks, and what's the fix?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* In-memory sessions force **sticky sessions**, with all four stateful consequences: uneven load, new nodes help only *new* sessions, node death loses sessions, deploys drop them. The fix: **externalize session to Redis** (token-keyed, TTL expiry), making the tier stateless so any node serves any request and capacity scales linearly. Name the cost, a ~1 ms hop per request plus Redis as a new HA dependency, and call sticky sessions what they are: a stopgap, named as debt.
 
+</details>
+
 **Q3.** You're putting a Redis cache in front of Postgres for a read-heavy service. Which write strategy, and when would you change your mind?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Default to **cache-aside**: update Postgres (durable source of truth), **invalidate** the cache key, let the next read lazily reload. Never loses data; the cache can only go stale via a race. Switch to **write-through** if read-after-write must be fresh and warm on a hot key, accepting higher write latency (cache + DB on the critical path). Reach for **write-back** *only* when write latency or burst absorption dominates **and** the data is reconstructable, it loses unflushed writes on crash. Tie it to the requirement: durability-first → aside or through; extreme write throughput on reconstructable data → back.
 
+</details>
+
 **Q4.** A checkout flow is a synchronous chain: API → pricing → inventory → payment → fulfillment, five hops. Where's the risk and what would you change?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Synchronous depth **multiplies latency** (5 × 50 ms = 250 ms floor) and **multiplies failure** (availability ≈ the product of the links, five services at 99.9% ≈ 99.5%). Keep **synchronous** only the steps the user must block on (pricing, inventory check, payment authorization), with **timeouts + circuit breakers** so a slow downstream fails fast. Make the rest **asynchronous**: emit an `OrderPlaced` event to a broker (Kafka/SQS) driving fulfillment, email, and analytics, with idempotent consumers for at-least-once delivery. The trade: those steps become eventually consistent, bought in exchange for a faster, more resilient critical path.
+
+</details>
 
 ### Key takeaways
 - API style is chosen from the **consumer and team boundary**: REST for cacheable public reach, **gRPC for internal service-to-service** (Protobuf/HTTP-2/streaming/typed), GraphQL for **many clients each wanting a different slice**, and each choice forfeits something (GraphQL gives up free HTTP caching; edge gRPC gives up browser reach). Name what you dropped.

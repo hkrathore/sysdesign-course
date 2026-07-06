@@ -157,16 +157,40 @@ The decision falls out of *where you sit on the coordination↔sortability line*
 
 ### Practice questions
 **Q1.** A service mints primary keys via a single Postgres `SERIAL`. It's now the bottleneck and a SPOF as you shard the write path. Walk through your options and pick one for a system needing ~1M IDs/s, time-ordered.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The single sequence is a **~100× non-starter** (thousands/s, not 1M/s) and a SPOF. The ladder: (a) **UUIDv4**, fixes throughput/SPOF with zero coordination but is **unsortable**, killing the time-order requirement and B-tree locality, out for a clustered PK; (b) **ticket/range servers**, batch the coordination, kill the SPOF with two odd/even servers, dense mostly-ordered IDs, viable but still a light central dependency; (c) **Snowflake**, **the pick**: 64-bit, ~4M IDs/s/node, k-sorted, no per-ID coordination, no SPOF. Accept its two costs explicitly: **machine-ID assignment at startup** (etcd/config) and **clock-skew handling** (refuse-and-alert, NTP slew). If 128 bits is acceptable and you want to skip machine-ID bookkeeping, **UUIDv7** is the zero-coordination near-equivalent.
 
+</details>
+
 **Q2.** Your Snowflake-based ID service starts throwing errors and refusing to issue IDs on one node after a maintenance window. No duplicate IDs were observed. What happened, and was the system behaving correctly?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Almost certainly **clock skew**, maintenance (NTP correction, leap second, VM migration) stepped that node's wall clock **backward**, so `now_ms < last_ms`, and a correct implementation **refuses to issue** rather than risk re-using a timestamp. So yes, it behaved *correctly*: it traded **availability on one node** to protect **uniqueness**. The fix is operational, not code: NTP in **slew** mode, leap-second smearing, drift alerts. A backward clock is the known sharp edge of any wall-clock ID scheme; "halt + alert" is the *designed* safe response, issuing anyway would be the actual bug.
 
+</details>
+
 **Q3.** A teammate wants to use Snowflake IDs to decide "which of two events across two services happened first" for audit ordering. Is that safe? When would it break, and what's the correct tool if it isn't?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Not safe across services.** Snowflake is strictly monotonic *within one node* but only **k-sorted across nodes**, clocks can differ by tens of ms, so "smaller ID happened first" is *backward* for any pair inside the skew window. It works most of the time and fails silently exactly when two events are close in time, the worst kind of bug. If the business genuinely needs **happens-before** ordering, that's **logical clocks** (Lamport/vector), real complexity, usually overkill. If "roughly time-ordered" is acceptable, keep Snowflake and *document* that cross-node order is approximate. The senior move is naming the limit, not silently building on the wrong guarantee.
 
+</details>
+
 **Q4.** When is UUIDv4 the *right* call, and when is it a foot-gun, and what does UUIDv7 change?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Right** for decentralized uniqueness with zero coordination where it's not a hot clustered key: trace IDs, idempotency keys, client-generated offline IDs, object keys. **Foot-gun** as a high-volume table's primary key: random inserts scatter across the B-tree (page splits, write amplification), and 128 bits bloats every index vs a 64-bit int. **UUIDv7** (RFC 9562) puts a Unix-millisecond timestamp in the high bits with randomness below, **k-sorted** like Snowflake, still **zero coordination** (no machine-ID assignment). Price vs Snowflake: 128 bits (2× index footprint) and only ms-granular order. So: UUIDv4 for opaque uncoordinated tokens; UUIDv7 for no-coordination *plus* locality; Snowflake when 64-bit compactness matters at very high scale.
+
+</details>
 
 ### Key takeaways
 - A sequencer must satisfy four *conflicting* requirements, **uniqueness, k-sorted order, high throughput, no SPOF**, and every scheme is a point on the **coordination-cost vs sortability** line.

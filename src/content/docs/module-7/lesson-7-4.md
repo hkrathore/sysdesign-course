@@ -155,19 +155,49 @@ The through-line at Director altitude: you reason about each engine's **bottlene
 ### Practice questions
 
 **Q1.** A Spark job joins a 3 TB fact table to a 40 MB dimension table, then groups by a key. It's slow. Walk through what's happening and how you'd speed it up.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two potential shuffles: the join and the `groupBy`. The 40 MB dimension is small enough to **broadcast** (raise `autoBroadcastJoinThreshold` if needed), so the join becomes a local broadcast join, the 3 TB fact table is **not shuffled** for the join at all, replacing a 3 TB all-to-all with shipping 40 MB to every executor (often a 10–100× win). The `groupBy` still shuffles, but with **map-side partial aggregation** only per-partition partial counts move (kilobytes/key), not raw rows. If it still hangs on the last task, that's **skew**, one key dominates the reduce partition and spills; mitigate with salting or AQE skew-join. Rejected alternative: a sort-merge (shuffle) join, which would shuffle both 3 TB and 40 MB, correct but needlessly expensive when one side broadcasts. The lever throughout is **bytes shuffled**, not cluster size.
 
+</details>
+
 **Q2.** Explain how Flink recovers from a worker crash without losing or double-counting, and what tuning knob governs the recovery-vs-overhead trade.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Flink periodically injects **checkpoint barriers** into the stream; as each barrier flows through the dataflow, every operator snapshots its keyed state the moment the barrier passes (Chandy-Lamport distributed snapshot), producing a **globally consistent cut without stopping processing**, written to durable storage (S3). On a crash, all operators restore from the last completed checkpoint and sources **rewind their Kafka offsets** to that barrier's position; replay is safe because the snapshot is consistent and the **sink commit is atomic with the offset** (transactional sink), so no double-count, this is what "exactly-once" means operationally. The knob is the **checkpoint interval**: frequent (every few seconds) → fast recovery but high steady-state snapshot I/O; sparse (minutes) → cheap steady-state but more replay and a longer stall on failure. Tune from the recovery SLO and state size; incremental checkpoints make frequent intervals affordable on large RocksDB state.
 
+</details>
+
 **Q3.** Why does a streaming "count per minute" use event time and watermarks instead of processing time, and what is the trade-off baked into the watermark delay?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Processing time** buckets an event by when the operator sees it; a mobile click generated at 9:00 but delivered at 9:05 (offline, network delay) lands in the 9:05 minute, corrupting both minutes. **Event time** buckets by the embedded timestamp, the truth of when it happened, but then the engine needs to know when a minute is *complete* given out-of-order arrival. A **watermark** asserts "event time has reached T; all events ≤ T are probably in," generated as `max_seen − δ`. The trade is **δ**: larger δ waits longer, catching more late events but delaying every result by δ; smaller δ emits faster but pushes more stragglers into the late path (allowed-lateness or side output). You set δ from the completeness-vs-freshness requirement, it's a dial, not a constant, and the batch layer is the ultimate safety net for events later than any δ.
 
+</details>
+
 **Q4.** Your Flink job runs fine for a week, then Kafka consumer lag starts climbing steadily and never recovers. What's happening and what do you check?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Sustained, non-recovering lag is **backpressure**: some operator (often the sink, e.g. the OLAP store, or a skewed `keyBy` partition) can't keep up, its buffers fill, and the slowdown propagates upstream until the source consumes from Kafka slower than events arrive, so lag grows. Flink self-throttles to its slowest stage rather than dropping events or OOM-ing (OOM = out-of-memory), so the lag is the symptom, not data loss. I'd check: (1) **which operator is backpressured** (Flink UI shows it), (2) whether it's the **sink** (slow downstream DB → scale it or batch writes), (3) **key skew** (one `keyBy` partition far hotter → re-key or salt), (4) **state growth** (RocksDB compaction or an unbounded-growing state → add TTL (time-to-live) / windowing), (5) checkpoint duration creeping up (state too large → incremental checkpoints, more parallelism). The fix is to scale or de-skew the bottleneck stage; throwing parallelism at the *whole* job without finding the slow stage just moves the problem.
 
+</details>
+
 **Q5.** A team proposes building a new real-time fraud-scoring pipeline on Flink. The current need is "fraud-loss reports, accurate, by the next morning." Push back or proceed?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The stated requirement, "accurate, by next morning", is a **batch** requirement: hourly/nightly Spark meets it at a fraction of Flink's cost and operational burden, no always-on cluster, no checkpoint tuning, no watermark/late-event machinery, no large RocksDB state to operate, and exactly-once is trivial (re-run an idempotent job). Flink would buy sub-second freshness **nobody asked for** while adding the always-on state/checkpoint/backpressure operating tax. I'd proceed with Flink **only** if there's a concrete real-time requirement, *block* fraud before settlement, alert *now*, in which case the sub-second per-event stateful scoring with exactly-once is exactly what Flink is for, and I'd likely run **both** (the Lambda shape): Flink for the live block, Spark for the accurate nightly ground truth. The engine choice follows the freshness requirement, not the team's enthusiasm for streaming.
+
+</details>
 
 ### Key takeaways
 - **Spark is a lazy DAG over partitioned collections**, narrow transformations pipeline locally; **wide transformations force a shuffle**, the all-to-all exchange (write to disk → read over network → barrier, spills on skew) that is the dominant cost center. Minimize bytes shuffled with **broadcast joins** (small side, no shuffle of the big table) and **pre-partitioning/map-side aggregation**; the rejected sort-merge shuffle join is for when both sides are large.

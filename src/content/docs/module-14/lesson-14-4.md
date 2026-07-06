@@ -123,16 +123,40 @@ The through-line at Director altitude: flake is an **economics-and-trust problem
 ### Practice questions
 
 **Q1.** Your team says the test suite is "only about 1% flaky, no big deal." The suite has 1,500 tests. Quantify why it's a big deal.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* P(clean green) ≈ (1−0.01)^1500 = (0.99)^1500 ≈ **0.0003%**, so the build is essentially *never* green on a clean codebase, expected flaky failures per run = p·N ≈ **15 tests**. That's not "1% flaky," that's "red on every single run for reasons unrelated to the code," which means engineers can no longer tell a real failure from noise and will rerun-to-green by reflex. The per-test rate sounds harmless because it isn't multiplied across the suite; the tolerable rate at N=1,500 to make green common (p·N < 1) is below ~0.07%, fifteen times tighter than where they are. The fix isn't "tolerate it," it's detect → quarantine the heavy-tail → bound retries → own with an SLA, and put green-rate on a tracked dashboard.
 
+</details>
+
 **Q2.** A staff engineer proposes turning on automatic retry (up to 5×) on every test to "get CI green." What's your call?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No as a standing policy, yes to *one* bounded retry with alerting. Five retries will make almost any flaky suite green (it drives effective per-test failure to ~p⁵), which is exactly why it's dangerous: the same retries hide genuine intermittent regressions, a real bug that reproduces 50% of the time now escapes the gate ~3% of the time instead of 50%. Retrying converts the suite from signal to noise. Instead: allow one retry as a shock absorber, and **instrument the retry rate**, if more than ~2% of runs needed a retry to pass, that's the flake leaking and it pages the test-health owner. The honest signal is "how much retrying did it take," not "is it green." Pair that with rerun-based detection and quarantine so the underlying flake actually gets fixed, not just suppressed.
 
+</details>
+
 **Q3.** You've quarantined 30 flaky tests and the build is green again. The team wants to move on. Why is that the wrong place to stop, and what do you put in place?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Quarantine restored the *green-rate* but it created a *coverage gap*, those 30 code paths are now effectively untested, and "out of the blocking gate" silently becomes "permanently ignored" unless there's a forcing function. Quarantine is a hospital, not a graveyard. I put in: a **ticket per quarantined test routed to its CODEOWNERS team**, an **SLA** (fix-or-delete within 2 sprints), a **cap** on quarantine size (e.g. ≤1% of the suite) that itself alarms when exceeded, and a **dashboard** tracking quarantine count, flake rate, and green-rate with targets reviewed like SLOs. Fix the high-value tests, delete the redundant ones, an honest coverage gap beats a test that lies. The DevEx team owns the machine; product teams own their tests.
 
+</details>
+
 **Q4.** Walk me through how you'd diagnose and fix the single most common class of flaky test.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The largest bucket is **timing/async races**, the test asserts before an async operation completed, or assumes an ordering that isn't guaranteed. Diagnosis: it fails more under CI load (slower machines widen the race) and passes locally, and rerun analysis flags it as flaky. The wrong fix is `sleep(2)` before the assert, that's both flaky (too short when CI is loaded) and slow (too long normally), and it just moves the race. The right fix is to **wait on the condition, not the clock**: poll for the expected state with a bounded timeout and a clear failure message (`awaitUntil(() -> job.isDone(), 5s)`). For the related non-determinism bucket, **inject a deterministic clock and seeded IDs** instead of `now()` and random UUIDs, and **sort before asserting** on collections. Then I'd randomize test order in CI to surface any hidden state interdependence, because order-dependent tests are the next bucket down.
+
+</details>
 
 ### Key takeaways
 - **Flake is an economics-and-trust problem, not a debugging problem:** P(suite green) ≈ (1−p)^N, so a per-test rate that sounds tiny (0.5%) compounds to a near-zero green-rate over thousands of tests; the lever is the *product* p·N, keep it well under 1.

@@ -309,15 +309,30 @@ Now the failure modes.
 
 **Q1. A user gets an answer quoting a salary figure from a doc they can't open. What broke and how do you prevent it structurally?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The ACL filter was post-filter or absent, so the forbidden chunk was retrieved and entered the model's context. Structural fix: enforce ACLs as a **pre-filter** — the user's resolved groups are part of the retrieval query, so chunks whose `acl_tags` don't intersect are never fetched. Back it with an automated leak test in the eval gate that replays queries as different identities and asserts zero forbidden chunks. A leak is a security incident; correctness here must be by construction, not by patch.
+
+</details>
 
 **Q2. Retrieval recall@10 is 95% but users say answers are often wrong. Where do you look?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Retrieval is doing its job (the right chunk is in the top-10 95% of the time), so the bug is in **generation or assembly**: low faithfulness (model adding ungrounded claims), context overflow / lost-in-the-middle (the right chunk is present but buried or truncated), or weak reranking (right chunk in top-10 but not surfaced to the model's top-5). Measure faithfulness separately, tighten the token budget, rerank to top-5 with strongest chunks at the edges, and instruct the model to answer only from context and abstain otherwise. The split metrics are what let me localize this — a blended accuracy number wouldn't.
+
+</details>
 
 **Q3. The corpus grows from 50M to 500M chunks. What changes, and what doesn't?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* What changes: the vector index goes from ~300–400 GB to ~2 TB+, forcing **sharding plus PQ or disk-backed ANN** (the estimation fork becomes mandatory), and re-embedding cost makes the **pinned embedding-model version** discipline non-negotiable. What doesn't change: throughput is still trivial; the query pipeline shape is identical; and the **ACL pre-filter invariant does not relax** — more shards, same permission guarantee on every shard. I'd delegate the index re-architecture to the platform team with the bar that recall and leak-test results stay at-or-above baseline.
+
+</details>
 
 ---
 

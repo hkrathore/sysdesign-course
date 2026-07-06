@@ -137,16 +137,40 @@ The signal is not "I used Next.js." It is that **rendering was chosen per surfac
 
 ### Practice questions
 **Q1.** A content-heavy marketing site is currently a client-rendered React SPA and its organic traffic is falling. What is likely wrong and what do you change?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* CSR is almost certainly the cause. The crawler and the first user both get an empty HTML shell until a large JS bundle downloads and runs, so LCP is poor and SEO indexing is delayed or partial, exactly the failure mode for a site that lives on organic search. I would move the public, SEO-driven pages to **server-rendering**: SSG or ISR for pages that change slowly (marketing, articles, category pages, near-static CDN speed with periodic revalidation) and SSR or streaming SSR at the edge for anything genuinely dynamic per request. That restores fast first paint and crawler-visible HTML. I would keep any behind-auth app surface as CSR since SEO is irrelevant there. Then I would put a **Core Web Vitals gate** in CI (LCP <2.5s, INP <200ms, CLS <0.1) with a bundle budget, and watch CrUX field data, so the regression cannot recur silently. The trade I am accepting is a server render cost and hydration on those pages, which is the correct price for SEO and first paint on acquisition surfaces.
 
+</details>
+
 **Q2.** Your web app has a fast LCP but users complain it "feels laggy" when they click. Which metric, and what is the architectural fix?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* That is **INP** (Interaction to Next Paint), the responsiveness vital, good is <200ms, and it is decoupled from LCP: the page can paint fast yet block the main thread on interaction. The usual cause is too much JavaScript, a large bundle and heavy hydration monopolizing the main thread, so taps queue behind long tasks. The fixes are architectural, not cosmetic: **ship less JS**, adopt React Server Components so non-interactive components ship zero client JS, code-split so each route loads only what it needs, and consider an islands approach so only interactive parts hydrate. I would also break up long tasks and defer non-critical work. The trade: RSC and an islands model add a server/client-boundary mental model and framework coupling, which is worth it when INP is the bottleneck.
 
+</details>
+
 **Q3.** Three feature teams keep blocking each other on one frontend repo's release train. Is this the moment for micro-frontends? What are the risks?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is the legitimate trigger, micro-frontends are an **org-scaling** decision and the signal is exactly this, multiple teams whose release cadences collide on one codebase. I would introduce a **shell** that composes independently deployed **remotes** (via Module Federation) so each team ships on its own cadence. But I would name the risks up front, because this is the frontend's version of the distributed monolith: **duplicated dependencies** (share React and the design system as singletons or bundles triple), **shared-state coupling** (keep remotes talking through well-defined contracts/events, not each other's internal state, or nothing deploys independently anyway), and **UX drift** (enforce a shared design system so the pieces stay coherent). If it were a single team, I would explicitly *not* do this, a modular-monolith frontend is simpler and faster; micro-frontends solve an org problem, and a one-team org does not have it.
 
+</details>
+
 **Q4.** You need to serve both a web app and a mobile app from the same backend microservices. How do you shape the API, and what is the trade?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I would put a **BFF per client** in front of the services, a web BFF and a mobile BFF, each aggregating and reshaping the backend calls for its client. Mobile on cellular cannot afford six sequential round trips (hundreds of ms each) and wants a trimmed payload, while web can take richer data in one call, so a single shared API would force a lowest-common-denominator shape that is wrong for both. The BFF gives each client **one tailored round trip** and decouples it from the individual service contracts. The trade I state: each BFF is another service to own, deploy and keep thin (it must not become a home for domain logic that belongs in the services). The rejected alternative, the client orchestrating the six calls itself, is chatty, couples the client to N contracts, and is especially bad on mobile latency. GraphQL is the other valid answer to the same aggregation need, at the cost of query-complexity and caching governance.
+
+</details>
 
 ### Key takeaways
 - **Rendering is a spectrum, chosen per surface by requirement:** CSR (cheap, app-like, but rejects SEO/first-paint), SSR (fast paint + SEO, but server cost + hydration), SSG (fastest/cheapest, but rejects freshness), ISR (static speed + bounded staleness), streaming SSR + RSC/edge (fast paint + SEO with less JS). Name what each rejects.

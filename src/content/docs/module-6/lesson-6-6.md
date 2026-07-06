@@ -245,13 +245,31 @@ If you ever migrate to a store without exclusion constraints (MySQL), the lock r
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Concretely, what stops two assistants double-booking the boardroom for Friday 3pm?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The booking transaction locks the boardroom's row before checking - check and insert are atomic per room; the second assistant's transaction waits ~5 ms, re-checks, sees the conflict, gets a 409 with alternative slots. Inside the lock I check concrete bookings *and* expand any recurring series intersecting the window, so rule-only occurrences are protected too. Independently, an exclusion constraint on `(room_id, overlapping range)` rejects overlaps at the storage layer - a tripwire for any path that bypasses the lock. Pessimistic was deliberate: at ~25 bookings/room/day there's no convoy to fear - the opposite of Ticketmaster, where 33K req/s made optimistic CAS mandatory. Same race; the contention shape picks the tool.
 
+</details>
+
 **Q2. A user edits a weekly series: "move this and all following meetings to 11am." What happens in the data?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A series split, two writes: terminate the existing rule with an UNTIL at the cut date; create a new series anchored at the first moved occurrence at 11am. Past occurrences keep their history; future ones follow the new rule. Single-occurrence edits are lighter - an exception row (cancelled, or moved with an override range). The alternative, mutating materialized occurrence rows under concurrent readers, doesn't exist because we never materialized; the worst edit in the product is two rows. One flag: the new anchor stores local time plus the named zone, so the series still tracks wall-clock time across DST.
 
+</details>
+
 **Q3. Your single Postgres is now serving a 500M-user calendar product. First three changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* (1) Shard by `calendar_id` - rooms and people are calendars; every invariant-bearing operation stays single-shard and the room lock carries over unchanged. (2) Split the meeting write path: book the room transactionally on its shard, fan out attendee copies through a queue - only the room is CP; attendee views are eventually consistent *by product semantics*. (3) Federated free/busy: each shard exposes a compact busy-intervals projection; an aggregator intersects them for "find a time," re-validated at booking. At ~12K writes/s and 100+ TB/yr the deployment changes completely - but TimeRange, rules-not-rows, and per-resource serialization survive intact: the evidence the v1 model was right.
+
+</details>
 
 ---
 

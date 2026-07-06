@@ -130,16 +130,40 @@ The through-line at Director altitude: you own the **posture** (paved-road secur
 ### Practice questions
 
 **Q1.** An interviewer draws a three-tier web app (client → API service → Postgres) and says "secure it." Walk through your first three minutes.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd resist listing controls and instead draw trust boundaries: internet → API, and API → Postgres. At the internet boundary, STRIDE says spoofing, DoS, and tampering dominate, so authN (OIDC/sessions), a WAF + rate limits, and TLS. At the API → DB boundary, the threats are elevation of privilege and information disclosure, so least-privilege DB credentials (the service role can touch only its tables), encryption at rest, and parameterized queries to kill injection. I'd triage to the top risks rather than enumerate all forty STRIDE cells, name that each control costs latency or friction, and assume-breach: if the API is popped, least-privilege IAM and short-lived DB creds mean it reads its own tables for 15 minutes, not the whole estate forever. The crypto and the exhaustive STRIDE pass I'd delegate to security with a stated prior.
 
+</details>
+
 **Q2.** A peer argues "we're all inside the corporate VPN, so service-to-service calls don't need auth, it's a trusted network." Respond.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Network location is not an identity. The VPN is castle-and-moat: a hard shell and a soft, trusting interior, and the failure mode is that one phished laptop, one compromised CI runner, or one SSRF puts an attacker *inside* the trusted zone, where every service now trusts them completely, so the blast radius is the entire fleet. The fix is zero-trust: authenticate and authorize every service-to-service call (mTLS or workload identity) regardless of network position. It costs an identity plane and a few ms per hop, and it buys a blast radius of one hop instead of everything. For a single-tenant low-stakes intranet I might accept the perimeter model, but for anything multi-service and sensitive, implicit network trust is the most dangerous assumption we could ship.
 
+</details>
+
 **Q3.** You're asked to add a control that cuts account-takeover. You propose mandatory MFA. What's the trade, and would you apply it uniformly?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* MFA cuts account-takeover by over 99%, so against a breach cost on the order of \$4–5M it's an easy yes on value. But it's not free: it adds a step to every login (friction, abandoned signups) and a real support cost for locked-out and lost-device users. So I wouldn't apply it uniformly, I'd mandate it for admins and high-value accounts where the loss is largest, and risk-base it for everyone else (step up to MFA on a new device, new geo, or sensitive action) so the friction lands only when the risk justifies it. That's the general pattern: heavy control where the loss is large, risk-based elsewhere, and the cost named on both sides rather than "more security is always better."
 
+</details>
+
 **Q4.** Distinguish authentication from authorization with a concrete failure, and say which STRIDE threat the failure is.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Authentication answers *who are you* (you logged in as Alice); authorization answers *what may you do* (Alice may read her own orders, not Bob's). A correctly-authenticated Alice changing the URL from `/orders/alice` to `/orders/bob` and seeing Bob's data is a pure authorization failure, the authN was perfect. In STRIDE that's elevation of privilege (and information disclosure on the data exposed). The design lesson: authN at the edge is necessary but never sufficient, every request must also pass an authZ check at the resource (does *this* identity have a grant to *this* object), and treating "they're logged in" as "they're allowed" is one of the most common real-world holes, e.g. insecure direct object references.
+
+</details>
 
 ### Key takeaways
 - **Security is a system property, not a checklist.** You design it in via trust boundaries, paved-road secure defaults, and assume-breach blast-radius thinking; you own the posture (what's impossible by construction, what defaults enforce, where the audit boundary sits) and delegate the from-scratch crypto with a stated prior.

@@ -301,15 +301,30 @@ Stating *which* dependency fails which way, tied to the requirement, is the Dire
 
 **Q1. A team's AI feature suddenly 10×'d its traffic from a buggy retry loop and the whole org's chat features started getting rate-limited by the provider. How does your design prevent this?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Per-tenant rate limits and spend budgets** in the gateway (the token bucket in Redis). The offending tenant hits its own `429`/`402` and is isolated; the shared provider rate limit and budget are protected because no single tenant can consume more than its allocation. Set `on_exceed=degrade-to-cheap` so even a misbehaving team degrades rather than hard-fails. Without the gateway, the provider's *global* account limit is the only backstop, and the first noisy tenant starves everyone. This is multi-tenant fairness as a blast-radius control.
+
+</details>
 
 **Q2. Walk me through exactly where the gateway's added latency comes from and how you keep it under ~5 ms p50.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Per request: auth (in-memory key check), quota check (one Redis op, sub-ms intra-AZ), cache lookup (one Redis op; semantic adds an embed + ANN only on opt-in routes), routing (in-memory policy read — zero network), then proxy bytes. Metering is **async after** the response. So on the common path it's two Redis round-trips plus memory reads — single-digit ms. The thing that would blow the budget is putting anything model-sized on the hot path (a routing LLM, a synchronous guardrail model, a per-request DB read) — which is exactly why policy is cached in memory and metering is off-path.
+
+</details>
 
 **Q3. Legal asks: "prove no customer PII is being sent to a provider that trains on our data, and tell me our spend per product line." How does this design answer both in minutes?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Both are gateway-native. PII: the **guardrails hook** runs PII redaction on input for flagged routes, and provider selection is policy — we route PII-bearing routes only to zero-retention/enterprise-terms providers (or the self-hosted model), enforced centrally, not per team. Spend: the **usage ledger** records tenant/feature/model/$ on every call, so `GET /v1/usage?group_by=feature,model` answers spend-per-product-line directly. In the no-gateway world both questions are spreadsheet archaeology across forty teams — the centralization *is* the governance answer.
+
+</details>
 
 ---
 

@@ -112,16 +112,40 @@ The through-line at Director altitude: quality is a **platform + process + incen
 ### Practice questions
 
 **Q1.** A team proposes hitting 90% line coverage across all services as the quality goal for the year. React as the Director.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd reject coverage-as-the-goal, because line coverage measures *what code ran during tests*, not *what failures we'd catch*, and it pushes teams to write cheap unit tests that exercise lines while the real risk, the cross-service seams, stays untested. A service can hit 95% unit coverage and still take money without creating an order, because that bug is a contract break the units can't see. I'd retarget the goal at **ROI per layer**: contract tests at every inter-service boundary (catch the seam bugs in provider CI before merge), integration tests where the risk is real-dependency behavior (payments, idempotency), dense units only where logic is branchy, and a thin e2e cap. And I'd measure outcomes, **escaped-defect rate and change-failure rate**, not coverage, because those tell me whether quality is actually improving while coverage just tells me tests touched lines.
 
+</details>
+
 **Q2.** Estimate the lifetime cost of a 500-test end-to-end suite at a 1% per-test flake rate, run on every PR, and name the fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Flake first: a full-green run has probability 0.99^500 ≈ **0.6%**, so a clean run essentially never happens, every red is presumed false, and the suite **gates nothing**, it has negative value (it costs run-time and trains people to ignore failures). Run cost: at ~30s/test the suite is ~4+ hours serial, call it ~15 min parallelized, on every PR across many teams, that's hundreds of engineer-hours a week of merge-blocking wait. The fix is not "add retries". It's **quarantine on detection** (flaky tests auto-move off the blocking lane), pull most e2e off the per-PR critical path into **post-merge/scheduled**, keep a **thin happy-path gate**, and shift the lost coverage **down** to contract and integration tests that run in milliseconds, deterministically. Flake rate becomes an SLO with an owner. Net: the gate is fast and trustworthy again, and the seam bugs are caught lower and cheaper.
 
+</details>
+
 **Q3.** Your microservices keep breaking in production from changes that passed every team's CI. Diagnose and fix at Director altitude.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The diagnosis is structural, not a coverage gap: every team's units and even integration tests are green because they test each service *in isolation*, but the failures are at the **seams**, a provider renames a field, tightens a timeout, stops sorting, and the consumer breaks, and nothing in either pipeline tests the *contract between them*. The fix is **consumer-driven contracts**: consumers declare the response shape they depend on, those contracts run against the provider in the **provider's** CI, and the provider can't merge a breaking change without seeing exactly who breaks, with no shared environment needed. I'd make the contract broker part of the **paved road** so a new service gets it by default, add a `can-i-deploy` check so a provider can't promote to prod against live consumers it would break, and keep e2e thin for the few whole-path checks contracts can't cover. This reshapes our pyramid into a trophy, fat at the contract/integration band where our bugs actually live, and I'd delegate the broker build-vs-buy to the platform team with a prior toward a managed broker for adoption.
 
+</details>
+
 **Q4.** Finance wants zero defects to ever reach production. Engineering wants to keep shipping a thousand times a week. Where do you set the line?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* "Zero defects in prod" is not achievable at a thousand deploys a week, and chasing it (an exhaustive pre-prod gate) would crush velocity to near zero while still missing the failures that only exist at real scale, so I'd reframe from "zero defects" to **bounded blast radius and fast recovery**, which is what finance actually needs. The model: shift-left for cheap early detection (types, units, contracts, integration, the 1×→1000× cost ladder justifies pushing detection down), then for what pre-prod can't reach, **progressive delivery**, canary to 1% gated on error/latency, feature flags so deploy ≠ release, synthetic prod transactions, and a **sub-60-second rollback**. I'd set **risk-tiered gates**: the payments path gets the heavy gates (mandatory canary, second approver, tight rollback SLO), the marketing-banner path gets the light ones, because applying payment-grade gates everywhere taxes velocity for no safety gain. Then I'd commit to measurable targets, change-failure rate and time-to-restore (the DORA pair finance can hold me to), instead of an impossible absolute. That gives finance the risk control they want and engineering the velocity, with the trade-off named.
+
+</details>
 
 ### Key takeaways
 - **Quality is an operating system, platform + process + incentives**, that makes safe shipping the *default* across many teams; the Director owns that system, and the IC-altitude answer ("more tests" / "QA tests it") fails because it scales with headcount and puts quality after the work.

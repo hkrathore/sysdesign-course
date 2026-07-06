@@ -230,16 +230,40 @@ The meta-decision framing the table: **geometry in pieces, game-state legality i
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. "Forget the stub, implement castling, now."**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First, the receipt: castling is exactly why `RulesEngine` takes `history`. Five preconditions: king unmoved, rook unmoved (both from the log, or `hasMoved` flags maintained from it), path empty, king not currently in check, king doesn't cross an attacked square. Implement as a guard list in `RulesEngine.isLegal` for the castle-flagged move; `Move.execute` moves both king and rook, the one move touching two pieces, which is why castling lives at the rules layer, not in `King.canMove`. Cost: ~30 lines, and nothing in the piece classes changed, the open-closed claim from my NFRs, demonstrated.
 
+</details>
+
 **Q2. "Where does check detection live, and what does it cost?"**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* `RulesEngine.isInCheck(board, color)`: find the king, loop over ≤16 enemy pieces, ask each one's existing `canMove(board, from, kingSquare)`, geometry reused verbatim, ~10 lines, microseconds. It can't live in `King` because it's a predicate over *other pieces'* movement; "may I move?" and "does the game permit it?" are different questions with different owners. Full legality adds apply-simulate-undo per candidate move, that's where I'd stop and name the next step rather than write it.
 
+</details>
+
 **Q3. "Make it two players over a network."**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Client-server, server-authoritative: the server owns the only trusted `Game`; clients send proposed moves (~4 bytes + framing); the server validates with the same two-layer pipeline and broadcasts accepted moves with sequence numbers so both clients apply in identical order, the ordering problem in miniature. Never trust client validation: a hacked client is just an HTTP client. Reconnect = replay from the last acked sequence number; spectators subscribe to the same log; persistence is the log itself. The decision that made this a two-minute answer was made in the data model: keep moves, not snapshots.
 
+</details>
+
 **Q4. "Your next interview is Connect Four. What carries over?"**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The family skeleton, `Board`, `Player`, `Game.makeMove`, status check, move history, is identical. What disappears is the piece taxonomy: one move type, so polymorphic pieces would be pure ceremony; the design collapses to `Game` + grid + a win-checker (four-in-a-row scan from the last drop, ~20 lines, only the new disc can complete a line, so check locally). The judgment is symmetric: chess earns inheritance because behavior varies over a closed taxonomy; Connect Four earns *none* because nothing varies. Same principle, opposite designs, exactly what the family tests.
+
+</details>
 
 ---
 

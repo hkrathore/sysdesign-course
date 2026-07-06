@@ -338,19 +338,39 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 **Q1. Two orders arrive at the same price level. How does the engine decide which fills first?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* Price-time priority: best price executes first; at the same price, the order with the lower sequence number (earlier global arrival at the sequencer) fills first. The sequencer assigns a monotonically increasing sequence number to every event before it reaches the engine; the engine processes events strictly in order. There is no tie-breaking heuristic, the sequence number is the total order, determined at ingestion. Any distributed fanout of sequence assignment breaks this guarantee.
+
+</details>
 
 **Q2. The journal fills up 234 GB in a trading day. How do you keep restart time under 30 seconds?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* Periodic intraday snapshots. Every 15 minutes, serialize the in-memory book to a snapshot file. On restart, load the snapshot, then replay only events after its sequence number. For 50,000 events/sec with a 15-min window: ~45M events replayed at ~10M events/sec = ~4.5 seconds per symbol. The snapshot is advisory, fall back to the prior snapshot if corrupted. Journal is always the source of truth.
+
+</details>
 
 **Q3. A broker sends a cancel for an order that has already filled. What does the exchange return?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* `409 ALREADY_FILLED` with the fill details, not an error implying a malformed cancel. The cancel arrived after the match event in the journal; this is a normal race condition. The broker receives the `CANCEL_ACK` (409) and the fill execution report in sequence-number order; it reconciles by accepting the fill as authoritative. Sequence numbers, not delivery order, determine state.
+
+</details>
 
 **Q4. How would you design differently for 10 million symbols (crypto long-tail)?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* Static symbol grouping breaks on core count when most symbols trade near-zero volume. Use **dynamic engine allocation**: a pool of engine threads; assign a symbol to a thread on first order, evict inactive symbols on TTL (time-to-live). Hot symbols (top 1% by volume) get dedicated threads; cold symbols share threads, with the invariant that a thread processes one symbol's events at a time, no interleaving. Journal and sequencer do not change. The operational challenge: a sudden spike on a cold symbol (listing, news) must trigger re-assignment within seconds. Instrument order-rate per symbol; delegate the scheduling policy to the exchange ops team.
+
+</details>
 
 ---
 

@@ -121,16 +121,40 @@ The through-line at Director altitude: the bugs live at the seams, so you push v
 ### Practice questions
 
 **Q1.** A team proposes deleting all contract and integration tests and relying on a comprehensive nightly E2E suite for confidence. Make the Director case against it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* E2E proves the full flow but at the worst cost profile, many minutes per run and a flake rate that climbs with every service in the path (a 1% per-service flake across 10 services is a ~10% suite flake), which trains engineers to hit retry and stop reading failures, destroying the signal. It also couples every deploy to one shared environment: one team's red build blocks everyone, reintroducing a release queue. I'd invert the pyramid for distributed systems: push seam confidence down into **consumer-driven contracts** verified in each team's CI (seconds, near-zero flake, decoupled deploys), use **ephemeral-real** tests for each service's own infra, and keep a *thin* E2E layer, only the handful of critical journeys whose emergent behavior nothing else proves. Net: faster signal, independent deploys, and E2E reserved for what only E2E can verify.
 
+</details>
+
 **Q2.** Two teams share a staging environment and ship on a weekly train. They want daily independent deploys. What changes, and what does it buy?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Introduce consumer-driven contracts: each consumer publishes the requests/responses it depends on to a broker, each provider verifies those contracts in its own CI, and a `can-i-deploy` gate proves a version is compatible with what is actually running before promotion. That removes the need for a shared environment to gain integration confidence, so each team's deploy is gated by its own CI, not by a shared-env queue or the other team's build. Quantify the win: from one coupled weekly release (52/year, shared blast radius) to independent daily deploys (hundreds/year per team, isolated). The trade-off, *rejected: keeping the shared staging gate*, is that contracts verify the agreement but not full emergent flow, so I'd retain one thin E2E on the critical journey. The benefit is decoupling, which is an org-velocity win, not just a test win.
 
+</details>
+
 **Q3.** A provider must rename a response field `status` to `state`, and two consumers read `status`. Walk through a zero-downtime rollout.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Expand-then-contract, obeying the deploy-order rule. **Expand:** the provider ships `state` *alongside* `status` (additive, backward-compatible), so it serves both old and new consumers; this provider change ships first and breaks nothing. **Migrate:** each consumer moves to read `state`, updating its contract; provider CI re-verifies and stays green. **Contract:** once no consumer's contract references `status`, the provider removes it; the contract gate confirms no consumer depends on it before the removal merges. At no point is there a gap where a deployed consumer reads a field a deployed provider does not serve, because the provider always adds before consumers depend and removes only after consumers stop depending. `can-i-deploy` enforces this at each promotion. *Rejected: a coordinated big-bang where both deploy together*, because it reintroduces the cross-team coupling and a failure window if either side is delayed.
 
+</details>
+
 **Q4.** Your team's mocks of a third-party payments API are comprehensive and the suite is green, yet a production integration broke. What happened and how do you prevent a recurrence?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Mock drift. The mocks encode the team's belief about the third party's behavior; the third party changed (a field type, an error shape, a new required parameter) and the mocks did not, so the suite stayed green while production failed, the classic false-confidence trap. Prevention has two parts. For a third party I can't run contracts against, add a small **real-dependency contract/integration test against their sandbox** on a schedule, so drift surfaces as a failing job, not a prod incident, and treat their changelog/version as a monitored input. For internal services, replace belief-based mocks with **consumer-driven contracts** verified against the real provider code, which structurally cannot drift because the provider's own CI re-verifies them. The Director point: a mock is only as true as the day it was written; fidelity at the boundary has to be *refreshed against reality*, by contracts internally and by sandbox checks externally.
+
+</details>
 
 ### Key takeaways
 - **In a distributed system the bugs live at the seams**, the integration between services owned by different teams, not inside any one service, so test investment must move toward verifying the *agreements at the boundaries*, and the cheapest way to do that is not to run the whole system.

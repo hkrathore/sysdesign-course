@@ -289,19 +289,49 @@ A mega-celebrity's *own* user-timeline partition (the pull source) and a viral t
 ### Practice questions
 
 **Q1.** A user with 50M followers tweets. Trace what happens in your design and justify it with numbers.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* They're above the **celebrity threshold**, so the tweet is **not pushed**, it's written durably to the Tweet store and that's it on the write path. If we *had* pushed, that's **50M timeline inserts for one tweet**, dwarfing the 925K/s baseline and spiking the fan-out fleet. Instead, their followers **pull** this tweet at read time: each follower's Timeline Read service merges the celebrity's recent tweets (session-cached) with their precomputed push timeline, ordered by `tweet_id`. We trade a little read-time merge work for avoiding a 50M-write spike, the right trade because reads of any one celebrity tweet are amortized across a session cache, while the push would be 50M writes *now*.
 
+</details>
+
 **Q2.** Why not just pull everything and skip the fan-out machinery entirely?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Pure pull costs **~4.6M tweet-fetches/s** (2B reads/day × 200 followees) versus push's **~925K inserts/s**, about **5× more work**, because the system is **5:1 read-heavy** and pull pays on the frequent operation. It also makes the **read path** the expensive, latency-critical one (computing a 200-source merge under a 200 ms p99 on every app-open), which is exactly the thing the product can't afford to be slow. Push moves that cost onto the rarer, non-latency-critical write. We *do* use pull, but only for the celebrity minority where push's amplification is catastrophic. The general rule: **fan out on whichever operation is rarer**, here writes.
 
+</details>
+
 **Q3.** Your timeline cache is ~1.3 TB and a node fails. What's the user impact and how do you handle it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The cache is **regenerable** (it's derived from tweets + graph), so a node loss is an availability/latency event, not data loss. With Redis cluster replication, a replica is promoted; for the affected users in the gap, the read service **falls back to compute-on-read** (pull + merge), slower but correct, and re-warms the cache. The trade we already took (cache, not durable store, for timelines) is exactly what makes this survivable: we never promised the timeline cache is the source of truth. Capacity-plan replicas and accept a brief tail-latency bump on failover.
 
+</details>
+
 **Q4.** Product wants a ranked "For You" feed. How much of this design changes?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Surprisingly little, which is *why* we built the timeline as a **candidate set**. Reverse-chron becomes **candidate generation**; we insert a **ranking service** that re-scores the merged candidates by engagement features **before hydration**, then return the top-K. The fan-out, graph, tweet store, and cache are unchanged. The new constraint is **latency**: ranking eats into the 200 ms budget, so it must be a fast model over a bounded candidate set. I'd **delegate the model** to the ranking team and own the latency budget and the candidate-set contract. The risk is ranking pulling from a bigger candidate set than push precomputes, which may lower the celebrity threshold to widen candidates.
 
+</details>
+
 **Q5.** How do you handle a brand-new user who follows 50 people and opens the app for the first time, there's no precomputed timeline yet?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is the **cold-start / compute-on-read** path that already exists for returning inactive users. With no cached timeline, the read service **pulls** from their 50 followees' `user_tweets` partitions (cheap, 50 small range scans), merges by `tweet_id`, hydrates, and returns; then it **builds and caches** the timeline so subsequent reads are push-speed. New follows thereafter are fanned out normally. The trade is a slower *first* load for a never-pay-twice steady state, the same inactive-skip bargain from Evaluation, applied at signup.
+
+</details>
 
 ---
 

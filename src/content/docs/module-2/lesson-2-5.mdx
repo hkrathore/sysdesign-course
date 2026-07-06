@@ -121,16 +121,40 @@ Now the **celebrity** version: a Twitter user with 100M followers. Even with per
 
 ### Practice questions
 **Q1.** You're storing IoT sensor readings (high write volume, queried as "this device's readings over a time window"). Range or hash partitioning, and on what key?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Hash on a **composite of `device_id` plus a coarse time bucket**, with readings time-ordered within the partition. Pure range-on-timestamp hot-spots the newest shard; pure hash-on-time scatters a device's time scan across the whole cluster. The composite buys even write spread *and* a local, already-sorted per-device scan, and the bucket bounds partition size so one chatty device can't grow an unbounded partition, the Discord pattern. The query made expensive: cross-device analytics becomes a fan-out, acceptable because it's the rare access pattern. The exact schema is the data team's call; the key shape is the decision.
 
+</details>
+
 **Q2.** A naive service uses `shard = hash(user_id) mod 8`. Traffic grows; you add 2 shards (→10). What happens, and how would you have designed to avoid it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Going `mod 8 → mod 10` re-maps almost every key, only ~**20% keep their slot, so ~80% of the dataset relocates**, with a cache-miss storm and migration load against live traffic. (The counter-intuitive part: a bigger cluster doesn't reshuffle less, you can't grow your way out.) The fix is **consistent hashing**: a ring where a new node steals only ~**1/N** of keys from its neighbors. Alternatively a **directory** remaps only the keys you choose to move. `hash mod N` is fine until N changes, and N *will* change.
 
+</details>
+
 **Q3.** Your design partitions an e-commerce orders table by `country`. What's wrong, and what would you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* `country` is **low-cardinality and badly skewed**, the US/India shard dwarfs the Vatican shard, a handful of partitions saturate while most idle, and you can't grow past the number of countries or split a mega-country under this key. Repartition on a **high-cardinality, uniform key aligned to the dominant query**, hashed `user_id` if most reads are "this user's orders." If geo genuinely matters (data residency, latency), keep `country` as a *routing/region* dimension and shard *within* each region by a high-cardinality key, never let the partition key itself be the skewed dimension.
 
+</details>
+
 **Q4.** When is directory/lookup partitioning worth its extra hop and SPOF (single point of failure) risk over plain hashing?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When you need **placement control hashing can't give**: isolating a whale key on its own shard, running **heterogeneous** shards, migrating individual keys/tenants surgically, or evolving topology frequently (Vitess resharding MySQL). You pay an extra lookup hop and must make the directory highly available (replicate + cache, as GFS/HDFS do with their masters). If access is uniform point-lookups with no surgical moves needed, plain (consistent) hashing is simpler, don't take on a directory you don't need.
+
+</details>
 
 ### Key takeaways
 - **Partition when data or write throughput outgrows one node**, replication multiplies reads; only partitioning raises the per-node *write/capacity* ceiling; do both (partition, then replicate each shard).

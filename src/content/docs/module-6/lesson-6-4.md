@@ -222,16 +222,40 @@ The production state of the art (Caffeine, successor to Guava's cache) goes past
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Your teammate's design review proposes 16-way lock striping for v1. Respond.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd ask for the number. We run ~150K cache ops/s peak; a coarse-locked cache sustains ~2-5M ops/s - 15-30× headroom, so striping solves a problem we can't measure. And it isn't free: LRU goes per-segment approximate, stats turn racy, a global byte budget needs cross-segment coordination. Locking hides behind the facade, so striping later is a contained refactor, not an API change. Decision: coarse lock, lock-wait and hit-rate telemetry from day one - if the profile ever shows a convoy, the platform team benchmarks striped-16 against our replayed trace; my prior is we never need it.
 
+</details>
+
 **Q2. Why does a read-write lock not help here, and when would it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Strict LRU has no read-only operations - every `get` moves the entry to the front of the recency list, so "readers" are writers and the rwlock degenerates into an exclusive lock costing ~2× per acquire. It helps only when reads genuinely don't mutate: a pure TTL policy with no recency, or an approximate-LRU design where reads append to a lossy buffer instead of splicing (Caffeine's approach - relax recency precision to buy concurrency). Which is exactly why lock choice lives behind the facade, per policy, not in the public contract.
 
+</details>
+
 **Q3. Add TTL as a policy. What breaks, and what do you decide?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* TTL plugs into the same four hooks - its bookkeeping is an expiry ordering (a timer wheel, like a scheduler) instead of a recency list - but it surfaces two contract decisions. Does `get` refresh the TTL? Default no, expiry from write: touch-on-read lets a hot-but-stale entry live forever; offer touch as explicit opt-in. And expired-but-unread entries are a leak, so expiry is checked lazily on access - an expired hit is a miss, reclaimed inline, correctness never depending on a background job - with a periodic sweep purely for hygiene, the lazy-reclaim shape from Ticketmaster. TTL *plus* LRU composes as expiry-for-validity over LRU-for-victim-choice, not two competing victim pickers.
 
+</details>
+
 **Q4. "Great. Now ten instances of the service need a coherent view of this cache."**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Then we've left this problem. An in-process hit is ~100 ns; a shared cache puts a network hop in the path - ~0.5-1 ms, roughly 5,000× - so the answer is not my object behind gRPC, it's the distributed-caching block: Redis/Memcached as the shared tier, an explicit cache-aside or write-through strategy, and an invalidation story - the actual hard part. In practice: keep this cache as a small hot L1 in each instance over the shared L2, and the new design problem is L1 invalidation across ten replicas - pub/sub invalidation or short L1 TTLs bounding staleness. That's the distributed-cache deep-dive's problem; the Director move is recognizing the LLD answer ended at the process boundary.
+
+</details>
 
 ---
 

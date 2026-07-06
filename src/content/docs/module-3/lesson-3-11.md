@@ -176,19 +176,49 @@ Requirement (the R/E of RESHADED): **500 PB and growing** of user photos and vid
 
 ### Practice questions
 **Q1.** You're storing 1 PB of cold backups and need eleven nines of durability at minimum cost. Replication or erasure coding, and what does each cost you?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Erasure coding** (e.g. RS(10,4), 10 data + 4 parity). Storage overhead is **40%**, so 1 PB of data needs **~1.4 PB** of disk and tolerates **any 4** fragment losses. **3× replication** would need **3 PB** (200% overhead) to tolerate only **2** losses, for cold bulk data that 2× extra storage tax is indefensible. The cost I accept with EC is **reconstruction**: a degraded read fetches **k=10 fragments** across nodes and runs Reed-Solomon math (CPU + repair I/O), and small objects fare poorly, both fine here because backups are large and rarely read. If single-disk **repair I/O** became the pain at huge scale, I'd consider **LRC** (Azure-style, ≈1.33× overhead) to make single-fragment repair read only a local group. The decision is a clean storage-cost-per-nine optimization, and on a petabyte it's a real hardware line item.
 
+</details>
+
 **Q2.** A teammate says "let's store the uploaded videos as a BLOB column in Postgres so metadata and data stay together and transactional." Talk them out of it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Multi-GB immutable videos are the **wrong shape** for a relational engine. Postgres pays B-tree, WAL, and buffer-pool costs that buy nothing for write-once blobs, and large BLOBs **destroy the buffer pool, replication, and backups** while costing **transactional-database dollars per GB**. The right design **splits the planes**: small, hot, strongly-consistent **metadata** in a sharded KV/Postgres catalog; bytes on a **dumb, append-only data plane** scaled by capacity. "Transactional together" is a non-requirement, objects are immutable whole-object writes, so a single atomic **metadata commit** already gives strong read-after-write consistency. We lose nothing real and gain independent scaling and 10×+ lower $/GB.
 
+</details>
+
 **Q3.** Explain S3's consistency model and why it can offer it cheaply when a general database can't.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* S3 is **strongly read-after-write consistent for all operations since December 2020**. It's cheap *because objects are immutable, whole-object writes*: there's no partial update, read-modify-write, or multi-key transaction to make consistent. A write durably stores the new blob, then **flips a single metadata pointer** atomically; the only thing requiring consistency is that **tiny pointer**, which the metadata store handles with a quorum/consensus write on a small record. A relational DB must hold strong consistency across **in-place mutations, indexes, and transactions**, far more expensive. **Immutability is the simplification that buys cheap strong consistency.** The boundary: S3 deliberately offers no cross-object transactions, conditional content updates, or atomic rename, those stay a database's job.
 
+</details>
+
 **Q4.** Walk me through reliably uploading a 4 GB file, and the operational gotcha.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Use **multipart upload**: `CreateMultipartUpload` → upload **parts in parallel** (5 MiB min, 5 GiB max, up to 10,000 parts → 5 TiB max object), each with its own checksum/ETag and **retried independently** → `CompleteMultipartUpload` assembles them and the **atomic metadata commit** makes the object visible. This gives **parallel throughput** (saturate the link with N connections), **resumability** (re-send one part, not 4 GB on a blip), and independent part failure. A single `PUT` tops out at **5 GiB**, so anything larger *must* be multipart anyway. The **gotcha**: a failed/abandoned upload leaves **orphaned parts you keep paying to store**, so I add a **lifecycle rule to abort incomplete multipart uploads after ~7 days**. Skipping that is a silent, growing storage bill.
 
+</details>
+
 **Q5.** Your media bill is dominated by storage and egress. What levers do you pull, and what's the cost of each?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two levers. **(1) Tier cold data.** Most reads are skewed to recent content, so lifecycle the long tail down the ladder, Standard → Standard-IA → Glacier, for up to a **~23× per-GB drop** ($0.023 → $0.00099). But I **name the costs**: archive tiers add **retrieval latency** (up to 12 h for Deep Archive), **per-GB retrieval fees**, and **90/180-day minimum durations**, so I only tier on a confident "this is going cold" prediction; tiering data I'll re-read next week is a net loss, and I'd use **Intelligent-Tiering** where the pattern is unknown. Also switch the cold tier from 3× replication to **erasure coding** to cut storage overhead from 200% to 40%. **(2) Front it with a CDN.** Object-store **egress is expensive**; putting a CDN in front (store = origin) with a high cache-hit ratio offloads both request rate and egress. The cost is CDN spend + invalidation complexity, but for skewed media reads the hit ratio makes it a clear win. Both levers tie straight back to the **read-skew** I established in requirements.
+
+</details>
 
 ### Key takeaways
 - An object store is **two systems**: a small, strongly-consistent **metadata/index plane** (name → location, the namespace) and a vast, dumb, append-only **data plane** (the bytes). They scale on different axes, never put the bytes in your database.

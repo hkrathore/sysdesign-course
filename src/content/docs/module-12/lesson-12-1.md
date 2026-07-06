@@ -144,16 +144,40 @@ The through-line at Director altitude: tenancy is a **first-class design axis an
 ### Practice questions
 
 **Q1.** An interviewer says "we serve 5,000 small businesses and just signed our first bank. Design the tenancy." Walk through your first move.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Not one model for both. **Pool the 5,000 small businesses**, shared app fleet and a shared database with `tenant_id` on every table and RLS in the engine, because for the long tail density is the business: cost per tenant is a few dollars a month, margin in the 90s. **Silo the bank**, dedicated database, isolated network, in-region residency, its own keys, contractual requirements the pool cannot satisfy and without which the deal does not close. So a **deliberate mix**: pool for margin, silo for the whale, one control plane over both. The trade, pool gives up blast-radius containment and easy per-tenant restore for density, silo gives up density for isolation, its extra COGS the price of a deal we could not otherwise book. Top risk is cross-tenant leakage, defended by RLS on the pool and physical separation on the silo.
 
+</details>
+
 **Q2.** A peer proposes "just add a `tenant_id` column everywhere and filter on it in the app." What is the risk and how do you harden it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* App-layer filtering makes isolation depend on *every* query author remembering `WHERE tenant_id = ...`, and the one that forgets, in a report, a migration, a new endpoint, is a cross-tenant leak, worse than downtime because it breaches two customers and a contract at once and cannot be undone. The fix is isolation **enforced by construction**: push the predicate into Postgres with row-level security so even a query that omits the filter returns only the current tenant's rows, set tenant context per request from the authenticated claim, validate `tenant_id` at the boundary as non-optional, and reset context on every pooled-connection checkout so a request cannot inherit the previous tenant's session. Pooling with `tenant_id` is fine; *trusting the app to remember the filter* is the risk.
 
+</details>
+
 **Q3.** Your platform has 20,000 tenants; one of them just grew to drive 40 percent of total load. What do you do, and why is this predictable?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Predictable because tenant load follows a **power law**, the top 1 percent drive a large share of load and revenue, so a whale was always coming. In the shared pool it is a **noisy neighbor**: its spikes contend for the same app pods, database, and connection pool as everyone else, so one customer's growth degrades the other 19,999. **Isolate the whale**, its own compute (a dedicated Kubernetes namespace or node pool) and likely its own database (from pool toward bridge or silo), with **per-tenant** rate limits so no one tenant consumes the shared budget. The long tail stays pooled for density. The trade: the whale costs more per tenant, but it is a top revenue account, so isolation protects the pool and matches spend to the customer that justifies it. Uniform provisioning is wrong at both ends, over-provisioning the pool for one tenant or letting it starve the rest.
 
+</details>
+
 **Q4.** Why is the tenancy model a business decision a Director should own, not just an engineering detail?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because it sets the numbers the business runs on and gates which customers you can sell to. The point on the spectrum sets **cost per tenant (COGS)** and therefore **gross margin**, density the direct lever, and SaaS lives or dies on 70 to 80 percent-plus margins, so pooling versus siloing the long tail swings the P&L by an order of magnitude per tenant. It also decides **which deals close**: a regulated enterprise needing a dedicated database, residency, and its own keys cannot buy a pooled tier, so **isolation is a sellable, revenue-gating feature** that justifies the enterprise price. And because load and revenue follow a power law, the answer is a **tiered mix**, pool for margin, silo for the whales, a pricing-and-packaging call as much as an architecture one. A Director owns it with numbers: cost per tenant, margin impact, and the deals each tier unlocks.
+
+</details>
 
 ### Key takeaways
 - **Multi-tenancy is a distinct design axis, not a bolt-on column.** Many customers share one system, each seeing only their own data, with tenancy threaded through every layer from the start; retrofitting it late is how leaks ship.

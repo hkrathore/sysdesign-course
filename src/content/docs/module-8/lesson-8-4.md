@@ -313,19 +313,49 @@ Hundreds of teams emitting free-form events produce `btn_click` / `button_clicke
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through a single `button_clicked` event from the SDK to a funnel a PM sees.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The SDK stamps **event time** and POSTs to the collector, which validates the event name against the **semantic catalog**, enriches geo/device, and appends to the **Kafka firehose** partitioned by a stable identity key. Two consumers fan out. The **stream processor** resolves identity (anonymous→user against the identity store) and sessionizes using **event-time + watermarks**, then writes the resolved, sessionized event into the **real-time OLAP store**, event-time-ordered and date-partitioned. The same event lands in **lakehouse bronze** as retained raw, refined by batch into sessionized/identity-resolved silver and gold marts. When the PM runs a funnel, the **self-serve query layer** hits the OLAP store, which prunes by date partition and event-name and evaluates the ordered sequence near-single-pass in tens of milliseconds (or hits a pre-aggregate for a hot funnel). If late events or a retroactive identity merge change the picture, the lakehouse batch back-corrects the OLAP store, so the PM's number is "live, converging to truth."
 
+</details>
+
 **Q2. Why not just put everything in Snowflake/BigQuery and run funnels with SQL?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* At low volume with no interactive promise, I would, that's the 14.1 single-store call, and I'd add the fast path later. But this product *is* sub-second self-serve: a funnel over tens of billions of events in a warehouse is seconds-to-minutes, and a PM asks forty variants before lunch. That latency, repeated by hundreds of PMs, is both a bad product and a runaway scan bill. So I run a **dual path**: the **real-time OLAP store**, event-time-ordered with pre-aggregated hot funnels, serves the interactive surface at sub-second; the **lakehouse** is the complete, arbitrary-SQL, ML-feeding source of truth and the reconciliation authority. The warehouse/lakehouse is exactly right for the *ad-hoc and ML* half, it's just too slow to be the *interactive* half. One store can't be both; the numbers force two.
 
+</details>
+
 **Q3. Funnels and retention need correct event ordering, but mobile events arrive hours late and out of order. How do you stay correct?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is the 9.7 problem and I reuse it wholesale. Events carry **client event time**, and the stream uses **watermarks with a grace period** so moderately-late events still land in the right window and session. Definitively, the **lakehouse batch sees every event in retained raw, including the very-late ones, and re-attributes them to the correct day and session**, then back-corrects the OLAP projection, so the interactive number converges to truth. Sessions follow the same split: fast in-stream sessions for the live surface, exact batch-re-derived sessions in the lake. The retained raw is the enabler, without it I could never re-attribute a late event or re-derive a session after the fact.
 
+</details>
+
 **Q4. A user browses anonymously, signs up, and you want their pre-signup behavior in the conversion funnel. How?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Identity stitching. Pre-login, events carry an `anonymousId`; on login the SDK calls `/identify(anonymousId, userId)`, and I **merge the anonymous history into the resolved user** (union-find in the identity store). The stream resolves identity going forward so the live funnel counts one person; the hard case is the **retroactive merge**, the user retro-claims a week of already-aggregated anonymous activity, so the **batch re-resolves over retained bronze and back-corrects** the affected cohorts and funnels in the OLAP store. The result: a signup funnel that starts anonymous (viewed signup) and ends logged-in (subscribed) counts a single person end-to-end, not two. Aggregate-only systems can't do this, they've thrown away the raw needed to re-stitch.
 
+</details>
+
 **Q5. What does this platform cost, where's the risk, and what would you delegate?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two decoupled bills. **Lakehouse storage** (~1–10 TB/day raw, ~75–150 TB retained after compression and tiering, low-thousands/month, the 14.1 tiering lever keeps it bounded) is the complete-truth cost. **Interactive funnel compute** is dominated by **scan layout, not cluster size**, controlled by the event-time-ordered OLAP layout and pre-aggregating hot funnels (the difference between a 40-second scan and tens of milliseconds). The cardinal risks are funnel scan-cost at self-serve scale (mitigated by the bounded grammar + pre-aggregation) and trust erosion from ungoverned events (mitigated by the semantic catalog). I delegate, with priors, the **OLAP engine bake-off** (whichever the org runs; layout matters more), the **identity-resolution data structure** (owning that merges back-correct history), and **sessionization gap-tuning + the stream engine** (Flink, reused from 9.7). What I keep is the architecture: dual path, one-firehose-feeds-both, event-time correctness, identity-back-correction, and funnel-cost-by-layout-and-pre-aggregation.
+
+</details>
 
 ---
 

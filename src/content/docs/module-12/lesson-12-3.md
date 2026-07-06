@@ -157,19 +157,49 @@ The through-line at Director altitude: you own the **posture** that keeps a pool
 
 ### Practice questions
 **Q1.** A pooled multi-tenant API has no per-tenant limits. During a customer's product launch, their traffic spikes 50x and every other tenant's latency degrades. Diagnose and fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is the **noisy-neighbor** failure: in a **power-law** load distribution one tenant's spike consumes the shared pool and starves everyone, and with no per-tenant cap nothing stops it. The fix is **per-tenant, per-plan rate limits** at the gateway with a **token bucket keyed by `tenant_id`** (Redis), so the launching tenant is throttled to its contracted rate and its 429s hit *its* excess traffic, not the fleet. Behind that, **weighted fair queuing** stops even an in-limit large tenant from monopolizing the workers, and a confirmed runaway gets **quarantined** onto an isolated pool. The limit is **per-plan and adjustable**, so a legitimately growing customer gets a raised plan (or Enterprise override) rather than punishment. I avoid a single **global cap**, too loose for whales and too tight for growth.
 
+</details>
+
 **Q2.** You are going to bill customers based on API usage. What does "billing-grade" metering require that ordinary logging does not?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Ordinary logging is best-effort; billing-grade metering cannot **drop** or **double-count**, because a dropped event is silent lost revenue and a double-counted one is an overcharge that becomes a chargeback and, for regulated customers, a compliance incident. So: every event carries a unique `event_id`; events flow through a durable, replayable log (**Kafka**); the aggregator is **idempotent**, deduplicating on `event_id` because at-least-once delivery guarantees occasional duplicates; and a **daily reconciliation** compares the rollups against an independent count (gateway request logs, storage byte totals) and alarms beyond a tight tolerance, well under 0.1%. I keep **raw for a bounded audit window** (60 to 90 days) to resolve disputes and **rollups indefinitely** for cheap rating. The mental model: metering is a financial system of record, not a log.
 
+</details>
+
 **Q3.** Finance says one of your biggest customers is losing the company money. How is that possible, and what would you change?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Load is a **power law** and this tenant is a whale consuming 100 to 1,000x the median while sitting on a **flat plan** whose price does not track cost, so their per-tenant **COGS exceeds their price** and they are gross-margin-negative. We can see it only because of **per-tenant metering**. The fix is to align **price to cost**: at renewal, move them to a **tiered/hybrid** model (base fee plus **usage overage** beyond an allowance) and use the metering data to show their actual consumption so the new price is defensible. This is why **flat infinite usage** is the rejected default: it makes your heaviest tenants your least profitable and hides it. QoS tiers help too, giving the whale a reason to pay more (reserved capacity, priority) rather than just costing more.
 
+</details>
+
 **Q4.** How do you give gold-tier customers a real latency and uptime guarantee on a platform where they share infrastructure with free-tier tenants?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A tier has to be a **promise I can enforce in the shared system**, not a marketing label. Gold gets higher **fair-queue weight** so its work is dequeued first under contention; **reserved capacity** (a pool or headroom held for gold) so it never queues behind free-tier work at peak; higher **limits and quotas**; and a differentiated **SLA** (gold 99.95%, bronze best-effort). The trade I name is **utilization versus guarantee**: reserved capacity can sit idle while lower tiers are throttled, so I reserve only enough to meet the gold SLA at peak and let everything else share the pool. And I frame it as a **monetization lever**: differentiated QoS is something customers pay to move up for, so the mechanism that protects the fleet also drives expansion revenue.
 
+</details>
+
 **Q5.** When a tenant hits its plan limit, do you block the request or serve it? Defend your answer.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It depends on the billing relationship, this is a **soft-warn versus hard-block** decision. On a **paid plan** an overage is usually **revenue I want**, so I **soft-warn**: serve, meter the overage, notify the account owner, and let the invoice reflect it, because blocking a paying customer mid-workload is worse than billing them for what they used. On a **free tier** the tenant has no billing relationship and an unbounded free tier is pure cost and an abuse magnet, so I **hard-block** past the allowance. Across both I keep a **hard ceiling well above the soft limit** so a leaked key or buggy loop cannot run up a catastrophic bill overnight. The rule: block where you cannot recover the cost or the risk is abuse, warn-and-meter where the overage is money you are happy to collect.
+
+</details>
 
 ### Key takeaways
 - Load in a pooled multi-tenant system follows a **power law** (top 1% of tenants drive ~half the traffic, a whale is 100 to 1,000x the median), so **noisy-neighbor** risk is structural. Defend with **per-tenant, per-plan token-bucket rate limits and quotas** (Redis, keyed by `tenant_id`) enforced before the shared pool, **weighted fair queuing**, and a **quarantine** lever. Limits are **per-plan and adjustable**, never a single global cap.

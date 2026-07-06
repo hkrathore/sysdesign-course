@@ -97,13 +97,31 @@ flowchart LR
 
 ### Practice questions
 **Q1.** Convert "the system should be reliable and fast" into interview-grade requirements.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* "Reliable" → availability target (e.g., 99.99%, ~53 min/yr) + durability target (e.g., no committed data loss, 11 nines for stored media). "Fast" → percentile latency targets (p99 read < 100 ms, p99 write < 300 ms). Then I'd state which matters most given the product and design to the binding one.
 
+</details>
+
 **Q2.** A product is write-heavy (IoT telemetry, 50:1 writes:reads). How does that flip your defaults vs. a read-heavy product?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* De-emphasize caching (low read demand), prioritize ingest throughput: a log/queue (Kafka) as the front door to absorb spikes, LSM-tree storage (Cassandra) for cheap high-volume writes, batching, and time-based partitioning. The read path can tolerate higher latency, so I trade read optimization for write durability and throughput.
 
+</details>
+
 **Q3.** Why is mean latency a misleading SLO?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The mean hides the tail. A 20 ms mean can coexist with a 2 s p99, and the p99 is what a meaningful fraction of users experience every session. SLOs are set on percentiles (p99/p999) because tail latency is what damages perceived reliability and what fans out into cascading timeouts at scale.
+
+</details>
 
 ### Key takeaways
 - Functional = verbs (and cut to 3-5); non-functional = adjectives (and quantify every one).

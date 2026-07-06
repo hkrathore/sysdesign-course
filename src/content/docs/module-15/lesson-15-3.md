@@ -102,16 +102,40 @@ The through-line at Director altitude: reliability is a **negotiated, quantified
 ### Practice questions
 
 **Q1.** A team proposes a 99.99% availability SLO for an internal analytics dashboard used during business hours. Critique the proposal.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd push back: 99.99% means ~4.3 minutes of allowed downtime per month, and the last nine before it cost roughly 10× the one before, multi-region failover, redundant infra, and the ops machinery to fail over in seconds. For an internal dashboard nobody watches at 2am, that spend buys an experience no user will perceive, and it burns budget and money against a requirement that doesn't exist. I'd derive the SLO from the requirement: this tool is business-hours, low-stakes, so 99% (~7 hours/month) or 99.9% (~43 min/month) is almost certainly right, and the saved engineering effort goes to a path where reliability actually moves revenue or safety. The principle is set the SLO from value, not ambition, and reserve the expensive nines for the paths that earn them.
 
+</details>
+
 **Q2.** Your service has a 99.9% SLO over 30 days. A deploy causes a sustained 5% error rate. How fast is the budget burning, and what should fire?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The budget is 0.1% of requests; a 5% error rate is a burn rate of 50× (5% ÷ 0.1%), which exhausts the entire month's ~43-minute budget in roughly 30 days ÷ 50 ≈ **14.4 hours**. That's a fast, budget-threatening burn, well past the ~14.4× fast-burn threshold, so the **fast-burn alert should page a human immediately**, paired short-and-long windows confirming it's both sustained and still happening. This is not a "wait for the morning ticket" leak, it's a hemorrhage, and the right response is page, mitigate (likely roll back the deploy), then postmortem. If the budget actually hits zero, the freeze policy fires and feature work stops until we've repaid reliability.
 
+</details>
+
 **Q3.** Engineering leadership and product are deadlocked: product wants to ship a risky migration this week, SRE says the service is fragile. How do you resolve it as the Director?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I don't resolve it with opinion, I resolve it with the error budget. If the service is under budget for the rolling window, there's headroom to absorb a risky change, so we ship it behind a feature flag and a fast rollback, the budget is there to be spent on exactly this. If the budget is already exhausted or nearly so, the written freeze policy applies, feature work pauses and we repay reliability first, and the migration waits until the budget recovers. The point is the decision was made when everyone was calm, by agreeing the policy in advance, so right now it's a balance check, not a turf war. If we *don't* have a budget defined, that's the real gap, I'd fix that first, because without it this fight reruns every quarter and the loudest voice wins.
 
+</details>
+
 **Q4.** All your dashboards are green but the support queue is full of "the site is slow / broken" tickets. Walk through what's likely wrong and how you'd prevent it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Almost certainly the SLIs are measured in the wrong place, server-side. The app handler reports 50 ms and 200 success, but the user is hitting a misrouting load balancer, a CDN serving stale content, or timing out at the client on a request the server thinks it served. Green box-health is not the same promise as "the user got a correct answer fast." The fix: move the measurement as close to the user as possible, SLIs at the edge / API gateway plus real-user monitoring, and add the SLIs box-health misses, latency at the true p99 the user feels, correctness (was the answer right?), and freshness (was it current?). Prevention is structural: the SLI must reflect user pain by construction, or the dashboard will keep lying to you confidently.
+
+</details>
 
 ### Key takeaways
 - **The SLI/SLO/SLA triple is three objects:** indicator = the measurement, objective = the internal target you defend, agreement = the external contract with penalties, and the **SLO must be stricter than the SLA** so you have buffer before money changes hands.

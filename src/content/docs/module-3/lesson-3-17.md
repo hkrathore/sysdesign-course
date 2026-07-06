@@ -205,16 +205,40 @@ The signal is not any single pick. It is that **serving mode, freshness, store, 
 
 ### Practice questions
 **Q1.** A ranking model scores AUC 0.94 offline but click-through drops after launch. Infra metrics are clean. Diagnose and fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two prime suspects, both this building block. (1) **Training-serving skew:** a feature computed one way in the training pipeline and a subtly different way in serving code (window boundary, null-handling, timezone), so serving inputs differ from training. Check **online-vs-offline parity** on a sample of served vectors; fix by defining each feature once and computing it from that definition in both paths, or by log-and-serve. (2) **Label leakage / no point-in-time correctness:** the training set joined labels to current feature values, leaking post-label signal, so the 0.94 is inflated and unreachable online; fix with as-of joins on event-time history. Both produce exactly this signature (great offline, poor online). Infra is clean, so do not chase latency, chase the input distributions.
 
+</details>
+
 **Q2.** When do you batch-precompute predictions versus score online? Give an example of each.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Precompute** when the prediction space is enumerable and stable over the refresh window: a daily "recommended for you" list or a nightly churn score, computed offline and written to a KV, served at ~1 to 5 ms with near-zero serving compute and no accelerator on the critical path. The cost is staleness (stale to the last batch) and an inability to use request context. **Score online** when the input only exists at request time: ranking these candidates for this session, or a fraud decision on this transaction, where a precomputed score is meaningless. The cost is inference on the critical path and a hot accelerator fleet you autoscale and pay for. Many systems do both: precompute the daily list, then score online when the user actually opens the app.
 
+</details>
+
 **Q3.** You are asked to build versus buy a feature store. Walk the decision.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The thing you are really buying is not a KV cache; it is **point-in-time-correct training-set generation, a single feature definition shared across both paths (skew prevention), and managed materialization** from offline to online. **Roll-your-own** (Redis + Spark + glue) is defensible for one or two feature sets with a strong platform team, but you will rebuild point-in-time joins and skew tooling, which is where teams underestimate the cost. **Feast** gives the dual-store abstraction and registry while you bring and operate your own stores, good when you want the pattern without a vendor. **Tecton or a cloud-managed store** adds streaming, point-in-time, and serving as a managed product, worth it when many teams share features and time-to-value beats control, at vendor cost and lock-in. Prior: for a single team, Feast; for an org standardizing across many teams, managed. I would have the platform team benchmark serving latency and materialization freshness against our budget before committing.
 
+</details>
+
 **Q4.** A teammate wants to put a large model directly in the request path with no latency budget, "because it is more accurate." Push back.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Accuracy off a budget is not a serving design. Every request-path model has a p99 budget (a ranking call ~30 ms) spent across feature fetch, inference, and post-processing. A large model may add tens to hundreds of ms of inference, blowing the budget and forcing a GPU fleet whose cost scales with QPS (a cloud GPU ~$1 to $3/hr, a fleet a seven-figure annual line). Options that keep the accuracy conversation honest: **dynamic batching** to use the accelerator efficiently (throughput up, tail latency up, tune the window against p99); a **smaller or distilled model** on the hot path with the large model reserved for a cheaper offline or lower-QPS stage; or **batch-precompute** if the prediction space allows. Decide on accuracy per millisecond per dollar, not accuracy alone, and **canary** any model before it takes real traffic.
+
+</details>
 
 ### Key takeaways
 - An ML system is **two paths that must agree**: an offline (training) path over full history and an online (serving) path that fetches features and runs inference inside a p99 budget (a ranking call ~30 ms). The feature store exists to make the features on both paths the **same**.

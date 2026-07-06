@@ -118,16 +118,40 @@ Requirement (the R/E of RESHADED): a service in **us-east-1, eu-west-1, ap-south
 
 ### Practice questions
 **Q1.** Explain recursive vs iterative resolution and say which actor makes which kind of query.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The client makes **one recursive** query to its **recursive resolver** ("do all the work, return the final answer"); the resolver then makes the **iterative** referral walk root → TLD → authoritative on the client's behalf, only the authoritative server *answers*, the rest *refer*. Cold path ≈ 1 client request + ~3 upstream RTTs; warm path = 0 upstream RTTs (served from cache within the TTL).
 
+</details>
+
 **Q2.** You need to fail a region over within ~1 minute. What TTL do you set, what does it cost you, and why isn't it a guarantee?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Set TTL to **30-60 s** so resolver caches expire (and re-resolve to a healthy region) within ~a minute. **Cost:** roughly 10-50× more queries hitting your authoritative provider vs a 3600 s TTL → higher per-query bill (e.g., Route 53 ~$0.40/M) and a larger query-load surface. **Not a guarantee** because many resolvers/clients ignore or clamp TTL (resolver slop), so DNS failover is a **best-effort floor**, not a hard RTO mechanism, for a strict SLA, pair it with **anycast withdrawal** or a **global L7 LB** that fails over independently of DNS caching. Practical pattern: keep TTL moderate (300 s) day-to-day and pre-lower it before planned failover.
 
+</details>
+
 **Q3.** Why is anycast a great fit for DNS but riskier for a long-lived TCP service?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Anycast advertises one IP from many sites; **BGP routes each client to the BGP-nearest instance** (fewest AS hops / routing policy, *not* guaranteed geo-nearest or lowest-latency). DNS is **short, stateless UDP**, each query is one self-contained round trip, so it's fine if consecutive queries hit different instances, and attack traffic disperses across all sites (DDoS absorption). A **long-lived TCP/TLS** flow can **break on BGP reconvergence**: the path shifts mid-connection to a different anycast node with no session state, dropping the connection. So anycast is ideal for DNS/CDN entry, but stateful protocols need stickiness or a different layer.
 
+</details>
+
 **Q4.** Twitter, GitHub, and Spotify all went down on the same day in 2016 without their own servers failing. What happened, and how do you prevent it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The **Dyn DNS outage (Oct 21, 2016)**, a **Mirai IoT-botnet DDoS** overwhelmed **Dyn's authoritative DNS**. Those companies used Dyn as their **sole authoritative provider**, so even though their application servers were healthy, **no one could resolve their names** → effectively down. **Prevention: multi-provider / secondary DNS**, run two independent authoritative providers (e.g., Route 53 + NS1) as co-equal `NS` records, so one provider's outage doesn't take the domain dark. **The rejected alternative, a single provider, is cheaper and simpler to operate, but it makes DNS a single point of failure with internet-wide blast radius.** For a Director, DNS redundancy is a cheap insurance premium against a catastrophic, self-inflicted outage.
+
+</details>
 
 ### Key takeaways
 - **One recursive query in, ~3 iterative referral hops out**, the **recursive resolver** walks root→TLD→authoritative; the client never does.

@@ -112,16 +112,40 @@ The through-line at Director altitude: observability is the ability to ask **new
 ### Practice questions
 
 **Q1.** Your p99 latency tripled but p50 is flat and error rate is unchanged. What does that pattern tell you, and what's your first move?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* p50 flat with p99 blown means the median user is fine and a *tail* of requests is slow, a specific path (a cold cache, one slow shard, a GC pause, a noisy-neighbor pod, a regressed query plan), not a fleet-wide resource saturation (which would lift p50 and p99 together). Flat errors say nothing is failing, just slowing. First move is RED across the services on the request path to localize *which* service's duration is climbing, then click that p99 bucket's exemplar to get a trace ID and read the span tree for the slow hop. I am hunting a code path, so I go metrics → trace, not straight to a resource graph. I would not start in the logs, logs confirm the cause once the trace tells me where to look.
 
+</details>
+
 **Q2.** A team wants to add `user_id` as a label on their request-rate and latency metrics so they can debug per-customer. What do you tell them?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No, not as a metric label. Metric series count is the product of every label's distinct values, so `user_id` at a million users multiplies your series into the billions and either falls the time-series DB over or makes the per-series bill unpayable, the cardinality-explosion failure. The need is real, though: per-customer slicing mid-incident. The right tool is a **high-cardinality wide event**, emit one structured event per request carrying `user_id`, `tier`, `region`, `build_id`, and aggregate at query time, so you can ask "p99 for this customer" after the fact without paying the cardinality tax on every metric. Metric labels stay bounded (status, route, method); the unbounded dimensions live in events, logs, and traces.
 
+</details>
+
 **Q3.** You're choosing between head and tail sampling for traces on a service doing 50k requests/sec. Which, and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Tail sampling, given traces are a primary debug tool here. Head sampling decides at request start, so keeping 1% throws away 99% *before* knowing which were interesting, and the rare errored or slow traces, the exact ones I need at 02:00, are almost certainly in the discarded 99%. Tail sampling buffers each trace and decides after it completes, so I keep 100% of error traces and traces above a p99 duration threshold, plus a 1 to 5% random baseline of healthy traces to preserve ratios. The cost is a buffering collector tier (memory ∝ in-flight traces × spans), which I accept because the alternative is paying to collect traces and still not having the one I need. If traces were merely nice-to-have and volume were uniform, head sampling's simplicity would win, but that is not this service.
 
+</details>
+
 **Q4.** Leadership asks you to cut the observability bill by 40% without going blind. Where do you cut?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I attack the three cost drivers in order of waste. **Logs** are usually the biggest and chattiest line (\$/GB ingested): drop debug/info logs that no alert or runbook reads, sample high-volume success logs, and tier retention, 7 days hot and searchable, 90 days cold and cheap, which alone often clears the 40% without losing diagnostic power. **Metrics**: hunt high-cardinality series (an unbounded label someone slipped in) and kill them, since per-series pricing means a few bad labels can dominate the bill; keep the SLI and RED/USE series untouched. **Traces**: move from a high fixed head-sample rate to tail sampling so I keep the interesting traces (errors, slow) and drop the boring bulk, often a large reduction at *better* debug value. The discipline: cut by *signal value per dollar*, not across the board, the SLI metrics and error traces are the last thing I touch.
+
+</details>
 
 ### Key takeaways
 - **Monitoring answers known questions; observability lets you ask new ones of a live system mid-incident**, and the second is what gets you through a novel outage, bought before the incident, not during it.

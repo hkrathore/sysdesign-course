@@ -127,16 +127,40 @@ The through-line at Director altitude: ingestion is the failure-prone boundary, 
 ### Practice questions
 
 **Q1.** A team proposes ingesting the production `orders` table into the warehouse by running `SELECT * FROM orders WHERE updated_at > :last_run` every five minutes. What breaks, and what would you do instead?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two failures. First, **hard deletes are invisible**, a cancelled or GDPR-erased order is physically `DELETE`d, has no newer `updated_at`, and never appears in the delta, so the warehouse keeps counting an order that no longer exists, the silent-desync trap. Second, every poll runs a **query against the production OLTP database**, adding load to the box serving customers (the 13.1 "never starve point traffic" rule) and leaning on an `updated_at` that bulk updates and app bugs routinely break. Instead I'd use **log-based CDC** (Debezium reading the Postgres WAL): it captures inserts, updates, *and* deletes from the log the database writes anyway, at seconds-freshness and near-zero source impact, lands them idempotently in a raw bronze layer, and transforms in-warehouse (ELT). Polling is acceptable *only* if `orders` were genuinely append-only (no deletes, no in-place updates), which it isn't.
 
+</details>
+
 **Q2.** Estimate when self-hosted Debezium beats Fivetran for a source with 200M changed rows/month, and name the rejected option on each side.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Fivetran prices per **monthly active row**; 200M MAR is well into volume-pricing territory, plausibly tens of thousands of dollars/month and rising with the business (exact rate varies, but it's clearly five-figures-plus at this scale). Self-hosted Debezium + Kafka Connect costs roughly fixed **infra + ops**, a small connect/Kafka footprint plus a fraction of a data engineer's on-call, call it a few thousand dollars/month all-in if the team already runs Kafka. At 200M MAR the arithmetic favors **build**: per-row pricing has crossed fully-loaded ops cost. *Rejected on the buy side:* staying on Fivetran lets the bill scale linearly with a growing change volume you don't control. *Rejected on the build side:* building at low volume (say 2M MAR) would burn scarce platform-engineering time to save little, there Fivetran's speed-to-value wins. The decision is the crossover, computed per source, and the real answer is often **hybrid**, build the high-volume DB CDC, buy the long-tail SaaS connectors.
 
+</details>
+
 **Q3.** Why did the industry shift from ETL to ELT, and what architectural property does ELT buy you?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The shift was driven by **cheap object storage** (S3/GCS at pennies/GB-month) plus **powerful elastic warehouses**. ETL transformed data *before* loading because storage was once too expensive to keep raw, but that **discarded the raw** and **coupled business logic to the ingestion pipeline**. ELT loads the **raw copy first**, then transforms in-warehouse with SQL. The property it buys is **rebuildability**: because the untransformed landing copy is retained, every downstream table is reproducible by re-running SQL over raw, *idempotent recomputation over retained raw*, so a transform bug is a cheap re-run, not a re-extraction from a source that may have changed, and the source and the business logic evolve independently. You'd still transform-on-ingest only when legally barred from landing raw or when raw is genuinely uneconomical to store.
 
+</details>
+
 **Q4.** A CDC connector was down for six hours, then restarted and replayed every change it missed. Two concerns: did it corrupt the warehouse, and did it endanger the source? How do you design against each?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Warehouse corruption** is prevented by **idempotent loads**: each CDC event carries a primary key and a source position (LSN), and the landing layer applies it as an **upsert/merge keyed on (pk, LSN)**, so replaying an already-applied event is a no-op, no duplicate rows, no double-applied delete. (The full exactly-once end-to-end guarantee is the pipeline design; here the load just has to be idempotent.) **Source danger** is the **replication-slot trap**: while the connector is down, Postgres **retains WAL** for the slot's unread position, and six hours of pinned WAL can fill the source disk and take down the production database. Design against it by **monitoring slot lag** and alerting before disk pressure, bounding WAL retention, and, for very long outages, being willing to drop and re-snapshot rather than let the slot pin the source. The Director point: CDC's low-impact promise holds *only* if you operate the slot, which is exactly the kind of internal you delegate with a prior and a monitor, not ignore.
+
+</details>
 
 ### Key takeaways
 - **Three ingestion modes, chosen per source:** full load (small/no-change-marker tables), incremental/query-based (append-only only), and **change data capture** (the default for any mutable table where deletes matter and freshness counts). Choose from mutability, deletes, and the freshness requirement, not by reaching for streaming reflexively.

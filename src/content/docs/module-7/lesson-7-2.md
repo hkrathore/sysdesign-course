@@ -134,16 +134,40 @@ The through-line at Director altitude: you can explain *why* the scan is cheap i
 ### Practice questions
 
 **Q1.** A 40-column events table has a query `SELECT SUM(bytes_sent) FROM events`. Estimate how much less data this reads in a Parquet column store than in a row store, and name the two effects.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The query touches **1 of 40 columns**, so **projection pushdown** reads ~**1/40 = 2.5%** of the bytes a row store would (the row store drags all 40 columns off disk because the row is the I/O unit). Then **compression** on the homogeneous `bytes_sent` column, say ~**4×**, cuts that again, so net ≈ 2.5% ÷ 4 ≈ **~0.6%** of the row-store bytes, well over **100× fewer bytes read**. The two effects: *read fewer columns* (projection, the 1/N win) and *those columns are denser on disk* (compression on homogeneous values). On the bytes-scanned cost model, that's the orders-of-magnitude difference, and it's layout, not a cache.
 
+</details>
+
 **Q2.** Explain how a columnar file format answers `WHERE event_date = '2026-06-01'` cheaply with no B-tree index, and what physical-layout choice makes it dramatically better or worse.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Parquet row groups / ORC stripes carry **per-block min/max statistics (zone maps)**. The engine checks each block's `event_date` min/max and **skips any block whose range can't contain the date** without reading it, **predicate pushdown**, and composes this with **partition pruning** (skipping whole files for other days). The decisive layout choice is **sort/cluster order**: if the data is sorted by `event_date`, each block covers a narrow date range and almost all blocks are skippable; if it's randomly ordered, every block's [min, max] is ~the global range, so min/max pruning skips nearly nothing and you scan everything. Hence "partition + sort by your common predicate" is the highest-leverage move after going columnar (the cost discipline).
 
+</details>
+
 **Q3.** Your team wants to "just run analytics off the production Postgres with a few indexes" to avoid building a separate store. Make the mechanical case against it and the case for the one exception.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* An analytical aggregate is **unselective** (it touches most rows), so the planner ignores `amount`-style indexes and **table-scans**, and because Postgres is **row-oriented**, that scan drags **every column** of every row off disk to reach the two or three the query needs, while contending with OLTP point traffic for the buffer pool and IOPS (I/O operations per second) (the starvation point). A column store instead reads only the needed columns (projection, ~k/N), compressed 3–10×, vectorized, often **50–100× fewer bytes and isolated compute**. The exception: if the "analytics" are actually **highly selective point/range lookups** ("the last 10 orders for one user"), a row store with the right index is genuinely better, columnar would reassemble rows from scattered chunks for no benefit. So separate the analytical projection (CDC-fed) for *scans*; keep selective lookups on the row store.
 
+</details>
+
 **Q4.** When is Zstd the right codec over Snappy for a Parquet table, and when is it the wrong call?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Right** for **cold or very large tables scanned infrequently**, or where **scan-bytes / cross-region egress are billed**: Zstd's denser compression cuts the per-scan byte cost and the storage footprint, and you rarely pay its higher decompression CPU because you rarely read it. **Wrong** for **hot, interactive tables read many times an hour**: you'd pay Zstd's extra decode CPU on *every* query to save storage that's cheap relative to the compute, Snappy's faster decode wins because **decompression CPU is the bottleneck**, not bytes. It's a CPU-vs-IO trade: optimize the scarce resource, state the prior (Snappy hot, Zstd cold), and let the platform team benchmark on the real column mix.
+
+</details>
 
 ### Key takeaways
 - **Row vs column is a physical-layout choice and it sets every query's cost:** rows store an entity's fields contiguously (cheap point access, OLTP), columns store a field's values contiguously (cheap scans, OLAP), so an N-column table answers a single-column aggregate by reading ~**1/N of the bytes** in a column store.

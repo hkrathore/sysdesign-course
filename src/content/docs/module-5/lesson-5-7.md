@@ -290,19 +290,49 @@ Bots and duplicate-intent clicks must not be billed.
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through counting a single click exactly once for the invoice.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The click arrives with an assigned `eventId` and durably lands on the Kafka log, partitioned by `campaign_id`, and is tee'd to S3 as retained raw. The **stream** dedups by `eventId` in keyed state and produces a fast approximate count for the dashboard, but that's not the bill. The **bill** comes from a **batch job that recomputes over the complete retained raw**: it dedups across *all* events (not just a window), folds in late arrivals, applies the fraud filter, and writes an exact count to the billable table. The invoice reads only that table. So exactly-once for billing is structural: idempotent recomputation over an immutable, deduped raw set yields the same exact number however many times it runs. The stream is fast; the batch is true.
 
+</details>
+
 **Q2. The same firehose, but now show me top-10 ads by clicks in the last 5 minutes.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* That's the **top-K / heavy-hitters** read shape over the *same* ingest log and stream layer. Same partitioned firehose, same windowing, but instead of per-campaign totals I maintain a bounded top-K structure (e.g. Count-Min Sketch for frequencies + a heap of candidates) per window, so I don't sort the full cardinality. Crucially, for a *dashboard* top-K, approximate is fine, so it stays purely on the stream, no batch needed unless top-K ever drives money. The reusable substrate is the log + stream aggregation; only the aggregation function and read shape change.
 
+</details>
+
 **Q3. Your stream processor crashes mid-window. Did you lose or double-count clicks for the dashboard?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Neither, if exactly-once is configured: the processor checkpoints state and commits aggregate writes transactionally with the consumer offset (Flink + Kafka transactions). On restart it rewinds to the last checkpoint and replays from the log; because the output commit was atomic with the input offset, replay doesn't double-count, and nothing is lost because the log retained the events. The dashboard may stall for the restart window, then catch up. And even if the stream got it slightly wrong, the **batch back-corrects** the dashboard and *is* the bill, the stream never has to be perfect.
 
+</details>
+
 **Q4. Why not just make the stream exactly-once and drop the batch entirely (Kappa)?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* You can move toward Kappa, recompute by replaying the retained log through the same stream job, killing Lambda's dual-codebase cost. I keep the raw log precisely so that's possible. But I hold Lambda while two things are true: billing needs exactly-once over an *unbounded* late-event window (a stream's dedup state is finite, so a click arriving days late slips its window, the batch, seeing all raw, doesn't), and fraud rules must be re-runnable over history to re-settle past periods. Both are naturally batch recomputes. Once the engine's exactly-once-on-replay is proven for our late-event profile, I'd collapse to Kappa, a managed migration, not a day-one bet.
 
+</details>
+
 **Q5. What does this cost, and what would you delegate?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The spend is the **ingest log + stream tier** (sized for 300k/sec peak) and **raw retention** (~50 TB/mo S3, a few hundred dollars, the price of a recomputable, auditable bill). The aggregates and dashboard tier are small; reads are trivially cached. I delegate the **fraud model** to trust-and-safety behind `isValid(event)`, owning only the integration point (batch applies the verdict before settling). I delegate the **stream-engine and OLAP-store bake-offs** with stated priors (Flink for event-time + exactly-once; whichever OLAP the org runs). What I keep is the two-path speed/truth split, never-bill-from-the-stream, and raw retention as the recompute enabler.
+
+</details>
 
 ---
 

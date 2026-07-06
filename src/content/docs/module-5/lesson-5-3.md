@@ -362,19 +362,39 @@ The function is pure and deterministic given policy + timestamps, safe to run in
 
 **Q1. A property has 5 king rooms. Two guests simultaneously try to book the last available room for June 14. How does the system handle it?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Both guests arrive at the Booking service concurrently. Each attempts `UPDATE inventory SET confirmed_count = confirmed_count + 1 WHERE property_id = $p AND room_type = 'KING' AND date = '2026-06-14' AND confirmed_count + held_count + 1 <= physical_count + overbook_buffer`. Postgres serialises writes to the row; one update lands first, setting `confirmed_count` to the buffer limit. The second update finds the WHERE predicate false (count exceeded), returns 0 rows updated, and the Booking service returns a 409 to that guest. No lock held after the first commit; no oversell. The Cassandra availability index is updated asynchronously via Kafka, the second guest may have seen "1 available" from search but the 409 at confirm is the truth.
+
+</details>
 
 **Q2. The CTO asks: "Can we set overbooking to 110% for premium hotels during peak season?" How do you handle this without a code change?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* `overbook_buffer` is a first-class column in the `inventory` table, set per (property_id, room_type_id, date). The admin API `PUT /v1/properties/{propertyId}/inventory` accepts `physicalCount` and `overbookBuffer`. Setting `overbook_buffer = 2` on a 20-room property allows up to 22 bookings (110%). The DB constraint (`confirmed_count + held_count <= physical_count + overbook_buffer`) enforces it atomically. A yield-management service, delegated to the revenue team, reads booking velocity and no-show history to recommend and apply buffer values via that admin API. The business decision is theirs; the system enforces whatever they set. Walk-rate SLA is the revenue team's contractual obligation to manage.
+
+</details>
 
 **Q3. Design the cancellation flow for a 7-night booking, including the partial-refund case.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Cancellation is a Postgres transaction on the `property_id` shard: decrement `confirmed_count` for each of the 7 date rows, update `reservation.status = 'CANCELLED'`, compute `refund_amount = total_price - cancellation_fee(policy, checkin, now())` using the stored policy. All 7 date rows are colocated on the same shard, no cross-shard coordination. Payment reversal is async: emit a `CancellationInitiated` event to Kafka; the Payment service handles the PSP reversal with an idempotency key and emits `RefundCompleted`. The reservation status updates to `REFUNDED` on that event. The guest sees "cancelled, refund in 3-5 days", standard. We don't block the cancel path on PSP latency.
+
+</details>
 
 **Q4. A popular hotel flash-sale drops 50 discounted rooms. Suddenly your Cassandra availability index is wrong for 10 minutes while Kafka processes the backlog. What's your mitigation?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three levers. First, a **Kafka consumer-lag alert**: if lag on the availability-update consumer exceeds 30 s, the Booking service sets a `high_contention` flag for that property (stored in Redis, expires in 5 min). Second, for properties with that flag, the Search service **hedges by reading available_count from Postgres** instead of Cassandra for the final "can I book this?" check shown to users, adds ~10 ms to that property's search response, avoids showing availability that's already gone. Third, the Search API includes `asOf` in the response so clients can surface a "prices may be updating" disclaimer. The key is that the eventual tier is *always* a hint; the 409 at confirm is the authoritative answer. We accept a slightly elevated 409 rate during the flash window rather than re-architecting the read path.
+
+</details>
 
 ---
 

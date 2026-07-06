@@ -350,19 +350,39 @@ Red flag: sizing a giant database.
 
 **Q1. A bidder places $200 at the exact moment another bidder places $205. Both bids arrive at the same millisecond. What happens?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The DB serializes writes to the `auction_id` row. One UPDATE executes first; the second's `amount > current_price` condition is evaluated against the already-updated price. Either way exactly one bid wins per write slot and the winner is the highest bid. The loser gets a 409 with the current price and can rebid immediately, no seat hold, no exclusive claim.
+
+</details>
 
 **Q2. The Notification service is down for 30 seconds during a hot auction close. What breaks and what doesn't?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Watchers stop receiving live updates, UX degradation, not a correctness failure. Bid acceptance continues; events accumulate in Kafka (durable, replicated); on recovery the Notification service consumes from its last offset. The auction DB is unaffected; the auction closes at `close_at` as scheduled. Alert on consumer lag; this is a P2 incident (watcher SLA (service-level agreement) degraded), not P0 (the Bid service and DB are the P0 surface).
+
+</details>
 
 **Q3. Design the auction-close mechanism for 10M active auctions without a table scan.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* `ZADD close_queue <close_at_ms> <auction_id>` on create. Scheduler polls `ZRANGEBYSCORE close_queue 0 <now_ms> LIMIT 100` every second, executes close logic, `ZREM`s the entry. Anti-snipe re-enqueue is `ZADD` with the new score (ZADD updates existing members). Trade-off: Redis dependency and failure mode, mitigated by a replicated cluster. Alternative, cron table scan, is O(10M) per sweep at scale. At 10×: shard the sorted set by `auction_id % N`.
+
+</details>
 
 **Q4. A seller claims the winning bid was placed after the auction closed. How do you audit this?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The CAS condition includes `close_at > now()`, any bid arriving after `close_at` affects 0 rows and is rejected with a 410; it never appears in the bid log. The `bids` table records `placed_at` with server-assigned timestamps; a bid in the log definitionally passed the `close_at` check at write time. Audit: query `bids WHERE auction_id = ? ORDER BY placed_at` and verify the winner is the highest row; cross-check against the close-event timestamp in Kafka. I'd expose a "bid history" API backed by a read replica and delegate dispute adjudication to Trust & Safety.
+
+</details>
 
 ---
 

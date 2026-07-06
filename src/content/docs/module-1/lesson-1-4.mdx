@@ -102,13 +102,31 @@ That paragraph, turning the ladder into a spent budget with a graceful-degradati
 
 ### Practice questions
 **Q1.** A request makes 10 sequential same-DC calls at ~0.5 ms each, plus one ~10 ms DB read. Rough p50, and how would you cut it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* ~10×0.5 + 10 = **~15 ms** p50. Cut it by parallelizing the 10 independent calls (collapse ~5 ms into ~0.5 ms) and caching the DB read. The tail matters more than this p50, bound each call with a timeout.
 
+</details>
+
 **Q2.** Why does turning random writes into sequential writes (LSM-tree) help so much?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Random disk I/O (~10 ms HDD seek, and write amplification even on SSD) dominates latency and wears the device; sequential I/O is orders of magnitude cheaper per byte. LSM-trees buffer writes in memory and flush them as large sequential runs, trading read amplification (must check multiple levels, mitigated by Bloom filters) for vastly cheaper writes, the right trade for write-heavy systems.
 
+</details>
+
 **Q3.** Translate "1 ns = 1 second" for RAM, same-DC round trip, and cross-continent round trip.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* RAM 100 ns → **~1.5 min**; same-DC round trip 500 µs → **~6 days**; cross-continent 150 ms → **~4.75 years**. The point: a cross-region hop is "five years" of human time vs. RAM's "minute and a half", never on the hot path.
+
+</details>
 
 ### Key takeaways
 - Internalize ratios, not digits: RAM ~100 ns, same-DC RT ~0.5 ms (~5,000×), cross-continent ~150 ms (~1.5M×).

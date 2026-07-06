@@ -261,19 +261,39 @@ Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/wid
 
 **Q1. Top-10 trending hashtags over the last hour, out of a billion distinct tags. Walk the design.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* I don't keep exact counts for a billion keys, ~50 GB/window to return 10 items, almost all discarded. I use a **Count-Min Sketch** for per-key frequency in fixed sub-linear space (tens of MB) plus a **min-heap of size K** for the current top-10. The 1-hour window is a **ring of per-minute sub-sketches**; the roller drops the oldest each tick (O(1), not a per-key scan). Ingest shards by key region; per-shard sketches **merge** by cell-wise add at query time, and CMS's one-sided error means a true heavy hitter is never undercounted out of the top-10. The board is AP, `exact:false`, fresh to ≤ the merge TTL. If it ever pays out, recompute exactly in batch from the Kafka log, display approximate, payout reconciled.
+
+</details>
 
 **Q2. A game leaderboard with 20M ranked players. Sorted set or sketch?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* **Sorted set, exact.** Cardinality is bounded and known, so cost is bounded: ~100 B × 20M ≈ **~2 GB**, a couple of Redis nodes. I get exact rank, `ZREVRANGE`, `ZREVRANK`, `ZRANGEBYSCORE`, all O(log N). A sketch would *throw away* exactness I can cheaply afford and can't even answer "my exact rank." Shard by `playerId` for write throughput, merge per-shard top-K for the global head; hot single players get the sharded-counter treatment. The sketch is right only when cardinality is huge and the tail is worthless, not here.
+
+</details>
 
 **Q3. The leaderboard write path is melting on a hot player during a streamed event. What's happening and what's the fix?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* That player's score key is the hottest **write** in the system, every update serializes on one key (the hot-key write-contention wall). Replicas don't help; replication adds read capacity, not write throughput to one key. **Shard the counter:** fan the increments across N sub-counters, sum on read; size N from peak rate ÷ per-key ceiling. The sorted-set entry updates from the rolled-up total. Trade-off: write ÷ N for read × N behind the rollup, and the displayed score trails by ≤ the rollup interval, fine for a leaderboard.
+
+</details>
 
 **Q4. Why is "exact rank for everyone" the wrong default, and when is it right?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* It's wrong when the population is huge and the tail is worthless: nobody asks the exact rank of the four-millionth entity, so paying linear memory (50 GB/window for trending) to compute it is cost with no requirement behind it. The right default is **exact top-K + percentile buckets** ("top 2%") for the tail. It *is* right when the population is **bounded and small enough that exact is cheap**, a ~10-50M-player leaderboard at ~1 GB/10M, *and* the product genuinely needs "my exact rank." Keep the exact surface as small as the requirement demands.
+
+</details>
 
 ---
 

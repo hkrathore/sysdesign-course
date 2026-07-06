@@ -245,16 +245,40 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. The CEO read that Amazon uses microservices and wants the migration started this quarter. You have 40 engineers and flat headcount. What do you say?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd bring numbers, not philosophy. At 40 engineers (~5 teams) the coordination tax is modest, while the migration costs ~$8M-equivalent effort plus a permanent platform team and 1.5-2× infra - double-digit percent of all engineering, forever. Most of the velocity outcome comes from a **modular monolith**: enforced module boundaries, module ownership, a parallelized suite, trunk-based deploys with flags - ~10% of the cost, reversible. Measure deploys/week and blast radius for two quarters; if pain persists *and* headcount scales, the strangler-fig case writes itself - and the modular-monolith work is its mandatory first phase anyway, so nothing is wasted. I won't start a 2-year migration to satisfy an article.
 
+</details>
+
 **Q2. Two years into a migration you inherit: 40 services, shared Postgres, and deploys still go out in a coordinated weekly batch. Diagnose and prescribe.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **distributed monolith** - the architecture changed, the coupling didn't: microservice costs (network hops, 40 pagers, infra multiple) for monolith outcomes. Root cause is the shared database: schema coupling forces lockstep releases regardless of service boundaries. Prescription: **stop extracting** - more services deepen the hole. Measure which service pairs always change together, run the S-step breakup on the 2-3 worst seams, and **merge** services that always co-change - consolidation is cheaper than fixing a wrong boundary. Success metric: % single-service deploys, quarter over quarter. Service count may go *down*; fine - it was never the KPI.
 
+</details>
+
 **Q3. How do you extract checkout when its tables have 25+ cross-boundary joins, without a feature freeze?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Late and pre-paid - it's last in my sequence for exactly this reason. First, **sever in-monolith**: the checkout team replaces cross-boundary joins with internal interfaces *inside* the monolith - shipped continuously, no freeze, each PR reversible. That work *is* the extraction; what remains is relocation. Then the standard ladder: CDC-hydrate checkout's own store, cut reads behind a flag with checksum verification, cut writes with reverse-CDC as the rollback net, drop the old tables. Cross-domain workflows (order → payment → inventory) become **sagas**, not distributed transactions - any invariant that can't tolerate that means the boundary is misdrawn; keep those pieces together. Payments/PCI I delegate behind a tokenized interface; my prior is its own service with the smallest possible surface.
 
+</details>
+
 **Q4. What will you never extract, and how do you defend leaving it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The stable, high-fan-in core - in our map, catalog and identity. Two reasons from the R-metrics. **Change frequency:** the release-train tax is proportional to change rate; a module shipping twice a year pays ~zero tax, so extraction buys ~zero velocity. **Fan-in:** everything joins catalog and users; extracting them puts a network hop and a new failure mode in every hot path - spending availability to gain nothing. The defense is the success metric itself: deploys/week up, blast radius down, with those modules in place. The end state - 8-12 services around a modular-monolith core - isn't an unfinished migration; it's the design. If identity later becomes a real bottleneck, it gets extracted *deliberately*, as a designed platform service - not as cleanup.
+
+</details>
 
 ---
 

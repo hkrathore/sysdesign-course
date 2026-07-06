@@ -126,19 +126,49 @@ The through-line at Director altitude: a data platform is a **DAG of idempotent,
 ### Practice questions
 
 **Q1.** A teammate's pipeline appends to a `gold_revenue` table on every run. After a transient error, Airflow retried one task and finance now sees revenue 2× too high for a day. What happened, and how do you fix it permanently?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The task is **non-idempotent**, it `INSERT INTO`s the day's rows, so the retry added them a *second* time and double-counted. The permanent fix is **idempotent, partition-scoped** semantics: scope each run to its date (`event_date = '{{ ds }}'`) and **delete-insert** (or `INSERT OVERWRITE`) that partition so a re-run *replaces* the day rather than appending. Now a retry, a failover, or a backfill is deterministic, run it once or five times, same result. This is the rebuildable invariant and the idempotent reprocessing; it's also what makes the bad day fixable with a single re-run of that partition rather than a manual surgery.
 
+</details>
+
 **Q2.** You discover a transformation bug that's been wrong for 60 days. Walk through the backfill and estimate its cost and time.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because models are idempotent and partition-scoped, backfill is "re-run the affected model **and everything downstream** for those 60 partitions": fix the dbt model, then `dbt build --select the_model+` backfilled `--start-date` 60 days back. Cost = **`N partitions × per-partition scan × $/TB`**, if each daily run scans ~150 GB at \$5/TB, that's **60 × 150 GB × \$5/TB ≈ \$45**; at 20 parallel runs it drains in **60 ÷ 20 = 3 waves**, well under an hour. I'd quote that number *before* running. No table goes offline and nothing double-counts because each partition is *replaced* deterministically, the difference between a parameterized re-run and an outage is exactly the idempotency property.
 
+</details>
+
 **Q3.** Airflow vs Dagster for a brand-new analytics platform with a small team that cares a lot about data freshness SLAs and being able to test transforms locally. Make the call and name what you give up.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd lean **Dagster**: it's **asset-aware**, so lineage and **freshness** are native (you declare freshness policies on assets and it tracks staleness), and local dev/typing/testing are markedly better, both first-order for this team. What I give up: a **smaller ecosystem** (fewer pre-built integrations than Airflow's), a smaller hiring pool, and a newer operational track record, so I'd verify the integrations we need exist. If instead this were an org already running Airflow at scale with deep operational muscle and a big hiring pool, I'd **reject Dagster for Airflow**, the ecosystem and team-familiarity win outweighs asset ergonomics. Either way I'd state the prior and delegate the bake-off on our integration and scale profile.
 
+</details>
+
 **Q4.** Explain to a skeptical engineer why dbt is worth the toolchain overhead versus the SQL scripts and stored procedures they run today.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Their scripts are **untested, unversioned, and opaque**: run-order is maintained by hand and rots, there are no tests so a column silently going null produces a confidently wrong metric (the silent-wrong-number), there's no lineage so "where does this number come from?" means reading thousands of lines, and stored procs are invisible to git and code review. dbt turns the **T** into software: models in git (reviewed, rollback-able), a **`ref()`-derived DAG and lineage** built automatically, **built-in tests** (`not_null`/`unique`/relationships, feeding 13.9), auto docs, and **incremental models** that process only new partitions. The cost is honest, a build/deploy toolchain and a learning curve, but at any real platform scale it buys rebuildability, trust, and reviewability that scripts can't. For a literal 2–3 table throwaway, the overhead may not pay; for a platform, it always does.
 
+</details>
+
 **Q5.** Where exactly is the boundary between the orchestrator (Airflow/Dagster) and dbt? Give the pattern and the anti-pattern.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The orchestrator **schedules, sequences across systems, retries on infra failure, and owns the SLA**; dbt **transforms**, with its own internal `ref()` model DAG, running *inside* the warehouse. The **pattern (orchestrate-the-transform):** the orchestrator runs ingestion (EL), then triggers `dbt build`, then triggers publish steps (BI refresh, reverse-ETL, ML features), alarming if the whole chain misses its freshness SLA. dbt does *not* schedule itself or wait on external dependencies, that's the orchestrator's job. The **anti-pattern (transform-inside-ingestion):** doing the cleaning/conforming during the EL step couples two concerns that fail and evolve independently, you can't re-run or test the transform without re-ingesting, and a transform change forces an ingestion redeploy. Keeping EL and T separate (ELT) is what keeps the transform rebuildable over already-landed raw.
+
+</details>
 
 ### Key takeaways
 - **A data platform is a DAG of interdependent jobs, not a pipeline.** The **orchestrator** (Airflow/Dagster/Prefect) is the control plane that schedules by dependency (fire B on A's *recorded success*, not a timing guess), retries with backoff, and owns freshness **SLAs/alerting**, reusing the durable-store + leader-election + scheduler/executor machinery of 3.15 / 5.14, adding *data-aware* concerns on top.

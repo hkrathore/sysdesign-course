@@ -118,16 +118,40 @@ The through-line at Director altitude: gates **encode the bar by ROI**, DORA **m
 ### Practice questions
 
 **Q1.** A team proposes a 90%-coverage-or-fail gate across all services as this year's quality goal. React as the Director.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd reject coverage-as-a-target, because coverage measures *what lines ran*, not *what failures we'd catch*, and a 90% gate is Goodhart's law: the cheapest way to hit it on hard-to-test modules is assertion-free tests that call the function and check nothing, so coverage climbs to 92% while real defect-catch doesn't move, and now we've trained the org to write theater. I'd report coverage as a *hint* (a service at 20% is genuinely under-tested and worth a look), and gate the *outcome* on **escaped-defect rate** and **change-failure rate**, which measure caught-vs-escaped reality. The required-path gates I actually want are the ones with ROI: lint, type-check, unit and contract tests, and a dependency scan tuned to fail only on exploitable CVEs. If we want an honest "is this tested" signal, mutation testing in a scheduled lane beats coverage, because it checks that a test actually *fails* when you inject a bug.
 
+</details>
+
 **Q2.** Your required CI pipeline is 25 minutes and engineers are batching changes to amortize the wait. Diagnose and fix, with numbers.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The 25-minute required path is the disease: at, say, 200 merges a day across the org, that's ~83 engineer-hours of merge-blocking wait *daily*, and the rational response, batching changes to pay the wait once, makes each merge bigger and riskier, raising change-failure rate, the opposite of the goal. The fix is to treat required-path wall-clock as a first-class SLO (target under ~10 min p95) and get there with **build caching** (cache deps, layers, unchanged-module test results, often a 6× win on warm builds) and **test sharding** across 10 runners (a 30-min serial suite becomes ~3 min wall-clock at 10× compute-minutes, a trade worth it because engineer-time dwarfs CI-time). Then **push the expensive, slow gates off the critical path**: full e2e, the noisy SAST scan, and load tests move to post-merge or scheduled lanes, keeping only ROI-positive checks on the required path. Net: smaller, more frequent merges, lower change-failure rate, and a CI bill increase that's rounding error against the engineer-hours recovered.
 
+</details>
+
 **Q3.** Leadership wants to put each team's DORA scores on their quarterly review to "drive accountability." What do you tell them?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd push back hard, because grading DORA per team guarantees it gets gamed and stops measuring the system: deploy frequency gets padded by splitting one deploy into ten, change-failure rate drops because incidents get relabeled "infra" instead of change-induced, MTTR improves because incidents get closed fast and quietly reopened, and lead time shrinks because people branch late so the clock starts late, every one of these *helps the score and hurts the system*. DORA is an **aggregate health signal you steer by**, not a per-person stick: I read the org-level trend to find where the *road* is slow ("lead time regressed because the security gate's false-positive rate spiked"), and I fix the road. The real accountability is structural, not a scoreboard: teams own the on-call for what they ship, so the change-failure rate a team causes is its own 3am pager, a consequence that needs no grading and can't be gamed without the team feeling the pain directly.
 
+</details>
+
 **Q4.** You're standing up CI/CD for a new 40-team org. Make the build-vs-buy call and defend it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* My prior is **buy the control plane**, GitHub Actions or GitLab CI, with **self-hosted runners** for cost and environment control at our scale. The reasoning: the value of a CI/CD platform is *paved-road adoption across forty teams*, the templates, the marketplace steps, the caching, the one-button rollback every team inherits for free, not in owning the orchestrator, which is undifferentiated heavy lifting a vendor does better. Building our own on Jenkins or Tekton commits an SRE team to keeping a control plane alive, and the opportunity cost is the paved-road features we *didn't* build on top. The CI bill, tens of thousands a month, is rounding error against the engineer-hours a slow or homegrown-flaky pipeline burns, so we spend compute freely on parallelism to buy back wall-clock. I'd only flip to build for a hard air-gap or data-residency requirement, an exotic build environment managed runners can't host, or a fleet so large that self-hosted runners pay for the SRE team several times over, and I'd delegate the actual bake-off to the platform team against our real build profile and team count, with that prior stated.
+
+</details>
 
 ### Key takeaways
 - **Three layers reinforce each other:** quality **gates** encode the bar in the paved road, **DORA metrics** measure whether the delivery system is healthy, and the **CI/CD platform** makes the safe path the easy path; the Director owns this system, not the individual pipelines.

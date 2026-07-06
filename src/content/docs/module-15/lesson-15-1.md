@@ -120,16 +120,40 @@ The through-line at Director altitude: the diagnostic round scores **method unde
 ### Practice questions
 
 **Q1.** Your API's error rate jumped from 0.1% to 4% at 09:15, across all regions. Walk through your first five minutes.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I shape it first, all regions and a sharp 09:15 cliff means it's almost certainly a *global change*, not a regional infra fault, so I pull the change feed for 09:00–09:15: deploys, config pushes, flag flips, migrations. I form competing hypotheses, a bad deploy, a config change, or a shared dependency (auth, a gateway) degrading, and I check the dependency status pages in parallel since "all regions" also fits a shared-dependency failure. I bisect with a trace on a failing request to see whether the errors originate in my service or a downstream call. If a deploy or flag at 09:10 lines up, that's my suspect and it's cheap to test, I **roll it back / flip the flag off** to mitigate, watch the error rate fall, and only then root-cause. The whole first five minutes is shaping, what-changed, and localizing, not fixing.
 
+</details>
+
 **Q2.** You believe a recent deploy caused an outage. Make the case for rolling back rather than writing a quick fix, with numbers.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Rollback returns the system to a *known-good* state in roughly the rollout window, call it 3–5 minutes, with near-zero new risk because that build was healthy minutes ago. A roll-forward hotfix means write + review + build + deploy, realistically 30–60 minutes, during which the site keeps bleeding, and it introduces *new* untested code under fire, so it can fail and *add* a cycle. In MTTR terms (detect + diagnose + mitigate), rollback collapses time-to-mitigate to minutes; a hotfix can double total MTTR if it's wrong. So I roll back to stop user pain, then fix forward calmly through normal review. The only time I'm forced to roll forward is when rollback isn't safe, e.g. an irreversible schema migration already ran, and then I'd say so explicitly and weigh a forward-only mitigation.
 
+</details>
+
 **Q3.** Mid-incident, a senior engineer is certain it's the database and wants to fail over to the replica. You're not convinced. How do you handle it at Director altitude?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I don't overrule on authority, I ask for the *confirming evidence* the method requires, because failing over the database is a high-blast-radius action and we should be sure before we take it. "What's different that points at the DB, since when, which queries, do the DB's own RED/USE metrics (latency, saturation, connection pool) actually show the problem, or is that inferred?" If a trace shows the latency is in the DB hop and its saturation is pegged, great, we mitigate. If the trace shows the time is in a downstream call and the DB looks healthy, failing it over does nothing and adds risk. This is the anti-anchoring move done as a leader: I'm protecting the team from acting on an unconfirmed first hypothesis, and I'm modeling that mitigations follow evidence, not the loudest voice, while still moving fast.
 
+</details>
+
 **Q4.** Why is "what's different, and since when" often more powerful than deep knowledge of the system internals during an incident?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because most incidents are *change-induced* on a system that was healthy minutes ago, so the fault isn't in the steady-state design you'd reason about from internals, it's in the delta. Differential signal, since when (correlate to a change), which region (regional vs global), which cohort (data/config vs code), which version (canary vs baseline), partitions the suspect space fast and *cheaply*, four cuts can isolate one suspect before you read any code. Deep internals knowledge matters for the *root-cause* phase, but for *localizing* under time pressure, the delta tells you where to look. The Director framing: I want the method that converges fastest with the least guessing, and "what changed and what's different" is that method; deep expertise then makes the confirmed fix correct and durable.
+
+</details>
 
 ### Key takeaways
 - **The diagnostic round tests method, not design:** structured reasoning under uncertainty, run the loop, observe → hypothesize → bisect → confirm → mitigate → root-cause, calmly and out loud, and the failure mode being watched for is *fixing before localizing*.

@@ -112,16 +112,40 @@ The through-line at Director altitude: environments and data are a **priced risk
 ### Practice questions
 
 **Q1.** Your CI is blocked because 9 teams share one staging environment and someone is always mid-deploy. Walk through your fix and quantify the win.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The root causes are contention, drift, and diffuse ownership, not a sizing problem, so a bigger or second staging just relocates them. I'd move integration and end-to-end testing to **ephemeral per-PR environments** provisioned from the same Terraform/Helm that defines prod (so no drift) into isolated namespaces (so no contention, and a failure is unambiguously that PR's change). Spin-up ~3–5 min, ~$1–3 per PR-hour, with a 48-hour TTL so nothing orphans. Quantify: 9 teams × ~30 min/day of queueing is ~4.5 engineer-hours/day, ~1,000+ hours/year, recovered at near-zero marginal infra cost. Staging survives only as a thin release-candidate soak, not the daily battleground.
 
+</details>
+
 **Q2.** A team proposes nightly-cloning the production database into developer test environments "so the data is realistic." What's your response?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd stop it. The moment a prod clone lands in a test box it's regulated personal data, customer names, emails, card numbers, health records, in an environment with weaker access controls, looser audit, and broader engineer access than prod. That puts the box in scope for GDPR/CCPA/HIPAA/PCI and full breach-notification duties; regulators have fined exactly this into seven and eight figures. The realism is real but the technique is wrong. Instead: **subset then mask**, take a referentially-consistent ~1–2% slice (cheap, seeds in under a minute) and irreversibly mask every PII column, deterministic tokenization so joins still work, format-preserving encryption so a card stays a valid-looking 16 digits. We keep prod-like shape with zero real identity, and the box drops out of compliance scope. For volume tests we generate synthetic data at production scale instead.
 
+</details>
+
 **Q3.** How do you decide how production-like each test environment should be, when full fidelity is expensive?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Fidelity is a dial across several axes, data realism, dependency realism, scale, and freshness, and each notch costs money, time, and spin-up latency, so I buy it per-path against the risk that path carries, never uniformly. Unit and component tests run low-fidelity and fast: in-memory or containerized deps, a few synthetic rows, milliseconds. A payments end-to-end test runs high-fidelity: the processor's real sandbox, a masked subset hitting the edge cases. A performance test runs at production-scale volume but zero identity (synthetic). I explicitly reject "make everything prod-like" (cost and spin-up multiplied across thousands of CI runs for realism most tests don't need) and "mock everything" (green tests that fail in prod when a real dependency misbehaves). The number I'd carry: full fidelity is reserved for the handful of high-risk paths, cheap low-fidelity covers the rest.
 
+</details>
+
 **Q4.** A critical downstream service, a partner's payment gateway, can't be run in your test environments. How do you test the flows that depend on it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Service virtualization. I'd record real request/response pairs from the gateway's sandbox and replay them (or simulate its published contract) so per-PR environments get realistic gateway behavior, success, decline, timeout, retry, without depending on the partner's uptime or hitting their rate limits. That keeps the environment realistic and self-contained. The risk is the virtual service drifting from the real one, so I'd run a contract test against the real sandbox on a cadence (say nightly) to catch breaking changes early. I reject both alternatives: a hand-built mock rots and silently diverges, and blocking all testing on the live partner makes my pipeline hostage to someone else's availability and quotas.
+
+</details>
 
 ### Key takeaways
 - **Shared staging is the hidden tax:** contention serializes teams, drift breaks the "passes in staging → works in prod" prediction, and diffuse ownership keeps it broken; the answer is **ephemeral per-PR environments** rebuilt from the same IaC as prod, isolated, and torn down on a TTL.

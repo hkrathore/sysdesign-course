@@ -292,16 +292,40 @@ Production wrinkle: simplification suggestions go stale the moment a new expense
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. ₹2,000 dinner, split equally among 3, payer included. Show the exact ledger rows.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Total `200000` cents; equal-split shares `[66667, 66667, 66666]` (sorted by user id, first two take the remainder cents). Payer (user 1, share 66667) fronted 200000 and consumed 66667 → entry **+133333**; users 2 and 3 get **−66667** and **−66666**. Sum: `133333 − 66667 − 66666 = 0`. Deterministic, so a retry with the same idempotency key reproduces - and dedups to - the identical posting.
 
+</details>
+
 **Q2. Two roommates add expenses against each other at the same millisecond. Why is nothing lost?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Each `addExpense` is one transaction appending its own header + entry rows - disjoint writes, nothing read-then-written at the truth layer, so no interleaving can lose data. The shared touch point is the cached balance row, updated as a relative increment (`net += x`) the DB serializes per row; both land commutatively in either order - and the cache is derived, rebuildable if ever doubted. In the mutable-balance design both writers read 0 and one delta silently overwrites the other. The race wasn't *handled*; it was *deleted by the data model*.
 
+</details>
+
 **Q3. Percent split: 33.33% / 33.33% / 33.34% of ₹999.99. What goes wrong naively?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two failures hide here. Validation: take percents as integer basis points (3333+3333+3334 = 10000) so the sums-to-100 check is exact, not float-fuzzy. Allocation: `99999 × 3333 / 10000 = 33332.66…` - floor each share, and the floors undershoot the total by a few cents; distribute them by **largest remainder** (tie-break by user id). The `allocate` contract - integer shares summing exactly to total, deterministically - catches both, which is why validation and allocation live inside the strategy.
 
+</details>
+
 **Q4. "Our 8-person Goa trip ended with 19 IOUs. Build debt simplification into v1?"**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No - and here's the shape of the no. Min-cash-flow operates on *net balances*, already a derived view, so it's a pure read-side feature: a v2 `suggestSettlements` endpoint with zero schema or ledger impact. The greedy (largest debtor ↔ largest creditor) guarantees ≤ n−1 transfers - 7 payments instead of 19 - while the exact minimum is NP-hard and not worth chasing at trip-sized n. Suggestions are advisory - only a recorded settlement posting moves the books - and they go stale on every new expense, so compute on read, never store. I'd have product validate whether users accept net routing (paying Carol for a debt "to" Bob surprises people); my prior is yes with clear UX - Splitwise shipped exactly this.
+
+</details>
 
 ---
 

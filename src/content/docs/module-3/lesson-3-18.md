@@ -186,19 +186,49 @@ The signal is not "I used microservices." It is that **each boundary followed a 
 
 ### Practice questions
 **Q1.** A 6-person startup asks whether to build their new product as microservices "to scale later." What do you advise?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Start with a **modular monolith**, one deployable with hard internal module boundaries and a schema per module. At 6 people you have no team-autonomy or independent-deploy problem to solve, and the domain is still forming, so microservices would only buy you network latency, lost local transactions, and a discovery/tracing/mesh operational burden. The modular monolith makes the seams **visible** so that when a specific module later needs its own deploy cadence or scaling profile, you extract *that* service along a boundary you now actually understand. Splitting on day one draws the boundaries blind and is the fast path to a distributed monolith.
 
+</details>
+
 **Q2.** Two services, Orders and Inventory, need each other's data. A junior engineer proposes giving both read access to a shared `products` table. What is wrong and what do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A shared table is the tightest possible coupling: a schema change by either breaks the other, they can no longer deploy independently (the entire point of splitting), and one service's heavy query starves the other. Fix: **one service owns the data**; the other gets it through the owner's **API** or by subscribing to its **events** and keeping a local **read model** (accepting a small eventual-consistency lag). No service reaches into another's store. If they genuinely cannot be untangled and always change together, that is a signal they are *one* bounded context and should be one service, not two.
 
+</details>
+
 **Q3.** Walk me through placing an order that must charge a card and reserve stock across two services, with no distributed transaction. What happens if the reserve fails?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Model it as a **saga** of local transactions. Order starts it; Payment charges (local txn) and, via the **outbox**, atomically emits `PaymentCompleted`; Inventory consumes it (idempotent on `order_id`) and tries to reserve. If the **reserve fails**, the saga runs the **compensating transaction**: refund the payment and mark the order cancelled, reaching a consistent end state. I would use an **orchestrated** saga (Temporal / Step Functions) so the flow and its compensations live in one auditable place. I explicitly avoid **2PC**, it holds cross-network locks and turns the coordinator into a single point of failure that can leave services locked. The guarantee is **eventual** consistency with an explicit rollback path, not atomicity.
 
+</details>
+
 **Q4.** During a Stripe slowdown, your entire checkout goes down, not just payments. Diagnose and fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is **cascading failure**: Order calls Payment synchronously with (likely) no timeout, so threads pile up waiting on the slow dependency, exhaust Order's pool, and Order stops serving, a distributed monolith failure mode. Fix on the seam: a **timeout** derived from Payment's p99, **bounded retries with jittered backoff** (idempotent only), and a **circuit breaker** that trips when Payment's failure rate crosses a threshold so calls **fail fast** (or return a "try again shortly" fallback) instead of blocking. Add a **bulkhead** so the Payment pool is isolated from other dependencies. Now a Payment outage degrades *payments*, and the rest of checkout stays up.
 
+</details>
+
 **Q5.** How do you know your service boundaries are wrong?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The tell is **coupling that shows up as coordination**: most features require changing several services together and deploying them in lockstep; service A cannot serve a request without several synchronous calls to B on every hit; teams are constantly blocked on each other's releases; or you find a shared database. Any of these means you drew the boundary through the middle of one cohesive capability. The fix is to **redraw along bounded contexts**, often *merging* over-split services back together (fighting nano-services), until a typical feature ships by changing one service and cross-service chatter is the exception, not the rule.
+
+</details>
 
 ### Key takeaways
 - Microservices buy **independent deployability, team autonomy, and fault isolation** at the cost of a permanent **distributed-systems tax** (network latency, lost local ACID, ops burden). Default to a **modular monolith** and extract services only where cadence, scaling, or ownership demands it.

@@ -243,16 +243,40 @@ What I keep: the metrics, the voluntary-adoption posture, the hatch contract, th
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Your CEO says "just mandate it, we're not a democracy." Respond.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Agree on the goal, push back on the mechanism with the metric: the business case is **linear in real adoption**, $5M/yr returned at full adoption, underwater below ~40%, and mandates produce *fake* adoption: services flagged golden that still deploy through side doors. I'd offer the two cheap, legitimate mandates, **all new services on the platform** (touches no existing workflow) and the **security baseline on every tier**, and commit to a decommission date *once pilots prove the path and adoption passes ~70%*. Same destination, with the teams' trust and an honest number. An acute forcing function (an active Jenkins CVE, an audit) compresses the sequence; absent that, the decree costs more than it buys.
 
+</details>
+
 **Q2. Six months in: adoption is 35% against a 50% target, tickets rising. Diagnose.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Rising tickets per migrated service plus stalled adoption almost always means **product gaps, not customer resistance**, the path fits the pilots' shape but not the middle teams'. Read the ticket corpus as customer research, re-interview the stalled teams; expect a missing blessed resource or a manifest limitation forcing workarounds. Fixes in order: redirect the roadmap to the top gap (pause new features), audit support-SLA compliance (slow support kills platforms faster than missing features), verify the pilots are still healthy, a regretful pilot is anti-marketing. What I would *not* do: escalate for a mandate, pushing a product with known gaps converts quiet skeptics into vocal enemies. Adoption is a *thermometer for product quality*; treat the fever, not the reading.
 
+</details>
+
 **Q3. The GPU/ML team says the golden path will never fit them. Are they right?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Probably yes, for training, GPU scheduling, giant artifacts, experiment-shaped pipelines are a different product, and stretching v1 to cover them slows the path for the seven teams it fits. They land on **`tier: hatch`**: raw IaC freedom, the security baseline still enforced, catalog-visible, best-effort support, sanctioned, not exiled. I count that as *success*: the goal was never 100% golden, it's an honest catalog and zero shadow infrastructure. Two follow-ons: their *serving* services are often plain web services, migrate those; and recurring hatch usage with a common shape is exactly how the roadmap learns what to pave next. The hatch is the platform's product-discovery channel, not its failure log.
 
+</details>
+
 **Q4. How is your platform team measured, and what does it cost?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Cost: ~7 engineers + infra ≈ **$2M/yr**, sized at the 5-8%-of-engineering heuristic for 400 engineers. Measured on four numbers, none of which is feature count: **adoption rate** (side-door-verified, target 70% by month 12), **time-to-first-deploy** (2-3 days → < 1 hour), **tickets per service** (the product-quality proxy), and the org's **DORA deploy frequency**, the platform exists to make *other teams* faster, so their delivery metrics are its outcomes. Annually I defend the budget with the toil ledger: ~$15M/yr of org toil, a third removed at current adoption ≈ $3-5M/yr returned against $2M spent, plus Jenkins's $600K/yr retired. If the numbers stop clearing the bar, the platform shrinks, product lines earn their headcount.
+
+</details>
 
 ---
 

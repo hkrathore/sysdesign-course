@@ -166,16 +166,40 @@ Net: a pipeline that would have been ~$260k/month of hot ELK storage is reduced 
 
 ### Practice questions
 **Q1.** Your team wants every service to write its logs directly to Elasticsearch "to keep it simple." Talk them out of it (or into it).
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Direct-to-ES couples **application health to indexer health**. When ES is slow (a GC pause, a shard rebalance, or an incident-driven log spike, exactly when you need logs most), the agent's send buffer fills and it must either **block the app** or **drop logs at the source**. It also gives **no replay**: a bad mapping or parse is already in ES badly, with no source of truth to reprocess from. The fix is **two-tier + Kafka**: a light agent that only tails/tags/forwards, a **Kafka buffer** that absorbs spikes and retains for replay, and a centralized aggregator pool draining at a steady rate (autoscaled on consumer lag). The indexer can now be down for maintenance with zero log loss. Direct-to-ES is acceptable only at toy scale.
 
+</details>
+
 **Q2.** You're at 43 TB/day of raw logs and finance wants the bill halved. Where do you cut, and what do you refuse to cut?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two levers, in order of impact. **(1) Level-aware sampling**: drop DEBUG in prod, sample INFO ~10%, keep 100% WARN/ERROR, a **~5× cut (43 → ~8 TB/day)** that preserves every error. **(2) Tiered retention**: hot **7 days** on fast storage, then roll to **S3/Glacier (~4-25× cheaper)** for the long tail; 95% of query value is in the last few hours. What I **refuse to cut**: no **blind uniform sampling** (it throws away 90% of errors → the next sev-1 is unexplainable), and no touching **audit/security logs** below their **legal retention floor** (SOX ~7yr, PCI ≥1yr). I'd also add **per-team chargeback** so the teams generating the volume internalize the cost, the lever that actually changes logging behavior.
 
+</details>
+
 **Q3.** ELK or Loki for a platform whose engineers mostly ask "show me the errors for service X in the last hour"? When would your answer flip?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Loki.** That query is **label-anchored** (`{service="X", level="error"}`) over a bounded recent window, Loki's sweet spot, and storage is **~10× cheaper** (compressed chunks in S3, no inverted index) with far less operational state. My answer **flips to ELK** when the dominant query is **"find this arbitrary string anywhere across 30 days"**, wide-window, unlabeled, full-text, because Loki would scan enormous numbers of chunks while ES's **inverted index** answers it fast. The decision is **query pattern × budget**: label/time-anchored + cost-sensitive → Loki; arbitrary full-text over long windows + budget for it → ELK.
 
+</details>
+
 **Q4.** A request fails intermittently and touches 20 services. How do you debug it, and what has to be in place beforehand?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Query by **trace ID**. For that to work, the platform must **propagate a correlation/trace ID across every service boundary**: generate it at the **edge** if absent, pass it on every downstream call via the **W3C Trace Context `traceparent`** header (standardized by OpenTelemetry), and have every service stamp `trace_id` into its **structured** log line. Then one query returns the **full ordered cross-service story** of that request, "checkout → payment timed out at 800ms waiting on a slow fraud check," not "checkout 500s somewhere." The same `trace_id` is the **join key to traces and metrics**. Without the propagated ID in place beforehand, you're grepping 20 services on fuzzy timestamps, which is why ID propagation is a platform prerequisite, not an afterthought.
+
+</details>
 
 ### Key takeaways
 - **Two-tier collection + a Kafka buffer** is the spine: a dumb, light agent per host → Kafka (load-leveling + replay, the durable-buffer argument) → heavy centralized aggregator → index. Never let apps write direct to the index.

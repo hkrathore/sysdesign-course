@@ -258,13 +258,31 @@ What I keep, the differentiation verdict, the crossover number, the exit trigger
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Your Datadog renewal comes in at $2.4M/yr, up 30%. Walk me through your decision.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Governance before strategy: do we control the volume? An OTel pipeline tier we own, with sampling and log filtering, typically cuts 30-50%, that alone may erase the increase. Then negotiate: a 3-year commit at this ACV gets 25-30% off, plus a renewal cap (~7%/yr) and egress rights in the paper. Then run the crossover: a replacement team is ~$2.1M/yr all-in, so build wins only when governed spend durably clears ~$4-5M/yr, we're at half that. Verdict: stay bought, govern the pipe, write the crossover into the memo as the trigger, and keep the exit runbook current so next renewal we negotiate with a credible alternative. What I won't do is commission a build to win one negotiation, that's a decade of ownership to dodge an invoice.
 
+</details>
+
 **Q2. The CTO wants to build an in-house ML platform "because AI is core to our strategy." Respond.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Separate what's core from what's plumbing. Our *models, training data, and the product loop around them* differentiate, that's where the engineers go, and that we build without question. The orchestration substrate, pipelines, feature store, serving infra, GPU scheduling, is a commodity with mature options (SageMaker/Vertex/Databricks), and building it consumes the exact ML engineers who should be improving models. TCO: a credible platform team is 6-8 engineers ≈ $2M/yr before a single model improves; the managed equivalent at our scale is a fraction of that. The honest caveat: if inference volume grows to where API token spend crosses self-hosted serving cost, we in-source *serving*, a written trigger, not a day-one build. Build the moat, buy the plumbing, put the crossover in the memo.
 
+</details>
+
 **Q3. How do you keep a "buy" decision from becoming irreversible?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Four artifacts, created at signing when they're cheap: a **seam**, the vendor behind an interface in our vocabulary (standards like OIDC/OTel where they exist), confined to one adapter; a **continuous export**, we keep the system of record or a teed raw stream, costing 1-3% of the bill; **contract terms**, egress rights, price caps, portability, a 90-day wind-down; and a **costed exit runbook**, reviewed annually. Then triggers with numbers: spend crossover, SLA breaches, roadmap block, acquisition. The runbook matters even if we never leave, a vendor who knows we *can* exit in a quarter prices renewals differently. The yearly audit covers four lock-in axes, API, data, workflow, skills, and workflow is the sneaky one: after three years, your incident process is shaped like the vendor's feature set.
+
+</details>
 
 ---
 

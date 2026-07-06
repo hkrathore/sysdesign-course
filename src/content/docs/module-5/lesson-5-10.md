@@ -262,16 +262,40 @@ WS   /v1/docs/{docId}/connect
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. OT or CRDT for this, and defend it.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three strategies: locking (rejected - it serializes co-editing and kills the product), OT, CRDT. I choose a **sequence CRDT**, and the deciding requirement is **offline editing** - under a CRDT, reconnect-and-merge is the *same code path* as online editing (commutative merge, no central ordering authority), whereas OT must transform an offline client's stale-baseline ops against all intervening history on reconnect. The trade I accept is CRDT metadata/memory overhead, mitigated by snapshotting and a mature library; if offline were cut I'd reconsider OT for smaller payloads. The convergence *proof* I delegate to the collaboration team with property tests and a fuzzer; my prior is **Yjs**. Owning the decision, delegating the internals, is the point.
 
+</details>
+
 **Q2. Alice and Bob both insert a character at position 7 at the same instant. What happens?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Each inserted character gets a **globally unique, immutable ID** and a position from a dense order between its neighbors. The two inserts mint distinct IDs "around" 7, and every replica applies a **deterministic tie-break on those IDs** - so all replicas end with the same two characters in the same order: both screens identical, neither keystroke lost. There's no "winner"; both survive deterministically. Convergence by construction - exactly why I chose a CRDT over a hand-written transform.
 
+</details>
+
 **Q3. What's the durable write rate, and what do you actually persist?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Not every keystroke as a row - I coalesce ops per doc into an append-batch every ~1-2 s, so with ~2M active docs that's ~**1.3M durable appends/sec**, an append-only op-log write sharded by `doc_id` (the cheapest durable pattern). Presence (~30M events/sec) is **never** persisted - separate in-memory channel, ~200 ms shelf life. Snapshot + truncate keeps doc-open fast and storage bounded. The durable surface is a small shardable append log plus snapshots, not a hot transactional core.
 
+</details>
+
 **Q4. 5,000 people open the same doc during a launch. Does your design hold?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd reframe: 5,000 *editors* on one doc is a broadcast, not a document - a different problem. I **split editors from viewers**: convergence runs only over the handful editing (tens); the large **view-only** audience is served snapshot+tail over a read-optimized broadcast/CDN path, not as CRDT replicas (they see edits a beat behind - fine). The convergence algorithm never scales with audience; **connection fan-out** does, handled by the stateful gateway tier with per-doc subscriptions. So yes - by recognizing it's a fan-out problem in a convergence costume.
+
+</details>
 
 ---
 

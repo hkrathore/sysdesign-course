@@ -256,16 +256,40 @@ The `ConcurrentLinkedQueue` (Michael-Scott algorithm) inverts this: the head poi
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Two cars hit two entry gates simultaneously; one compatible spot remains. Walk me through exactly why only one gets it.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Spot assignment is an atomic dequeue from a lock-free free-list per spot type, both gate threads call `poll()`; the queue's internal CAS guarantees one gets the spot and the other gets `null`, falling through to the next compatible size, then "lot full." There is no check-then-act window because the claim *is* the removal. The claimed spot sits `Held` until the ticket persists, with timeout reclaim if the gate crashes mid-assignment, the `AVAILABLE → HELD → OCCUPIED` shape of a Ticketmaster seat, shrunk to one process. Defense in depth: a partial unique index on open tickets per spot makes the database reject a double-issue even if the in-memory layer ever regressed.
 
+</details>
+
 **Q2. Product adds weekend rates and a lost-ticket flat fee. How much of your design changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two new `PricingStrategy` implementations and a selector, zero changes to `ParkingLot`, spots, or tickets. That's deliberate: R surfaced "pricing may change" as the one axis of stated variability, so v1 spent its single abstraction there. The contrast: had you asked me to change *assignment* policy, I'd be editing core code, because no requirement justified that seam, and I'd rather pay one small refactor later than carry speculative interfaces on every axis forever. Restraint plus one cheap refactor beats ten abstractions, nine never used.
 
+</details>
+
 **Q3. We're now a 50-lot city-wide operator with a consumer app showing live availability. What breaks?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The moment the problem crosses the facility boundary it stops being LLD, and I'd say that out loud before redesigning. Per-lot concurrency is unchanged (the free-list was always per-facility). The letters that nearly dropped grow back: S becomes a multi-tenant store partitioned by lot; E becomes a read-QPS estimate, 50 lots, ~200K app users polling, ~100-500 reads/s, so availability gets a cache/push tier fed by occupancy events, eventual by design since a 5-second-stale count is harmless. Money and tickets stay strongly consistent per lot; cross-lot search is a new product surface I'd scope separately. The Director point: know which layer you're in, and rerun the spine when you change layers.
 
+</details>
+
 **Q4. You used one design pattern. Defend not using more.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Patterns are amortized over requirement variation, and this problem states exactly one varying axis: pricing. Strategy there costs one interface and pays on the first rate change. A `SpotAssignmentStrategy`, vehicle factories, or an observer bus would each add a seam with no requirement behind it, pure carrying cost in tests, onboarding, and indirection. My rule, and what I hold design reviews to: **every abstraction names the requirement that bought it.** When floors and display boards arrive, assignment policy becomes a stated requirement and the strategy appears then, foreseen is not the same as built.
+
+</details>
 
 ---
 

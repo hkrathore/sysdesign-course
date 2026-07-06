@@ -174,19 +174,49 @@ The signal is not "we support multi-tenancy," but that the control plane resolve
 ### Practice questions
 
 **Q1.** Why separate a control plane from a data plane in multi-tenant SaaS, and what does each own?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The **control plane** owns the tenant registry (existence, plan, region, config, isolation model), provisioning, feature flags, routing, billing, and the lifecycle state machine; the **data plane** serves tenant traffic (app services, datastores, caches). Separating them buys **blast-radius isolation** (a bad provisioning deploy or a one-region outage does not take down the other plane), **independent scaling** (low-QPS metadata versus high-QPS traffic), and **one control plane governing many data planes**, so a single registry runs N per-region or per-silo planes, which lets a small team operate thousands of tenants. The rejected alternative, fusing tenant logic into every service, drifts with no single source of truth for tenant identity and becomes unoperable.
 
+</details>
+
 **Q2.** A prospective enterprise customer in the EU requires that their data never leave Europe. How do you design for it, and what does it cost you?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Run a **global control plane** plus **per-region data planes** (for example us-east, eu-west, ap-south), each a full stack whose datastores live entirely within that region. The tenant's **home region** is pinned in the registry, and the **router** sends every request to the EU data plane, so their data is created, stored, and processed only in the EU. The control plane holds only metadata (name, plan, region pointer, config), not the regulated bulk. The cost is **operational multiplication**: every region is another stack to deploy, patch, monitor, and migrate, and the planes must stay version-consistent. I reject a single global data plane because it hard-blocks the deal; per-region planes are deal-gating for a SaaS selling into Europe or the public sector. I would make the system region-aware from the first region (a home-region field on every tenant), so adding the EU plane is a deployment, not a re-architecture.
 
+</details>
+
 **Q3.** You must roll a breaking schema change across 5,000 tenant databases with zero fleet-wide downtime. Walk through it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Treat the tenant as a **rollout dimension**. Use **expand/contract** so the app tolerates both shapes: add the column nullable, backfill, dual-write, cut reads over, then drop the old column later. Drive it with a **migration orchestrator** in the control plane that rolls **tenant by tenant**, tracks each tenant's **schema version** in the registry so the run is **resumable** (a failure at tenant 4,000 restarts there, not at zero), and respects each enterprise silo's **maintenance window**. **Canary by tenant**: internal first, then a 1% ring of low-risk tenants, watch error and latency, then 10%, then the rest. I reject a big-bang synchronous migration: it needs a full-fleet window I cannot get and risks stranding the fleet in a mixed state with no clean rollback.
 
+</details>
+
 **Q4.** A tenant exercises their GDPR right to erasure. What does your system actually do, and why is a `deleted` flag not enough?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A soft-delete flag leaves the tenant's data in the primary DB, caches, search index, analytics warehouse, logs, object store, and every backup, so it does **not** satisfy erasure. I drive deletion from the control plane as a **tracked, auditable workflow** with an explicit **SLA** (commonly **30 days**, operationalizing GDPR's "without undue delay"), fanning out deletes to every online system and recording completion per system so "is this tenant fully erased" is provable. For **backups**, which you cannot surgically edit, I use **crypto-shredding** (encrypt each tenant's data under a per-tenant key, then delete the key to make it unreadable across all backups at once) or honor deletion on restore via a suppression list plus bounded retention. I keep a reversible soft-delete step for operational undo, but the erasure path is a hard, cross-system, backup-inclusive purge tracked to the SLA.
 
+</details>
+
 **Q5.** How do you support both instant self-serve signup and slow, high-touch enterprise onboarding through one control plane, and what is the core trade?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Self-serve** is fully automated: the control plane writes a registry row, allocates the tenant into **pooled** shared infrastructure, seeds default config, and points routing at the pool, completing in **seconds** with no human, ideal for SMB and product-led growth. **White-glove enterprise** onboarding provisions a **dedicated silo** via **infrastructure-as-code** (Terraform), wires SSO, a **custom domain** (tenant CNAME plus auto-issued TLS cert), and a specific region, taking **hours to days**, gated by contract, security review, DNS, and cert issuance. Both run through the same control-plane workflow, ideally durable/idempotent/resumable so multi-step provisioning survives partial failure. The core trade is **instant-but-shared versus slow-but-isolated**: pooled is cheap but less isolated with no residency; siloed is deal-gating for regulated buyers but multiplies infrastructure. The rule: provisioning is **automation, not a runbook**, or you cannot onboard enterprises at volume.
+
+</details>
 
 ### Key takeaways
 - **Separate the control plane from the data plane.** The control plane owns the tenant registry, provisioning, config, routing, and lifecycle; the data plane serves traffic. The split buys blast-radius isolation, independent scaling, and one control plane governing many data planes, which is what lets a small team run thousands of tenants.

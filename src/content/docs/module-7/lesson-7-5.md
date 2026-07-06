@@ -117,19 +117,49 @@ The through-line at Director altitude: real-time OLAP is the **second analytical
 ### Practice questions
 
 **Q1.** A product team wants an in-app "your store's orders in the last hour, by minute, sliced by region" panel that every seller sees on login, call it ~2,000 QPS at peak, must feel instant, data no more than a few seconds stale. They propose querying the analytics warehouse you already run. What do you tell them, and what do you build instead?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd reject the warehouse for this surface: it's tuned for tens of concurrent, seconds-to-minutes, flexible queries, at 2,000 QPS of small refreshes it queues and its per-query latency is seconds, not the sub-second this needs, and it loads on a minute-to-hour cadence, not seconds-fresh. This is the arrivals-board corner, so I'd serve it from a **real-time OLAP store** (Druid/Pinot/ClickHouse): ingest the order stream from Kafka into **real-time nodes** (queryable in seconds), **roll up at ingest** to the `(store_id, minute, region)` grain so a billion events become tens of millions of rows, and let columnar time-partitioned **segments** + a `store_id` bitmap return the panel in tens of milliseconds. The warehouse stays the home for the team's ad-hoc and historical analysis, two stores, matched to two query profiles. Trade-off I'd name: rollup means I can't drill to an individual order from this store, so I keep raw in S3 for that and for backfill.
 
+</details>
+
 **Q2.** Your real-time OLAP dashboard shows ~3% more events for the last hour than the same figure once it's a day old. Bug or expected? Explain the mechanism.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Expected, and it's the lambda-ish handoff. The **real-time tier** ingests off the stream and is fast but the weaker authority at the bleeding edge, it can't have seen very-late events (an offline mobile client flushing an hour later) and may include things a later rule excludes. The **batch path** re-derives authoritative segments from the **retained raw**, folding in late arrivals and applying corrections (e.g. a fraud/validity filter), and **overwrites** the segments for that time range; the broker switches to the corrected version atomically. So the recent number is fast-and-approximate, the settled number is the batch re-derive, and the dashboard *converges to truth*, the same speed-vs-truth split as 2.9/9.7, just inside one serving store's ingestion. It's a bug only if it *never* converges, which would point at a broken backfill.
 
+</details>
+
 **Q3.** A staff engineer wants to add `user_id` to the rollup dimensions so the team can drill into any individual user from the serving store. What breaks, and what's the right design?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Rollup is a `GROUP BY` over (time-bucket, dimensions) at ingest, and its compression depends on dimensions being **low-cardinality** relative to event volume. `user_id` is high-cardinality, adding it collapses the rollup ratio toward **1:1**, so you've effectively gone back to storing raw: storage balloons, segments stop being small, and the sub-second-at-high-QPS budget evaporates. The right design keeps the serving store rolled up on low-cardinality grains (region, device, campaign, minute) for the fast dashboard, and answers per-user drill-down from the **retained raw in S3** via the warehouse/lakehouse or a targeted scan, a query that's rare, low-concurrency, and tolerant of seconds-to-minutes, which is the *other* store's corner. Don't put a high-cardinality drill-down workload on the arrivals board.
 
+</details>
+
 **Q4.** Distinguish a real-time OLAP serving engine (Druid/Pinot/ClickHouse) from a metrics/observability time-series store (Prometheus-class). When would you reach for each?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Different jobs that look similar because both are "fast and time-indexed." A **metrics/observability** store is purpose-built for *operational* telemetry: regular-interval numeric series keyed by label sets, alerting/rules, downsampling and retention tiers for infra health, you reach for it to watch CPU/error-rate/latency and page on-call. A **real-time OLAP** store serves *arbitrary high-cardinality business analytics*, per-user, per-campaign, per-SKU (stock-keeping unit) slice-and-dice, at product-facing concurrency and sub-second latency, powering customer-facing dashboards and live product counters. They overlap in the middle, but I wouldn't drive node-level alerting from Druid, nor power a customer analytics product from Prometheus. Reach for observability for *system health*, real-time OLAP for *user-facing analytics over fresh business events*.
 
+</details>
+
 **Q5.** You've decided on a real-time OLAP store but the team is split on Druid vs Pinot vs ClickHouse. How do you resolve it at Director altitude, and what's your prior?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I resolve it as a delegated bake-off with a stated prior, not a brand preference. The distinguishing traits: **Druid**, mature streaming ingest, time-partitioned rollup, node-typed (real-time/historical/broker) for elastic high-QPS scatter-gather; **Pinot**, the tightest user-facing query latency with rich indexing (the LinkedIn profile-view shape); **ClickHouse**, full SQL and operational simplicity on fewer, fatter nodes, trading the strict real-time/historical separation for ease. My prior: *whichever the org already runs*, because the operational cost of a second specialized store usually dominates the per-query delta; absent that, Druid/Pinot for a streaming-ingest, high-QPS user-facing shape and ClickHouse if SQL ergonomics and fewer moving parts matter more than elastic separation. Then: "data-platform benchmarks the final two on our concurrency, freshness, and rollup-ratio profile; I own the *decision criteria* and keep the architectural choice (rollup at ingest, stream-fed real-time tier, batch backfill), and delegate the head-to-head." The full design is 14.2.
+
+</details>
 
 ### Key takeaways
 - **Real-time OLAP is the second analytical store.** The warehouse/lakehouse answers *complex, flexible* queries in *seconds-to-minutes* at *low* concurrency; a serving engine (Druid/Pinot/ClickHouse) answers *simple aggregation* queries in **sub-second p99** at **hundreds-to-thousands QPS** over **seconds-fresh** data. Choose by concurrency + latency + freshness, and never force one store into both corners.

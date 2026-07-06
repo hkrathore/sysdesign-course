@@ -191,19 +191,49 @@ The throughline across both: **choose pull vs push from the content profile, max
 
 ### Practice questions
 **Q1.** A static-asset workload serves 2,000,000 req/s. At a 92% hit ratio your origin fleet is saturated. Your boss says "add origin servers." What do you do instead, and quantify it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Don't scale origin, **raise the hit ratio**, because origin load is `R×(1−h)`. At 92% the origin sees `2M×0.08 = 160k req/s`; at **99%** it's `20k req/s`, an **8× origin reduction** with zero added servers. Get there by (a) **cache-key hygiene**, strip `utm_` params, kill `Vary: User-Agent`, move the cookie off the asset host; (b) **fingerprinted URLs** with `max-age=31536000, immutable`; (c) an **origin shield** so a deploy or viral object causes one origin fetch, not one-per-PoP. Adding origin servers treats the symptom and leaves the cause, capacity before configuration is the wrong instinct.
 
+</details>
+
 **Q2.** You're designing video delivery for a streaming service. Pull or push, and what breaks if you pick wrong?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Push** (Netflix Open Connect). Video is **large**, demand is **predictable**, and a **cold miss is unacceptable**, pull-filling a 4 GB movie on the first viewer's request saturates the very transit links you're protecting, at peak, with the first viewer waiting. Push pre-positions the catalog overnight, off-peak, so there's no first-request miss. For long-tail web assets the logic inverts, pull, because content is unpredictable and a one-time cold miss is cheap. The decision falls out of the **content profile**: size, predictability, cold-miss tolerance.
 
+</details>
+
 **Q3.** After every deploy your team purges the entire CDN, and you see a latency spike and an origin load spike for ~30 seconds afterward. Explain the spikes and redesign the invalidation.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Purging everything evicts every cached object at once, so everything misses and stampedes origin simultaneously (the load spike) while users wait on full origin round trips until the edges refill (the latency spike), a self-inflicted cache stampede. Redesign: **version assets** (fingerprinted filenames, 1-year `immutable`) so a deploy emits new URLs and old entries are simply never requested again; **purge only the HTML** you can't rename, ideally by surrogate key; add **`stale-while-revalidate`** so even those serve instantly while revalidating; keep an **origin shield** so unavoidable misses coalesce into one fetch. Invalidation moves from a risky runtime operation to a publish-time non-event.
 
+</details>
+
 **Q4.** Which of these belong on a CDN, and why: (a) JS/CSS bundles, (b) a logged-in user's personalized feed, (c) a product page that updates hourly, (d) a payment POST?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* (a) **Yes**, immutable, identical for all users: fingerprint + 1-year TTL → ~99% hit. (c) **Yes, short TTL** (`s-maxage=3600`) + `stale-while-revalidate`, same for everyone; minutes of staleness buys a large offload. (b) **No**, per-user; caching it risks serving user A's feed to user B (a security incident). Route it *through* the CDN, don't cache the body. (d) **No**, a write must reach origin; a CDN accelerates cacheable reads, never writes. Principle: cache only what is **identical across users** and **stale-tolerant**.
 
+</details>
+
 **Q5.** Anycast vs DNS-based routing for getting users to a nearby PoP, what's the trade, and where does it bite during a PoP failure?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Anycast** (Cloudflare/Fastly) announces one IP from every PoP; on failure BGP (Border Gateway Protocol) reconverges in seconds with no DNS change to wait on, and DDoS load spreads across all PoPs. **DNS-based** routing (historically Akamai) gives finer, load-aware steering but failover is **bounded by DNS TTLs**, a dead PoP keeps receiving traffic until cached resolver entries expire, and some resolvers ignore low TTLs. Trade: anycast = faster failover + DDoS resilience, coarser steering; DNS = finer health/load awareness, TTL-bounded failover. For availability-critical edge, anycast's no-wait failover is the stronger default.
+
+</details>
 
 ### Key takeaways
 - A CDN buys **two** things from one mechanism (an edge hit): **user latency** (~10-50 ms edge vs ~150 ms+ origin) **and origin offload**, and both are the **hit ratio** read two ways. Origin load = `R × (1 − h)`, so 95% → 20× less, 99% → 100× less; **90%→99% is a further 10×**, which is why shielding/tiering exist.

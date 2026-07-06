@@ -271,19 +271,39 @@ The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The def
 
 **Q1. Your wave 2 (2,500 machines) has a 7% error rate at gate close. What do you do?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* 7% > 5% threshold → halt wave 2, open no new waves, fire P1. The 175 bricked machines are already reverting via watchdog; I expect REVERTED beacons next contact window. Triage `revert_reason` to determine whether it's a bad package (yank + block re-assignment), a specific hardware SKU (filtered exclusion for wave 3), or a transient install error. Do not promote wave 3 until root cause is understood.
+
+</details>
 
 **Q2. How does the design change with continuous telemetry (no contact windows)?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Gate soak shrinks from 24h to minutes; INCONCLUSIVE goes away (silence is immediately a network alert, not an ambiguous state); you can auto-ramp (1% → 10% → 100% with SLO-breach (SLO = service-level objective) halt). Blast-radius invariant stays identical; the feedback loop compresses. This is Android staged rollouts and AWS host fleet upgrades, same wave structure, tighter timing. Moon is the degenerate case with the slowest possible feedback loop.
+
+</details>
 
 **Q3. Operations wants to compress gate soaks to 4 hours for an urgent security patch. Do you agree?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Push back. The soak floor is a signal-quality guarantee: 4 hours covers only machines with a contact window in that window, roughly half the wave. Promoting on half the data means you're not seeing the machines with the problem. The right urgency lever is widening wave sizes as confidence builds, not shrinking soaks. If the business risk is genuinely acute, accept a 4-hour soak with an explicit operator risk acknowledgment and surface the INCONCLUSIVE rate prominently, the decision-maker should know exactly how much data they're acting on.
+
+</details>
 
 **Q4. The firmware team says slot B writes are corrupted on 0.5% of machines. How does this affect rollout?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* 0.5% of 500K = 2,500 machines that fail at install, not at boot. This is inside the 5K wave tolerance but changes how I read gate signals, I'd split the error-rate metric into `INSTALL_FAILED` (write error, firmware issue) vs `HEALTH_CHECK_FAILED` (bad update) vs `WATCHDOG_REVERTED` (runtime failure). Different root causes, different responses. I'd exclude affected machines from the rollout pending a firmware fix, continue on the healthy population, and add a pre-install storage self-test to the update controller, fail fast before corrupting the slot.
+
+</details>
 
 ---
 

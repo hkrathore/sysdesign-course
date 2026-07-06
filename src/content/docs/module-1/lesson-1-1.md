@@ -83,13 +83,31 @@ That answer scored axes 1, 2, and 5 in 90 seconds without designing a single com
 
 ### Practice questions
 **Q1.** An interviewer says, *"You've described three components. Which one keeps you up at night?"* What makes a strong answer?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Name the component on the critical availability/latency path (e.g., the redirect/read path for a URL shortener), explain the specific failure (cache stampede, region loss), and state your mitigation and its cost. The signal is that you reason about *failure*, not just happy path, and you tie it to a number/SLO (service-level objective).
 
+</details>
+
 **Q2.** You realize 8 minutes in that you've been hand-deriving a hashing scheme. How do you recover without looking lost?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Zoom out explicitly: "I'm going deeper than this decision warrants, the key point is collision-free unique IDs, which I'd solve with [approach]; the tuning is a detail I'd delegate. Let me get back to the system." Naming your own altitude correction is itself a strong signal.
 
+</details>
+
 **Q3.** Why is "we'll scale horizontally" a red flag even when it's technically correct?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because it asserts an outcome without a mechanism. The signal interviewers want is *which* component scales horizontally, what makes it able to (statelessness, partitionable key), and what new problem that creates (coordination, hot shards). The mechanism is the leadership content; the conclusion isn't.
+
+</details>
 
 ### Key takeaways
 - Five axes: scope, estimate, design, **trade-offs**, communicate, and at Director level trade-offs and communication carry the most weight.

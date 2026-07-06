@@ -103,16 +103,40 @@ The through-line at Director altitude: shift-left to catch defects where they ar
 ### Practice questions
 
 **Q1.** A team wants to add a week of staging soak before every release to "be safe." React as the Director.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd push back on the premise that more staging equals more safety. A week of soak buys confidence *about staging*, and staging structurally cannot reproduce production scale, the real data distribution, the real traffic mix, or real dependency latency, so the failures that actually take us down are the ones the soak cannot show, while we have paid a week of calendar on every release. I'd keep a *fast* pre-prod gate for the cheap defect class (types, units, contracts, a thin integration pass) because the 1×→1000× cost ladder says catch what you can early, then move the rest of the confidence into prod via progressive delivery, dark-launch and shadow for the unprovable class, a 1% canary gated on SLOs, a synthetic probe, and a sub-60-second flag rollback. That gives us *more* real confidence than the soak (real traffic is the only true test) at a fraction of the velocity cost, with risk bounded to 1% and undone in seconds.
 
+</details>
+
 **Q2.** Estimate the user impact of a bad release shipped big-bang versus via a 1% canary with a 10-minute bake and a flag rollback, on a service doing 100k checkouts/hour. Name what the canary buys.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Big-bang: the bad version is live for all **100k checkouts/hour** until someone notices and redeploys, call it 30-60 minutes to detect-and-revert manually, so **50k-100k affected checkouts** before recovery. Canary: 1% of traffic is **~1,000 checkouts/hour**, and the SLO gate catches the regression within the **10-minute bake**, so at most **~170 affected checkouts** before auto-rollback, and the flag flip reverts in **under 60 seconds**, not a redeploy. That is roughly a **300-600× reduction in blast radius** and an order-of-magnitude faster recovery. What the canary buys is exactly that: exposure capped at a sliver, detection by an automated gate not a human, and an undo measured in seconds. The cost is a slower full rollout (the rings take longer than a big-bang flip), which on a payments path is obviously worth it.
 
+</details>
+
 **Q3.** You need to validate a full rewrite of your search ranking service before any user touches it. How do you get real-traffic confidence with zero user risk?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd use **shadow / mirror traffic**: at the load-balancer or service-mesh layer, duplicate live production search requests to the new ranking service in parallel, **discard its responses**, and serve users entirely from the old service. The new service then handles the *exact* real query mix, volume, and data distribution, which is precisely what staging cannot reproduce, with **zero user impact** because nothing it returns is shown. I'd compare its latency and ranking output against the old service offline, and watch for scale failures (memory, pool exhaustion) that only appear at real QPS. The one sharp edge is side effects, since ranking is read-mostly this is safe, but if any path wrote state I'd point the shadow at read-only or sandboxed dependencies so mirroring does not corrupt real data. Only once shadow looks clean would I move to a 1% canary on real traffic, gated on result-quality and latency SLOs, then ring it out. Shadow buys real-load confidence before exposure; the canary buys the final real-user signal.
 
+</details>
+
 **Q4.** Finance demands "zero defects in production." Engineering ships a thousand times a week. Where do you set the line, and how does test-in-prod fit?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* "Zero defects in prod" is not achievable at a thousand deploys a week, and chasing it with an exhaustive pre-prod gate would crush velocity to near zero while *still* missing the failures that only exist at real scale, so I'd reframe from "zero defects" to **bounded blast radius and fast recovery**, which is what finance actually needs. The model: shift-left for cheap early detection (types, units, contracts, the 1×→1000× ladder), then progressive delivery for what pre-prod cannot reach, dark-launch and shadow for the unprovable class, a 1% canary gated on SLOs, synthetic probes, and a sub-60-second flag rollback. I'd tier the gates by risk: the payments path gets the heavy kit (SLO gate on payment-success-rate, a second approver, tight rollback SLO), a marketing banner gets the light one, because payment-grade gates everywhere tax velocity for no safety gain. Then I'd commit to **change-failure rate and time-to-restore** as the measurable targets finance can hold me to, instead of an impossible absolute. That gives finance the risk control they want and engineering the velocity, with the trade named.
+
+</details>
 
 ### Key takeaways
 - **Shift-left is the cost floor:** the escaped-defect ladder (~1×→10×→100×→1000×) means catch defects early where they are cheapest, types and units and contracts in CI, and that is where most of your catch value lives.

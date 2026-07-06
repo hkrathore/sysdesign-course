@@ -134,16 +134,40 @@ The throughline at Director altitude: treat `N/W/R`, the conflict policy, and th
 
 ### Practice questions
 **Q1.** Design the storage layer for a globally-available shopping cart that must never reject an *add to cart*. Specify partitioning, replication, `N/W/R`, and conflict handling, and name what you trade away.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Partition by **consistent hashing** (scaling moves only ~K/N keys). Replicate `RF = 3` across **3 AZs** so an AZ loss leaves two serving copies. Set `N = 3, W = 1, R = 1`, ~1-5 ms, always-writable, surviving 2 of 3 replicas down; deliberately `W + R < N`, i.e. eventually consistent, because cross-device staleness of a few hundred ms is invisible. Under partition, a **sloppy quorum + hinted handoff** lands the add on a reachable node and forwards it home later. Resolve concurrent edits with **version vectors**, merging toward *keeping* the item, never silently dropping a write, because a lost cart item is a lost sale. **Traded away:** read recency and the quorum-overlap guarantee during the partition window, accepted on purpose; the requirement prioritises availability. (This is the original Dynamo motivation.)
 
+</details>
+
 **Q2.** A Cassandra cluster occasionally shows a row reverting to an old value after a node was down and recovered. No application bug. What's happening, and what's the fix?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two suspects, both rooted in **LWW + operations**. (a) **Clock skew:** Cassandra resolves per cell by highest timestamp; if the recovered node's clock ran ahead, a stale write can carry a higher timestamp than the correct newer write and win, fix with rigorous **NTP** (Network Time Protocol), and note LWW is fundamentally clock-dependent. (b) **Missed repair:** if the node was down longer than the hint window, hinted handoff dropped its hints, and read repair only heals keys that get read, cold keys stay divergent until Merkle repair runs, and if a delete's tombstone expired before repair propagated it, the old value **resurrects** (zombie data). Fix: run repair on a schedule inside the tombstone grace window, throttled and off-peak. The Director point: this is an *operational* failure of the anti-entropy cadence, owned by capacity-planning the repair job, not a code bug.
 
+</details>
+
 **Q3.** Your team wants a central membership directory "so every node has a consistent, authoritative view of the ring." Evaluate.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Push back, but acknowledge the real tension. **Gossip** already spreads membership in O(log N) rounds with **no SPOF**, the AP posture a Dynamo store is built for. A central directory (ZooKeeper/etcd) gives a strongly-consistent view, genuinely nicer during rapid churn, but it reintroduces a **coordination tier**: another system to run, a potential bottleneck, and a dependency whose outage can stall the cluster. The architecture deliberately tolerates eventually-consistent membership because the quorum and anti-entropy layers absorb the transient disagreement. So: keep gossip for membership; reserve a coordination service for the narrow places needing real consensus (lightweight transactions, leader election for specific operations). The signal is weighing "stronger view" against "new SPOF + operational tier" rather than reflexively centralising.
 
+</details>
+
 **Q4.** A per-user "items purchased" counter is read constantly and incremented from many regions concurrently. LWW, version vectors, or CRDT, and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **CRDT**, a counter type (PN-/G-counter). Concurrent increments from many regions are the worst case for both alternatives: **LWW** keeps only one of two concurrent `+1`s, **undercounting**, and **version vectors** surface every concurrent pair as siblings, pushing merge onto the application on every read. A counter CRDT merges automatically: each replica tracks per-replica sub-counts and the merged value is their sum, so all increments count with no siblings and no app logic. Cost named: per-replica metadata, and it only works because "increment" is a CRDT-expressible shape, an arbitrary read-modify-write wouldn't fit, and you'd fall back to a conditional write/LWT. Rejected alternatives rejected by their loss: undercount (LWW), per-read merge burden (vectors).
+
+</details>
 
 ### Key takeaways
 - A Dynamo-lineage key-value store is the foundational primitives assembled: **consistent-hashing partitioning** + **`RF`-replication across AZs** + **per-operation quorum `N/W/R`** + versioning + anti-entropy + gossip, leaderless, any node coordinates.

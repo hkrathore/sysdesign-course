@@ -136,16 +136,40 @@ The signal is not "we used multi-tenancy." It is that **the default is pooled fo
 ### Practice questions
 
 **Q1.** Your SaaS has 20,000 mostly-small tenants and a business model built on a free tier. Which data-isolation model is the default, and how do you keep it safe?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Shared-schema + `tenant_id` (pool)** is the only model whose economics survive a free tier, one database holds tens of thousands of tenants at cents each, migrations run once, and a dedicated database per free tenant would cost more than the tenant pays. Database-per-tenant is rejected on cost and on the migration fan-out across 20,000 databases, schema-per-tenant is rejected because 20,000 schemas times the app's tables is catalog bloat that cripples the instance. Safety is **defense in depth**: a tenant-context middleware sets the current tenant from the authenticated token (never a request parameter), the data-access layer injects the `tenant_id` filter on every query, and **Postgres RLS** enforces the same predicate in the engine as a backstop so a forgotten filter returns zero foreign rows. I reset the tenant session variable per transaction to avoid a pooled-connection RLS bypass, and I run a cross-tenant test suite plus a canary tenant that pages on any foreign read, because a leak here exposes all 20,000 tenants at once and is worse than downtime.
 
+</details>
+
 **Q2.** An enterprise prospect will sign only if their data is physically separate, restorable independently, and stored in the EU. You currently pool everyone. What do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is exactly the case for a **database-per-tenant (silo) tier**, and I would sell it as a premium feature. Provision this tenant a dedicated database placed in an EU region (residency by construction), with its own PITR backups so their restore is a minutes-to-an-hour operation touching no other customer, and their traffic on isolated compute so a noisy neighbor cannot affect them. For the strictest requirements I would put them in a dedicated VPC or a dedicated AWS account to isolate the network and IAM blast radius. I keep the 7,000 small tenants pooled, this is tiering: density for the long tail, isolation for the customers who pay for it. The trade I accept is higher per-tenant cost and a migration fan-out on schema changes, justified because the enterprise count is in the hundreds, not thousands, and the isolation is revenue, not overhead.
 
+</details>
+
 **Q3.** A tenant on your pooled tier is graduating to the siloed enterprise tier. Walk through moving them with no downtime.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First, this is only clean if tenant location is **data, not code**, a tenant routing table mapping `tenant_id` to its database. Steps: (1) provision the target silo database, (2) backfill the tenant's rows with `WHERE tenant_id = X` via bulk export/import, (3) keep the target current with filtered logical replication or application dual-write while the pool keeps serving, (4) verify row counts and checksums, then during a brief read-only freeze flip the tenant's routing-table entry to point at the silo, (5) after a safety window, purge their rows from the pool. The tenant sees at most seconds of read-only time, and because the cutover is a metadata flip rather than a redeploy, it is a routine operation. I would rehearse it on a staging copy of the tenant first, and keep the pool rows until I have confirmed the silo is serving correctly, so rollback is just flipping the routing entry back.
 
+</details>
+
 **Q4.** In the pooled model, how does Row-Level Security actually stop a leak, and what is its most common bypass?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* RLS attaches a policy to each shared table, for example `USING (tenant_id = current_setting('app.current_tenant'))`, and Postgres applies that predicate automatically to every `SELECT`, `UPDATE`, and `DELETE`, so a query that forgets its own `WHERE tenant_id` still returns and mutates only the current tenant's rows. That makes it the backstop for the inevitable human error in application code. Its most common bypass is **session-variable leakage across a connection pool**: poolers reuse physical connections, so if you set `app.current_tenant` but do not reset it per transaction, the next request served by that connection inherits the previous tenant's context and RLS happily filters to the *wrong* tenant. The fix is to set the variable at the start of every transaction (and use `SET LOCAL` so it is scoped to the transaction), never once per connection. A secondary bypass is a superuser or table-owner role, which can be exempt from RLS, so application connections must run as a non-owner role with `FORCE ROW LEVEL SECURITY` where needed.
+
+</details>
 
 ### Key takeaways
 - The three data-isolation models trade **density against isolation**: database-per-tenant (silo) is strongest-isolation/lowest-density (~$15-30/tenant floor, migration fan-out across thousands of DBs), schema-per-tenant (bridge) is medium/medium (catalog bloat past low thousands), shared-schema + `tenant_id` (pool) is weakest-isolation/highest-density (cents/tenant, migrate once).

@@ -150,19 +150,49 @@ Every decision falls out of the requirement: tiers → token bucket; multi-tenan
 
 ### Practice questions
 **Q1.** A client reports being throttled "even though they're under the limit," and your dashboards show traffic briefly hitting ~2× the configured rate. You use a per-minute fixed-window counter. Diagnose and fix, quantifying the trade.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The **fixed-window boundary burst**: a client can send a full limit's worth in the last moment of one window and another full limit in the first moment of the next - up to **~2× the limit** across the boundary - while neither minute's counter shows a violation. Fix: a **sliding-window counter** - blend the current and previous minute's counts, weighting the previous by its remaining overlap - which decays smoothly instead of cliff-resetting and eliminates the 2× burst at the same **O(1) memory**. I'd reject the sliding-window **log**: exact, but it stores every timestamp (O(limit) per key, multi-GB at our key cardinality) for accuracy this endpoint doesn't need; the counter's small approximation error is plenty.
 
+</details>
+
 **Q2.** You implement a distributed token bucket in Redis as `GET tokens` → compute refill → `SET tokens`. Under load, clients exceed their limit. What's the bug, and the correct implementation?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **read-modify-write race**: the check is multiple commands, so two concurrent requests both `GET` "1 token left," both pass, both `SET` a decrement - two admitted against a budget of one, worse under higher concurrency. Fix: run the **entire** refill-check-decrement as **one atomic Lua script** - Redis is single-threaded per shard, so the script is a true critical section. I'd also accept that a Redis failover can lose bucket state (async replication, AP) and *briefly* over-admit - fine, because rate limiting is best-effort and a CP store's per-request consensus cost isn't worth paying.
 
+</details>
+
 **Q3.** Where do you enforce rate limits for a multi-tenant API, and what fails-open vs fails-closed?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Defense in depth across three layers.** Edge/CDN (per-IP) drops volumetric floods *before* they consume origin resources - reject what you never want to pay to receive. The **API gateway** is primary: it sees the **authenticated key**, so per-tenant tiered limits live here, centralized rather than scattered in app code. Per-service guards protect bottlenecks the gateway can't see (an expensive internal route, a third-party quota). On failure: **fail-open for general traffic** - the limiter must never be the thing that takes the service down, so a Redis outage means serve unthrottled (edge still backstops abuse) rather than 503 everything - but **fail-closed for auth/payment/abuse endpoints**, where unlimited credential-stuffing during an outage is the worse outcome. The signal is the *split*, justified per endpoint.
 
+</details>
+
 **Q4.** You must enforce a single company-wide limit of 10,000 req/s against a third-party API you don't own. What's the scaling hazard, and how do you handle it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The **hot-key problem**: a single global limit means every request increments one counter - one Redis key, one hash slot, one shard - and you **cannot shard your way out of a single hot key**; "add more Redis shards" does nothing. The fixes are **sharded counters** (split the logical counter into K sub-keys, increment one at random, sum to read) or **local approximate counters** reconciled to the shared store periodically, trading a small over-admit between syncs for zero per-request central writes. Both lean on the same principle - rate limiting tolerates approximation - so I'd pick by how tight the third-party ceiling is.
 
+</details>
+
 **Q5.** A teammate proposes building the limiter on a strongly-consistent (CP) store so the limit is "never violated." Push back at Director altitude.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Wrong trade.** A CP store enforces the limit exactly, but you pay **consensus latency on every request** (a quorum round-trip, far above Redis's ~0.5-1 ms) and **reduced availability under partition** - the limiter becomes a fragile, slow dependency on the hot path of everything, violating the principle that **the limiter must never be more fragile or slower than the service it protects**. What does exactness buy? Rate limiting is inherently best-effort: the cost of occasionally over-admitting after a failover is trivial (you throttle slightly late); the CP cost is real and paid continuously. Use an AP store (Redis), accept brief over-admission, and spend the engineering on the edge/gateway layering and the fail-open/closed split. "Never violated" is a non-requirement you'd be overpaying for.
+
+</details>
 
 ### Key takeaways
 - A rate limiter does up to four jobs - **protect capacity, fairness, cost control, abuse defense** - and a real limit is **two numbers**: a **sustained rate** and an **allowed burst**. Which algorithm you pick is mostly which of those knobs it gives you.

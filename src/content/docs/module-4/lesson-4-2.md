@@ -244,16 +244,40 @@ At Director altitude they're listening for **trade-off articulation, cost owners
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. A single paste goes viral and takes 80% of your read traffic. What saves you?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's a **hot key**, but it's the **same URL for everyone**, so the CDN serves it at ~100% edge hit and the body reads never reach origin; Redis absorbs the metadata lookups that leak through, `origin = R×(1−h)` with `h≈0.99` means origin sees ~1% of the spike. This works because the paste is public and immutable (cacheable). A **burn** paste is self-limiting (one reader wins); an **unlisted** one stays non-cacheable and rides Redis + the sharded store. The lever is hit ratio, never "add origin capacity."
 
+</details>
+
 **Q2. The PM wants paste *editing*. How does that change your design?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd push back on mutating the body, **immutability is what lets me cache and tier bodies cheaply**. The clean model: an "edit" writes a **new immutable blob version** and the metadata row's pointer flips atomically (the blob-versioning pattern); the short key stays stable, the old version is GC'd. Cost I name: cache/CDN invalidation on edit (versioned blob key or purge). I would not turn the body into a mutable in-place record, that reintroduces every problem the split avoids.
 
+</details>
+
 **Q3. Your metadata store is eventually consistent. Where does that bite?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Exactly two places: **read-your-writes on create** (the reader hits a replica that hasn't seen the new key → spurious 404) and **burn-after-read** (a stale replica could leak an extra read). Fixes: route the immediate post-create read to a strongly-consistent read for a short window; force burn pastes onto the **strongly-consistent read + conditional write** path so the claim is serialized. Everything else tolerates eventual consistency happily, bodies are immutable and a few hundred ms of lag on a brand-new key is invisible.
 
+</details>
+
 **Q4. How do you stop Pastebin becoming a malware/secrets dump, and what do you own vs delegate?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I **own the requirement and the SLA**, not the classifier: rate-limit creates, run new pastes through an **async content-safety pipeline** (secret-scanning, malware hashes), honor takedowns within a defined SLA, keep unlisted keys unguessable. I **delegate** the ML/heuristics to trust-and-safety, "my prior is async scanning with a fast-path block on known-bad hashes; model quality and the false-positive budget are theirs." I'd resist *synchronous* scanning on the create path, it adds latency and a dependency to every write, unless a legal requirement forces it.
+
+</details>
 
 ---
 

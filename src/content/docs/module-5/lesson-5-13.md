@@ -299,19 +299,49 @@ A skewed key concentrates load on one partition's leader.
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Two messages for the same user must be processed in order. How do you guarantee it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Set the **partition key to `user_id`.** That user's messages all hash to one partition, strictly ordered by offset, and a partition is consumed by exactly one member of a group, so a single consumer sees them in order. The cost: ordering holds *only* within that key; different users have no relative order, fine since I only need per-user sequence. A hot whale I'd salt to spread load, accepting weaker ordering for that key. The thing I'd never claim is global ordering, it needs one partition and caps the topic at one consumer.
 
+</details>
+
 **Q2. `acks=all`, replication factor 3. A follower lags and drops out of the ISR. What happens to producers?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* While the ISR stays at or above `min.insync.replicas` (say 2), producers are unaffected. If a second replica drops and the ISR falls **below** the floor, the leader **rejects new `acks=all` writes** and that partition goes write-unavailable, the contract refusing to acknowledge a write it can't durably replicate, choosing unavailability over silent loss. Lowering the floor to 1 restores availability but opens a data-loss window if the last leader then dies. A CP-vs-AP choice I make per topic: strict for payments, relaxed for metrics.
 
+</details>
+
 **Q3. A consumer crashes after processing a message but before committing its offset. What does the next consumer see?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It **re-reads** the un-committed message, **at-least-once**, the default. The offset commit is the lever: committing *after* processing gives at-least-once (a crash re-delivers); *before* gives at-most-once (a crash skips). Since duplicates are possible, processing must be **idempotent**, dedup on a message ID or a naturally idempotent side effect. I reach for exactly-once only where duplicates are unacceptable and can't be made idempotent, and only *within* the Kafka boundary.
 
+</details>
+
 **Q4. Why an append-only log instead of a database for the message store?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The access pattern is **append-to-tail, scan-from-offset, never random-update**, the exact workload a sequential file is best at and a B-tree is worst at. Appends hit raw disk bandwidth (~1-2 GB/s on NVMe vs a fraction for random writes), the offset *is* the index, and immutability means no write-amplification or locking. A database adds a point-lookup index we never query and update machinery we never use. At 1 GB/s ingress, sequential appends make a ~10-broker cluster sufficient; random-write storage would need far more spindles for the same throughput.
 
+</details>
+
 **Q5. How do you scale from 1M to 10M messages/s?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Throughput scales by **adding brokers and partitions**, sequential bandwidth is roughly linear. What *breaks* first is the control plane: thousands of partitions strain leader election and rebalances, which is why Kafka moved to **KRaft** to lift the old ZooKeeper partition-count ceiling. Second, storage cost (~2 PB → ~20 PB) pushes me to **tiered storage**, recent segments on local SSD, old offloaded to S3, trading cold-replay latency for an order-of-magnitude cost cut. I delegate the segment/tiering policy with a benchmark-first prior, keeping the partition-count and durability contracts.
+
+</details>
 
 ---
 

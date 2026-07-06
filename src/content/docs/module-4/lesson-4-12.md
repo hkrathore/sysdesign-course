@@ -288,19 +288,49 @@ At Director altitude the probes are about trade-off articulation, cost ownership
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. How does the frontier enforce "≤1 req/s per host" while hitting 12k pages/sec, and why does partitioning matter?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two ideas. The **two-tier frontier**: front queues encode priority, back queues encode politeness, each back-queue serves exactly one host, drained no faster than its `crawl_delay`, scheduled by a min-heap of next-eligible times. A host *physically can't* be fetched faster than its delay. And **partition by host**: all of `example.com` lives on one node, which enforces its limit locally, no global coordinator. Throughput comes from breadth: 12k/s ÷ 1 req/s/host = ~12k hosts drained concurrently. Sharding by URL-hash instead would scatter each host across nodes and demand a distributed rate-limiter at 12k/s; I traded perfect balance for coordination-free politeness, handling mega-host hot-spots with budgets.
 
+</details>
+
 **Q2. The Bloom filter says "seen" for a URL you've never crawled. What happened and how do you bound it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **false positive**, and the direction matters: Bloom has no false negatives, so a FP means I **silently skip a real page**, lost coverage, never a double-crawl. At 120B URLs and 1% FP that's up to ~1.2B wrongly dropped. Three levers: accept it (often fine for a search corpus); **layer an exact ledger check behind positives**, only ~1% of 720k ≈ 7.2k extra lookups/s, eliminating false-skips; or raise the bit budget (12 bits/key → ~0.3% FP, ~180 GB). Archival crawl → exact check; search corpus → live with ~1%.
 
+</details>
+
 **Q3. One site has 5 billion URLs. What breaks?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Load balance, all 5B URLs hash to one frontier node while peers idle. And at 1 req/s, that host could never drain anyway (30 days ≈ 2.6M fetches, not 5B). Fixes: a **per-host budget + depth limit**, crawl the top *X* pages by priority, accepting incomplete coverage of mega-sites; the budget also caps any trap there. For genuinely important huge sites, **sub-shard by URL-path prefix** to parallelize fan-out, but keep the politeness delay coordinated so the host still sees ≤1 req/s in aggregate. Politeness stays a per-host property; I'm just bounding how much of one host I take.
 
+</details>
+
 **Q4. How do you keep 30B pages fresh without wasting the fetch budget?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Uniform monthly re-crawl wastes most fetches on pages that never change and misses fast-changers between passes. **Adaptive re-crawl**: the ledger records whether each page's fingerprint changed since last crawl; estimate per-page change rate and set `next_crawl` accordingly, news hourly, an archived PDF yearly. The scheduler re-injects due URLs into the frontier. That maximizes freshness-per-fetch, the metric that matters, at the cost of change-history state and a prediction model, so start uniform, evolve to adaptive once history accumulates, and delegate the change-rate model to the data team (prior: a simple exponential estimator).
 
+</details>
+
 **Q5. The crawler keeps fetching near-identical content under thousands of URLs (an infinite calendar). How do you stop it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **spider trap**, URL dedup fails because every URL is genuinely new. Defend in layers: **URL normalization** (strip session ids, sort params) before the Bloom check; **SimHash content fingerprinting**, the calendar's pages are near-identical, so they hit the content-seen set even with distinct URLs; **per-host budget + depth limit** caps the blast radius to one host's allowance; and a **quarantine heuristic** for hosts emitting huge fan-out of near-identical content. The trade: aggressive near-dup detection risks false-deduping genuinely different pages, tune conservatively and delegate the threshold to the data team, because an unbounded trap is catastrophic while a slightly-incomplete crawl is merely suboptimal.
+
+</details>
 
 ---
 

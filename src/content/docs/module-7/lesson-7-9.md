@@ -146,16 +146,40 @@ The through-line at Director altitude: **trust is engineered, not assumed, you o
 ### Practice questions
 
 **Q1.** Your revenue dashboard silently showed numbers 30% low for a week because an upstream team changed a column. Walk through how you'd make this class of failure impossible-to-miss, and quantify the improvement.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is the analytical hallucination, and the fix is layered by blast radius. **Shift-left:** put the upstream `transactions` table under a **data contract** enforced in the producer's CI, a schema change that removes/renames a depended-on column fails their build, so the break is *prevented at source* with **zero detection lag**. **In-pipeline regression suite:** if no contract, dbt schema + distribution tests on the mart (`not_null` on amount, `SUM(amount)` within ±20% of the trailing-7-day median) catch the all-null/low total on the next run. **Circuit-break:** because a wrong revenue number is worse than a stale one, configure these tests `severity: error` so the bad partition **doesn't publish**, the dashboard serves yesterday's correct number and pages the team. **Lineage** scopes impact (which reports) and root cause (the CDC change) instantly. Quantified: detection lag goes from **~6 days with a wrong number live** to **~5 minutes with zero bad data served** (circuit-break) or **zero, break prevented** (contract). The cost traded in is a possible false-positive stoppage on a legitimate spike, acceptable on a financial mart.
 
+</details>
+
 **Q2.** Why is a data-quality test suite the analog of an LLM eval gate, and what does that analogy tell you to do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Identical structure. In 11.7 every prompt/model/RAG change must pass a **fixed golden set** before shipping ("looked fine in a demo" is how quality silently regresses); here every model run must pass a **fixed assertion battery** before its output is trusted ("the job ran without error" is how a wrong number silently ships). Both are non-negotiable *gates*, not reports, the value is **blocking** before the damage propagates. Concrete moves the analogy prescribes: (1) run tests as **CI** on every change/run, not a one-off audit; (2) make every **production incident a permanent test**, the renamed-column break becomes a standing schema assertion (the "fold failures back into the golden set"); (3) gate hard on the dimensions that matter (faithfulness ↔ uniqueness/referential-integrity/freshness on financial marts), warn on the rest; (4) version tests with the models.
 
+</details>
+
 **Q3.** When would you *not* circuit-break on a failed quality check, and what's the risk you're accepting?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Alert-and-continue** when **freshness matters more than perfection and the blast radius is small**, an internal exploratory dashboard, a low-stakes operational metric, an early-stage pipeline where a human eyeballs anomalies anyway. You let data flow and fire an alert rather than halt. The risk is explicit: **bad data is live** while a human investigates, a wrong number sits on that internal dashboard for minutes to hours, tolerable precisely because nobody's repricing a product off it. You'd *also* lean this way when thresholds are still noisy and circuit-breaking would cause frequent false-positive stoppages that erode trust in the gate (the "team disables the over-tight gate" failure). The decision is per-data-product: cost of stale vs cost of briefly-wrong. Circuit-break when wrong ≫ stale; alert when stale ≫ wrong.
 
+</details>
+
 **Q4.** Design the quality gates for a new `daily_active_users_by_region` mart that feeds both a live ops dashboard (needs minute-freshness) and the monthly board deck (needs to be exactly right). How do your choices differ for the two consumers?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two consumers, two correctness/freshness profiles, so **two serving paths off shared upstream tests**, not one gate. **Shared dbt tests** on the base table for the seven-dimension basics: `region` non-null and all regions present (completeness), `user_id`-grain uniqueness (no fan-out double-counting DAU (daily active users)), `event_time` freshness, row-count ±20% (volume). **Board-deck path:** circuit-break, `severity: error`, so a bad partition never reaches the deck; stale-but-correct beats wrong for a board, plus a stricter DAU-within-3σ check since it's a reported metric. **Live-ops path:** alert-and-continue, minute-freshness is the point, so I don't halt on a soft anomaly; alert and let ops see live data, accepting a brief blip. **Shift-left:** the shared event source is high-value, so a **contract** on its schema (region enum, user-id presence) prevents the upstream break for both paths at once. **Lineage** tells me which consumer a failure hits. The Director point: the *same data* gets *different failure policies* by consumer, because the cost of wrong-vs-stale differs between a live glance and a board number.
+
+</details>
 
 ### Key takeaways
 - **The signature failure is a precise, confident, wrong number nobody catches for a week (the analytical hallucination); trust is a first-class discipline.** "Is the data good?" decomposes into seven quantified tests, **freshness, volume, schema, distribution/values, uniqueness, referential integrity, completeness**, and most real breaks are a schema change, a fan-out, a unit/timezone error, or a partial load.

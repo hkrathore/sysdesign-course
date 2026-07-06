@@ -133,16 +133,40 @@ The through-line at Director altitude: **the model is the cheap, swappable part;
 ### Practice questions
 
 **Q1.** Your RAG assistant gives a confident, well-cited answer that is flatly wrong. Walk me through how you diagnose it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Separate the two stages. **Retrieval:** is the correct chunk even in the index (ingest/chunking gap)? If indexed, is it in the top-k (recall — try hybrid, raise k, query rewriting)? If retrieved, is it ranked into the shortlist (add/tune the reranker)? **Generation:** if the right chunk *was* in context but the answer contradicts it, that's a **faithfulness** failure — tighten the grounding instruction, lower temperature, or the chunk was buried mid-context (lost-in-the-middle — reorder). The citation being wrong is the tell: it cited what it retrieved, and what it retrieved was wrong. Bigger model is the *last* lever, not the first.
 
+</details>
+
 **Q2.** Freshness requirement: a policy edited at 9:00am must be answerable by 9:05. How do you design ingest?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Event-driven incremental ingest** — a change webhook on the source enqueues just that document; a worker re-parses, re-chunks, re-embeds, and **upserts** the affected chunks (and tombstones deleted ones) into the index. The freshness SLA *is* this pipeline's end-to-end latency, so size the queue/workers for it. Rejected: nightly full re-index (up to 24h stale, and re-embedding 10M docs daily is pure waste). Keep a periodic full reconcile as a backstop for missed events, not as the primary path.
 
+</details>
+
 **Q3.** When would you *not* use RAG, and use long context or fine-tuning instead?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Long-context** when the corpus is small and bounded and fits a window (one contract, one runbook) and you'll accept the per-call token cost — no retrieval infra to maintain. **Fine-tuning** when the need is *behavior/format/tone* (always answer as JSON, adopt our support voice, classify into our taxonomy), not facts. **RAG** whenever knowledge is large, private, frequently changing, or must be cited — which is most enterprise cases. They compose: fine-tune the style, RAG the facts.
 
+</details>
+
 **Q4.** Your corpus is 10M docs and pure vector search keeps missing questions that contain exact error codes. What changes?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Go **hybrid**: add a BM25/keyword index and fuse it with dense results (RRF), so exact-token queries hit the keyword path while paraphrase queries hit the dense path. Also check **chunking** — if codes live in tables being shredded by fixed-size windows, switch to structure-aware chunking and consider **contextual retrieval** (prepend a doc summary to each chunk) so a lone code keeps its subject. Verify with retrieval-recall on a golden set containing those code queries before/after.
+
+</details>
 
 ### Key takeaways
 - **RAG grounds a frozen, private-data-blind model in fresh, citable knowledge** without retraining — the default for any feature whose answer depends on large/private/changing data. It *reduces* hallucination; it doesn't eliminate it.

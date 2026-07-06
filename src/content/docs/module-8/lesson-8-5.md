@@ -308,19 +308,49 @@ Federation's risk: 40 domains produce 40 different levels of quality, naming, an
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. We have 2,000 datasets across 40 teams and nobody can find or trust anything. Where do you start, centralized cleanup or mesh?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First I'd confirm the **bottleneck**: are domains waiting weeks on a central team to publish or get access? At 40 domains the central-team math doesn't close, roughly 12,000 engineer-days of change-work a year against a ~15-person team's ~3,300, a ~3.6× shortfall, so the queue grows without bound; that *is* the bottleneck, and it's why a bigger central team can't fix it (you can't hire past a serialization point). So the direction is **federation**, but I would *not* big-bang reorg or lead with "data mesh." I'd build the **governance plane and self-serve platform first**, catalog with rich business metadata so people can *find and judge* data, policy-as-code so access stops queuing, auto-captured column-level lineage so people can *trust* it, then **peel off the highest-pain, highest-maturity domains into ownership one at a time**, leaving the rest centrally managed until ready. The two models coexist for years; the platform helps either way. The crossover I'd name aloud: below ~10 domains I'd stay centralized.
 
+</details>
+
 **Q2. How do you do access control over thousands of datasets and tens of thousands of columns without it becoming a full-time queue?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Tag-based policy-as-code (ABAC), enforced at the catalog chokepoint.** I classify data with tags (`pii`, `pci`, `domain:orders`, `regional`) at publish, automatically where I can, then write ~tens of rules over *tags*, "role `analyst` reads any `domain:*` except columns tagged `pii`; `pii.email` is masked except for `privacy`; `regional` rows filter by the requester's region." A new dataset inherits all of that the moment it's tagged, so governance scales with **rule-count (near-constant), not dataset-count**. Every decision is audited. The alternative, per-object grants on request, is the ~60,000-column surface by hand: it drifts into inconsistency, fails audit, and recreates the central bottleneck as an access-ticket queue. The cost of policy-as-code is real upfront investment, a policy engine, a tagging discipline, classification automation, and that's the trade I'd defend, debt-free scaling for upfront effort.
 
+</details>
+
 **Q3. What's the difference between a "data product" and just a table in the lake, and why does it matter?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A table is anonymous; a **data product** has a **named owner, an SLA, a documented schema published as a versioned data contract, and a sensitivity classification.** That metadata is exactly what the scenario is missing, it's why nobody can *trust* the data. The owner means someone's on the hook; the SLA means consumers know the freshness/availability they can build on; the **contract** means another domain can depend on the product's *interface* without coupling to its internals, and a breaking change requires a new version rather than silently breaking downstream; the classification drives automatic policy. The product is the **unit of federated ownership**, it's what makes the mesh a mesh rather than a shared dumping ground. Modeling data as products, not tables, is the decision that turns sprawl into a governed, discoverable catalog.
 
+</details>
+
 **Q4. A regulator demands you delete a specific customer's data everywhere within 30 days. How does this design make that tractable?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two pieces do the work. **Column-level lineage**, captured automatically from job execution as a graph, lets me run a **transitive closure** from the source PII column to *every* downstream table derived from it across bronze/silver/gold, so I find all of it, not just the obvious tables. Then the **table format's column-precise delete** erases the rows, and I use **column-level classification** so I knew exactly which columns are that customer's PII in the first place. The gotcha I'd name: **time-travel snapshots**, the deleted data lingers in old snapshots, so snapshot expiry must be set inside the compliance window. The audit log proves who could access it before deletion. This is why I insist on **column-level** lineage and policy, not table-level: table-level can't answer "which columns, derived where" precisely, and GDPR is column-precise. Lineage that's hand-maintained would have blind spots; it has to be captured from execution.
 
+</details>
+
 **Q5. Your CTO read about data mesh and wants it everywhere by next quarter. You run 6 domains and the team isn't backed up. What do you say?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd push back with the crossover. At **6 domains and a central team whose queue is days, not weeks, we're *below* the threshold where mesh pays.** Mesh trades a central bottleneck, which we don't yet have, for distributed inconsistency and a heavy self-serve-platform investment and an org change that demands domain teams mature enough to own products, which is the usual reason mesh *fails*. So forcing it now would likely give us a *worse* swamp and slower delivery. What I'd do instead: **invest in the parts that help us today regardless**, a real catalog, policy-as-code, automated lineage, all valuable in a centralized model, and **define the bottleneck metric** (central-team queue depth, onboarding time) that would *trigger* federation. When we cross it, dozens of domains, multi-week queue, we'll peel off mature domains incrementally with the platform already in place. That's leading with the *problem* (the bottleneck), not the *buzzword* (mesh), which is the whole discipline here.
+
+</details>
 
 ---
 

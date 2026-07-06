@@ -309,19 +309,49 @@ One client firing 100K-token prompts can monopolize KV and decode cycles - a hot
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate the fleet size and the cost floor, and explain what drives the numbers.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **30M DAU × 10 msgs/day = 300M requests/day**; at ~500 output tokens that's **1.7M output tokens/sec average, ~10M peak**. Pin the serving unit: 70B fp16 = 140 GB > 80 GB, so a **2-GPU node (TP=2)**. A node does ~**2,000 tok/s** (batch ~64 × ~30 tok/s), so **~850 nodes average → ~4,500 peak (~9K GPUs)**. At ~$3/GPU-hr, ~$6/node-hr ÷ 7.2M tokens/hr → **~$0.85 per 1M output tokens** as a compute floor (public prices ~$10-15/1M add margin + input tokens). The two biggest dials: **model size** (an 8-13B model cuts the fleet ~10×) and the **~5× peak-vs-average gap** - which is exactly why autoscaling and utilization are the budget conversation.
 
+</details>
+
 **Q2. Why is the KV-cache the thing that limits throughput, and what do you do about it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Generating token *N+1* needs the keys/values of all prior tokens; the KV-cache holds them in **HBM next to the weights**, so concurrency is capped by what fits. For a 70B model it's **~320 KB/token with GQA (~1.3 GB per 4K sequence)**; at fp16 weights only ~15 sequences fit - too few to keep the GPU busy. The three levers: **quantize weights to fp8**, **PagedAttention** to kill fragmentation, and **GQA** - together they grow the batch **~15 → ~65 sequences**, turning a memory-bound node compute-bound. The trade is a small, **eval-gated** accuracy loss; I'd have the ML team sign off per model.
 
+</details>
+
 **Q3. Explain the TTFT-vs-throughput trade and how you'd hit both SLOs.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* TTFT is queue wait + prefill; throughput comes from large batches amortizing weight loads. They fight: bigger batches mean new requests wait for KV slots and big prefills block the decode loop. I hit both by **segmenting**: an **interactive pool** with smaller, latency-bounded batches (chunked prefill as an inference-team lever for long prompts) keeping TTFT < ~1 s, and a separate **async `/batches` pool** running giant batches off-peak with no TTFT SLO for the cheapest throughput. I deliberately leave throughput on the table on the interactive fleet - a product decision paid in slightly higher $/token. A single global batch size can't satisfy both.
 
+</details>
+
 **Q4. How do you autoscale a fleet where each node costs ~$6/hour and takes minutes to start?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Not like a stateless web service. Weights are 70-140 GB and take **minutes** to load, so reactive scaling lags spikes and you can't scale to zero for an active model. I scale on **queue depth / pending-token backlog** (a leading indicator, not CPU), keep a **warm pool** of pre-loaded standbys, and a **warm floor** always running; spikes are absorbed by the queue + backpressure (429) while the pool spins up. The warm capacity is **idle GPU cost paid for responsiveness** - the explicit dial, sized from real traffic spikiness. Pinning at peak 24/7 would be ~$0.2B/yr; the entire point is riding between average and peak.
 
+</details>
+
 **Q5. Why stream over SSE rather than WebSocket or returning the full response?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* During generation the flow is **server→client only** - the client already sent the whole prompt - so SSE gives exactly what's needed: one-way over plain HTTP/2, auto-reconnect, no custom framing, one `data:` event per token. WebSocket's bidirectionality is unused weight (its own protocol, keep-alives, framing). Buffering the full response discards the core UX - watching words appear - and inflates perceived latency from **TTFT (~1 s)** to **total generation (~15-25 s)**. The wrinkle SSE adds is operational: long-lived streams complicate load-balancer draining and rollouts (in-flight streams must finish), handled with graceful drain.
+
+</details>
 
 ---
 

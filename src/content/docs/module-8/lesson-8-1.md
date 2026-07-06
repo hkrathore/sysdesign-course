@@ -305,19 +305,49 @@ Thousands of tables, millions of files, many teams, who can read PII, what's aut
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through how data gets from a production Postgres table to a finance dashboard.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* CDC streams Postgres row changes into **bronze** as raw, append-only, retained, idempotent on a load id. A scheduled transform (Spark/dbt) applies those changes with an atomic `MERGE` into a **silver** `customers`/`orders` table, snapshot-isolated so analysts never see half-applied state, cleaning types, timezones, and dedup along the way. Business logic rolls silver into a **gold** `finance.revenue` dimensional mart, partitioned by day, clustered by region. The BI tool queries gold over a right-sized compute pool, pruning to the requested days so it scans MBs. Everything is Iceberg/Delta on Parquet in object storage, one copy; the catalog governs access and records lineage so finance can trace the number to its source. If a transform bug is found, I re-run from retained bronze, no data loss.
 
+</details>
+
 **Q2. Snowflake is turnkey and great. Justify the extra complexity of a lakehouse.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* At moderate scale and BI-first, I'd *use* Snowflake, the turnkey governance and zero assembly are worth it. The lakehouse earns its complexity at *this* profile: PB-scale storage where open object storage + tiering is multiples cheaper than warehouse storage; **ML/data science that must read the same data as files** without a costly export; and a strategic mandate to avoid lock-in. Crucially the choice is converging, Snowflake and BigQuery now query external Iceberg tables, so I can keep data in open lakehouse storage and still point a managed engine at it, getting warehouse ergonomics on open, cheap, ML-readable data. The complexity (catalog, compaction, layout) is real, and it's the price of cost + openness + one-copy-for-ML at scale. Below that scale, I wouldn't pay it.
 
+</details>
+
 **Q3. A streaming source is creating millions of tiny files and queries got slow. What happened and what do you do?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The small-files problem: frequent micro-commits each write tiny Parquet files, and query planning must open every file's footer and schedule a task per file, so I/O and metadata overhead dominate. Fixes: schedule **compaction** (`OPTIMIZE`) to coalesce into ~100 MB–1 GB files; use **merge-on-read** for the write-heavy streaming table so writes stay cheap, with periodic compaction to keep reads fast; and tune ingestion to buffer toward larger files. The table format manages this safely (compaction is an atomic commit). It's the most common lakehouse performance failure, and the fix is operational hygiene, not a bigger cluster.
 
+</details>
+
 **Q4. How do you handle a GDPR (General Data Protection Regulation) "delete this user's data" request across a petabyte lake?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Raw Parquet can't delete a row; the **table format can**. A `DELETE FROM ... WHERE user_id = ?` (or a `MERGE`) is an atomic, snapshot-isolated operation, merge-on-read writes delete files merged at read time, then compaction physically removes the data. I'd also ensure the data is **partitioned/clustered** so the delete touches few files, not the whole table, and use **lineage** to find every table derived from that user's data (bronze, silver, gold) and propagate the deletion. Time-travel snapshots must be expired past the compliance window so the deleted data doesn't linger in old snapshots, a real gotcha. This is exactly the kind of update raw-file lakes can't do and the table format makes tractable.
 
+</details>
+
 **Q5. What does this platform cost, and what would you delegate?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two bills: **storage** (~PB on object storage, controlled by tiering cold partitions, on the order of tens of thousands/month, not the naive all-hot figure) and **compute** (dominated by **bytes scanned**, controlled by partitioning/clustering/pre-aggregation, the difference between \$600k/mo naive and single-digit-thousands pruned). I own the *policies*, every large table partitioned and compaction-scheduled, per-team cost attribution, query guardrails. I delegate, with priors, the **table-format bake-off** (Iceberg unless Databricks-centric), the **warehouse-vs-lakehouse crossover model** (prior: lakehouse past our volume), and **per-table CoW/MoR + compaction tuning** (platform team). What I keep is the architecture, decoupled storage/compute, open table format, medallion + retained raw, and scan-cost-by-layout.
+
+</details>
 
 ---
 

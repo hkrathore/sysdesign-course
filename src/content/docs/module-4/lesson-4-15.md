@@ -299,19 +299,49 @@ Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate fires/sec and due-poll load for 100M live timers, why is the average misleading?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Uniform: `100M ÷ 86,400 ≈ 1.2K fires/s`, small. But fires clump at round cron times: 30% pinned to midnight is **30M fires in one second**, ~4 orders of magnitude above average; against a 50K/s drain that's a 600 s daily cliff. So I size for the herd and smear it with a jitter window. The due-poll is cheap in count (~8 scans/s across 16 shards) but each is a `SKIP LOCKED` claim over the time index, the cost is lock + scan pressure, which is why I shard by `hash(job_id)` and keep history out of the table. The storage that matters isn't the 10 GB live set; it's the ~7 TB/yr history firehose, which must be tiered.
 
+</details>
+
 **Q2. "We'll elect a leader, so each job fires exactly once." Pressure-test that.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Election only stops two schedulers firing *simultaneously*. Two gaps remain: a **failover window** ≈ the lease TTL where no one fires (jobs late or missed), and a **zombie leader** that resumes after a pause and double-fires unless every enqueue is **fenced with a monotonic epoch** the store rejects when stale. Execution is *also* at-least-once (crash-before-ack → redelivery). The correct claim is **exactly-once-effect**: idempotency on `(job_id, fire_time)` via a unique constraint, so duplicates from either source collapse while the next recurrence still runs, plus epoch fencing and a chosen catch-up policy. Not "the leader makes it exactly-once."
 
+</details>
+
 **Q3. Why shard by `hash(job_id)` and not by `fire_time`?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The due-poll always asks for `fire_time ≤ now`. Partitioned by time, **every due job at any instant lives in the single current partition**, a screaming hot shard taking all scan, lock, and write load while future partitions idle. Hashing `job_id` spreads 100M timers evenly across P shards, each owner scans only its ~100M/P slice with no cross-shard contention, throughput scales ≈linearly, and adding a shard remaps only ~1/P of jobs. The `fire_time` index still time-orders *within* each shard, time just isn't the partition key. The cost I name is rebalancing on churn, far cheaper than a permanent hot shard.
 
+</details>
+
 **Q4. When would you choose at-most-once (skip) over at-least-once (catch-up)?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Catch-up** when the run must happen and a late run still has value, billing, reports, pipelines: if the failover gap missed the nightly billing fire, the recovered owner fires it late, and idempotency on `(account_id, billing_date)` makes duplicates a no-op. **Skip** when a stale run is worse than none, "emit the current price every minute": a 5-minute-old price emitted after recovery is misleading, so skip the missed fires and resume from now. The decision is purely requirements, does a delayed run carry value, or is freshness the point? That's why `fire_policy` is a per-job field, not a global mode.
 
+</details>
+
 **Q5. Run-history is growing ~7 TB/year and the due-poll is slowing. Diagnose and fix.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* History is bloating the hot instance table, if outcomes append to the table the due-poll scans, the `fire_time` index grows unbounded and every range scan (and its lock hold) slows. Fix: **separate the firehose from the index.** Keep the live table lean, only scheduled/in-flight rows, the `(shard_id, fire_time)` index, no secondary indexes, write outcomes to an append-optimized store (Cassandra/DynamoDB) with a 14-90-day TTL rolling to S3/Parquet, and purge completed instance rows promptly so the working set stays ~10 GB and RAM-resident. Trade: history queries hit a slower store, fine, history is read rarely; the due-poll is on the critical firing path.
+
+</details>
 
 ---
 

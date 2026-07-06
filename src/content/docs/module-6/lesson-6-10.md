@@ -235,16 +235,40 @@ The promise ledger can deliberately overbook, airline-style: some reservations n
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. The courier scans in; no free slot of the right size. Now what?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Bind-time fallback chain: next size up (an M in an L, wastes capacity, saves the delivery), then the nearest location in a small radius, then courier redirect, each step logged against the <2% SLO (service-level objective). But the real answer is upstream: this mostly happens when `AWAITING_RETURN` slots were counted as promisable, so the fix is the ledger, expired-but-uncollected packages subtract from `available_count`, and the carrier return sweep becomes a capacity-critical operation with its own SLA, not housekeeping.
 
+</details>
+
 **Q2. Why a 6-digit code? Couldn't someone guess it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The space is 1M codes against ≤100 active packages per location, and codes are scoped per location, so a guess must also be at the right kiosk. The defense is rate, not entropy: 5 attempts then lockout and alert makes brute force need ~2,000 visits for a coin-flip on one package; longer codes punish every legitimate customer to defend against an attack the rate limit already kills. I'd delegate the threat model to security with that prior, holding one requirement: single-use redemption via conditional update, so a shoulder-surfed code dies on first use.
 
+</details>
+
 **Q3. Amazon wants same-day delivery to lockers. What changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Transit drops toward zero, collapsing the reserve-early tax, promise-to-bind shrinks from ~2 days to ~2 hours, so hard-reserving the physical slot at checkout becomes affordable (`dwell 1.5 + 0.1` vs `1.5 + 2`) and eliminates bind-time misses. The Strategy seam absorbs it: hard-bind for same-day orders, two-phase for standard. The deeper change is demand shape, same-day concentrates arrivals into evening windows, so the eligibility filter must project hour-level, not day-level, occupancy.
 
+</details>
+
 **Q4. 35 minutes, cold. How do you split them?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* ~8 on R, scoping is the scored event; every actor pinned now is an ambush avoided later. ~4 on E, Little's law and the dwell-tax division, the one number that picks the allocation design. ~15 on S/H/D, entities, the two state machines, two-phase allocation with one rejected alternative each. ~5 on Evaluation, volunteer the expiry-reclaim trap and the last-bucket race unprompted. ~3 in reserve for the curveball. Deliberately skipped: APIs beyond a sketch, hardware, any optimization I can't tie to a requirement. Saying "I'm cutting X" out loud is most of the grade.
+
+</details>
 
 ---
 

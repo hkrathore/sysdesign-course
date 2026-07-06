@@ -292,19 +292,39 @@ The through-line at Director altitude: **own the GPU economics and the safety/le
 
 **Q1. Walk me through what happens, end to end, when a user submits a prompt — including where you spend a GPU-second and where you don't.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Submit API authenticates and **checks quota** (cheap). It runs the **prompt safety filter inline** — if the prompt is blocked, return `400` and **spend zero GPU** (safety + cost both win here). Otherwise write a `QUEUED` job, enqueue on the user's tier queue with per-user WFQ, return `202 + job_id`. A warm **GPU worker** pulls the job per fairness, renders ~30 steps (batched with siblings), then the **image gate** runs (NSFW classifier + CSAM hash + likeness). Pass → object store + CDN + metadata + `DONE` + webhook. Block → quarantine + audit + (CSAM) report. The only GPU-second is step 4, and we gate cheaply before it and mandatorily after it.
+
+</details>
 
 **Q2. Your free tier is losing money per image. What do you change, in order?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First, **measure effective $/image** = GPU-seconds × $/GPU-hr ÷ *actual* utilization — the loss is usually low utilization from peak-provisioning, not the kernel. Then: (1) route the free tier to a **distilled 1–4-step model** (~8–30× fewer GPU-seconds) — biggest lever; (2) **flatten utilization** by letting free-tier jobs queue longer and run on **spot/preemptible GPUs** (interruptible, re-queue on preemption); (3) **batch** more aggressively; (4) **cache** identical (prompt, seed, params); (5) tighten free **quotas**. Only after all that consider capacity changes. Quality trade: distilled output is slightly lower fidelity — acceptable on the free tier, and the user can pay for the flagship model.
+
+</details>
 
 **Q3. The flagship model takes 4 s/image and product now wants a "real-time" feel. How do you deliver it without buying 10× the GPUs?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Don't make the 30-step model faster — **change the model.** Stand up a second worker pool running a **distilled few-step model (LCM/Turbo/Lightning)** that renders in sub-second–~1 s, and **route by tier/request**: real-time tier → fast pool, "high quality" → async flagship pool. Same queue/worker architecture, a quality/speed knob exposed to the user (the GPU analog of model cascades). It's *cheaper*, not more expensive, because distilled steps cut GPU-seconds — so it improves both latency and margin, at a modest fidelity cost the user opts into.
+
+</details>
 
 **Q4. How is your burst defense different from the autoscaling you'd use for a stateless web tier?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A stateless web tier scales in seconds, so reactive autoscaling on CPU/RPS (requests per second) works. A GPU worker's **cold start is dominated by loading multi-GB weights into HBM (tens of seconds)**, and spare H100s may not even be available on demand — so reactive autoscaling **can't catch a spike**. The defense is therefore **pre-warm a pool sized for the known (diurnal 5×) peak**, let the **queue absorb overflow** with graceful latency degradation, **shed/deprioritize free tier** under backpressure, and **preempt for paid jobs**. Autoscaling only adjusts the *baseline* slowly; it is never the burst defense.
+
+</details>
 
 ---
 

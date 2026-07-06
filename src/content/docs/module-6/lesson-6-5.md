@@ -256,16 +256,40 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Sketch your core interface and defend its shape.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* `Decision allow(clientId, resource)` on the facade; `Decision tryAcquire(state, rule, now)` on the Strategy. Three choices: **`Decision`, not boolean**, the caller needs `retryAfter` and remaining quota for 429 headers; **check-and-consume in one call**, separate check/consume is a TOCTOU gap the contract must make impossible; **time injected, monotonic**, wall clock steps backward under NTP and mints free tokens. Strategies stateless and shared; per-client state in a locked map entry, the factoring that later lets state move to Redis.
 
+</details>
+
 **Q2. When would you actually pick the sliding-window log, given its memory cost?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When the limit is small and a false *accept* is the expensive error. At 1,000 req/min the log is 8 KB/client, 8 GB for a million clients, dead as a default. At 5 attempts/hour on password reset it's 40 B, free, and exact: no boundary burst, no burst allowance (a bucket's forgiveness is precisely wrong for brute force). Bucket as fleet default for revenue paths; the log for low-limit security rules, a per-rule config line, which is why the seam exists.
 
+</details>
+
 **Q3. Your limiter is correct on one node. Production runs 40 nodes behind an LB. Walk me up.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Local enforcement is now globally wrong, 100/min per node is up to 4,000/min for a spraying client. Three rungs: **divide by N** (free; breaks on traffic skew and every autoscale); **consistent-hash clients to nodes** (globally correct per client; fragile on churn, hijacks LB policy); **Redis with atomic Lua**, the 3.10/the rate-limiter problem design, ~1 ms per request against my 50 µs budget, so the practical winner is the **hybrid**: local burst allowance with async sync. Posture: **fail open with an alarm**, fail-closed converts a Redis blip into a self-inflicted outage. The class survives the climb: the shared store is another state store behind the same seam.
 
+</details>
+
 **Q4. Why per-client locks rather than lock-free CAS?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* CAS is faster under contention, and the contention doesn't exist: distinct clients never share a lock; a client racing itself spends sub-µs in the critical section. CAS costs real things: bucket state must pack into 64 bits, the log can't pack at all, two concurrency models in one codebase. **Decision: per-client locks; platform team benchmarks CAS; prior: the lock loses under a microsecond and wins maintainability.**
+
+</details>
 
 ---
 

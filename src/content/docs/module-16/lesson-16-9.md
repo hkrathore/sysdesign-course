@@ -279,16 +279,40 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Both engineers refuse to budge after your two-week process. The timebox expires today. What happens?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The decider decides today, that's what the timebox is for. Consensus was never the exit criterion; an auditable decision was. The decider is the tech lead who'll operate the result; I'm the approver and I override only on budget, risk posture, or strategic conflict, none of which apply here. Both dissents (if both remain) go into the ADR by name with tripwires. The cost math is the justification: the blocked workstream burns ~$40K/week, and nothing new will be learned in week three that wasn't known in week two, past the timebox we're paying for comfort, not information. If the deadlock pattern *recurs* across decisions, that's a different problem, a missing technical strategy that should be pre-deciding these at the principle level, and that one lands on my desk, not the decider's.
 
+</details>
+
 **Q2. Why not just adopt event-driven now? You admit it wins at 10x, you're knowingly building technical debt.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's not debt, it's a priced option. Choreography now costs ~5× the build, $200-300K/yr more to run, and a first-Kafka-on-the-money-path risk premium I estimated at $100-200K in year-one incidents, purchased two years before the requirement sheet needs the headroom, operated by a team that hasn't earned the competence. The hybrid buys B's entire evolvability case for ~2 weeks and $1.5K/month: the outbox stream is the migration seam, exercised from day one by non-critical consumers, so the team builds streaming muscle where failure is cheap. When the tripwires fire, we migrate incrementally with operators who've run the substrate for two years. Pre-buying capability ahead of both the requirement and the team is how platform bets die, I'd rather pay a small option premium than a large insurance premium on a risk we don't yet have.
 
+</details>
+
 **Q3. Your criteria matrix scored A at 45 and B at 29. Doesn't that make the decision mechanical, why do we need you?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The matrix is an argument-structurer, not a decider, three reasons it can't be mechanical. First, the weights are judgment: weighting operational risk ×3 versus evolvability ×2 *is* the decision, encoded; my job is making the room own those weights before scoring, while the outcome is unknown. Second, the matrix's real output wasn't the totals, it was the shape: B's case lived in a single row, which is what prompted "can we buy that row cheaply inside A?" A mechanical reading picks A and walks away; the interrogated reading produced the hybrid, which beat both pure options. Third, matrices are gameable, score-stuffing by an invested author is normal human behavior, which is why criteria are signed first and scores are set by the consulted group, not the authors. The matrix makes the judgment auditable. It doesn't replace it.
 
+</details>
+
 **Q4. A year in, the `OrderPaid` consumer fleet has grown to eight teams and two of them are demanding stronger ordering and exactly-once delivery. Re-decide?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First check which document this challenges. The requirement sheet promised at-least-once with per-order ordering, that's what an outbox on a partitioned stream gives (consumers idempotent by `event_id`). Two teams wanting exactly-once is a new requirement, so it goes through the process, not through a hallway: what do they actually need? Nine times out of ten "exactly-once" means "my side effects fired twice," which idempotent consumers fix for the cost of a dedupe key, I'd have their tech leads bring the concrete duplicate-driven failure, and my prior is that idempotency closes it. If a genuine end-to-end transactional need survives that scrutiny, say, financial ledger consumers, that's a scoped sub-decision (transactional stream features or a dedicated ledger pipeline) for those two consumers, not a re-platform of eight. The tripwire that *would* reopen ADR-014 is sync-coupling pressure on the orchestrator, and that one, notably, never fired, the stream absorbed all eight teams.
+
+</details>
 
 ---
 

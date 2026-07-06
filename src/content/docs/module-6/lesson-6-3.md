@@ -272,16 +272,40 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. The motor jams after the customer paid $2.00 for a $1.50 item. Walk the exact sequence.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* `Collecting` validated stock, credit, and `canMake(50¢)`, journaled `VEND_START`, fired the motor, returned `Dispensing(slot, 200¢)`. The jam sensor (or 5 s timeout) fires `onJamDetected`: journal `VEND_FAIL`, transition to `Refunding(200¢)`, **full** credit, no product moved, and flag the slot suspect. I reject retrying: a second pulse on a jammed helix can release two units. If the refund itself faults, `Refunding → OutOfService` with the owed amount journaled.
 
+</details>
+
 **Q2. Power dies 1 second into the dispense. How do you not eat the customer's money?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The append-only journal is written **before** the motor fires, `VEND_START {txn_id, slot, 200¢}`. On boot, a `VEND_START` with no `VEND_OK/FAIL` is in-doubt: trust the latched drop flag if present, else resolve in the **customer's favor**, journal a `REFUND`, pay it. The `txn_id` makes recovery idempotent: a second power cut during reconciliation can't double-refund. Cost: an occasional free item, versus silently eating money thousands of times daily fleet-wide. The ATM variant is the identical probe, journal before the irreversible cash-out, reverse the debit if dispense is unconfirmed.
 
+</details>
+
 **Q3. Defend the State pattern against "just use a switch statement."**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* By maintenance cost, not doctrine. 6 states × 8 events = 48 cells, ~15 legal. Switch-and-flags makes the other 33 *implicit*, and 4 booleans give 16 representable combinations for 6 meaningful states, illegal configurations type-check. Adding one state touches ~8 handler sites under a switch, versus one new class with illegal events rejected once in the base class. Where the alternative wins: a table-driven FSM beats both when transitions are config-like, so I keep its table as a **unit test** asserting every cell is a documented transition or explicit rejection.
 
+</details>
+
 **Q4. Product asks for card and NFC next quarter. What changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* One new state and a widened port, the core is untouched. Payment grows to a `PaymentSession` lifecycle: `authorize → capture → release`. Selection enters `AuthPending` (~10 s timeout → abort); on drop-confirmed we **capture**; on jam we **release the auth**, compensation becomes free, inverting which failure is expensive. I reject capture-before-dispense: it recreates the jam-refund problem on a rail where refunds take days. Cash retrofits onto the same lifecycle, so the dispense states and journal don't change. PCI scope goes to the payments team, capture-on-dispense prior stated.
+
+</details>
 
 ---
 

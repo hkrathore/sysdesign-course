@@ -130,16 +130,40 @@ The Director-altitude signal throughout: you treat CAP/PACELC as a **lever you s
 
 ### Practice questions
 **Q1.** A candidate says "we'll use a CA database for our core service so we never have to choose." How do you respond?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* CA isn't a runtime option for anything spanning a network, partitions are inevitable (NIC/switch/fiber failures, GC pauses, overloaded links), so P is a given. The real choice under partition is **CP** (stay correct, minority stops) or **AP** (stay available, reconcile later); "CA" only describes a single node or the no-partition moment. I'd ask them to specify, per operation, whether correctness or uptime wins when the network breaks, and to name the cost of the side they drop.
 
+</details>
+
 **Q2.** Two systems are both "eventually consistent and highly available." One reads from the nearest replica by default; the other always routes reads through a record master. Same CAP class, how does PACELC distinguish them?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* CAP only sees the partition; both are AP there. PACELC separates them on the **Else**: the nearest-replica reader is **EL** (favors latency, ~1-5 ms local reads, accepts staleness), classic Cassandra/DynamoDB defaults; the master-routed reader is **EC** (favors consistency normally, pays the extra hop/coordination, e.g., cross-AZ latency), the majority-concern MongoDB / PA/EC pattern. So they're **PA/EL** vs **PA/EC**: identical under partition, opposite on a normal day, which is precisely the everyday cost CAP can't express.
 
+</details>
+
 **Q3.** You're told "make the feed strongly consistent" on a Cassandra-backed feed running `R=1,W=1`. What do you do, what does it cost, and would you push back?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Mechanically: raise the quorum so **W + R > N** (e.g., `N=3, W=2, R=2`) → reads now overlap the latest write set, moving the store's **E** behavior from **EL** to **EC**. Cost: every read/write now waits on a majority of replicas (often cross-AZ), so latency rises from ~1-5 ms toward ~5-15 ms+ and availability drops (you need 2 of 3 up, not 1 of 3). Director pushback: *does the feed's requirement actually justify it?* Feeds are the canonical PA/EL case, staleness is usually invisible. I'd confirm the real NFR (non-functional requirement) before paying a latency/availability tax on a path that rarely needs it, and likely reserve strong consistency for the ledger, not the feed.
 
+</details>
+
 **Q4.** Reconcile: "Spanner is CP" with "Spanner offers five-nines availability." Is that a contradiction?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No. "CP" describes the choice made *in the instant of a partition*, the minority replica set stops serving to avoid divergence, and that moment is rare. Yearly availability (five-nines = ~5 min/year of downtime) is an aggregate dominated by the 99.99%+ of time with no partition, where Spanner is fully available; redundant paths and TrueTime keep partitions short and infrequent. CP is about *which property you drop when forced*, not how often you're down.
+
+</details>
 
 ### Key takeaways
 - CAP's real statement: **under a partition you must forfeit C or A**, not "any two of three"; the rest of the time you have both.

@@ -191,16 +191,40 @@ The signal isn't any single pick - it's that **eviction, sharding, replication, 
 
 ### Practice questions
 **Q1.** You front Postgres with Redis at 50,000 read QPS and a 90% hit rate. A product launch makes one item 100x as popular; minutes later the site is down with database timeouts. Diagnose and fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two coupled problems. (1) **Hot key:** the launch item pins a single shard - consistent hashing balances keys, not load on one key - so that shard saturates. (2) **Stampede:** when the hot key's TTL expires, the thousands of requests it was absorbing all **miss simultaneously** and hit Postgres for the same row; Postgres, sized for the normal miss rate, falls over, and the cache can't refill while it's down - a self-sustaining outage. Fixes, layered: **request coalescing** so one miss does the origin read; **TTL jitter** so keys don't expire in lockstep; **replicate the hot key** across nodes or add an in-process L1. Each costs something (waiter latency, memory, cross-copy staleness), but they convert a hot-key expiry from an outage into a one-query blip.
 
+</details>
+
 **Q2.** When would you run the cache with **no replication** at all, and when is that negligent?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No replication is right when the cache is a **pure performance layer** over an origin that **can absorb a lost shard's miss surge** - replicating doubles memory cost to defend a failure the database already survives. It becomes **negligent** when (a) the origin can't absorb the surge - losing a shard at peak stampedes it into an outage - or (b) the data is expensive to recompute, so a cold shard cripples latency for minutes. Then you pay **2x memory** + a failover system. The tie-breaker is **blast radius**: compute the QPS a lost shard dumps on the origin and ask whether the origin survives it *with* stampede control. Crucially, replication here is **not** about durability - Redis replicates async and can lose acked writes on failover - it's about keeping the cache **warm**.
 
+</details>
+
 **Q3.** A teammate proposes write-back to Redis as the system of record for a shopping cart "to make writes instant." Walk them through the risk.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Write-back acks at cache speed and flushes the database asynchronously, so between ack and flush the **only** copy of the write is in Redis memory. Two compounding hazards: (1) **eviction** can drop a not-yet-flushed key under memory pressure, and (2) **async replication** means a primary can ack, die, and the promoted replica **never had** the write. Either way the cart write is gone with no origin to recover from. The fix: the **database is the source of truth** - use cache-aside or write-through so every cart write is durably persisted before (or with) the cache, accepting higher write latency for a cart you cannot lose. Write-back is acceptable only for **reconstructable** data with a tolerable loss window (view counters) - never authoritative state.
 
+</details>
+
 **Q4.** Same Redis cache, two keys: a product's `like_count` and a user's `can_view_account` authorization result. Same caching policy for both? Justify.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No - the **cost of a stale read differs**, so the consistency boundary differs. `like_count` is derived and tolerant: a few seconds stale is invisible, so **cache-aside with a short TTL** (plus stampede control if hot) maximizes hit rate at negligible correctness cost. `can_view_account` is an **authorization** decision: a stale "allowed" after revocation is a **privacy bug**, not a latency trade. Either don't cache it, or cache with a very short TTL + write-through and tight invalidation on any permission change, or read from source on the access decision. Applying one blanket TTL to both is the mistake.
+
+</details>
 
 ### Key takeaways
 - A cache earns its place on **hit rate**: 90% sheds 10x of origin reads; because **misses size the origin**, a few points of hit rate is a real cost lever, and **eviction + stampede control are how you move it** - not tuning trivia.

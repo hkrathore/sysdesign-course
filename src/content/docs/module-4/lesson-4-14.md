@@ -325,19 +325,49 @@ If the queue dies, the gate fails open (stampede) or closed (no sales).
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Two fans click the same seat in the same instant. What stops a double-sell?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The claim is a single atomic conditional update, not a read-then-write: `UPDATE seats SET status='HELD', ... WHERE event_id=? AND seat_id=? AND (status='AVAILABLE' OR (status='HELD' AND expires_at<now()))`. The store serializes writes to the row: exactly one statement affects 1 row; the loser sees 0 rows and instantly returns **409 - pick another seat**, holding no lock. Multi-seat is the same predicate inside one transaction, all-or-nothing. This is a deliberate CP posture - I chose a strongly-consistent store precisely so this single-statement CAS is the entire oversell defense. The queue is *not* part of it; it only controls how many attempts arrive per second.
 
+</details>
+
 **Q2. Justify the waiting room beyond "fairness."**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Its real job is **rate control on the strongly-consistent core**. I shard inventory by `event_id` for transaction locality, which puts a mega-event on one shard - a hot partition a 33K/s spike would melt. The waiting room admits ~2K/s, bounding the write rate onto that shard to what a CP node sustains. **Event-sharding is only safe *because* the queue caps the per-event rate - they're co-designed.** Fairness and bot-gating are bonuses. It's also deliberately low-state and edge-scalable (Redis sorted set behind a CDN page) so it survives the spike that would kill the origin, and it fails closed if it degrades.
 
+</details>
+
 **Q3. Your payment processor takes 9 seconds. What goes wrong?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The risk is a race between the hold TTL and payment completion. Three defenses: (1) the TTL (10 min) sits far above worst-case PSP latency, so the common case never races; (2) purchase is idempotent via a unique key, so a timeout retry doesn't double-charge; (3) the `HELD -> SOLD` conversion re-asserts the hold inside the same transaction - if it expired and the seat was resold, conversion fails and triggers an automatic refund/reconcile, which is rare. Payments and PCI I delegate behind `charge(idempotencyKey, amount, token)`. The trade: a generous TTL locks abandoned seats longer - accepted to make the race vanishingly rare.
 
+</details>
+
 **Q4. General admission, 10,000 capacity. What changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The contention shape flips from many seat-rows to **one hot counter**: a single `avail` per section, claimed with a conditional decrement that can't go negative (`... SET avail=avail-1 WHERE avail>0`). Same CAS principle - one decrement wins per unit; 0 rows means sold out. The new problem is that one row is the whole section's write hotspot, so I **shard the counter**: split 10,000 across ~10 shards, decrement a random shard, sum on read. Trade-off: the exact remaining count becomes approximate (you sum shards) in exchange for ~N× write throughput - fine, because "sold out" only needs all shards drained.
 
+</details>
+
 **Q5. Why not just one big Postgres? Steady state is ~115 writes/s.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Steady state *is* trivial - that's the trap. The design exists for the **33K/s flash spike concentrated on one event's rows**, which would saturate one node with brutal lock contention, and for keeping the 12K-reads/s browse/search firehose off the sacred inventory DB. So: a small, strongly-consistent, `event_id`-sharded store for inventory + orders + payments only, fed at a queue-capped ~2K/s, with catalog/search/seat-map pushed to an eventually-consistent edge tier. One Postgres conflates a CP correctness core with an AP read firehose - the whole design is about keeping those apart.
+
+</details>
 
 ---
 

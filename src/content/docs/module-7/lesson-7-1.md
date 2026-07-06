@@ -128,16 +128,40 @@ The through-line at Director altitude: reason in **freshness, scan-cost, volume,
 ### Practice questions
 
 **Q1.** Stakeholders ask you to "just add a dashboard" on top of the production orders database. Walk through your response.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd push back on querying production directly: an analytical dashboard runs unselective aggregate scans (`SUM`, `GROUP BY` over all orders), which on a row-oriented OLTP store reads every column of every row and competes with the point-lookup traffic that serves customers, risking latency regressions on the paying path. Instead I'd land the data in an analytical store, CDC-replicate `orders` into a columnar warehouse or lake, pre-aggregate to the dashboard's grain, and serve from there. Freshness: if a day old is fine, an hourly batch; if they need live, a separate real-time path, not this one. The cost is set by bytes scanned, so I partition by day and project only needed columns. Net: the dashboard is fast and cheap, and production is untouched.
 
+</details>
+
 **Q2.** Estimate the monthly cost of a dashboard that scans a 3 TB events table on every refresh, refreshed 200×/day, on serverless \$5/TB pricing. Then name the cheapest fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Per refresh: 3 TB × \$5/TB = **\$15**. Per day: 200 × \$15 = **\$3,000**. Per month: ~**\$90,000**, for one dashboard, the runaway-cost failure mode. The cheapest fix is **not** a bigger cluster or a cache; it's cutting bytes scanned: **pre-aggregate** the events into a daily rollup table the dashboard reads (megabytes, not terabytes) and **partition by day** so even ad-hoc queries prune. That turns ~\$90k/mo into tens of dollars. Layout and pre-aggregation are the lever; this is the core analytical cost discipline.
 
+</details>
+
 **Q3.** A VP says "the revenue dashboard and the finance report disagree by 3%, which is right?" What's actually going on and how is it prevented?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Almost certainly two paths computing "revenue" with slightly different logic, definitions (gross vs net, timezone of "day," late-arriving refunds), or freshness (the dashboard is a fast approximate stream; finance is the settled batch), the same speed-vs-truth split as the billing-batch problem. Neither is "wrong"; they answer subtly different questions. Prevention: a **single governed definition** of the metric (one dbt model both consume), explicit handling of late events and timezone, and **lineage** so each number's source and logic are inspectable. The Director point: this is a *governance and modeling* problem, not a query bug, and it's why a semantic layer and metric ownership exist.
 
+</details>
+
 **Q4.** Why is "decoupled storage and compute" the defining feature of modern data platforms, and what does it let you do that an old on-prem Hadoop cluster couldn't?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* In the old model, storage and compute were bolted together on the same nodes (HDFS (Hadoop Distributed File System) + MapReduce), so to store more you bought compute you didn't need, and to compute more you bought storage you didn't need, and the cluster ran 24/7 sized to peak. Decoupling puts data in cheap object storage (S3, pennies/GB-month) and points **elastic, ephemeral compute** at it: you scale them independently, run ten isolated warehouses on one copy of the data, spin compute to zero when idle, and pay per scan or per cluster-hour. The consequences a Director cares about: cost tracks usage not peak provisioning, teams don't contend for one cluster, and storage growth is nearly free. It's the same "pay for usage, not provisioned capacity" shift that makes serverless attractive elsewhere.
+
+</details>
 
 ### Key takeaways
 - **OLTP vs OLAP is the foundational divide:** operational stores answer "this entity now" with point access; a data platform answers "all entities over time" with scans, and serving one from the other is the classic, costly mistake. Get the data into a separate analytical store.

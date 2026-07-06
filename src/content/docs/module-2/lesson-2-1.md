@@ -78,13 +78,31 @@ flowchart LR
 
 ### Practice questions
 **Q1.** Why might you deliberately set a low DNS TTL, and what's the cost?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Low TTL enables fast failover/traffic shifting (repoint within seconds). The cost is more frequent resolver lookups (load, marginal latency) and reliance on clients/resolvers honoring the TTL, and many don't honor it exactly, so DNS failover is a best-effort floor, not a guarantee. For tight RTOs (recovery time objectives), pair it with anycast or a global L7 LB.
 
+</details>
+
 **Q2.** A client complains the *first* request to your API is slow but subsequent ones are fast. What's likely, and what would you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Cold-path costs: DNS lookup (uncached), TCP + TLS handshakes (multiple RTTs, worse cross-region), and possibly connection-pool warm-up. Mitigations: edge TLS termination near the user, TLS 1.3 / 0-RTT resumption, HTTP/2 or HTTP/3 connection reuse, and keeping warm connection pools.
 
+</details>
+
 **Q3.** When is a forward proxy the right tool rather than a reverse proxy?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When the concern is *client-side*: corporate egress control/filtering, outbound caching, or anonymizing/representing clients reaching external services. A reverse proxy solves *server-side* concerns (fronting, balancing, terminating, protecting your backends). They're not interchangeable, they sit on opposite ends of the connection.
+
+</details>
 
 ### Key takeaways
 - The request path is DNS → TCP → TLS → HTTP; each cross-region RTT is ~150 ms, so terminate handshakes near the user.

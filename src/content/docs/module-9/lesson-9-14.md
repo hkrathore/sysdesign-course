@@ -134,16 +134,40 @@ The through-line at Director altitude: **the question is no longer "is the outpu
 ### Practice questions
 
 **Q1.** You're giving an IT-helpdesk agent the ability to take actions. Walk me through how you decide what it can do autonomously.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Enumerate the actions and place each on a reversibility-and-impact grid. Account/ticket lookups → **full-auto** (reversible, read-only credential). Password reset for the *requesting user's own* account → **bounded-auto** under hard guardrails (scoped to that user, rate-limited, out-of-band notification), escalating resets of other or privileged accounts. Account deletion/deprovisioning → **HITL with a dry-run preview** (irreversible, max blast radius). Credentials are scoped per-tool and short-lived so a write tool can only touch the right resource; limits are deterministic guardrails, not prompt text; and I start one rung more conservative than feels necessary, raising autonomy per-action as the audit log and trajectory eval prove it safe — *not* because the model scores well on a benchmark.
 
+</details>
+
 **Q2.** An attacker hides "delete all inactive accounts" inside a ticket your helpdesk agent ingests. The agent has account-management tools. What's your design so this can't cause a mass deletion?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Concede the model may be steered (injection isn't preventable). Containment: (a) **least privilege** — the delete tool is scoped per-account with a short-lived credential, so "all inactive accounts" is simply not an expressible operation and dies at authorization; (b) **HITL** — any account deletion is irreversible/high-impact and routes to human approval with a dry-run preview, so a person sees and rejects the bogus deletion; (c) **guardrails** — rate limits and an allow-list of operations; (d) the ticket text is treated as **untrusted data**, and the source is quarantined and flagged once detected. The injection can move the model; it can't move accounts, because impact is bounded outside the model.
 
+</details>
+
 **Q3.** How is evaluating this agent different from evaluating a Q&A model, and what do you measure?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A Q&A model is scored on output correctness. An agent can reach a correct answer through a harmful path, so I score the **trajectory**: tools called and in what order, whether it touched anything destructive, tokens/$ spent, loops/steps. Metrics: **task-success-rate** *and* a **safety-violation-rate** (forbidden tool calls, budget overruns, escape attempts), measured in a **sim environment** with seeded tasks, plus **red-team** suites that try to steer it into destructive actions. A run that succeeds on the task but trips a safety violation is a fail. (Ties to eval-as-a-gate.)
 
+</details>
+
 **Q4.** Who in your org is allowed to raise an agent from "approval-gated" to "bounded-autonomous," and how do you keep that safe?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Raising autonomy is a **production change**, so it goes through change control: a named owner proposes it with evidence (trajectory-eval and safety-violation numbers at the current rung, audit-log history showing the human approvals would have been rubber stamps), a reviewer signs off, and the change is logged. The new rung still has deterministic guardrails (caps, allow-list, scoped credentials) and a kill switch. Accountability for the agent's actions stays with the owning team — the agent is not a person and can't be accountable. (The org-wide policy and risk register are the AI-governance lesson's subject; here it's per-agent change control.)
+
+</details>
 
 ### Key takeaways
 - **The risk moved from words to effects.** A wrong agent *does* something irreversible. Design from "what can it do, and what's the blast radius when it's wrong?" — not from accuracy. (It builds on the text-I/O safety of the model-guardrails lesson.)

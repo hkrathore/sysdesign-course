@@ -340,19 +340,39 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 **Q1. Sender has $100. Two concurrent transfers of $80 each are submitted simultaneously. Walk through exactly what happens.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Both transfers start, both read balance $100 and pass the funds check (in the application layer). Both attempt the conditional UPDATE: `SET balance = balance - 80 WHERE account_id = :id AND balance >= 80 AND version = :v`. The DB serializes the row writes. One succeeds: balance becomes $20, version increments. The second sees 0 rows updated (balance is now $20, < $80, OR version mismatch) and returns INSUFFICIENT_FUNDS immediately, no lock held. The losing transfer is marked FAILED; the client returns a 400. The winning transfer proceeds to credit the receiver. Total debit: exactly $80. This is optimistic CAS on the account row, the same pattern as the seat claim.
+
+</details>
 
 **Q2. Your saga's credit step fails permanently (receiver shard is down for 2 hours). What happens to the sender's money?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The saga is in state DEBIT_COMMITTED, CREDIT_FAILED. The Transfer Service marks the transfer ROLLING_BACK and issues a compensating credit to the sender's shard (same shard, local transaction, idempotent by `transfer_id + COMPENSATION` key). The sender's balance is restored; the transfer is marked FAILED. The receiver never receives the funds. The sweeper monitors for ROLLING_BACK records and retries the compensation if it hasn't committed. *Trade-off:* the sender sees their money return after a delay (bounded by sweeper interval, ~30 s). The business must surface this as a "transfer failed" notification, not a silent PENDING that resolves itself. The compensation itself is a simple local credit on the sender's shard; its failure mode is a DB error, which the sweeper retries.
+
+</details>
 
 **Q3. When would you choose 2PC over saga for this problem?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd choose 2PC (via a distributed SQL system like CockroachDB or Spanner) when: (1) TPS is below ~2,000, so coordinator latency is not a bottleneck; (2) the team is small and the compensation-logic surface is a larger risk than coordinator availability; and (3) we are already running CockroachDB for other reasons. CockroachDB's 2PC uses Raft-replicated transaction records, so the coordinator SPOF is eliminated, commit latency is ~10-30 ms on LAN, bounded by Raft, not by a single pod restart. Above ~2,000 TPS or in cross-region deployments where cross-region 2PC latency (~100 ms) is untenable, saga wins on availability. The decision is a TPS threshold and a team-capability question, not a correctness one.
+
+</details>
 
 **Q4. A journalist reports that Venmo "created" money, some users see inflated balances. What likely went wrong, and how would your design prevent it?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three likely causes: (1) **floating-point arithmetic drift**, balances stored as FLOAT or DECIMAL with rounding errors, accumulated over millions of transfers; fix: integer cents. (2) **Failed compensation double-credited**, a saga compensation ran twice without idempotency; fix: unique constraint on `(transfer_id, entry_type)` in ledger_entries. (3) **Replay of ledger events without deduplication**, an event-sourced projector applied an event twice; fix: projector deduplication by `transfer_id`. In all cases, the reconciliation job catches the drift within 24 hours, without it, the drift compounds undetected. The fix is both the coding invariant (integer, idempotency) and the operational invariant (daily reconciliation run, alert on any drift).
+
+</details>
 
 ---
 

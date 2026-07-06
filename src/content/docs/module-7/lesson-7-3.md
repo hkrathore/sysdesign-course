@@ -119,19 +119,49 @@ The through-line at Director altitude: the decision is **architecture category**
 ### Practice questions
 
 **Q1.** A team has a cheap data lake, petabytes of Parquet on S3, read by Spark and Trino, but finance refuses to trust it for reporting. What's the architectural fix, and what does it add?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The lake has the economics but none of the guarantees, so it's a **swamp** for finance: a crashed write leaves a half-updated "table," concurrent pipelines produce torn reads, and there's no "as of quarter-end" snapshot. The fix is to put an **open table format** (Iceberg/Delta/Hudi) over the same Parquet files, turning the directory into a **lakehouse** table. That adds, as a metadata layer of snapshots and manifests over the existing files: **ACID commits** (the half-written partition never becomes visible), **snapshot isolation** (finance always reads a consistent point-in-time view while pipelines write), **time travel** (`AS OF` quarter-end for reconciliation and audit), **schema/partition evolution** (add columns without breaking readers), and **concurrent-writer safety**. Crucially this is *additive*, the files stay open Parquet on the same cheap object storage, so Spark and Trino keep reading them and ML needs no export. Warehouse guarantees, lake economics, no migration of the bytes.
 
+</details>
+
 **Q2.** Estimate the storage-cost difference between keeping 4 PB of mostly-cold analytical data in a managed warehouse's proprietary storage vs an open lakehouse on object storage, and name the non-cost factors that still matter.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* On object storage at **~\$23/TB-month** hot, 4 PB ≈ 4,096 TB × \$23 ≈ **~\$94k/month** if all hot, but cold analytical data tiers to **~\$1–4/TB-month**, so if ~80% is cold at ~\$2/TB-mo and 20% hot, it's roughly (3,277 × \$2) + (819 × \$23) ≈ **~\$25k/month**. A managed warehouse's bundled storage carries a premium over raw object storage (varies by vendor, but materially higher per-TB and far less aggressively tier-able), so the lakehouse is **multiples cheaper at this volume**, the storage line item that flips the decision at PB scale. But cost isn't the whole call: the warehouse buys **turnkey governance, best-in-class SQL, and zero assembly**, while the lakehouse demands you run a **catalog, compaction, and file-layout discipline**. The honest framing: lakehouse wins decisively on storage cost and openness at PB scale; the warehouse can still win on time-to-value and ops simplicity for a BI-first, ops-light shop.
 
+</details>
+
 **Q3.** Explain how an open table format gives ACID and time travel over plain files, in terms a peer architect would accept, without claiming it's magic.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's a **metadata layer over Parquet**, not a new storage engine. The format keeps a small metadata tree: a current **snapshot** points to **manifest** files, and each manifest lists the **data files** (Parquet) that make up the table in that snapshot, with per-file stats. A write never mutates Parquet in place, it writes **new** data files and then **atomically swaps in a new snapshot** that references them; that single atomic pointer swap *is* the ACID commit (all-or-nothing visibility), the same "commit is one small pointer flip" idea that makes object stores cheaply consistent. **Time travel** falls out for free: keep old snapshots and you can query the table **as of** any of them. **Snapshot isolation** falls out too: each reader pins a snapshot, so a concurrent writer's uncommitted files are invisible. And **schema/partition evolution** is metadata-only because changing the schema or partition spec just writes new metadata, not a rewrite of the underlying files. A proprietary warehouse owns a version of exactly this machinery; the table format gives it to you over **open files any engine can read**, that's the only real difference.
 
+</details>
+
 **Q4.** When would you deliberately *not* build a lakehouse, and choose a managed warehouse instead?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When the workload is **BI/SQL-first**, the scale is **moderate** (not PB-scale where storage cost dominates), the team is **small or ops-light**, and **time-to-value dominates.** The warehouse's whole value is being turnkey: best-in-class governed SQL, ACID, and access control with **zero assembly**, no catalog to stand up, no compaction to schedule, no file-layout tuning. The lakehouse's advantages (lowest storage cost, no lock-in, one copy for BI *and* ML) only pay off when you actually have **PB-scale storage** (so the object-storage cost gap is large), **ML/data science reading the same data** (so the no-export, open-format benefit is real), or a **strategic mandate to avoid lock-in.** Absent those, the lakehouse's extra moving parts are cost without benefit, and I'd start on a managed warehouse, while noting the two converge (warehouses now query external Iceberg), so I can adopt open tables later without a rip-and-replace. The Director point: match the architecture to scale, workload mix, and ops maturity, don't reflex to either extreme.
 
+</details>
+
 **Q5.** A candidate says "we'll use a data lake, just dump everything as Parquet on S3, it's cheap and open." Where does this go wrong and how would you reframe it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Cheap and open is the *upside*, and it's real, but "dump Parquet on S3" describes a **landing zone, not a system of record**, and used as the latter it becomes a **data swamp**. A directory of files has **no atomic multi-file commit** (a crashed job leaves a half-updated table), **no snapshot isolation** (readers see torn state mid-write), **no schema evolution** (add a column and break readers or mismatch old files), **no time travel**, and **no concurrent-writer safety**, and with no catalog, nobody knows which files are authoritative. I'd reframe: keep the open files and cheap object storage, but put an **open table format** (Iceberg/Delta/Hudi) over them so it's a **lakehouse**, same economics, plus ACID, snapshots, evolution, and time travel, and a **catalog** for governance and table-truth. That preserves the candidate's correct instinct (open + cheap) while fixing the fatal omission (guarantees). The specific format is a delegated bake-off; using *a* table format at all is non-negotiable.
+
+</details>
 
 ### Key takeaways
 - **Three architectures, told apart by guarantees and economics, not logos:** a **warehouse** (proprietary storage, schema-on-write, governed SQL, turnkey but locked-in and storage-premium), a **data lake** (open files on cheap object storage, schema-on-read, cheap and open but ungoverned, a swamp risk), and a **lakehouse** (open files + a **table format** = warehouse guarantees on lake economics).

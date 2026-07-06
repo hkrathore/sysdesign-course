@@ -144,16 +144,40 @@ The through-line at Director altitude: **you cannot responsibly ship or scale an
 ### Practice questions
 
 **Q1.** Your team ships LLM prompt changes weekly and quality "feels" like it's slowly getting worse, but no one can point to a cause. What's the root problem and how do you fix it structurally?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No **regression gate**. Each weekly change is eyeballed on a few cases; each quietly breaks cases nobody checked, and the damage compounds. Fix: build a **versioned golden set** (seed it from production traces and every past incident) and run it as a **CI gate** — pairwise win-rate vs the current production version via a calibrated LLM-as-judge, with hard gates on faithfulness/safety. No prompt/model/RAG change merges without passing. Now regressions are blocked at PR time instead of discovered in aggregate weeks later, and the gate *speeds up* shipping because changes are safe to make.
 
+</details>
+
 **Q2.** You're using GPT-4-class as an LLM-judge to grade your GPT-4-based assistant. What's suspect, and what would you change?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Several biases. **Self-preference** — a judge tends to favor text from its own family, so grading your own model's output with the same family inflates scores; use a **different judge family** where possible. **Position bias** — pairwise comparisons favor order; run **both orders and average**. **Verbosity bias** — reward length unless the rubric scores concision. And it's likely **uncalibrated** — validate it against a **small human-labeled set** (measure agreement) before trusting it to gate, and re-check periodically since the judge model drifts. Without that, you have a confident, biased grader giving false green lights.
 
+</details>
+
 **Q3.** A RAG answer is fluent, well-cited, and wrong. How do your metrics tell you whether to fix retrieval or generation?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Split the metrics. Check **context recall** — was the answer-bearing chunk retrieved at all? If **no**, it's a *retrieval* failure: fix chunking/hybrid/reranking, the model never had a chance. If **yes** (the right chunk *was* in context) but the answer contradicts or invents beyond it, that's a **faithfulness** failure: the model ignored its grounding — tighten the grounding instruction, lower temperature, or check the chunk was buried mid-context. The trace settles it: read the retrieved chunks for that case. One blended accuracy number can't distinguish these, and the two fixes are completely different.
 
+</details>
+
 **Q4.** The model provider pushes a silent update to the endpoint you call. How would you have known, and how do you prevent surprises?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* You'd know if you **re-run the eval set on a schedule** (not just on PRs) — a faithfulness/win-rate dip with no deploy of your own is the signature of provider-side drift. Prevention: **pin to a dated/versioned model endpoint** rather than the floating "latest" alias, so upgrades are a deliberate, eval-gated choice; **version everything** (prompt, model ID, RAG config) so results are reproducible and you can bisect; and treat a provider upgrade like any other change — run it through the gate before adopting it. Same harness, now defending against a change *you* didn't make.
+
+</details>
 
 ### Key takeaways
 - **Eval is hard because the system is non-deterministic, open-ended, has no single ground truth, and quality is multi-dimensional** (correct? grounded? safe? on-tone?). It's an essay exam, not multiple-choice — you build and calibrate a *grader*, you don't get pass/fail for free.

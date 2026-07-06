@@ -125,16 +125,40 @@ The through-line at Director altitude: **don't reach for a new vector database b
 ### Practice questions
 
 **Q1.** You have 50M document chunks at 1536 dimensions and need recall@10 ≥ 95% at p99 under 30 ms. Size the memory and pick an index, naming what you reject.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Raw vectors = `50M × 1536 × 4 bytes` ≈ **307 GB** float32 — too large for a single commodity node's RAM. Pick **HNSW** for the recall/latency target, but the graph overhead (~1.5–2×) pushes resident memory toward **~450–600 GB**, so either **shard across nodes** (fan-out + merge) or **quantize**: **scalar (int8)** cuts to ~77 GB for ~1% recall loss, **PQ** cuts to ~10–20 GB for a larger but tunable recall loss — likely **HNSW + scalar quantization, sharded** to hit both the memory and latency budgets. **Rejected:** flat (307 GB scan per query is far over 30 ms); IVF without quantization (saves little memory and trades recall at cluster boundaries we don't need to give up). Verify the final choice against a **measured recall@10** on a held-out eval set, not by assumption.
 
+</details>
+
 **Q2.** A teammate wants to add Pinecone. You already run Postgres and have 8M vectors with a strict per-tenant ACL. What do you decide and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* At **8M vectors** with existing Postgres, **start with pgvector + HNSW** — it's within range (raw ~25 GB at 768d), keeps the embeddings **transactionally consistent and joinable** with the relational data, and is **one fewer system to run, sync, and pay for**. The ACL is a **pre-filter** requirement: ensure pgvector does **filtered ANN on `tenant_id`** (and that the filter is indexed), because post-filtering would return too few rows and risk cross-tenant leakage. **Reject the dedicated VDB *for now*** — its wins (billion-scale sharding, advanced filtered ANN, managed ops) don't clear the bar at 8M, and it adds a sync pipeline and lock-in. **Revisit** if we cross ~50–100M, need very high QPS, or hit pgvector's filtered-ANN limits — and decide on **measured** recall/latency, not vendor marketing.
 
+</details>
+
 **Q3.** Users complain that searching for the exact error code "ERR_5031" returns irrelevant results, even though a doc with that code exists. Diagnose and fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is the classic **dense-only failure**: the embedding maps "ERR_5031" into a semantic neighborhood near other error-ish text, but it doesn't do **exact token match**, so the document containing the literal code may rank below paraphrased-but-codeless docs. The fix is **hybrid search**: run **BM25 / keyword retrieval** alongside dense ANN and **fuse with RRF** — BM25 surfaces the exact-token document, dense covers the paraphrase cases, fusion gives the best of both. A bigger embedding model wouldn't reliably fix it; the failure is structural (semantics ≠ exact tokens), and **hybrid beats pure dense on identifier-heavy corpora**.
 
+</details>
+
 **Q4.** Explain the recall–latency–memory triangle to a skeptical architect using two concrete index choices.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* You can optimize any **two** of recall, latency, and memory, not all three. **HNSW** buys **high recall + low latency** by spending **memory** — it stores a navigable graph on top of the raw vectors (~1.5–2× overhead), so it's the default until RAM becomes the binding constraint. **HNSW + PQ** buys **low memory + low latency** by spending **recall** — Product Quantization compresses vectors 16–32×, fitting a billion-scale index in a fraction of the RAM, at a measured recall loss. **Flat** buys **perfect recall + low memory** but pays in **latency** that grows with `N`. So the architect's real question isn't "which is best" — it's "**what's our budget on each axis**," and we pick the index that spends down the axis we can most afford (here, memory at small scale, recall at billion scale), then verify recall against ground truth.
+
+</details>
 
 ### Key takeaways
 - **An embedding is meaning as geometry:** a dense float vector (≈384–3072 dims), similarity via cosine/dot product, produced by a cheap **separate** model — and the **same model/version must embed corpus *and* query**, or relevance silently breaks.

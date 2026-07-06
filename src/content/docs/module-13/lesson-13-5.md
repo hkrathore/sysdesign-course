@@ -113,16 +113,40 @@ The through-line at Director altitude: translate the auditor's rulebook into **p
 ### Practice questions
 
 **Q1.** A startup taking credit cards says "we'll deal with PCI after we hit scale." What do you tell them, and what's the first architectural move?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* PCI applies the moment you store, process, or transmit a card number, so "later" is not optional, it is already in effect, and retrofitting it onto a flat architecture is far more expensive than building it in. The first move is **scope reduction, not control-hardening**: tokenize the card at the absolute edge using the processor's SDK so the PAN never reaches your servers, which puts you on the lightweight SAQ-A path instead of the heavy SAQ-D, and means almost none of your services are ever in the cardholder-data environment. The discipline is to make the regulated zone as small as possible *before* you write a single PCI control, because a control over a dozen segmented services is cheap and a control over 200 is an engineer-year. Compliance here is an architecture decision made on day one, not a certification bought at scale.
 
+</details>
+
 **Q2.** A user exercises GDPR (General Data Protection Regulation) right-to-be-forgotten, but they have transactions you're legally required to keep for 7 years. Walk through the design.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* These two obligations genuinely conflict, and the answer is to **separate the person from the record**. The deletion right covers *personal data*, so I delete the identity and its linkage: name, email, address, and the key that makes the transaction "about" this individual. The retention floor covers the *financial record*, so I keep the transaction in a **de-identified / tokenized** form (amounts, dates, a non-reversible reference) that satisfies SOX/finance without holding personal data. If a **legal hold** is active (litigation, investigation), it lawfully overrides the deletion request for the specific records under hold, and the system supports a hold flag that suspends deletion. The deletion itself is logged, because I have to be able to prove I honored it, and that propagates across replicas, search indexes, and derived analytical stores, with backups handled by crypto-shredding the per-user key rather than rewriting immutable backup sets. The Director point: this is a *designed reconciliation*, scoped retention plus de-identification plus legal hold, not a per-request argument about which law wins.
 
+</details>
+
 **Q3.** Your org is going for SOC 2, PCI, and HIPAA at once. How do you keep this from consuming the whole engineering year?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The three regimes share most of their load-bearing requirements, **audit logging, access control, encryption, change management**, so I build those *once* in the platform as paved-road defaults rather than three times per framework. Audit logging is a single append-only, immutable pipeline every service emits to; access flows through one identity plane so access reviews are a query, not a survey; encryption at rest and in transit is a deploy-time default that non-compliant infrastructure cannot bypass. Then I layer **controls-as-code** (Vanta/Drata-class tooling plus policy-as-code) to collect evidence continuously and map one set of controls to all three frameworks' overlapping requirements, so the audit is a dashboard read instead of a per-framework scramble. The cost trade is explicit: the tooling runs tens of thousands a year and weeks to wire up, against a recurring engineer-quarter per framework done manually, plus the bigger win that drift is blocked at deploy rather than discovered at audit. The regime-specific deltas (PCI's CDE pen test, HIPAA's BAAs) are the only places I do bespoke work; everything common is platform.
 
+</details>
+
 **Q4.** Why is encryption *not* a way to take a service out of PCI scope, and what is?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because under PCI, encrypted cardholder data is *still cardholder data*, and a system that holds it (even encrypted) is still storing it under the "store, process, or transmit" test, so it stays in the CDE; encryption is a required control *inside* the CDE, not an exit from it. The confusion is that encryption feels like it makes the data safe-and-therefore-out, but the ciphertext is reversible with the key, and the key lives in your environment, so the data has not actually left. The two real ways out of scope are: **don't store it at all** (let the processor hold it), or **tokenize** it so the surrogate has no mathematical relationship to the PAN and is unrecoverable without separately-scoped vault access, which makes any token-only service genuinely out of scope. The lever is removing the data's *identity as cardholder data*, not obscuring it, and that is the most common scoping mistake teams make.
+
+</details>
 
 ### Key takeaways
 - **Compliance is a platform property, not a phase.** Build audit logging, segmentation, encryption, and evidence collection once as paved-road defaults every service inherits; the audit becomes a read of evidence the system already produced, not a quarter of heroics.

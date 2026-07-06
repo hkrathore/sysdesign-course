@@ -136,19 +136,49 @@ The signal is not "I used WebSockets" or "I used FCM." It is: **socket where the
 
 ### Practice questions
 **Q1.** Your team wants to guarantee chat messages by putting the full message text in the FCM/APNs push so it shows instantly even if the app is closed. What is wrong, and what do you do instead?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Platform push is best-effort, unordered, and ~4 KB capped, so this is wrong on every axis: long messages truncate, an offline device past TTL loses the message entirely with no error, a platform retry duplicates and double-renders it, and two pushes can arrive out of order and show a stale line as newest. Instead treat the push as a **wake-up hint**, carry a conversation ID and a badge count, not the text, and on receipt have the client **sync the delta** from the server, which is the source of truth, deduping on a stable message ID and rendering by per-conversation sequence. Now drops, dupes, and reorders are all harmless. The push exists to say "come sync," never to be the record.
 
+</details>
+
 **Q2.** A chat product must keep 10 million users connected for live delivery. Walk me through the fleet and the dominant cost.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The dominant cost is **per-socket memory**, not message throughput, because most of those 10M are idle-but-connected. A TLS TCP socket runs tens-to-hundreds of KB of kernel buffers plus app state; at ~100 KB that is ~100 GB of RAM **per million** connections before any traffic. So I terminate sockets on a tier of stateless **connection gateways** running an event-driven runtime (epoll/BEAM/Netty, not thread-per-connection) with kernel buffers tuned down, target a realistic ~1-2M connections per box, and shard users across the fleet. Gateways fan in to a much smaller pool of backend connections and keep a user→gateway routing map in Redis so "deliver to user X" finds the right box. A box failure drops only its shard, which reconnects elsewhere. I'd delegate the exact buffer-tuning and per-box ceiling to a benchmark; my prior is MQTT/WebSocket on a BEAM or Go gateway.
 
+</details>
+
 **Q3.** How do you set the heartbeat interval on a mobile persistent connection, and what does it give you besides liveness?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It is a **battery-versus-liveness/NAT** trade. Idle sockets are indistinguishable from dead ones, and carrier NAT gateways silently drop quiet mappings after ~30 s to a few minutes, so both ends must heartbeat to detect dead peers and keep the mapping open. A short interval (~15 s) detects failure fast and never loses NAT but wakes the radio constantly and drains battery; a long interval (up to ~300 s) saves battery but risks a dead-but-believed-alive socket and a lost mapping. I tune toward the **longest interval that reliably survives the carrier's NAT timeout**, often adaptively per network. As a byproduct I get **presence** for free: a live heartbeat means online, a missed one past a grace window means offline.
 
+</details>
+
 **Q4.** A daily-digest feature is being built on a persistent WebSocket "for consistency with chat." Is that the right call?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No. A daily digest is one-way and tolerates seconds-to-minutes of latency, so it has no live-bidirectional need that a socket exists to serve. Running a socket fleet for it means paying millions of idle sockets and, worse, burning **user battery** on heartbeats for a feature that could be a single **platform push** hint. The right design is Family A only: send a low/normal-priority push ("your digest is ready"), client opens and fetches from the API. Reserve the socket for the foregrounded live experience. The trade I'm naming: the socket buys nothing here and costs battery and infra, so platform push is strictly better for a wake-and-fetch workload.
 
+</details>
+
 **Q5.** Notification open-rates are quietly falling and send costs are rising. Where do you look first?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First suspect is **token lifecycle / deliverability rot**. Tokens rotate and die on reinstall, device restore, and uninstall; if we are not consuming invalidation feedback (APNs 410 `Unregistered`, FCM `UNREGISTERED`) and pruning dead tokens, we keep paying to send to addresses that no longer exist, which both inflates cost and makes the platform **down-rank us as a low-quality sender**, throttling even our valid pushes. So: instrument the invalidation responses, prune on the spot, and track "active valid tokens" and per-platform delivery/throttle rates as product metrics. I'd also check whether we're overusing high-priority or background pushes, which the OS penalizes. Deliverability and battery are product metrics, not infra footnotes, and this is a classic case of one silently decaying.
+
+</details>
 
 ### Key takeaways
 - There are **two delivery families**: **platform push** (APNs/FCM/WebPush), where the OS holds one battery-efficient connection and you send best-effort ~4 KB messages to a token, and **your own persistent connection** (WebSocket/MQTT), which buys sub-100 ms bidirectional delivery at the cost of owning millions of sockets. Pick by product need; chat needs both.

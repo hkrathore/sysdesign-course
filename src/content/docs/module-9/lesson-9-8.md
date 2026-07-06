@@ -154,16 +154,40 @@ The through-line at Director altitude: **design the unit economics (`$/request`,
 ### Practice questions
 
 **Q1.** A chat feature costs **$0.40/active-user/month** against an ARPU that can't absorb it. Walk me through making it economical, with numbers.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Start from the cost model: output dominates and re-sent context is the input sink. **(1) Routing/cascade** — small model by default, escalate the hard fraction on low confidence; if the small model carries 80% at quality, blended cost falls ~5–10×, the single biggest lever. **(2) Prompt caching** the stable system-prompt/RAG prefix → up to ~90% off that input portion and lower TTFT. **(3) Output caps + structured output** → halve the most expensive term. **(4) Trim context** — window history, rerank RAG to top-3, shorter system prompt. Recompute `$/user` after each; expect order-of-magnitude. The non-negotiable: the cascade rides behind an **eval harness** so the routed-down quality is bounded, and **none of this touches personalized data through a semantic cache.**
 
+</details>
+
 **Q2.** When is a semantic cache the right call, and when is it a liability?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Right** for high-volume, **non-personalized, slow-changing** answers where paraphrases are common — product FAQs, policy questions, doc Q&A — gated by a conservative similarity threshold, a freshness TTL, and tenant/locale keys. **Liability** for anything **user-specific or time-sensitive** (balances, "my orders", live status): "similar enough" can return a *stale or someone-else's* answer, a correctness *and* a privacy bug. The exact cache is safe but low-hit; the semantic cache trades a bounded correctness risk for a much higher hit rate — you must say so and gate it, not ship it blind.
 
+</details>
+
 **Q3.** You need to embed and summarize a 50M-document corpus, and also serve a live chat. Same infrastructure? Same models?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **No — split by latency tolerance.** The corpus job is **non-interactive**, so run it through the **async/batch API (~50% cheaper)** or self-hosted with **large batch sizes** for throughput/$, accepting minutes-to-hours latency; use a small/distilled model for embedding and summarization since the task is narrow. The live chat is **interactive**: synchronous, **streamed** (sub-second first token), routed (small default → escalate), prompt-cached. Forcing the batch job through the real-time path pays interactive prices for work that doesn't need them; forcing chat through batch makes it unusable. The trade-off is explicit: batch buys ~50% by giving up interactivity.
 
+</details>
+
 **Q4.** A teammate proposes "just use the small model everywhere to cut cost." What's your response?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* That's not cost optimization without a quality gate — it's **silently dropping quality** on the fraction of traffic the small model can't handle. The right shape is a **cascade**: small model default, **escalate on low confidence/complexity**, with an **eval harness** measuring quality per tier and the escalation threshold set to bound the regression. That captures most of the saving (the cheap tier still carries the majority) while keeping hard requests on a capable model — and it's defensible because you can show the quality number, not just the cost number. Reserve "small model everywhere" for a **narrow task** where a distilled model provably matches the big one on that task.
+
+</details>
 
 ### Key takeaways
 - **Cost ≈ (input × in_price) + (output × out_price); output is priced 3–5× higher and is the term you most control; re-sent context (history + RAG) inflates the input bill on *every* call.** Cost scales linearly with usage, so design `$/request` and `$/active-user` up front.

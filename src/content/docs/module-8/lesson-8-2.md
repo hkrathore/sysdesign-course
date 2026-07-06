@@ -313,19 +313,49 @@ At 3,000+ QPS, the broker's scatter-gather fan-out and merge becomes the bottlen
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Walk me through a single "views by region this hour" query for a viral post.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The request hits a **broker**, which uses segment metadata to **prune** to the segments covering *this hour* for that content, a handful, not the year, and recognizes the most recent minutes are still in the **real-time tier** while the rest are sealed **historical segments**. It **scatters** sub-queries: the real-time nodes aggregate their in-memory rolled-up rows for the latest window; the historical nodes (hot tier, the recent segments are heavily replicated, so a viral item's load spreads) use **bitmap indexes on `region`/`content_id`** to skip straight to matching rows and aggregate the pre-rolled per-minute-per-region tallies. The broker **gathers and merges** the partials (sums are mergeable; uniques merge via HLL sketches) into one answer, stitching real-time + historical seamlessly, and may **serve it from its result cache** for a few seconds since thousands of users request this identical slice. Net: tens of MB scanned across a few segments, ~20–50 ms, fresh to the second. The viral hot spot is handled by replication + result caching, not by a bigger machine.
 
+</details>
+
 **Q2. Your CEO wants to add a "by individual user" breakdown to the live dashboard. What happens, and what do you do?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* `user_id` is **high-cardinality**, adding it to the rollup makes nearly every event its own group, so **rollup stops compressing** (segments bloat ~20×, scans slow toward raw speed, cost spikes), it would break the sub-second-at-high-concurrency contract for *every* query, not just that breakdown. So I would *not* add it to the serving-store rollup. Instead: keep **bounded dimensions** (region, device, content) in the serving store; serve **"unique users" via an HLL/Theta sketch** (mergeable, tiny, ~1% error, invisible on a glance); and push genuine **per-user drill-down to the lakehouse**, which is built for high-cardinality flexible queries at low concurrency, exactly where a "show me this one user's activity" query belongs. The principle I hold: no unbounded high-cardinality dimension enters the serving-store rollup; flexibility lives in the warehouse, speed lives in the serving store.
 
+</details>
+
 **Q3. The dashboard counter and the billing report disagree on this campaign's number. Which is right, and is that a bug?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Not a bug, **different guarantees by design.** The serving store is *approximate and seconds-fresh*: rolled up, sketch-based for uniques, with a brief real-time window that may include or just-miss boundary events, perfect for a user glance, deliberately not exact. The **billing number comes from the batch source-of-truth path**: exactly-once over complete deduped raw, late events folded in, fraud filtered. So the serving store answers "roughly, right now," the batch answers "exactly, settled." You **never bill from the serving store**, just as you never bill from the stream. If a user-facing number ever *must* be exact, it reads the batch result, not this store. Holding two reconcilable numbers, fast-approximate and slow-exact, is the same speed-vs-truth split as 9.7, here one is a serving store and one is a batch table.
 
+</details>
+
 **Q4. Druid, Pinot, or ClickHouse, pick one and defend it.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The *category*, a real-time OLAP serving store, is the decision; the pick is a delegated bake-off with priors. My priors: **Pinot** if the dominant need is lowest-latency, highest-QPS *user-facing* serving with rich indexing, it was built at LinkedIn for member-facing analytics at exactly this concurrency, and its indexing (sorted, bitmap, star-tree) is strong for bounded slices. **Druid** if mature real-time-ingest tooling and time-series operational ergonomics matter most, it's the most battle-tested on the real-time/historical split. **ClickHouse** if raw-data flexibility and raw scan speed matter more than turnkey rollup/real-time and the team wants SQL-first operation, it's a phenomenal raw columnar engine but you assemble more of the real-time serving story yourself. I'd have data-platform benchmark all three on *our* 500k/sec-ingest, 3,000-QPS-bounded, seconds-fresh profile and decide on the numbers; the architecture (segments, real-time/historical split, scatter-gather, bounded rollup) is identical across them, so the pick isn't load-bearing.
 
+</details>
+
 **Q5. What does this cost, and what would you delegate?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two budgets. **Latency** is won structurally, time-partitioning + rollup (~20×) + bitmap indexes cut bytes-scanned ~100×, so p99 is sub-second *by architecture*, not by spend. **Dollar cost** concentrates in the **hot tier** (recent segments in RAM/SSD, heavily replicated for the high-QPS recent traffic) and **real-time nodes** (sized for 500k/sec ingest); the **cold tier and deep storage are cheap** (aged segments, dense disk / S3). Tiering by age tracks the access skew, so cost follows usage. I own the **policies**, bounded-cardinality rollup (no high-cardinality dimension in-store), hot/cold tiering, result caching, rebuild-from-lakehouse. I delegate, with priors, the **engine bake-off** (Pinot for user-facing latency, Druid for real-time maturity, ClickHouse for raw flexibility), the **rollup schema and sketch choices** (analytics, against the real query shapes), and the **tiering thresholds and replication factors** (platform, against observed skew and SLA). What I keep is the architecture: real-time/historical split, immutable pre-aggregated segments, scatter-gather, and the serving-store/warehouse complementarity.
+
+</details>
 
 ---
 

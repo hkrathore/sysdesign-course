@@ -300,16 +300,40 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate storage and the commit rate, and defend your per-user basis.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Basis stated first: **blended across all 500M registered at ~10GB/user** - free tier dominates, so a blended 50GB would be indefensible. Raw `= 5 EB`; dedup+compression ~35% → **~3 EB effective**. At ~1MB/file that's **~5T files ≈ ~5T blocks** (most files are one sub-4MB block), and the chain ties out (`10GB/1MB = 10K files/user`). Writes: ~100 changes/user/day × 100M DAU → **~120K commits/s avg, ~300-500K peak**. The headline is the pairing: **~120K durable ordered commits/s fanned out over ~200M idle connections.** The soft knob is changes/user/day - I'd anchor it and let the interviewer dial it.
 
+</details>
+
 **Q2. Walk me through the upload path. Why the `/blocks/check` round-trip before uploading?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Chunk into **4MB blocks**, SHA-256 each locally, call **`/blocks/check`** → the server says which hashes it's missing; `PUT` **only those** (content-addressed, idempotent); then **`/commit`** the path + ordered hash list + `baseVersion` in one transaction that bumps refcounts and advances the namespace cursor. The check-first round-trip *is* dedup and instant upload: edit 2 slides in a 50MB deck → upload ~4-8MB (**~10×**); the file already exists server-side → **~0 bytes**. One extra RTT (round-trip time) buys up to 100× bandwidth - rejecting it means re-uploading bytes the server already has.
 
+</details>
+
 **Q3. Design the sync feed. What about a device offline for a week?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Each **namespace** has a monotonic **cursor** and an ordered **journal**. A device stores "synced to N," holds an idle long-poll, and on a poke calls `/delta?cursor=N` → entries since N + new cursor, fetching only blocks it lacks. **O(changes), not O(tree)** - full-tree diff across 200M devices is bandwidth death for the no-change common case. Far-behind client: **paginate `/delta`**, and past the journal's compaction threshold **fall back to a snapshot reset** - a file edited 500 times offline syncs as its final state, not 500 deltas. Trade: snapshot transfers more, but bounds journal retention.
 
+</details>
+
 **Q4. Two devices edit the same file offline, both reconnect. What happens? Why not merge?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Both committed from the same `baseVersion`; the first wins the path, the second gets a **409** and writes a **conflicted copy** (`report (Bob's conflicted copy).pdf`) - both versions survive, the user reconciles. I deliberately don't merge inside the file: it's an **opaque binary blob** with no meaningful 3-way merge. OT/CRDT merge is for structured text with real-time co-editing - **Google Docs**, which I scoped out. **Silent last-write-wins is the unforgivable failure** for a backup product, so I reject it explicitly.
+
+</details>
 
 ---
 

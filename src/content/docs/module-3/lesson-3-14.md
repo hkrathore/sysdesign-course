@@ -169,19 +169,49 @@ Take the order/checkout pipeline from the messaging-queue building block and put
 
 ### Practice questions
 **Q1.** Your on-call team is drowning, dozens of pages a night, most of them CPU and disk warnings, and they've started ignoring the pager. How do you fix this at a design level?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is a **signal-vs-noise** failure, and it's a reliability risk because a muted pager misses the *real* incident. Stop alerting on **causes** (CPU, disk, restarts) and move those to **dashboards**. Define **SLIs/SLOs** for the user-facing services (e.g. 99.9% success over 30 days) and page only on **error-budget burn rate**: fast burn (~14.4× over 1h) pages, slow burn (~1× over 3 days) tickets. The target I manage is **pages per shift and % actionable**, drive non-actionable pages toward zero so responders trust the pager again. The principle: page when the **user is being hurt fast**, not when a machine metric twitched.
 
+</details>
+
 **Q2.** A team adds a `user_id` label to their main request counter "so we can break errors down per user." What happens, and what do you tell them?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Cardinality explosion.** Cardinality is the number of unique time series = the product of all label values; `user_id` is **unbounded** (millions of users), so one metric becomes millions of series. That OOMs the Prometheus head **and**, on a SaaS like Datadog where you're billed **per unique series**, it can turn a modest bill into a six-figure one. The fix: **per-user identifiers belong in traces and logs, not metric labels.** Keep the counter labeled by **bounded** dimensions (service, method, **templated** route, status) and use a trace (filtered by `user_id` as a span attribute) or logs to investigate a specific user.
 
+</details>
+
 **Q3.** Walk me through what each pillar does during a real checkout-latency incident, and why you wouldn't just use one.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Metrics detect:** the SLO burn-rate alert fires because checkout p99 latency (from a **histogram**, not an average) breached and the budget is burning fast, that's the page. **Traces localize:** the traces for the slow requests all stall in the `payment-gateway` span, not in `inventory` or the DB, so I know *where*, across a dozen services, without guessing. **Logs root-cause:** the `payment-gateway` logs for that window show TLS handshake timeouts to Stripe, the *why*. You can't collapse these: a metric carries no context (can't root-cause), logs can't be alerted on cheaply (can't detect), and neither shows cross-service **causality** (can't localize in a 40-service graph). Cost rises with detail, so you use the cheap aggregate signal to decide *when* to pay for the expensive detailed one.
 
+</details>
+
 **Q4.** Why is Prometheus pull-based, and when do you break that model?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Pull's killer feature is **liveness for free**: Prometheus scrapes each target's `/metrics` every ~15s, and a **failed scrape is itself a signal** (`up == 0`), a dead instance is detected with zero extra instrumentation, where push **can't tell "dead" from "silent."** Pull also keeps **service discovery and scrape control server-side**. You break it for jobs pull can't reach: **short-lived** batch jobs that finish before a scrape, or targets behind a **NAT/firewall**, via the **push-gateway**, a deliberate **exception**: route normal service traffic through it and you get stale metrics and a centralized bottleneck. Pull by default; push-gateway only for ephemeral/unreachable jobs.
 
+</details>
+
 **Q5.** You're setting the observability budget for a 600-engineer org. Build or buy, and how do you decide?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's a **cardinality-driven cost vs headcount** decision, stated both ways. **Buy** (Datadog/New Relic): near-zero ops, fast to adopt, but priced on **hosts × custom metrics (unique series) × ingest GB**, at large fleet + high cardinality the bill goes six or seven figures, and one careless label spikes it overnight. **Build** (Prometheus/Mimir + Grafana + Loki + OTel): low license cost, full control, but real **platform headcount** to run and scale. My call hinges on (a) do I already have a platform team, if yes, self-host amortizes well at this size; (b) the cardinality profile, high cardinality makes SaaS pricing punishing; (c) the org's speed-vs-control stage. Either way I'd put **cardinality controls and metric-naming review** in place, because that lever governs cost on *both* paths, which is exactly why it's my problem and not the on-call engineer's.
+
+</details>
 
 ### Key takeaways
 - **Three pillars, one axis:** metrics to **detect** (cheap, aggregate, bounded), traces to **localize** (causality across services), logs to **root-cause** (detailed, expensive), use them in that order and spend on each in proportion to the signal it returns.

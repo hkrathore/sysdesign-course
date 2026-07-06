@@ -90,13 +90,31 @@ flowchart TD
 
 ### Practice questions
 **Q1.** You blank on the exact replication-lag number for an async follower. What do you say?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Give the method and a bound: "It depends on write volume and network, but typically milliseconds to low seconds under healthy conditions, spiking under load. That's why I'd route read-your-writes traffic to the leader and only send staleness-tolerant reads to followers." Bounded reasoning beats a fabricated precise figure.
 
+</details>
+
 **Q2.** Halfway through, you realize your estimate was off by 10×. Recover.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* "I need to correct an earlier number, I dropped a factor of ten, so peak QPS (queries per second) is ~500k, not ~50k. That actually changes my conclusion: a single cache tier won't absorb it, so I'll shard the cache. Good that we caught it." Owning + showing the *consequence* turns the error into a signal of rigor.
 
+</details>
+
 **Q3.** The interviewer keeps pushing on a choice you're confident in. Are they telling you you're wrong?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Usually no, repeated pushing is often a probe to test whether you understand *why* you chose what you chose and whether you'll cave under pressure. Hold your reasoned position, acknowledge the cost, and offer the condition under which you'd change. If they reveal a genuine new constraint, *then* update.
+
+</details>
 
 ### Key takeaways
 - Recovery, not flawlessness, is what's scored, a clean recovery beats a perfect run.

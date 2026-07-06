@@ -243,16 +243,40 @@ Data transfer is the line nobody can explain: internet egress ~$0.05-0.09/GB, cr
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. The CFO wants 40% in two quarters. Walk me through the first 30 days.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First 72 hours: visibility and freeze, billing export on, top-20 line items (~80% of a $10M bill), delete the provably orphaned (~$0.5-0.8M run-rate), freeze new commitments, stand up the guardrail dashboard before anything that could bite. Days 3-30, the ladder in order: rightsize compute, k8s requests, and storage off p95 utilization (~12%), shipped like deploys, canary, watch 48h, proceed or revert, *then* 1-year Savings Plans at ~75% coverage of the new baseline (~12%). That's ~32% at near-zero risk, the mandate's floor, and it funds the 6-month re-architecture that closes to ~40-45%. The ordering is the design: visibility before cuts, rightsize before commit, quick wins before structural work.
 
+</details>
+
 **Q2. A team claims your rightsizing will blow their latency SLO. How do you adjudicate?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* With the mechanism, not authority. The framework already defines the test: canary the downsize on a slice, watch p99 and error-budget burn 48 hours against baseline, and the data decides, sustained burn means automatic, pre-agreed revert in minutes; that reversibility is *why* rightsizing sits on rung 2. Either the team is padding out of habit (p95 utilization data settles it) or the cut is genuinely wrong, and the revert happening *visibly and cheaply* is what keeps every other team cooperating. A cost program that argues with its own guardrails once loses all of them.
 
+</details>
+
 **Q3. Why not 3-year commitments everywhere? The discount is nearly double.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A commitment is a contract on a forecast, and the program is about to invalidate the forecast twice, rightsizing shrinks the baseline in month 1, and rung 4 (spot, ARM) restructures what's left. An early 3-year commit either strands (utilization below coverage, contractual loss, worse than on-demand waste) or forecloses the re-architecture by making the old fleet artificially cheap to keep. So: 1-year no-upfront at 70-80% coverage of the post-rightsize baseline as default, 3-year only on the floor I'd bet the company keeps, the core DB tier, with quarterly coverage review. I'll trade ~15 points of discount for not betting three years against my own roadmap.
 
+</details>
+
 **Q4. Name a cut you'd refuse under direct CFO pressure, and defend it.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The standby DR capacity and N+1 headroom, ~$400K/yr at ~0% utilization, the worst-looking line on the report. Its job is to be idle: it's an insurance premium, and cutting it converts $400K of visible cost into an invisible RTO regression that materializes during the worst hour of the company's year. Same protected class: backup retention at the compliance floor, incident-time observability. What I offer instead: rungs 1-3 deliver 8× that amount in 30 days from spend that buys nothing, and I re-drill DR after every change touching redundancy so the premium provably still pays for coverage. If the CFO still wants the $400K, I want the revised RTO in writing, then it's a business decision made with open eyes, not a cost cut.
+
+</details>
 
 ---
 

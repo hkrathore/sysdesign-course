@@ -314,16 +314,40 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Estimate the tile-fetch QPS and explain why the CDN, not the origin, defines the cost.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* ~2B sessions/day × ~20 tiles → **~40B requests/day ≈ 0.5M/s avg, ~1.5M/s peak.** Tiles are immutable and identical for everyone at a given `(z,x,y,style,version)`, and a small popular set covers most fetches → **~95-99% edge hit rate**. At 99% the origin sees **~5K tiles/s - a ~100x reduction.** The serving tier is a CDN + object store; the cost is egress + edge storage, not origin compute. That subtraction *is* the serving design, and it's only possible because tiles are versioned-immutable and cache-forever.
 
+</details>
+
 **Q2. Why isn't Dijkstra enough, and how do you keep ETAs live without re-running the precompute every minute?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Dijkstra touches millions of nodes per continental query - seconds, far over budget at thousands of QPS. Contraction hierarchies precompute shortcuts → sub-ms queries; but plain CH **bakes in static weights**, and traffic changes them every minute - you can't re-run hours of preprocessing per cycle. So **separate the slow part from the fast part**: topology-only preprocessing redone only when roads change, and a cheap **metric customization (~seconds, every ~1-2 min)** that stamps current per-edge speeds - aggregated from ~3M probes/s, with historical-profile fallback for low-probe edges and last-good overlay if a refresh is late - onto the precomputed structure. Queries stay sub-ms. I'd have the routing team benchmark CH vs CRP/CCH; my prior is the customization split, because live traffic demands a cheap re-weight.
 
+</details>
+
 **Q3. Why pre-render some tiles but not all, and why vector over raster?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* All tiles = `Σ 4^z ≈ 1.5T` per style ≈ **~15 PB/style**, mostly empty ocean, re-rendered every update. So pre-render the populated, high-traffic set and **render the long tail on demand, then cache it** - a cold rural tile is computed once. **Vector over raster** because a ~1-5 KB vector tile renders to *any* style on the client GPU - one stored tile serves all ~10 styles, collapsing storage ~10x and shrinking egress, the dominant cost. Trades: client-side render cost and first-hit latency on cold tiles - both acceptable against the storage/egress savings.
 
+</details>
+
 **Q4. How would you build places search, and what would you delegate in this whole system?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Search is a **dual-index join**: an **S2 geo-index** prunes to POIs near the point, intersected with an **inverted text index** for name/category/address, ranked by distance + relevance + popularity, metadata from a KV store. A DB `LIKE` + distance scan can't hit typeahead latency. **Delegate:** the router bake-off (CH vs CRP/CCH, prior: customization split), traffic-fusion + ETA-prediction ML behind `eta(route, depart_at)` with an SLA and historical fallback, and the cartography/tile-rendering pipeline. I personally own the **precompute-vs-query decision on both axes** and the **CH-can't-do-traffic → customization-split** insight - that's the architectural call; the bake-off and the ML are specialist depth I scope and delegate.
+
+</details>
 
 ---
 

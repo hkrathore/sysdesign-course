@@ -120,16 +120,40 @@ The through-line at Director altitude: **autonomy is a cost you pay in reliabili
 
 ### Practice questions
 **Q1.** Define what makes a system an "agent" versus a workflow, and why it matters for reliability.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* An agent lets the **LLM choose the control flow** — which tool to call and whether to continue — looping until done; a workflow has **predefined steps** with the LLM making bounded decisions at fixed points. It matters because the free-form loop is where errors **compound** (`p^N`): a workflow's reliability is roughly its weakest fixed step, while an agent's degrades with every additional autonomous step. So you choose an agent only when the path can't be pre-scripted, and accept that you're trading reliability and cost for that flexibility.
 
+</details>
+
 **Q2.** An agent that books travel works in testing but occasionally books the wrong flight in production. How do you think about the fix?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Booking is **irreversible**, so the compounding-error math says never let an unsupervised late step execute it. Restructure: the agent does the open-ended *search/compare* (where flexibility helps), then a **human-in-the-loop confirmation** or a deterministic validation step gates the actual booking. Separately, reduce step count, verify the selected itinerary against the constraints before presenting it, and add a budget/step cap. The point: don't try to make a 12-step loop 99.99% reliable — remove the irreversible action from the autonomous part.
 
+</details>
+
 **Q3.** How do you stop an agent from looping forever or burning your budget?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* External guardrails the model can't override: a **max-step cap**, a **token/time/dollar budget** that aborts the loop, an **explicit done-condition** (a verifiable signal, e.g., tests pass / the field is populated, not just the model claiming completion), and **loop detection** (abort/escalate if it repeats an action with no new observation). On any trip, escalate to a human or return partial results rather than spinning.
 
+</details>
+
 **Q4.** When is reflection/self-critique worth adding?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When the task is hard enough that first-pass quality is poor and you can afford the cost. Reflection adds model calls (more tokens, more latency), so it's a **quality-for-cost trade**: justify it with eval showing the lift, apply it to the risky steps rather than every step, and skip it where a single pass already clears the bar.
+
+</details>
 
 ### Key takeaways
 - **An agent is an LLM in a loop where the model — not your code — chooses the next action.** That one property is the source of both its flexibility and every reliability problem that follows.

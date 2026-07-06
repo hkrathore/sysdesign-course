@@ -322,16 +322,40 @@ Scale the design under new constraints, and name every trade.
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. How do you generate IDs for notes created while the device is offline?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Client-generated UUIDs, v7 so they sort by creation time: a note created offline needs a stable ID before it reaches the server, so a server-assigned sequential ID is out (round trip, breaks offline creation), and v7 collision risk is negligible. Separately, every *mutation* carries an `op_id` UUID idempotency key, so a resent push dedupes on `(account, op_id)` and applies exactly once. Stable client IDs for entities, idempotency keys for operations.
 
+</details>
+
 **Q2. Walk me through two devices editing the same note's body offline, then both reconnecting.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Both edited against `base_version = v3`. Whichever push lands first (say the phone) takes the note to v4; the tablet's push then arrives at `base_version = v3` while the server is at v4, so the mismatch flags a conflict. **Different fields** (phone the title, tablet the body): merge per-field, no real conflict. Both on the **body**: I do not silently pick one, that loses paragraphs; I keep **both** as a conflict copy, "note (conflicted copy from Tablet)," for the user to reconcile. Once live co-editing is real, the principled endpoint is a **sequence CRDT** for the body so both edits merge with no copy. The invariant I never break: user text is never silently discarded.
 
+</details>
+
 **Q3. A field team is offline for two weeks, then all reconnect at a depot on one Wi-Fi. What breaks and how do you handle it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two things spike at once, a reconnect storm and a large per-device backlog. Storm: **jittered backoff** so clients do not all hit at t=0, the **cursor fast-path** to cheaply answer "nothing new," and a stateless horizontally-scaled sync tier with read replicas soaking up the pull burst. Backlog: each device pushes its queued mutations in **coalesced batches** (~500 ops at ~300 B is ~150 KB, trivial) and pulls the two weeks of others' changes **paginated**, newest-first, so recent notes appear immediately while the tail streams; attachments defer to Wi-Fi. Convergence holds throughout via the per-account monotonic sequence and tombstones, so a fortnight of divergence reconciles to one consistent state.
 
+</details>
+
 **Q4. Product now wants Google-Docs-style real-time co-editing. What changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The body graduates from per-field LWW to a **sequence CRDT** (Yjs or Automerge), so concurrent keystrokes merge deterministically with no lost text and no conflict copy. I add a **WebSocket channel** for the active session (live ops and cursors), falling back to pull-and-wake when it ends, and persist the CRDT document and its op history, not just the latest text. I reject **operational transformation**, which needs a central server to transform every op and is very hard to get right; CRDTs merge without a central transformer, fitting an offline-first world. The trade is CRDT metadata overhead, so I adopt it only where co-editing is real.
+
+</details>
 
 ---
 

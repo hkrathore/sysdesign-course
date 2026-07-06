@@ -294,19 +294,49 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. A submission is a deliberate exploit aimed at your kernel. How do you contain it, and what's the blast radius?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I pick the boundary by blast radius. A bare container shares the host kernel, radius is the whole host, unacceptable for adversarial code. My default is **Firecracker microVMs**: each run gets its own guest kernel behind a hardware boundary, so an escape must beat the hypervisor, not just the kernel, radius is one microVM, ~125 ms cold start, lower density. Where density/cost dominate and the threat is softer, **gVisor** filters syscalls in userspace to shrink the host kernel surface with container-like density. Either way: no network, read-only FS, seccomp, dropped capabilities, hard CPU/memory/PID/output limits, **fresh sandbox per run**. Internals delegated to platform-security behind `judge(submission, limits)`; prior is microVMs for the public threat model.
 
+</details>
+
 **Q2. A weekly contest starts and 100k people submit in three minutes. Walk me through what happens.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* By Little's Law, `~550/s × ~10 s ≈ ~5,500 concurrent executions`, higher at `t=0`, I size for *that*, not the ~12/s steady rate. Contests are **scheduled**, so I **pre-warm** the pool ahead of the start rather than rely on reactive autoscaling, which lags by host cold start. The durable queue absorbs the `t=0` peak (429 if truly saturated), and I judge p95 across the 3-minute window, not the literal first second. Workers already hold pre-pulled images and test data, so per-verdict cold start is the sandbox's ~125 ms. Cost is ~700 warm hosts for a ~3-hour window, idle capacity paid for burst readiness.
 
+</details>
+
 **Q3. A submission runs an infinite loop. Another allocates 100 GB. Another fork-bombs. How does each get caught?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Each is a **verdict, not an outage**, limits live in the job envelope and the sandbox enforces them. The loop trips the **CPU-time limit** → TLE (a wall-clock limit also catches a `sleep` stall that burns no CPU, I need both). The 100 GB hits the **cgroup memory ceiling** → OOM (out-of-memory) → MLE. The fork bomb hits the **PID limit** → RTE; an output flood hits the **output cap**. Untrusted code *will* try all of these, so limits aren't a safety net, they're the normal control path, producing a clean verdict, never a crashed worker.
 
+</details>
+
 **Q4. Why async with a durable queue instead of judging synchronously in the request?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Synchronous ties the user's connection to a 10 s adversarial execution; at ~1,000/s the spike exhausts the connection pool before any judging happens. So submit returns `202`, writes the submission, enqueues; a worker pool drains the queue and streams the verdict. The queue is **durable** (Kafka/SQS), not in-memory, because a submission is a *contest entry*, losing it on a crash is unacceptable, and durability gives free replay (judging is idempotent on `submission_id`). Only the acknowledgement stays synchronous.
 
+</details>
+
 **Q5. This is "LeetCode," but where else does this exact problem show up?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's one instance of **running untrusted code at scale**. **CI/CD runners** (GitHub Actions) run arbitrary user pipelines; **FaaS** (Lambda, Cloudflare Workers) runs untrusted tenant code, Lambda literally uses Firecracker for this reason; and the fastest-growing instance, **AI-agent / code-interpreter sandboxes**, runs LLM-generated code, the blast-radius reasoning transfers wholesale. The architecture isn't "a judge," it's "a hardened execution plane behind a trusted control plane", and that pattern is everywhere code I didn't write runs on infrastructure I own.
+
+</details>
 
 ---
 

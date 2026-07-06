@@ -263,16 +263,40 @@ Going deep where the decision turns (the hybrid) and handing off the rest with a
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. A user posts, then immediately opens their own feed and doesn't see the post. What happened?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Classic **read-your-writes** miss, fan-out is async, so the post hasn't landed in the author's own feed list yet. Fix: merge the author's own recent posts from `posts_by_user` into their feed read for a short window (cheap, bounded), and/or write the author's own feed entry synchronously while follower fan-out stays async. Trade: a touch more work on the post path so authors always see their own post; everyone else tolerates seconds of lag.
 
+</details>
+
 **Q2. The ranking team wants a new engagement signal recomputed per read. Does your design allow it?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Yes, that's exactly why the feed is a **candidate set re-scored at read time**, not a frozen list. Cost is read-side compute: re-scoring candidates at ~290k opens/s. I keep retrieval cheap (precomputed list + celebrity merge), bound scoring to the first page, push expensive features into a precomputed feature store, and **delegate the model + feature pipeline** with the contract "retrieval is mine, scoring is yours, here's the latency budget." That separation lets ranking iterate without touching storage or fan-out.
 
+</details>
+
 **Q3. Walk me through deleting a photo, everywhere.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A multi-store, partly-async operation and a **legal obligation**, not best-effort. (1) Mark the metadata row `deleted`, the authoritative hide, immediate. (2) Evict the hydrated object from Redis; let it age out of feed lists. (3) Purge the CDN (or rely on versioned URLs) and delete the object-store renditions + original. (4) Reconcile counters/comments. Deletion is eventually *complete*, but the hide is instant. What I won't accept: bytes still fetchable on the CDN after a delete, that's a privacy incident.
 
+</details>
+
 **Q4. You're over budget. Where do you cut without hurting the product?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three levers, in order. (1) **Raise the CDN hit ratio**, at ~2 PB/day egress it's the biggest line. (2) **Lifecycle-tier cold media**, most photos are cold within days; archive storage is ~an order of magnitude cheaper. (3) **Erasure-code the warm/cold tier**, ~90 PB/yr raw disk saved vs 3× replication. I would *not* cut the feed cache or read replicas, that hits the 100:1 read path and p99. The cuts target stored-but-rarely-read bytes, where the cost lives and users never notice.
+
+</details>
 
 ---
 

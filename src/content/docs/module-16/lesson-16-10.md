@@ -210,19 +210,39 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 **Q1. "Your doc says you chose a monolithic deploy. Six months later you decomposed it. Was the original decision wrong?"**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* No. Three-engineer team, no service-mesh experience, six-week window, a monolith removed real blockers. At six months: four engineers with microservice experience joined, the load profiles had diverged (ingest 40K events/s vs query 2K QPS (queries per second) steady), two months of observability data made the boundary obvious. The decomposition took three weeks. Starting with microservices would have added six weeks to delivery and drawn the boundary before we had data to draw it correctly, monolith-first made the decomposition faster and lower-risk, not slower.
+
+</details>
 
 **Q2. "You said you'd use a read replica for analytics. Your incident report shows replica lag caused a two-hour reporting outage. What would you do differently?"**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* Separate analytics and operational read paths entirely, they're different workload tiers. I expected replica lag to stay under 30 seconds; at peak ingest (40K events/s) it hit 12 minutes, breaking a 2-hour reporting SLA. Fix: a dedicated analytics replica with async CDC (change data capture) into a columnar store (Redshift; I'd use BigQuery given our current footprint), two engineer-weeks to migrate. Greenfield, I'd draw that boundary day one: the analytics SLA (fresh within 15 min) stated explicitly, never inherited from the operational replica's lag behavior.
+
+</details>
 
 **Q3. "What was the biggest architectural risk you didn't fix before launch, and why?"**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* No circuit breaker between the order service and the payment PSP (payment service provider). We had exponential retry backoff but no fallback, a degraded PSP would fan out retries and exhaust the connection pool, taking down unrelated order operations. We knew; we deprioritized it given a 99.95% PSP SLA. Four months post-launch: 45-minute PSP degradation, p99 latency spiked to 30 seconds, ~2% of orders dropped. The circuit breaker took three days to add the following sprint. In retrospect it should have been in the launch definition of done, a 45-minute PSP degradation is not a tail event. The rule I'd enforce: any external dependency on the critical path needs a circuit breaker or explicit degradation mode at launch.
+
+</details>
 
 **Q4. "If you had to hand this system to a new team next week, what would they need to know that isn't in the doc?"**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model answer:* Three things. First, schema migration must precede service deploy, we have a pre-deploy hook but it's undocumented; a new team finds out the hard way. Second, a silent assumption: the ingest pipeline expects monotonically increasing sequence numbers; producer restarts that reuse sequence numbers cause the dedup logic to drop events silently, happened once with a partner integration; fix is a secondary dedup key. Third, the runbook covers steady-state failures but not quota exhaustion on the enrichment API, which manifests as a processing hang rather than an error; I'd add an alert at 80% quota.
+
+</details>
 
 ---
 

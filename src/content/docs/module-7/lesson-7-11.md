@@ -138,16 +138,40 @@ The through-line at Director altitude: **the platform has two decoupled bills, b
 ### Practice questions
 
 **Q1.** Estimate the monthly cost of an exec dashboard that scans a 3 TB events table on every refresh, 200×/day, on serverless $5/TB pricing, then name the cheapest fix and what it trades.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Per refresh: 3 TB × $5/TB = **$15**. Per day: 200 × $15 = **$3,000**. Per month: ~**$90,000** for one dashboard, the runaway-cost failure mode, set entirely by bytes scanned. The cheapest fix is **not** a bigger warehouse or a cache (neither cuts bytes scanned); it's **pre-aggregation**: materialize a daily rollup the dashboard reads (megabytes), partitioned by day so even ad-hoc queries prune. That turns ~$90k/mo into **tens of dollars**, a >1000× cut. The trade it accepts: the dashboard is now **stale to the refresh cadence** (up to an hour), fine for a morning exec glance; compute-on-read stays live but indefensible at $90k. Add a `require_partition_filter` + byte cap so the next one can't recur (cost guardrails).
 
+</details>
+
 **Q2.** A workload runs steadily at ~80% utilization 24/7. Your boss wants to "go serverless to save money." What's your response?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Push back with the **utilization crossover** (Lever 3, same logic as 11.15/11.8). Serverless wins for **spiky, unpredictable, low** usage because you pay per byte and nothing for idle, but at **80% sustained 24/7** you're saturated, so on-demand's premium per-unit price means you'd **pay the highest rate every hour for capacity you're using anyway.** This is exactly the case for **provisioned + reserved/committed capacity** (30–60% off the baseline you're guaranteed to use). The right shape is hybrid: **reserve the saturated baseline, burst any spiky top on on-demand**, never commit to peak (pays for idle nights), never run a steady saturated workload on premium on-demand. The rejected alternative on each side: all-serverless overpays the premium; all-reserved-to-peak pays for idle.
 
+</details>
+
 **Q3.** You have 3 PB in the lake; 80% hasn't been queried in 90 days. Walk through the storage decision and its trade-off.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The storage bill is `bytes × $/TB-month` and it's paid **whether or not anyone queries**, so 2.4 PB of cold data sitting on hot S3-Standard (~$23/TB-mo) is ~**$55k/month of rent on boxes nobody opens.** The lever is **tiering by access recency**: keep recent/hot data on Standard, move the >90-day cold 2.4 PB to **Glacier Flexible (~$3.6/TB-mo, ~6× cheaper here, up to ~20× to Deep Archive)** → ~$55k drops to ~$9k. *Trade-off:* cold reads now carry a **minutes-to-hours retrieval delay + a per-GB retrieval fee**, so tiering is **wrong for data you actually query** (the retrieval fees and latency erase the savings) and right for genuine archive. *Rejected:* all-hot keeps every byte instantly queryable but pays hot rent on data that's read maybe once a year. Pair with a **retention policy**, if 5-year-old data has no legal or analytical use, the cheapest storage is **deleting it.**
 
+</details>
+
 **Q4.** Why is "cost attribution / chargeback" worth the overhead, and when would you *not* do it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Without attribution the platform bill is **one central number that's everyone's and no one's**, you can see it's $400k but not that **one dashboard is $90k of it**, and the team running that dashboard has zero incentive to stop because they never see the bill (the 8.5 accountability problem). **Chargeback**, tagging every query/warehouse/dataset by cost-center, splits the bill by who spent it, which both **surfaces the runaway line** (the unit-economics number you actually act on) and **creates the incentive** for teams to materialize, partition, and clean up their own spend. The trade-off: **tagging/attribution plumbing overhead**, and over-aggressive chargeback can **discourage healthy exploration** (analysts afraid to run a query). So you **wouldn't** bother on a **small or early-stage platform** where the spend is immaterial and one team owns everything, central budget is simpler with no real downside until spend is material and teams are autonomous. The Director framing: chargeback is a *governance* lever, not just an accounting one.
+
+</details>
 
 ### Key takeaways
 - **A data platform is two decoupled bills, not one server cost:** **storage** (`$/TB-month`, set by retention + tiering + compression, paid whether queried or not) and **compute** (`bytes scanned × $/TB` serverless, or `cluster-size × hours` provisioned). You attack each with its own levers, never with "buy a bigger box."

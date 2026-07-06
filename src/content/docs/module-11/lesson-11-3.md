@@ -125,16 +125,40 @@ The Director signal is not "I used a CRDT." It is: *title is LWW because last-wr
 ### Practice questions
 
 **Q1.** A settings screen (theme, language, notification toggles) syncs across a user's phone and laptop, sometimes edited offline on both. What conflict strategy, and why not a CRDT?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* These are **independent scalar fields** with no intent to merge, the last chosen value should win, so **per-field Last-Write-Wins** is correct and a CRDT would be over-engineering (you would pay per-element metadata to model single values that never need union). The one real risk is clock skew, so I timestamp with **server time or a hybrid logical clock**, not the raw device clock, so a fast phone clock cannot silently win every conflict, and I detect genuine concurrency with a version vector rather than trusting wall time. Crucially I apply LWW **per field, not to the whole settings object**, so changing the theme on one device and the language on the other both survive rather than one overwriting the whole blob.
 
+</details>
+
 **Q2.** A shared to-do list is edited offline on two devices; each adds a task. Walk LWW versus a CRDT, and name the CRDT's cost.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* With **LWW on the list**, whichever device's write has the higher timestamp overwrites the other, so one added task **disappears silently**, unacceptable for collaborative data. With a **CRDT** (an OR-Set of tasks, each tagged with a unique ID on creation), the merge is a union: both additions survive on both devices with no server round-trip, which is what makes the offline case work. The cost I would name out loud: each task carries an ID and causal metadata, and a deleted task leaves a **tombstone** until a version vector proves both devices have seen the delete, so memory and sync payload grow with edit history. I would use **Yjs** (compact store, aggressive tombstone GC) over early **Automerge** (which could inflate a document by roughly 100x before its columnar rewrite), and bound growth with delta sync and compaction.
 
+</details>
+
 **Q3.** A booking system lets users reserve seats, and the mobile app supports offline. Would you use a CRDT so bookings merge cleanly? Defend your answer.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No. A CRDT would **converge** two offline "reserve seat 12A" operations, but it would converge to a **double-booked, invariant-violating** state, because a CRDT preserves intent, it does not enforce business rules. Seat inventory is correctness-critical, so I use **server-authoritative optimistic concurrency**: the booking commits only when the server confirms the seat is free at the client's base version, otherwise it returns a 409 and the client re-fetches and either rebases or tells the user the seat is gone. I consciously give up offline commit for bookings, because for money and inventory correctness must beat availability. I might still let the client *hold* an offline intent and reconcile on reconnect, but the authoritative decision, and any user-visible "reserved," happens only after the server arbitrates.
 
+</details>
+
 **Q4.** Your team ships a CRDT-based collaborative editor and, six months in, documents that have been heavily edited are slow to load and large to sync. What is happening and what do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is **tombstone and metadata accumulation.** Every deleted character or block left a tombstone that could not be dropped because some replica might still reference it, and the per-element IDs and causal metadata add up, so a document that looks small on screen carries a large hidden history. The fixes, in order: enable **tombstone garbage collection** once a version vector shows every active replica has reached causal stability past the delete (so it is provably safe to drop); switch sync to **delta/incremental encoding** so a client downloads only changes since its last version, not the whole state; run periodic **compaction / snapshotting** to collapse history into a compact base; and if we are on early Automerge, evaluate its columnar-encoded 2.x format or **Yjs**, which GCs deletions aggressively and is roughly an order of magnitude leaner. The trade to state: aggressive GC costs time-travel and tolerance for devices offline a very long time, since we must retain history back to the oldest unsynced replica's low-water mark.
+
+</details>
 
 ### Key takeaways
 - The problem is **convergence plus intention preservation**: with concurrent or offline edits there is no single node to impose an order, so the merge rule must make every replica identical **and** keep what each user meant. Convergence alone is easy; keeping intent is the value.

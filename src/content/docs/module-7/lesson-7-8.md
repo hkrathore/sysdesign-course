@@ -133,19 +133,49 @@ The through-line at Director altitude: analytical modeling is **denormalize for 
 ### Practice questions
 
 **Q1.** An interviewer says "just point the BI tool at our production Postgres, it's already got all the data." Walk through your response.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd reject querying production directly on two grounds. First, the **layout**: a normalized 3NF schema stores each fact once, so "revenue by region by category by month" means joining `orders → customers → regions → products → categories` across tens of millions of rows for every refresh, slow and expensive, and on a row store it reads every column to touch a few. Second, **contention**: those unselective aggregate scans starve the point-lookup traffic that serves customers. Instead I'd land the data in the warehouse (CDC (change data capture) into bronze) and model a **dimensional star** in gold: a `fact_sales` at declared line-item grain surrounded by flat `dim_customer`/`dim_product`/`dim_date`/`dim_store`. The five-join scan becomes at most four single-hop joins, and the dashboard reads a pre-aggregate of a few thousand rows instead of 50M. Net: correct, fast, cheap, and production is untouched.
 
+</details>
+
 **Q2.** A customer moves from California to Texas. Show how SCD Type 1 vs Type 2 changes the answer to "2025 revenue by state," and which you'd choose.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Under **Type 1** you overwrite `dim_customer.state` to Texas. Now *every* historical query joins that customer's 2025 orders to "Texas," so last year's California revenue silently migrates to Texas, the report is precise and wrong, and nobody notices. Under **Type 2** you insert a *new* `dim_customer` row (new surrogate key, `valid_from = move date`, the old row closed with `valid_to`); the 2025 fact rows still point at the *California* version via their surrogate key, so "2025 revenue by state" correctly credits California and 2026 credits Texas. I'd choose **Type 2**, preserving point-in-time attribution is exactly why the warehouse exists; Type 1 is only acceptable for attributes with no historical meaning (a misspelled name). The cost of Type 2 is one extra dimension row per change plus validity-window logic in the transform, cheap for correct history.
 
+</details>
+
 **Q3.** Estimate the scan reduction from adding a gold pre-aggregate for a dashboard that currently scans a 50M-row `fact_sales` table to show revenue by region by day.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The raw query scans all **50M line-item rows** every refresh, summing on the fly. A pre-aggregate `agg_revenue_by_region_day` at the (region × day) grain has, say, 50 regions × 365 days ≈ **~18K rows per year**, holding pre-summed revenue. The dashboard reads ~18K rows instead of 50M, roughly a **2,700× row reduction**, and since it's columnar and the dashboard projects ~3 columns, the bytes scanned drop further. A multi-second, multi-cent scan becomes sub-second and effectively free (the cost model). The trade: the aggregate must be refreshed by the transform and only answers questions at its grain, ad-hoc drill-downs below (region × day) still hit the fact. So I pre-aggregate the *known high-traffic* rollups and keep the detailed star for exploration. Layout and pre-aggregation are the lever, not a bigger cluster.
 
+</details>
+
 **Q4.** When would you deliberately choose a wide One Big Table over a star, and what do you give up?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd reach for OBT for a **specific, high-traffic, stable-schema dashboard** where the join cost is measurable and the analysts/BI tool benefit from zero joins, every row already carries region, category, segment, date attributes, so the query is a pure columnar scan with no joins at all, the fastest possible. It's viable *because* columnar storage dictionary-compresses the duplicated context to near-nothing. What I give up is **flexibility and reuse**: a dimension attribute change must be propagated across every row of the wide table, I lose conformed dimensions shared across facts, and the table is rigid to schema change. So OBT is a **per-mart optimization**, not a modeling philosophy, I keep the governed star as the default for flexibility and reuse, and materialize a wide table only where a hot dashboard justifies the rigidity. *Rejected:* making OBT the universal pattern, which sacrifices the warehouse's reusability for a speed win most queries don't need.
 
+</details>
+
 **Q5.** Your finance report and your product dashboard both show "revenue" and disagree by 3%. What's the cause and the fix?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Almost certainly **two different definitions** of revenue encoded in two places, gross vs net of returns, the timezone of "day," whether late-arriving refunds are subtracted, or one reads a fast approximate path and the other the settled batch (the speed-vs-truth split of 9.7). Neither is "wrong"; they answer subtly different questions. The fix is **not** to debug one query, it's a **semantic/metrics layer**: one governed, code-defined definition of "revenue" (net, settled, store-local day) that finance, product, and the board deck all query through, plus **conformed dimensions** so "customer"/"date" mean the same thing everywhere, and **lineage** so each number's source and logic are inspectable. The Director point: disagreeing dashboards are a **modeling and governance** failure (no single definition), not a SQL bug, which is precisely why semantic layers and metric ownership exist.
+
+</details>
 
 ### Key takeaways
 - **Analytical modeling inverts OLTP:** you normalize (3NF) to make writes safe and conflict-free on one entity; you **denormalize** to make scans cheap across all entities. The redundancy that horrifies an OLTP designer is free on columnar storage (dictionary compression) and collapses many-way joins into single scans.

@@ -128,16 +128,40 @@ The through-line at Director altitude: privacy is a **fan-out with a deadline an
 ### Practice questions
 
 **Q1.** A user submits a right-to-be-forgotten request against your e-commerce platform. The team's plan is "we run `DELETE FROM users`." Critique it and give the Director version.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* That deletes the front desk and ignores the building. The user is also in read replicas, the Redis profile cache, the Elasticsearch product-search index, the Snowflake warehouse and its order-history and feature derived tables, the Kafka order-events backlog, 90 days of application logs, the 35-day backup window, and every processor we forwarded to (payment, email, analytics). The Director version is an **orchestrated, idempotent fan-out**: one registered deletion handler per store, hard-delete the mutable ones, **crypto-shred** the immutable backups and logs by destroying the user's per-user key, issue deletion APIs to third parties, and only mark the request complete when every registered store returns proof, all captured in a tamper-evident audit record inside the 30-day SLA. The store registry *is* the data map, so adding a store means registering its handler, which is how we stop forgetting stores.
 
+</details>
+
 **Q2.** Your retention policy keeps nightly backups for 35 days. Legal says a deleted user's data must be unrecoverable. You cannot rewrite backups. How do you satisfy both?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Crypto-shredding. Every user's PII that lands in backups (and append-only logs) is written under a **per-user data-encryption key** in the KMS. "Delete the user" schedules destruction of that key, so every backed-up copy of their ciphertext becomes undecryptable noise immediately, without touching the backups and without breaking point-in-time restore for everyone else. The backups then age out naturally within the 35-day window. I'd also document that *if* a backup is ever restored, the current deletion list is re-applied before the data goes live. Rejected: deleting from backups directly, it breaks immutability and integrity and is often physically impossible; rejected: declaring backups out of scope, they're personal data and in scope. The cost is per-user key management and the discipline that no PII path bypasses the key, which I'd have the security team verify.
 
+</details>
+
 **Q3.** A data scientist wants to keep a "fully anonymized" copy of user behavior for modeling, exempt from deletion requests. What questions do you ask before agreeing?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* First, is it actually anonymized or just pseudonymized? If there's any mapping back to the user (a hashed ID, a reversible token), it's pseudonymized, still personal data, and still in scope for deletion, so the exemption is false. Second, even with direct identifiers gone, can it be **re-identified** from quasi-identifiers, birth date, ZIP, gender, a precise location trail, device fingerprint? Those combinations uniquely pick out individuals, so "we dropped the name" is not anonymization. To genuinely exempt it I'd require defended anonymization: generalization and suppression to a **k-anonymity** threshold (each record indistinguishable from at least k-1 others) or differential-privacy noise on the aggregates, validated by the security team. Cheaper and often sufficient: keep only **aggregates** that are non-identifying by construction, which sidesteps the whole question.
 
+</details>
+
 **Q4.** Beyond building the deletion machinery, what's the single highest-leverage thing you'd do to lower privacy risk across the platform, and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Data minimization with enforced retention. Every personal field we collect is liability paid forever and fanned across every store, more to inventory, encrypt, include in every DSAR, delete on request, and lose in a breach. The cheapest data to protect, delete, and not-breach is the data we never stored. Concretely: a collection review that drops fields we don't use, **purpose and retention tags** at write time, and a **retention sweeper** that auto-expires data (raw logs at 90 days, precise location at 30, downgrade to coarse aggregates after a year). This shrinks the breach blast radius, speeds every DSAR, and lightens the deletion fan-out simultaneously, one control improving all three. I'd pair it with PII classification so the data map driving deletion stays accurate. Rejected: "collect everything, we might want it," because every "might" is permanent risk for data we usually never use.
+
+</details>
 
 ### Key takeaways
 - **Privacy is an architectural constraint, not a policy PDF:** right-to-be-forgotten is a **distributed fan-out with a 30-day deadline and a proof obligation**, designed in like availability, not bolted on as a runbook.

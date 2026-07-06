@@ -113,16 +113,40 @@ The through-line at Director altitude: **multi-agent is a cost-and-risk decision
 ### Practice questions
 
 **Q1.** You're asked to design an agent that audits a 200-page contract clause-by-clause and flags risky terms. One agent or many — and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Clause-flagging is **parallel and independently verifiable** — each clause is judged on its own — so an **orchestrator-worker fan-out** (chunks of clauses to parallel workers, each with a clean context and a risk rubric) fits, with a reduce step that merges flags and a critic that checks coverage. *But* if the task were "rewrite the contract into one coherent voice," that's **coupled** (clauses reference each other, the whole must read consistently) and belongs to a single agent or a tightly-ordered workflow. Same document, opposite answer, decided by parallel-and-verifiable.
 
+</details>
+
 **Q2.** A team proposes a 4-level hierarchical agent system for a customer-support bot. Critique it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Almost certainly over-built. Each hierarchy layer multiplies token cost and latency and adds a decomposition/synthesis point that can fail (reliability decays with depth). Support is mostly **retrieve-and-answer with a few tool actions** — a single agent with RAG (retrieval-augmented generation) and a small toolset, or a constrained workflow, handles the bulk; escalate to a human for the tail. I'd push for the flattest thing that meets the quality bar and reserve any fan-out for genuinely parallel sub-questions, naming the ~10× cost if we add it.
 
+</details>
+
 **Q3.** How do you stop a multi-agent run from exploding your token bill?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Bound everything:** cap concurrent workers and total agent count; give each worker a step/token/time budget with a kill switch; cap dynamic fan-out and log what was dropped (no silent truncation); prefer fixed topologies over an orchestrator that invents its own structure each run; and gate the whole pattern behind a value-per-task threshold so cheap tasks never trigger it. Track $/task in tracing and alert on regressions.
 
+</details>
+
 **Q4.** When is a "multi-agent system" really just a workflow, and why does the distinction matter?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When the steps are **known and ordered** (extract → validate → format), it's a **pipeline/workflow** with LLM stages, not a free-roaming agent system — and that's better: deterministic order, lower cost, easier to test and audit. The distinction matters because calling it "multi-agent" invites unnecessary autonomy and nondeterminism. Reserve true agentic orchestration for open-ended decomposition you can't script in advance.
+
+</details>
 
 ### Key takeaways
 - **Multi-agent is a concurrency-and-separation tool, not an intelligence amplifier.** The three real reasons to use it: parallelism, role specialization, and context isolation. "More agents reason better" is false.

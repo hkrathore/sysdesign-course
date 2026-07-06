@@ -121,16 +121,40 @@ The through-line at Director altitude: **tools are how agents create value and t
 ### Practice questions
 
 **Q1.** An engineer says "let's give the travel agent a `run_sql` tool so it can answer any data question." Evaluate.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Reject it as the default. `run_sql` is the maximal-privilege tool — it can read every table (cross-tenant data leak), and a single indirect injection ("run `DROP TABLE bookings`") becomes catastrophic. It's also unpredictable and unauditable. Replace it with **narrow, least-privilege tools** for the actual questions (`search_flights`, `get_my_bookings`) scoped to the user/tenant in *your* code, with scoped credentials. If genuinely open-ended analytics are required, run them against a **read replica with a read-only, row-level-secured role** behind a query allowlist — never raw model-authored SQL on the primary. The lens is constant: *what can this tool do if the model is tricked into calling it?*
 
+</details>
+
 **Q2.** Walk me through how the model "decides" to call `search_flights` rather than `search` (the help-center tool).
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The model is given both tools' **schemas and descriptions**. From the user's message and those descriptions it predicts whether a tool call (and which) is the right next output, and emits a structured call with arguments filled from context. It is *selecting from the descriptions you wrote* — so if `search_flights` clearly says "find bookable flights between airports on a date" and `search` says "search help articles," selection is reliable; if both are vague or overlapping, it confuses them. The orchestrator then validates the args and executes. The model never reads docs or runs code — the description is its entire API surface, which is why sharpening descriptions beats upgrading the model.
 
+</details>
+
 **Q3.** You're building an internal agent platform several product teams will extend with their own tools. Bespoke wiring or MCP, and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **MCP.** With multiple teams and a shared agent runtime, bespoke wiring means *N×M* glue and tight coupling between every integration and the agent app. MCP lets each team ship a **server** exposing their tools/resources once, and any MCP-aware agent consumes it — integrations become reusable platform infrastructure (the LSP play), and you avoid lock-in to one framework. The costs to name: you run and monitor servers, and you must **vet and least-privilege** each one because a compromised server is inside your tool surface. For a single app with two tools I'd hand-roll; the reuse and decoupling only pay off at platform scale.
 
+</details>
+
 **Q4.** The `book_flight` tool occasionally executes twice. Diagnose and fix without changing the model.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The cause is the **execution layer, not the model**: a tool call timed out or the orchestrator crashed mid-call and the retry re-executed the booking — classic at-least-once delivery. Fix with **idempotency**: derive a stable key (e.g., `hash(user_id + fare_id + date)`), persist it before the side effect, and make the tool return the prior result if the key is already seen (the standard idempotency-key pattern). Now retries are safe and latency-driven double-booking disappears — no model change required. Reads like `search_flights` need none of this; only the mutation does.
+
+</details>
 
 ### Key takeaways
 - **Function calling is a contract:** the model emits a *structured call* from the JSON schemas you advertise; your orchestrator validates and executes, then feeds the result back and the loop continues. The model never touches your systems — that separation is the governance boundary.

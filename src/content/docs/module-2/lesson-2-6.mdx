@@ -121,16 +121,40 @@ The widget renders a live hash ring. Drag the **node count**: the ring recolors 
 
 ### Practice questions
 **Q1.** You run a 20-node Redis cache with a `hash mod N` client. You add 5 nodes at peak traffic and the database falls over. Explain precisely what happened and the fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Changing the divisor from 20 to 25 re-evaluates `hash(key) mod N` for every key, and the vast majority change owner at once. Every remapped key misses on its new node and re-reads from the database simultaneously, a thundering herd. Fix: a **consistent-hashing** client (Ketama or rendezvous), so adding 5 nodes to 20 moves only ~`5/25 = 20%` of keys, and those miss gradually. Add capacity off-peak, and consider request coalescing to flatten any residual spike. The decision is justified by ~20% gradual misses vs ~80% simultaneous misses.
 
+</details>
+
 **Q2.** Your Cassandra cluster (vnodes enabled) has one node pinned at 90% CPU while the rest sit at 55%. What's your read of the situation, and what do you decide?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Vnodes make *keyspace* even, so a persistent single-node hot spot is almost certainly **traffic** imbalance, a hot partition key, the celebrity problem, which consistent hashing cannot fix by design. Decision path: confirm hot key vs token-allocation artifact (I'd have the storage team pull per-partition metrics and ownership share, a quick check, and my prior is hot key), then fix at the **data-model level**, bucket/salt the key, cache the hot row, or replicate it, rather than re-tuning the ring. The red-flag move is adding nodes: that re-spreads keyspace but leaves the one hot key on one node.
 
+</details>
+
 **Q3.** A teammate proposes rendezvous hashing instead of a ring for routing requests across backend servers. When is that the better call, and when not?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Rendezvous gives the same minimal-movement property with no ring state and easy per-node weighting. It's the better call when `N` is **small** (a handful of backends/origins), O(N) per lookup is negligible and you avoid maintaining ring metadata. It's the worse call when `N` is **large** (hundreds+), where O(N) per request hurts and the ring's O(log N) wins, or when you need ring-based replica placement across AZs as Cassandra does. Pick HRW for small fan-out + simplicity; the ring for large `N` + replica-placement semantics.
 
+</details>
+
 **Q4.** How would you make a consistent-hashing cache cluster handle nodes of different sizes (a mix of 16-core and 64-core machines)?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Encode capacity as **vnode count**: give the 64-core box 4× the vnodes of the 16-core box, so it claims ~4× the keyspace and traffic, even per-core load across heterogeneous hardware, no manual key assignment. The trade: more ring metadata, and on failure of the big node a larger (but still scattered) redistribution, acceptable versus the rejected alternative of treating all nodes equally, which overloads the small machines or wastes the big ones. Rendezvous hashing achieves the same via per-node weights if you prefer no ring.
+
+</details>
 
 ### Key takeaways
 - `hash mod N` distributes evenly but **rebalances catastrophically**, adding 1 node to `N` moves ~`(N−1)/N` of keys (90% at 10 nodes, 99% at 100); that's the problem consistent hashing solves.

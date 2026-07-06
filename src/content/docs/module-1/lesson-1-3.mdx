@@ -97,13 +97,31 @@ flowchart LR
 
 ### Practice questions
 **Q1.** Estimate daily storage for a photo service: 50M DAU, each uploads 2 photos/day at 1.5 MB each.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* 50M × 2 = 100M photos/day × 1.5 MB = **150 TB/day** raw; with ×3 replication ≈ **450 TB/day**; ~164 PB/yr replicated. Conclusion that matters: this is a *blob-store + CDN* problem dominated by storage and egress cost, not a QPS problem.
 
+</details>
+
 **Q2.** A chat app has 500M DAU sending 40 messages/day. Average and peak write QPS?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* 500M × 40 = 20B msgs/day ÷ 86,400 ≈ **~230k/s** avg. Peak ×3 ≈ **~700k/s**. Conclusion: write-heavy, so a partitioned log/queue front door and LSM-tree (LSM = log-structured merge) storage, not a read-cache architecture.
 
+</details>
+
 **Q3.** Why round 86,400 to 100,000?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It's within ~16%, far inside back-of-envelope tolerance, and makes QPS = DAU × req/user ÷ 10⁵ a one-step mental division. It also rounds the *denominator up*, so the QPS estimate is mildly conservative, which is the safe direction for capacity planning.
+
+</details>
 
 ### Key takeaways
 - Estimation answers one question: *small fleet or hyperscale?* Order of magnitude is the deliverable.

@@ -170,19 +170,49 @@ The Director-altitude signal throughout: you treat each as a **lever set against
 
 ### Practice questions
 **Q1.** Why does an LSM-tree put a Bloom filter on each SSTable?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* An LSM point read may have to consult many immutable SSTables newest→oldest, and each consultation is a random read (~100 µs SSD, ~10 ms HDD). A per-SSTable Bloom filter answers "is this key possibly in this file?" from RAM first: "absent" is guaranteed correct (no false negatives), so the read skips the file with zero correctness risk, that skip is what keeps LSM read amplification bounded. The cost is tiny: ~9.6 bits/element buys ~1% false positives, each of which only wastes one file probe. Rejected alternative: an exact per-file index of all keys, no false positives, but ~30× the memory for data the filter guards just as safely.
 
+</details>
+
 **Q2.** A service runs fine at 8k QPS / 120 ms p99. A deploy raises p99 to 300 ms with the same traffic, and it falls over despite being "below capacity." Explain using Little's Law.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Concurrency = throughput × latency. Before: `8,000 × 0.12 = 960` in flight; after: `8,000 × 0.30 = 2,400`, a ~2.5× jump with *no change in QPS*. Pools sized near ~1,000 concurrent are now exhausted; requests queue, queueing adds latency, which raises concurrency further, a feedback collapse, not a linear slowdown. Throughput "headroom" was a red herring; the binding constraint was concurrency. Fix: roll back the regression (or scale pools to absorb 2,400+ meanwhile), and alert on p99 + in-flight, not just QPS.
 
+</details>
+
 **Q3.** Stakeholders want a "real-time" dashboard for daily revenue. Push back or build streaming, and how do you decide?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Interrogate the freshness NFR. "Daily revenue" almost always tolerates minutes of lag, so **micro-batch** (Spark Structured Streaming on a few-minute trigger) or hourly **batch** meets it at a fraction of true streaming's cost and complexity, no per-event windowing/watermark/exactly-once burden. I'd only build sub-second Flink if a concrete requirement needs it (ops alerting on the *current minute*). "Real-time is better" isn't a requirement; quantify acceptable staleness and pick the cheapest tier that meets it.
 
+</details>
+
 **Q4.** Why does a 1%-slow backend become a *63%*-slow request, and what do you do about it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Fan-out. A request that calls 100 backends is as slow as its slowest one; `1 − 0.99^100 ≈ 63%` of requests hit at least one slow backend (tail amplification, the rare tail of a component becomes the common case of the aggregate). This is why SLOs target p99/p99.9 and why you don't just optimize the mean. Mitigations: **hedged/backup requests** (duplicate to another replica after a short delay, take the first reply), tight **tail-tolerant timeouts** with retries on idempotent calls, reducing fan-out where possible, and isolating slow dependencies. Connects to the scatter-gather reads of partitioned stores.
 
+</details>
+
 **Q5.** When would you accept Lambda's dual codebase instead of going Kappa (stream-only)?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When full-history **recomputation is cheaper or simpler in batch** than replaying a long log, or when the accurate logic genuinely differs from the fast/approximate logic, e.g., a quarterly financial restatement over months of data, where a Spark recompute beats replaying months of Kafka and finance needs the exact number. Lambda's price is two implementations that can drift and double on-call; you accept it when the batch path's value (cheap full recompute, an independent correctness check) outweighs that. Choose Kappa when the logic fits one streaming model and the replay window is bounded enough to be affordable.
+
+</details>
 
 ### Key takeaways
 - A **Bloom filter** trades a tunable false-positive rate for huge space savings and **never** has false negatives, so "absent" safely **skips** work (LSM SSTable seeks, cache/origin hits). ~9.6 bits/element → ~1% FP at k=7; each 10× lower FP costs ~+4.8 bits/element.

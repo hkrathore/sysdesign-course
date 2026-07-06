@@ -130,16 +130,40 @@ The through-line at Director altitude: **prompt and RAG are cheap, reversible, a
 ### Practice questions
 
 **Q1.** A PM says: "Our assistant doesn't know our new pricing — fine-tune it on the pricing page." What do you say?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **No — that's a RAG problem, not a fine-tune problem.** Pricing is a **fact**, and it **changes**; fine-tuning bakes a stale snapshot into weights, can't cite the source, and will confidently invent prices it half-learned. Put the pricing docs in an **index**, retrieve and cite them at query time, and the answer updates the moment pricing changes — no retraining. Fine-tuning teaches **behavior, not facts**; the only thing I'd fine-tune here is *how* it presents pricing (format/tone), and only if a prompt can't get that.
 
+</details>
+
 **Q2.** When is fine-tuning genuinely the right tool, and how would you justify it to me?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When the gap is **behavior, not knowledge** — a format/style/tone/domain-skill the model must reliably produce (strict JSON, our support voice, classify into our taxonomy, reason like a domain specialist) — **and** eval proves **prompt + RAG can't close it**. Justification has three parts: (1) an **eval** showing prompt+RAG misses the bar and the fine-tune clears it without regressing; (2) **curated training data** with an owner; (3) a **retraining/ops plan** for the next base model. I'd start with **LoRA** (cheap, swappable), escalate to full FT only if LoRA's capacity isn't enough, and keep the fine-tune thin so base upgrades stay cheap.
 
+</details>
+
 **Q3.** What does a fine-tuned model cost you operationally, beyond the training run?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three standing costs. **Data curation** — assembling/cleaning thousands of high-quality pairs is the slow, expensive part, and bad data makes the model *worse*. **An eval harness** — without it you can't prove the fine-tune helps or catch regressions. **Retraining as the base moves** — the base vendor ships better models every few months; a prompt+RAG system adopts them by changing one name, but a fine-tune is **locked to its base version**, so each upgrade is a re-curate-and-retrain project. That lock-in often **erases the edge**: the next free base model, prompted well and RAG-grounded, may already match your fine-tune. That's why I reject fine-tuning whenever prompt+RAG gets close.
 
+</details>
+
 **Q4.** You need answers grounded in weekly-changing docs *and* always in strict JSON + brand voice. Lay out the adaptation plan and your rejected alternatives.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Split it by gap.** The changing docs are **facts → RAG**: index them, retrieve + cite at query time, fresh in minutes. The JSON + voice is **behavior → prompt first**: system prompt + **JSON-mode/structured output** + few-shot of the voice; measure on a golden set. **Only if** eval shows the format/voice still drifts, escalate to a **thin LoRA fine-tune** for the behavior. Net: **RAG on a fine-tuned (or just well-prompted) model** — they compose. *Rejected:* fine-tuning the policies in (stale, uncitable, hallucinated — they change weekly); long-context stuffing all policies every call (doesn't scale across regions, burns tokens); and jumping straight to fine-tuning the format before proving a prompt can't do it.
+
+</details>
 
 ### Key takeaways
 - **The spectrum is an escalating cost ladder:** prompt → RAG → LoRA → full fine-tune → continued pretraining. **Climb only when eval proves the rung below can't hit the bar.** Continued pretraining is almost never an app-team move.

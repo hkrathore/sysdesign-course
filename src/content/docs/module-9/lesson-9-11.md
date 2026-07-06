@@ -158,16 +158,40 @@ The through-line at Director altitude: **cost, quality, and privacy are one deci
 ### Practice questions
 
 **Q1.** A support agent's average session is 40 turns and you're letting context grow unbounded. Costs are up 5× month-over-month and users report it "forgets what they said earlier in the same chat." Diagnose and fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Both symptoms are the **same root cause** — unbounded context. **Cost:** every turn re-processes the entire growing history as input, so per-turn input cost climbs through the session; by turn 40 you're paying to re-read 40 turns *every* turn. **"Forgetting":** that's **lost-in-the-middle** — the early turns are buried mid-context where recall is weakest, so the model can't attend to them even though they're technically present. **Fix (hierarchical):** keep the last ~8 turns verbatim (sliding window), roll older turns into a **structured summary** that pins decisions/constraints so they survive, and **retrieve** any older specific when relevant. Add a cross-session **semantic profile** so the agent starts each chat knowing the customer's plan/history. Expect a ~5–10× drop in per-turn input cost and the mid-session amnesia to disappear because constraints now live in the pinned summary, not buried turns.
 
+</details>
+
 **Q2.** Design where each piece of memory lives for a personal-assistant agent: (a) "the user's home city is Dubai," (b) "last Tuesday we booked a flight to London," (c) "always confirm before spending money."
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* (a) **Semantic** — a durable fact; store in the **profile DB** keyed by user, inject directly (don't make a vector search guess at the home city). (b) **Episodic** — a past event; store in the **vector store** of interactions, retrieve by similarity when the user references travel ("when did I go to London?"). (c) **Procedural** — a learned rule/preference; fold into the **system prompt / tool policy**, not searched as data. The split matters because the *access pattern* differs: exact lookup vs fuzzy similarity vs always-on rule. Collapsing all three into one vector DB makes (a) and (c) unreliable.
 
+</details>
+
 **Q3.** "Agent memory is just RAG, so we already have it" — push back or agree, precisely.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Mostly agree on the read path, disagree it's done.** The recall side *is* RAG — embed past interactions, retrieve top-k relevant into context — same machinery and same failure modes (retriever misses, embedding/chunking quality) as document RAG. What plain RAG **doesn't** give you: **writes** (the agent persists new memories as it goes — what to keep, dedup, conflict resolution by recency/version) and **forgetting** (TTL, relevance decay, explicit deletion for privacy). It also needs **multi-tenant isolation** and a **structured-profile** path for durable facts that shouldn't be a similarity guess. So: the retrieval substrate is reused, but memory adds the write/version/forget lifecycle and governance on top. "We have RAG" gets you the easy half.
 
+</details>
+
 **Q4.** Your agent told a user it would do X based on a preference, but the user changed that preference two sessions ago. How did this happen and how do you prevent it?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The memory store holds **both** the old and new preference with no recency resolution, and retrieval surfaced the **stale** one (or surfaced both and the model picked wrong). Prevention: **timestamp and version every memory**; on write of a fact about an existing key, mark the prior version **superseded** rather than keeping it equal-weight; on read, return the **latest non-superseded** version and weight retrieval by **recency** as well as similarity. This both fixes the immediate bug and gives an audit trail of what the agent believed and when. The general lesson: memory without conflict handling will confidently act on facts that are no longer true — recency/versioning is not optional once facts can change.
+
+</details>
 
 ### Key takeaways
 - **The context window is finite AND metered** — every token is re-processed every turn (cost + latency) and quality degrades as it fills (lost-in-the-middle / rot). Memory is a **keep-vs-retrieve-vs-drop** decision; quantify the per-turn cost of unbounded context.

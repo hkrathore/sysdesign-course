@@ -160,16 +160,40 @@ The signal is not "it works offline." It is: **local store as truth, working-set
 
 ### Practice questions
 **Q1.** Design the write path for a notes app that must work in airplane mode, then describe what happens on reconnect.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* On write, I persist the note to the **local store** (SQLite/IndexedDB) and return immediately so the UI updates optimistically, and I record the change as an **operation** in a durable **outbound queue** with a client-generated `op_id`. Nothing waits on the network. On **reconnect**, a sync trigger fires: I **push** the queued ops, the server **dedupes by `op_id`** (retries are at-least-once, so I must assume duplicates) and applies each once, then I **pull** deltas since my stored **cursor**, applying updates and **tombstoned** deletes to the local store and advancing the cursor. The trade I accept is **eventual consistency** and possible **conflicts** on records edited on two devices, which I hand to conflict resolution; what I get is an app that is instant and fully usable offline. The rejected alternative, blocking each save on a server round trip, is unusable exactly when the user has no signal.
 
+</details>
+
 **Q2.** Your sync pulls the whole dataset every time. The account grew to 2 GB and syncs now take minutes and drain battery. Fix it.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two problems. First, no **cursor**: introduce a version marker per record (`updated_at`/version) and a client-stored **watermark**, so each sync pulls only changes since last time, cost then tracks change volume, not the 2 GB. Second, likely **full replication** of an account too big for a device: move to **partial/working-set** sync, keep recent and relevant data local and fetch the rest on demand, and fix first-login with **prioritized paging** (hot slice first, background the rest). Make deletes **tombstones** so they still propagate under delta sync. On cadence, move off tight polling to **push-triggered** sync so the radio wakes only on real changes. Result: a sync goes from 2 GB to tens of KB in the steady state, and battery recovers.
 
+</details>
+
 **Q3.** A delete on device A never disappears on device B. Diagnose and fix.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Almost certainly **delete-by-absence**: device A removes the row and its next sync simply omits it, but the server (and device B) cannot distinguish "deleted" from "not included in this payload," so the deletion never becomes a change and B keeps, or later **resurrects**, the record. Fix with **tombstones**: a delete sets `deleted = true` and bumps the record's version so it flows through the same delta/cursor path as any update; device B's next delta pull sees the tombstone and removes the row. I retain tombstones for a window (30 to 90 days) so any device that syncs at least once in that period gets the delete, then purge them to reclaim space.
 
+</details>
+
 **Q4.** After a regional outage ends, 100,000 devices reconnect at once and the sync backend falls over. What do you do?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is a **reconnect thundering herd**: 100k simultaneous syncs, many of them cold or large deltas, hitting the backend in one spike. Client side, add **jittered reconnect** (randomized backoff over a few minutes) so devices spread their reconnection instead of firing together, and cap concurrent in-flight sync work per device. Server side, use the **cursor** to page deltas (bounded response sizes, resumable), apply **backpressure and rate limiting** (429 with retry-after) so the backend sheds load gracefully rather than melting, and autoscale the sync tier ahead of known recovery. The point is that a 100k spike should **degrade** (slightly slower syncs) rather than fail; jitter plus paged, backpressured deltas turn a herd into a wave.
+
+</details>
 
 ### Key takeaways
 - **Offline-first means the local store is the UI's source of truth**, reads and writes hit it instantly (optimistic) and a background sync engine reconciles later; the rejected online-only client spinners on every action and dies without signal. The cost you accept is two copies of the data, a sync engine, and eventual consistency.

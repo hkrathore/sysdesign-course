@@ -274,16 +274,40 @@ Each wave is an explicit checkpoint: attrition, delivery metrics, and boundary-l
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Your CEO wants the reorg announced Monday, company-wide, done in one shot. Talk them out of it, or don't.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd show the cost asymmetry. Sequenced: ~$0.5M of managed productivity dip over three quarters with checkpoints. Big-bang: roughly double the dip, *plus* the attrition tail, every team changes at once, nobody's new domain exists yet as a service (so every boundary starts as a two-owner boundary), and each regrettable senior exit is $300-500K plus unwritten system knowledge; three exits and the big bang costs 2-3× the sequenced plan while delivering a worse org. The exception I'd grant: if the current structure is actively hemorrhaging people *now*, speed can beat sequencing, then I'd announce the **target and the wave plan** Monday (clarity is cheap and calming) but move ownership in waves regardless. Announce big-bang, *execute* in waves.
 
+</details>
+
 **Q2. Two teams keep colliding on the same boundary every quarter. Process fix or architecture fix?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Once is a feature; every quarter is data. Recurring cross-team coordination on the same seam means the boundary contradicts how the business actually changes, Conway is telling me where the real seam is. I'd resist the standing sync meeting (a permanent chatty channel that dissolves the boundary while keeping its costs) and instead run a short event-storming pass on that flow, then either move the contested service to one owner or redraw the two domains. The trade-off I accept: redrawing costs a mini-reorg (~weeks of dip for two teams); the committee costs forever. One caveat, if the collisions trace to one in-flight migration with an end date, hold the line and let the dual-ownership expire on schedule.
 
+</details>
+
 **Q3. With 40 engineers, the payments expert wants a dedicated payments team with herself as lead. Yes or no?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* No, at this size. A payments team would be 2-3 people (we can't fund 7 without starving a stream), which formalizes a bus factor and maximizes her attrition blast radius; and our PSP integration is mostly bought, so the in-house surface is thin. Payments stays inside Checkout behind a tokenization boundary that contains the PCI scope. What I *would* give her: explicit tech-lead ownership of the payments domain within Checkout, an enabling-mode mandate to spread the knowledge, and a revisit trigger, at 60+ engineers or if we build in-house risk/fraud, a complicated-subsystem payments team becomes the right call. The decision is reversible; the retention conversation happens this week either way.
 
+</details>
+
 **Q4. How do you know, six months in, whether the inverse Conway maneuver is working?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three measurable signals. First, **flow**: lead time for a vertical feature, the 6-8-week cross-team queue should be trending toward team-local weeks; I'd track what fraction of changes ship without a blocking dependency on another team (target: > 80%). Second, **boundary integrity**: contract-breaking changes between teams, shared-table count (must hit zero on the dated plan), and recurring cross-team collisions per quarter. Third, **the people NFR**: regrettable attrition against the < 5% budget and team-health surveys. The anti-signal I'd watch hardest: stream teams routing around the platform team, shadow infra means the platform drifted to gatekeeping, and the org is quietly reverting to the architecture of its old communication paths.
+
+</details>
 
 ---
 

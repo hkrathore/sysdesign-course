@@ -257,16 +257,40 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. It's Black Friday peak and us-east just went dark. First 15 minutes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* T+0-3: external probes confirm from three vantage points; the pre-written rule says declare at 3 minutes unreachable, the incident commander declares via the out-of-region control plane; nobody debugs first. T+3-6: drain East; Tier 0 in West is already serving production, so checkout recovers inside ~6 minutes; carts homed East lose seconds of writes, the RPO we signed. T+5-15: promote the Tier 1 replica, scale the warm fleet against pre-reserved quota, activate the shedding order, analytics first, checkout last, by written policy. T+10-15: synthetic checkout transactions verify the revenue path; status page and exec comms go out with a dollar estimate. The only live decision was *declare*, everything else was rehearsed in quarterly evacuations, which is why I can give minute marks instead of adjectives.
 
+</details>
+
 **Q2. The CFO asks why checkout runs at 40% utilization across two regions. Defend the spend.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Insurance with a stated premium and payout. Premium: ~$6M/yr for Tier 0 active in both regions, each able to carry full peak. Risk covered: regional outages run about once per 1-2 years for 2-6 hours; an hour of checkout at peak is ~$1M plus trust damage. Without it, checkout's RTO is 30-60 minutes of cold promotion, optimistically. Note what I'm *not* asking for: the same posture for analytics, that rides backup-restore at +$0.5M, which is why the total is +$12.5M, not the +$30M a blanket policy costs. And the fleet isn't idle: it serves real traffic daily, which is also what keeps it provably working.
 
+</details>
+
 **Q3. A staff engineer proposes multi-master writes everywhere so "any region can take any write." Response?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* One question: *what's the merge rule when both regions write the same key?* For the payment ledger there is no acceptable answer, LWW under clock skew loses or duplicates money, and "balance ≥ 0" isn't expressible as a CRDT. That's the CAP trade made concrete: accepting writes everywhere means paying in reconciliation later, and for invariant-bearing data that bill is unbounded. So the ledger gets a 3-region quorum, conflicts impossible, ~50 ms per write, affordable once per checkout, and carts get single-writer-per-key. Exhaust designs that make conflicts impossible before adopting any that make them merely resolvable.
 
+</details>
+
 **Q4. Your catalog says Tier 1 RTO is 30 minutes. How do you know that's true?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Because we measure it, the measured number, not the aspiration, lives in the catalog. Monthly drills promote the catalog replica in production and time it; quarterly we evacuate a full region for real. Our first evacuation missed the Tier 0 target, 12 minutes against 5, and that drill-found gap produced the pre-reserved-quota fix and the client-failover SDK. For Tier 2 the discipline is timed restores: a backup never restored is a hope. The drills cost engineer-days and elevated error rates; that's budgeted inside the DR line, because an untested DR plan is fiction we'd be paying $12.5M a year to print.
+
+</details>
 
 ---
 

@@ -123,16 +123,40 @@ The through-line at Director altitude: **the reliability story is the design.** 
 ### Practice questions
 
 **Q1.** An agent runs a 20-step plan, takes a side-effecting action at step 6 (charges a customer), and the process is killed by a deploy at step 14. On restart, how do you guarantee the customer isn't charged twice and the first 13 steps aren't redone?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Run it on a **durable execution engine** so step results are journaled; on restart it **replays/resumes from step 14**, treating steps 1–13 as completed (their recorded results are reused, not re-executed). The step-6 charge additionally carries an **idempotency key** `hash(run_id, step_6, ...)` so that even if the engine retried that activity, the payment provider deduplicates it — exactly-once *effect* on at-least-once infrastructure. State never lived in process memory, so the crash lost nothing.
 
+</details>
+
 **Q2.** Design the human-in-the-loop policy for a customer-support agent that can issue refunds.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Gate by **amount and reversibility.** Refunds under a low, in-policy threshold run **full-auto** with logging. Refunds above the threshold, or anything outside policy, **pause for approve-before-execute**: the runtime surfaces the proposed refund, the customer context, and the policy citation to an agent who signs off; the workflow durably waits and resumes on approval. Low confidence or repeated tool failure **escalates** to a human. A **review queue** samples completed auto-refunds for after-the-fact oversight. The gate placement is the design — not "a human approves everything" (kills throughput) or "the agent refunds freely" (unbounded loss). This is the autonomy-by-reversibility lens.
 
+</details>
+
 **Q3.** Which durable-execution approach would you pick for a business-critical agent that orchestrates across payments, email, and a CRM over up to several hours, and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **full workflow engine (Temporal / Step Functions)** over build-your-own/framework-only persistence. The run is long, multi-step, and side-effecting across external systems, so I need durable timers (for HITL and long tool waits), built-in per-activity retries with backoff, **signals** for human approval, and **replay** for debugging and audit. Framework persistence (a checkpointer) handles resume but not the timers, signal-based HITL, and operational tooling I want for something that moves money. The cost is operational complexity and a new dependency; justified by the blast radius. For a short single-service agent I'd accept the lighter option.
 
+</details>
+
 **Q4.** Your autonomous research agent occasionally gets stuck repeating the same failing search and burns through API budget. What runtime controls fix this?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Loop / no-progress detection** (halt if N consecutive steps produce no new state or repeat an action), a hard **step/iteration cap**, a **token and wall-clock budget** with the run aborting when exceeded, and a **kill switch** for an operator. Pair with **observability** so the trace shows the loop, and feed that back into the agent's stop-condition design. Budgets are a runtime guardrail, not a tuning afterthought — they're the circuit breaker for an autonomous loop.
+
+</details>
 
 ### Key takeaways
 - **A production agent is a long-running, stateful, failure-prone distributed workflow — not a chat loop** — so it inherits durability, idempotency, observability, and exactly-once-*effect* obligations you already solved in the architecture and business-domain tracks. Reuse that machinery; don't reinvent a fragile stack.

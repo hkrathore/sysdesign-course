@@ -89,13 +89,31 @@ Justify each by access pattern + consistency need. The signal isn't picking one 
 
 ### Practice questions
 **Q1.** A URL shortener: which store, and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Key-value (DynamoDB)**. Access is pure `shortcode → long URL` lookup, no joins, no ad-hoc queries, with enormous read skew and a need for high availability. KV gives O(1) lookups, horizontal scale, and AP behavior; the redirect tolerates eventual consistency. Relational would add overhead with no benefit for this access pattern.
 
+</details>
+
 **Q2.** When is wide-column (Cassandra) clearly better than relational?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Write-heavy, massive-scale, partition-friendly workloads (time-series, event logs, messaging, feeds) where you can design tables around known queries, tolerate eventual/quorum consistency, and need linear horizontal scale and multi-region availability without a single leader. The trade is no ad-hoc joins and you must model for the read up front.
 
+</details>
+
 **Q3.** What's the senior case for defaulting to Postgres?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It gives ACID, rich queries, mature operability, and `JSONB` flexibility, and scales via replicas/partitioning past most products' real needs. NoSQL trades away transactions and query power that you'll likely miss; adopting it prematurely adds distributed-systems complexity before you've hit the limit that justifies it. Choose by evidence (measured limits), not fashion.
+
+</details>
 
 ### Key takeaways
 - Differences that matter: data model, schema rigidity, consistency/transactions, scale-up vs scale-out, not "old vs new."

@@ -308,19 +308,39 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 **Q1. A user complains live captions lag the speaker by several seconds. What's wrong and how do you fix it?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The ASR is likely buffering for context (or batching) before emitting, or the GPU fleet is queueing under load. Fix: use a **streaming ASR that emits revisable partial hypotheses** so words appear within ~1 s and are corrected as more audio arrives; ensure the **live path is decoupled** from the batch summarizer so it never blocks; and confirm the GPU fleet is **provisioned to the concurrent-meeting peak** (this is a capacity, not per-token, cost) so streams aren't queued. Accept that partials occasionally flicker as they revise — far better than a multi-second lag.
+
+</details>
 
 **Q2. Your summary listed a decision that the team says they never made. Diagnose and prevent it.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **faithfulness failure** — the summarizer asserted something ungrounded, likely in the reduce step or via a low-confidence (mis-transcribed) segment. Prevent it by: (a) **grounding every extracted decision/action item with a `source_segment_ts`** and dropping any item without a valid citation; (b) running a **faithfulness eval** (does each item trace to its cited segment?) as a **ship gate** on prompt/model changes; (c) surfacing low-confidence ASR segments so a transcription error doesn't silently become a "decision." If it recurs after a vendor model update, that's why the eval gate exists — a silent model change can regress faithfulness invisibly.
+
+</details>
 
 **Q3. Walk me through summarizing a 3-hour, multi-topic meeting that's ~30K tokens.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It exceeds a comfortable single-prompt budget and would degrade via lost-in-the-middle even if it fit. Use **map-reduce**: chunk on topic/time boundaries (~1–2K tokens, speaker-preserving) → **map** (summarize each chunk in parallel, extracting cited decisions/action items) → **reduce** (merge chunk summaries into a global summary, de-dup and reconcile action items). Add chunk overlap and a reconciliation step in the reduce to catch decisions referenced across chunk boundaries. Run it on the **async/batch API** (latency-relaxed, ~50% cheaper). Rejected: one-shot stuffing (cost + middle-degradation); refine (serial, can drift on a 3-hour transcript).
+
+</details>
 
 **Q4. A customer in a two-party-consent jurisdiction is recording calls. What does your design have to guarantee?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Recording must not start until **all participants have consented** for that jurisdiction — enforced by the **consent gate** in front of both pipelines, with the meeting non-recordable until policy is satisfied. Every consent action is written to an **append-only `consent_events` audit trail** (the evidence in a dispute). Transcripts/summaries carry a **retention class** that auto-tombstones expired data across *all* stores (transcript, summary, vectors, any audio), and a **residency region** keeps data in-jurisdiction. I'd set policy with legal and own the enforcement mechanism. For the most sensitive customers, offer **on-device ASR** so raw audio never leaves their environment.
+
+</details>
 
 ---
 

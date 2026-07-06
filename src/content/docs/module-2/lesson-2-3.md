@@ -85,13 +85,31 @@ The decision falls straight out of the **read:write ratio** plus the query shape
 
 ### Practice questions
 **Q1.** Why does LSM win for writes, and what do you give up in exchange?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* LSM turns every write into a cheap sequential append instead of B-tree's random in-place I/O, sequential ≫ random is the whole win. You give up **read amplification** (several SSTables per lookup; Bloom filters and compaction bound it), transient **space amplification**, and **compaction itself**, a background CPU/I/O tax you must capacity-plan or it surfaces as latency spikes. Decide from the read:write ratio: pay compaction later only if writes dominate now.
 
+</details>
+
 **Q2.** Why does an LSM engine pair so naturally with the "sequential ≫ random" insight?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* LSM deliberately converts random user writes into large **sequential** disk writes (flush) and sequential merges (compaction), dodging the random-I/O penalty that dominates write cost on disks. The price is deferred: compaction re-does the sorting later as cheap, batched sequential work.
 
+</details>
+
 **Q3.** When would you accept B-tree's higher write amplification on purpose?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* When reads and consistency dominate: transactional systems with ad-hoc queries, range scans, and integrity needs at moderate write volume, predictable single-location reads and mature transactional support outweigh the in-place write cost. Exactly the relational-store case.
+
+</details>
 
 ### Key takeaways
 - Indexes trade faster reads for slower writes and more space, never free.

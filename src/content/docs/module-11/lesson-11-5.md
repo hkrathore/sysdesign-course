@@ -148,16 +148,40 @@ The signal is not "I added a cache." It is that **cold start renders from disk i
 ### Practice questions
 
 **Q1.** A designer wants every "like" and "follow" to feel instant. How do you build it, and what's the risk you have to handle?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Optimistic UI**: apply the write to local state and render success immediately (the heart fills, the follow flips), then send the request and reconcile in the background. It works here because these actions almost always succeed and are cheap to reverse. The risk I must handle is the **rollback**: if the server rejects (rate limit, the target was deleted, offline), I have to revert the UI and surface a quiet error or auto-retry, and I need idempotency so a retried "like" doesn't double-count. I'd draw a hard line at anything where a false success is dangerous, a payment, a booking, a "message sent" that wasn't, there I show a pending state and wait for the server ack, because the cost of a wrong optimistic render outweighs the perceived-speed win.
 
+</details>
+
 **Q2.** Your app renders instantly from a local cache, but users complain they sometimes see old data. Diagnose and fix without giving up the speed.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* This is the **second-copy-of-the-truth** problem: cache-first render buys the instant paint and pays in staleness. I wouldn't drop the cache, I'd add **stale-while-revalidate**: show the cached copy immediately, fire a background refresh (a conditional `If-None-Match` request so an unchanged resource costs only headers and a `304`), then reconcile the UI when fresh data lands. For correctness-critical data (balances, prices) I'd switch that specific type to **network-first** or a very short TTL, and for the rest I'd tune TTLs per data type and consider **server push-to-invalidate** for things that must feel live. The fix is per-data-type freshness, not all-or-nothing.
 
+</details>
+
 **Q3.** You're handed a feed app that OOM-crashes and drops frames on mid-tier Android phones. Walk through what you'd check and change.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two usual suspects, both memory budgets. First, **image decoding**: if a 12 MP upload is decoded at full resolution (~48 MB in RAM) to fill a 400 px slot, a few visible images blow the heap; the fix is **downsampling to display size** at decode and a proper two-tier image cache. Second, **list rendering**: if the list instantiates a view per row, 10k rows means 10k live views; the fix is **virtualization / view recycling** so only the ~20 on-screen rows plus a buffer are live and memory tracks the viewport, not the dataset. For the dropped frames, I'd confirm we're inside the ~16.6 ms/frame budget by moving image decode off the main thread and prefetching just-below-the-fold rows. I'd also right-size and modern-code (AVIF/WebP) the images to cut both memory and bytes. Then I'd put a memory and startup budget in CI so it can't regress silently.
 
+</details>
+
 **Q4.** How do you convince a product org to fund client-performance work, and how do you keep it from regressing?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* I'd frame it as **retention and revenue, not polish**: every 100 ms of latency measurably cuts conversion (Amazon's ~1% of sales per 100 ms), sites shed on the order of ~10% of users per extra second of load, and bounce probability climbs steeply from 1 s toward 3 s. That reframes perf from an engineering nicety to a growth lever with a dollar figure. To keep it from regressing, I'd make it a **discipline, not heroics**: a performance budget gating CI that fails the build when the JS bundle exceeds its size limit or TTI regresses past threshold, a **startup-time SLO** watched in production telemetry, and bundle-size limits enforced automatically. The explicit thing I'm rejecting is "we'll optimize later", later never comes because the regressions spread across a hundred commits with no owner. Enforce the fast path as the default so a team can't accidentally ship a slow client.
+
+</details>
 
 ### Key takeaways
 - **Perceived latency is the product metric.** Optimistic UI, skeletons, cache-first render, and prefetch buy the feeling of speed even on a slow network, and each one has a named cost (rollback, staleness, wasted prefetch) you own out loud.

@@ -307,16 +307,40 @@ They are not checking whether you can name HLS, they're checking that you grasp 
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. A user uploads a 2-hour 4K film. Walk me from the PUT to it being watchable, where does the time go?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Resumable multipart PUT straight to the object store (app servers out of the byte path); completion fires `source-uploaded` and commits a `processing` metadata row. The orchestrator splits at GOP boundaries and fans **thousands of (chunk × rung × codec) jobs** across a stateless fleet via Kafka, that parallelism is why the ladder finishes in **minutes, not hours**. To minimize time-to-watchable, the **universal H.264 ladder encodes first** and the row flips to `ready` when it's packaged; VP9/AV1 backfill asynchronously. The time goes into encode CPU, exactly why it's chunked, and why the cheap codec gates watchability. A worker crash re-queues one idempotent chunk, not the film.
 
+</details>
+
 **Q2. Your CDN bill is the biggest line in the budget. Where do you cut without hurting playback?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three levers, biggest first. (1) **Raise the edge hit ratio** toward 99, tiered caching, origin shielding, pre-positioning anticipated-hot content (ISP-embedded appliances so bytes skip transit); every point at ~125 Tbps is huge. (2) **Drive AV1 adoption** where clients support it, ~30% fewer bytes ≈ **~37 Tbps**, prioritizing backfill toward the most-watched content so savings land where the egress is. (3) **Per-title encoding** for popular titles. I would *not* drop low-bandwidth rungs or shrink the buffer, that spikes rebuffering. Cut bytes-on-the-wire and placement, where the cost lives and the viewer never notices.
 
+</details>
+
 **Q3. How do you count views accurately when a video is viral and people are gaming the counter for payouts?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two numbers on purpose. **Display:** dedup per `session_id`, apply fraud heuristics *before* incrementing a **sharded** counter, sum on read, fast, approximate, allowed to lag. **Payout-grade:** recomputed exactly, in batch, from the **Kafka watch-event log**, fully deduped and bot-filtered (the anti-fraud models themselves are a delegated workstream), that's the number that touches money and trending. The live counter is an accelerator; the immutable log is the source of truth.
 
+</details>
+
 **Q4. The same blockbuster drops globally at 8pm and everyone hits play at once. Why is that not an outage?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Two stampedes. **Bytes:** the segments are static and **already at the edge**, for a planned drop, pre-positioned overnight to ISP-embedded appliances; for an unplanned spike, origin shielding means the first edge miss pulls once and everyone after is served from cache. Origin sees a trickle. **Metadata/counts:** the metadata read is tiny and cached; view-count writes are sharded and async (a beacon, off the playback path). Worst case is a slightly slower first segment for the first viewers in a region, the heavy bytes were positioned ahead of demand and the counting never blocks playback.
+
+</details>
 
 ---
 

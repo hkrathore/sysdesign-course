@@ -335,15 +335,30 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 **Q1. Charge request times out at the client. How many times is the card charged?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Exactly once. Client retries with the same `Idempotency-Key`. If COMPLETE in the idempotency store, return the cached response, PSP not called again. If PENDING, a prior attempt started but crashed; re-call the PSP with the same derived key; PSP returns the prior result; commit and mark COMPLETE. Any number of retries → exactly one PSP charge. The key invariant: the PSP-level idempotency key is deterministically derived from ours.
+
+</details>
 
 **Q2. An engineer proposes switching the ledger to Cassandra for write throughput. Evaluate.**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* At 5,800 TPS, Postgres handles this comfortably, solving a problem we don't have. Cassandra's LWW model breaks the double-entry invariant: two concurrent writes can resolve via LWW to a balance that's wrong for both. The ledger needs atomic multi-row commits across multiple accounts. If we hit ~50K TPS, I'd move to CockroachDB or Spanner, ACID (atomicity, consistency, isolation, durability) at horizontal scale. Cassandra is right for a different data class (append-only time-series, high-throughput wide-column reads); not for a ledger that requires transaction atomicity.
+
+</details>
 
 **Q3. Nightly reconciliation finds 47 transactions where PSP shows "captured" but our ledger shows "failed." What happened and how do you resolve it?**
 
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Silent PSP success, PSP charged the card, HTTP response was lost, no retry arrived (retry budget exhausted or merchant gave up). Card was charged; merchant was not paid; buyer was not refunded. Resolution: (a) alert finance immediately; (b) create ledger correction entries, credit buyer, debit platform reserve; (c) root-cause the missing retry (idempotency key TTL, retry budget); (d) if a pattern, move toward near-real-time reconciliation against PSP webhooks. Every correction entry is itself an immutable ledger row with `reason: reconciliation_correction`, full audit trail preserved.
+
+</details>
 
 ---
 

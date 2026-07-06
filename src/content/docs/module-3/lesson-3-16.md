@@ -138,16 +138,40 @@ The public view count under a video is the canonical sharded-counter problem. Re
 
 ### Practice questions
 **Q1.** A like counter on one Postgres row is throttling at a few thousand writes/sec during a viral spike. Walk through your fix and quantify the new shape.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* The row is a **single serialization point**, every increment serializes on one row lock plus a WAL (write-ahead log) commit, so ~1k-few-k/sec is the ceiling regardless of CPU; replicas won't help. **Shard the counter:** N sub-counter rows, each increment hits a random one. Size N from peak rate ÷ per-key ceiling, e.g. 1,000,000/sec ÷ ~1,000/sec ≈ **~1,000 shards** on Postgres (or ~10 on Redis at ~100k/key, store choice matters). **Read = sum the N rows**; since 1,000-row sums per page load are costly, add a **rollup job** that sums into a **cached total** every ~1 s, served in O(1). The cost I accept: the displayed count is **eventually consistent**, trailing by ≤ the rollup interval, fine for a like count.
 
+</details>
+
 **Q2.** Distinguish the "inexactness" of a sharded counter from that of HyperLogLog. When do you reach for each?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* A **sharded counter is exact but eventually consistent**, `Σ C[i]` is the *correct* total once in-flight increments and the rollup settle; the gap is **temporal**, and at rest it's precise. **HyperLogLog is permanently approximate**, a bounded **~0.81% error even at rest**, traded for fixed **~12 KB** at any cardinality. They also answer **different questions**: a sharded counter gives an **additive total** (total likes); HLL gives **distinct cardinality** (unique viewers), which isn't additive because duplicates must collapse. Exact running total that can lag → sharded counter; "how many *unique*…?" where ~1% is invisible and the exact ID set costs hundreds of MB → HLL.
 
+</details>
+
 **Q3.** Your team wants to shard the rate-limiter's per-user counter "for the same reasons we sharded likes." What do you say?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Push back. Sharding trades **write ÷ N for read × N**, a great deal for a like total (millions of writes, read rarely, from a cached rollup). A **rate-limit counter is the opposite ratio, read on every request**, so sharding turns each check into an N-key fan-out on the hottest path in the system. And the contention argument barely applies: a single user's request rate almost never approaches one key's write ceiling. Keep it a **single atomic counter per key per window** (one `INCRBY` returning the new value). The rule: **shard write-heavy/read-rarely additive counters; never counters read on every event.**
 
+</details>
+
 **Q4.** YouTube's view count visibly lags and "sticks" at round numbers during a premiere, yet creators are paid an exact number. Reconcile these two facts.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* **Two different counters with two consistency contracts.** The **displayed** count is a sharded counter + ~1 s rollup into a cached total, built for write throughput and **eventually consistent**, so the public number trails by the rollup window (the visible lag). The **monetized** count is recomputed **offline and exactly** from the durable **event log / warehouse**, where each view is validated, deduped, and fraud-filtered. The fast path optimizes write throughput and read cost and tolerates staleness; the slow path optimizes exactness and auditability and tolerates latency. The Director move is refusing to let the cheap display counter be the source of truth for money.
+
+</details>
 
 ### Key takeaways
 - A logical counter is a **single point of write serialization**, every increment serializes on one lock, with single-key ceilings from **~1k/s (relational row) to ~100k/s (Redis key)**. You **can't scale it with hardware or replicas, only by splitting the key.**

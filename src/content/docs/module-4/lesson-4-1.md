@@ -233,19 +233,49 @@ GET /api/v1/urls/{code}/stats
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. Same long URL submitted twice, one code or two? Defend it.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* By default, **two distinct codes.** Counter-based generation makes that the natural, free behaviour; forcing one code means a **read-before-write on every create** (look up "does this URL already exist?"), which is the exact cost the whole design avoids and which doesn't scale as a default. I'd offer **opt-in dedup** only if a requirement demanded it, and implement it with a secondary `url → code` index that's *consulted only when the caller asks for reuse*, so the firehose path stays clean. The trade is **wasted code space (trivial at `62^7` headroom) vs. a guaranteed extra read per create**, and code space is the cheap side.
 
+</details>
+
 **Q2. The Key-Generation Service is a single point of failure. Fix it without making writes coordinate.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Hand each app node a **pre-allocated range** of counter values (a block of, say, 1,000); nodes mint locally and only call the KGS every 1,000th create, so a brief KGS outage doesn't stop creation. Run the KGS itself **replicated and range-partitioned**, or drop it entirely for **Snowflake-style** generation (timestamp + machine-ID + per-ms sequence) which needs *zero* runtime coordination, the only coordination is assigning machine-ID bits once at startup. The cost of ranges is **a few wasted codes per node crash** (an unused block is lost), negligible against the headroom, and it buys both no-SPOF and no per-write coordination.
 
+</details>
+
 **Q3. A single link goes viral, millions of clicks a minute. What happens, and what do you do?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* It becomes a **hot key.** First line of defence is already there, it lives in **Redis** and serves from RAM. To stop a single cache node becoming the hotspot, **replicate that key across cache nodes** (or add a tiny **in-process cache** on each app node so the hottest keys never leave the box). Because a `code → URL` mapping is **effectively immutable**, caching it aggressively costs almost nothing in staleness, that immutability is *why* the read path is cheap. The only real risk is a **cold-cache thundering herd** if the cache restarts; mitigate with **request coalescing** (single-flight per key) so one miss, not a million, hits the store.
 
+</details>
+
 **Q4. Walk me from typing `bit.ly/3xR9aQ` to landing on the page.**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* DNS (anycast) resolves `bit.ly` → load balancer → a stateless app node → **Redis lookup on `3xR9aQ`**. Hit (the common case): app returns an HTTP **301/302** with `Location:` the long URL; browser follows it to the destination. Miss: app reads the **KV store** by code (single partition, since `code` is the shard key), **populates the cache** read-through, returns the redirect. A **click event fires asynchronously** to a queue for analytics, never blocking the redirect. End-to-end p99 target < 100 ms, met because the hot path is an in-memory lookup.
 
+</details>
+
 **Q5. Make Bitly's analytics first-class, what changes?**
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Three things. (1) Likely move to **302** so *every* click reaches the server (301's browser caching would hide repeat clicks). (2) Build a real **streaming pipeline**, emit each click to **Kafka**, process with a stream processor, land it in a **columnar/time-series store** for slice-and-dice by day/geo/referrer. (3) For the raw per-link **click count**, use **sharded counters**, incrementing one row per viral link is a write-hotspot, so spread the count across shards and sum on read. This graduates analytics from an async footnote into its own system, and I'd **delegate its detailed design to the analytics/data team** with the prior that pre-aggregation beats raw-event scans for the common dashboards.
+
+</details>
 
 ### Key takeaways
 - **RESHADED is a sequence, not a checklist**, run R→E→S→H→A→D→E→D in order; the warm-up exists to make that order automatic, with the *signal concentrated in the back-end E (Evaluation) and D (Design evolution) steps.*

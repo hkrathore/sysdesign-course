@@ -164,16 +164,40 @@ The Director-altitude signal throughout: you treat `N/W/R` as a **lever set agai
 
 ### Practice questions
 **Q1.** Your store satisfies `W + R > N`. What exactly is guaranteed, and name two things that are *not*.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Guaranteed: the read set and write set must share at least one replica, so the latest acknowledged write is *present* among the R responses, a per-key recency guarantee. Not guaranteed: (1) which response is newest, you still need version metadata (timestamps / version vectors) to pick the winner; (2) atomicity of anything beyond a single read or write, no multi-key transactions, and no atomic read-modify-write (a decrement still needs a conditional write / LWT).
 
+</details>
+
 **Q2.** Your team runs a Cassandra feed at `N=3, W=1, R=1` and a product manager asks to "make it strongly consistent." Walk through what you'd change, what it costs, and whether you'd push back.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* Mechanically, raise the quorums so `W + R > N`, e.g. `W=R=2` (majority), which also satisfies `W > N/2`. Cost: every operation now waits on the 2nd-fastest of 3 replicas (often cross-AZ), so p99 rises from ~1-5 ms toward ~5-15 ms, and you tolerate only 1 replica down, not 2. Director pushback: feeds are the canonical eventual case, staleness is usually invisible, so I'd confirm the *actual* requirement before paying that tax. Likely outcome: keep the feed eventual, reserve majority quorum for the ledger, and use read-your-writes routing if the only real need is that the *author* sees their own post.
 
+</details>
+
 **Q3.** A partition means your write path can't reach W home replicas. For (a) cart adds and (b) balance decrements, do you enable sloppy quorum? Defend each call.
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* (a) **Yes.** The requirement is "never lose an add"; sloppy quorum keeps writes available by accepting them on reachable stand-in nodes, at the cost of suspending the `W + R > N` recency guarantee until hinted handoff completes, a brief recency gap on a cart is invisible, and the rejected alternative (strict quorum) would refuse the sale. (b) **No.** A balance decrement must read-its-own-write immediately; a write parked on a stand-in node that a home-set read can miss is exactly the failure we can't accept. Strict quorum, refuse and retry, is correct here; the cost is a window of write unavailability, which is cheaper than a wrong balance. Same mechanism, opposite calls, each defended from the requirement.
 
+</details>
+
 **Q4.** You only need a user to reliably see their *own* most recent comment immediately. Two engineers propose: (a) majority quorum `W=R=2`, (b) route that user's reads to a known-current replica for a few seconds after they write. Which is right and why?
+
+<details>
+<summary>Model answer, try yours out loud first</summary>
+
 > *Model:* (b). The requirement is **read-your-writes, a session guarantee scoped to one client**, not system-wide recency. Option (b) delivers it cheaply: pin the writer's reads to a current replica (or track their write version and read a replica at least that fresh) for a short window, leaving everyone else's reads fast and eventual. Option (a) buys *global* recency for *every* reader, strictly stronger and more expensive than needed: it lifts all reads/writes to cross-AZ quorum latency and reduces availability, to satisfy a guarantee only the one writer required. Match the mechanism to the scope of the need.
+
+</details>
 
 ### Key takeaways
 - Consistency is a **spectrum**, linearizable (real-time recency) → sequential → causal → eventual (converge if writes stop), plus *session* guarantees (read-your-writes, monotonic reads) that are cheap because they're per-client, not system-wide.
