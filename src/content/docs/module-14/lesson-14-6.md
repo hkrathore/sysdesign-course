@@ -5,6 +5,8 @@ sidebar:
   order: 6
 ---
 
+> A quality gate is a **toll plaza**: it must catch more than the queue it creates, and a required pipeline over **~10 minutes** teaches engineers to batch changes and hunt for back roads. Three layers make the system: gates encode the bar by **cost-vs-catch ROI**, the **DORA four** read as a trend you steer by (elite: on-demand deploys, sub-hour lead time and restore, **change-failure under 15%**), and the platform makes safe the easy path. The trap throughout is Goodhart: grade a metric and it stops measuring.
+
 ### Learning objectives
 - State the **three-part frame**: quality **gates** encode the bar in the paved road, **DORA (DevOps Research and Assessment) metrics** measure whether the delivery system is healthy, and the **CI/CD platform** makes the safe path the easy path, and the Director owns this delivery system, not the individual pipelines.
 - Choose **gates by ROI**, coverage, lint, SAST/dependency-scan, contract checks, performance budgets, by what each one *catches per minute of pipeline latency it adds*, and recognize the anti-pattern of a gate that taxes velocity without catching anything.

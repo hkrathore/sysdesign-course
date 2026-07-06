@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> This is a **trust test**: the round is a design review you chair, and the room scores whether they'd let you run one for real. The same answer is graded through two lenses, **five axes** and **eight RESHADED steps**, with **trade-off depth weighted heaviest** and marked at every step. The tension the whole scorecard turns on is **altitude**: too high reads as not technical enough to lead, too deep as not operating at level. Every red flag is a strong signal's **hand-wavy twin**, the same claim minus the number.
+
 ### What this is
 
 This is the scorecard the room is using on you, written down. It is not a lesson, it is a **reference you self-assess against the night before a real loop.** Run your last mock answer through both tables; if any row lands you in the red column, that is your highest-leverage fix.
@@ -28,7 +30,7 @@ These two tables are **not duplicates**, they are different views of the same an
 - **The 5 axes** are *what the interviewer is scoring.* One of them, communication & leadership, is **not** a RESHADED step at all; it runs underneath everything.
 - **The 8 RESHADED steps** are *the process you walk through.* They are the spine of the answer.
 
-The crucial relationship: **axis 4 (trade-off depth) and axis 5 (communication/leadership) are scored continuously, at every one of the 8 steps**, not in a single "trade-offs" moment near the end. Every step is a chance to name an alternative and to drive the conversation. That is why the same answer is graded twice, once per lens.
+The crucial relationship: **axis 4 (trade-off depth) and axis 5 (communication/leadership) are scored continuously, at every one of the 8 steps**, not in a single "trade-offs" moment near the end. Every step is a chance to name an alternative and to drive the conversation (chair the review; don't just present at it). That is why the same answer is graded twice, once per lens.
 
 The Director weighting (from the interview-scoring lesson, heaviest first): **trade-offs (4) > scope (1) ≈ communication (5) > estimation (2) ≈ design (3)**. Axis 3 has *diminishing returns*, past a clean decomposition, more boxes is not more signal, and grinding mechanics there is an **active anti-signal** ("why is this Director hand-tuning a B-tree?").
 
@@ -44,7 +46,7 @@ The Director weighting (from the interview-scoring lesson, heaviest first): **tr
 | 4 | **Trade-off depth & decision-making** *(heaviest)* | Names **2-3 viable approaches**, states pros/cons of each, **commits to one**, and defends it against requirement + cost + risk. Pre-empts "why not X?" by volunteering the rejected alternative and the condition under which they'd revisit. | Lists options but never **decides**. Or decides but **cannot name a single downside of their own choice.** Presents a design as obviously correct with no critique. |
 | 5 | **Communication & leadership signal** *(heavy)* | **Drives** the conversation and structures thinking out loud. Handles "why not X?" without getting defensive. **Delegates credibly with a stated prior** ("I'd have storage benchmark leveled vs size-tiered; my prior is leveled because reads dominate"). Names cost and on-call impact unprompted. | Waits to be led; answers only what's asked. Gets defensive under pushback or silently caves. Either grinds every detail personally (won't delegate) or delegates everything (no own depth). |
 
-**How to read your own answer against Table A:** the offer is won or lost on axis 4, gated by axis 1, and textured by axis 5. A technically flawless design that never decides, or decides without a critique, fails the heaviest axis regardless of how clean the boxes were.
+**How to read your own answer against Table A:** the offer is won or lost on axis 4, gated by axis 1, and textured by axis 5 (whether you chaired the room or merely attended it). A technically flawless design that never decides, or decides without a critique, fails the heaviest axis regardless of how clean the boxes were.
 
 ---
 
@@ -63,7 +65,7 @@ Same answer, graded as a process. Each step has a *Director tell* distinct from 
 | 7 | **E: Evaluation** | **Stresses their own design**, names the component that **saturates first**, *with a number*, and the specific lever (shard the hot key, add a read replica, add a cache). Re-checks the design against the Step-1 SLOs. | Surprise that anything would break. "Add more servers" with no mechanism and no named bottleneck. Never re-validates against the requirements they set. |
 | 8 | **D: Design evolution** | Thinks past v1: **how it behaves at 10×**, which assumption breaks, the migration path, and the **cost/operability** of the next step. Frames it as a roadmap with trade-offs, not a rewrite. | "It already scales." No 10× story, no failure mode, no awareness that the v1 choice has a ceiling. |
 
-**The single most repeated Director tell across Table B:** at every step where a detail is below the altitude of the decision, the move is *"state a default, delegate with a stated prior, move on"*, **not** resolve it personally. That one sentence, "I'd have the X team benchmark A vs B; my prior is B because [requirement]", is worth more than ten minutes of correct mechanics, because it shows judgment, trust in the org, and altitude awareness simultaneously.
+**The single most repeated Director tell across Table B:** at every step where a detail is below the altitude of the decision, the move is *"state a default, delegate with a stated prior, move on"*, **not** resolve it personally. That one sentence, "I'd have the X team benchmark A vs B; my prior is B because [requirement]", is worth more than ten minutes of correct mechanics, because it shows judgment, trust in the org, and altitude awareness simultaneously (a chair assigns the deep-dive and keeps the review moving).
 
 ---
 

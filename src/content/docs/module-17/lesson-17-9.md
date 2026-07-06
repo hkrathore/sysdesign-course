@@ -41,11 +41,11 @@ The merge: every one is a **past-event** question, so they all take **STAR-L**, 
 
 The general spine is five beats, in order, each doubles as the probe-defense, because each is exactly where a senior interviewer drills three levels down.
 
-- **Detection, how you saw it early.** Milestone burn-down, forecast *ranges* not point estimates, a skip-level signal. The load-bearing line of the whole cluster: *missing the deadline isn't the failure; letting someone be surprised by it is.* If your story starts at the crisis, you've lost the round, start at the instrument that flagged it.
-- **Options, each costed.** Kill / descope / re-staff / re-architect, and what each costs in time, money, and risk. The decision *tree* is the Director signal, not the heroics; a candidate who jumped straight to "we worked weekends" skipped the part being scored.
+- **Detection, how you saw it early.** Milestone burn-down, forecast *ranges* not point estimates, a skip-level signal. The load-bearing line of the whole cluster: *missing the deadline isn't the failure; letting someone be surprised by it is.* If your story starts at the crisis, you've lost the round, start at the instrument that flagged it (the pilot's scan, not the stall).
+- **Options, each costed.** Kill / descope / re-staff / re-architect (the pilot's divert, hold, or push), and what each costs in time, money, and risk. The decision *tree* is the Director signal, not the heroics; a candidate who jumped straight to "we worked weekends" skipped the part being scored.
 - **Decision + headline-first renegotiation.** Take the revised range and a recommendation to stakeholders *before they hear it elsewhere*, impact first, then the new date/cost, then options-with-a-recommendation in the *same* conversation (SCQA). No problem delivered without a recommendation.
 - **Quantified recovery, or a clean kill.** Percent of scope shipped, the new date hit, MTTR (mean time to recovery) delta, or a well-executed kill with engineers redeployed to something that mattered. The kill is not the failure; the sunk-cost rescue often is.
-- **Durable mechanism change.** Pre-mortems, estimation-with-ranges, a program-health check, a one-way-door one-pager, *with evidence it held* (a later slip the mechanism caught early). The story ends in a mechanism, not a feeling.
+- **Durable mechanism change.** Pre-mortems, estimation-with-ranges, a program-health check, a one-way-door one-pager, *with evidence it held* (a later slip the mechanism caught early). The story ends in a mechanism, not a feeling (the checklist changed for the next crew).
 
 Then survive the probe: hold the numbers, the rejected options, the stakeholders, and the timeline three levels down. Never announce the spine aloud.
 

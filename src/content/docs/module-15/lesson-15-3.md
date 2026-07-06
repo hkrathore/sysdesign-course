@@ -5,6 +5,8 @@ sidebar:
   order: 3
 ---
 
+> An SLO turns "reliable" from a vibe into a number, and the **error budget (1 − SLO)** is a monthly allowance for failure you are meant to spend: 99.9% buys **43 minutes of badness a month**. The budget settles the reliability-versus-velocity fight with a **balance check, not politics**: budget left, ship freely; budget gone, a written freeze fires. Alerts follow the drain rate (a fast burn pages, a slow leak tickets), and each extra nine costs roughly **10×**.
+
 ### Learning objectives
 - Separate the **SLI (service-level indicator) / SLO (service-level objective) / SLA triple** crisply: the indicator is the measurement, the objective is the internal target you defend, the agreement is the external contract with penalties, and the SLO must be **stricter than the SLA** so you have margin before money changes hands.
 - Choose **user-centric SLIs**, availability, latency, correctness, freshness, measured **at the user, not the server**, and reject server-side proxies that read green while customers are in pain.

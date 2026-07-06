@@ -5,6 +5,8 @@ sidebar:
   order: 6
 ---
 
+> Resilience is the **choreography of failure**: decide in advance what is allowed to break so the revenue path stays standing when a dependency dies. The tools: a **circuit breaker** (open at >50% errors, fail fast to a fallback), bulkheads, shedding by priority tier, and retries bounded by jitter plus a **~10% budget**, because naive retries hit a sick service with **4× load**. The second half is the pager: on-call is a managed system, symptom-only alerts, **under ~2 actionable pages a shift**.
+
 ### Learning objectives
 - State the **bend-don't-break thesis**: when a dependency fails, a Director-grade system serves a *degraded-but-working* experience that protects the revenue path, instead of a cascading failure that takes everything down with it.
 - Name and sequence the **resilience patterns** that produce that outcome, circuit breakers, fallbacks, load shedding, backpressure, bulkheads, and bounded retries with jitter, and know which one each failure calls for.

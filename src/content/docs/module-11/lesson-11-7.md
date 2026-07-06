@@ -5,6 +5,8 @@ sidebar:
   order: 7
 ---
 
+> An offline-first notes app is a **fleet of ships keeping their own logbooks**, reconciled by a harbor master: the local database is the source of truth for the UX, and the server is the durable master log. The design turns on two engines: instant local reads and writes, plus **delta sync keyed by a per-account cursor**, with push only as a wake-up hint. Size it for KB deltas, ~6k mutations/s, a 4 to 40 MB cold sync, and an ~8k/s reconnect storm, and never silently lose user text.
+
 ### Learning objectives
 - Run the **RESHADED** spine where the hard part lives on an untrusted, frequently-partitioned device, defending each step against battery, data, and convergence cost.
 - Separate the two engines of offline-first: a **local database that is the source of truth for the UX** (reads and writes instant, offline-capable) and a **delta-sync protocol keyed by a per-account cursor** (reconnection cheap and incremental).
@@ -107,7 +109,7 @@ Two stores, and conflating them is the classic mistake: a local store on the dev
 1. **The record store**, notes and tasks with version metadata, partitioned by `account_id`. **Choice: a DynamoDB or Cassandra-class store** (partition key `account_id`, sort key `note_id`): every sync query is scoped to one account, so a delta read is a single-partition scan, and the store scales horizontally to absorb ~6k writes/s across 20M accounts. *Rejected, a single Postgres primary:* it bottlenecks and we need no cross-account joins; sharded Postgres (Vitess) is a viable alternative for richer per-account transactions.
 2. **The per-account operation log**, an append-only change feed where each mutation gets a **monotonically increasing server sequence number scoped to the account**. It powers "pull everything since cursor," its sequence the backbone of convergence.
 
-**Attachments** go to **S3 plus a CDN**; records carry only a pointer and a content hash, and bytes are uploaded and downloaded lazily, off the sync path. Unlike a delete-on-delivery queue, the server **keeps everything**, because the product is durable notes that must reach any device, including a brand-new one.
+**Attachments** go to **S3 plus a CDN**; records carry only a pointer and a content hash, and bytes are uploaded and downloaded lazily, off the sync path. Unlike a delete-on-delivery queue, the server **keeps everything** (the harbor master's master log), because the product is durable notes that must reach any device, including a brand-new one.
 
 ---
 
@@ -141,7 +143,7 @@ flowchart LR
 
 **Happy path, a user edits a note on the phone while offline:**
 1. The app writes the new record version to SQLite **and** appends a mutation to the outbox in **one local transaction**, so the UI updates instantly with read-your-writes at zero network, and a crash cannot leave an edit without its outbox row or an orphan row for a rolled-back edit.
-2. When connectivity returns, the sync engine **drains the outbox**: it pushes the mutations (each with its `op_id`) to the sync service, which dedupes on `op_id`, applies them to the record store, bumps the account's server sequence, appends to the op log, and returns the new versions and cursor. Recording applied `op_id`s makes a retried push idempotent.
+2. When connectivity returns, the sync engine **drains the outbox** (the pages written since it last docked): it pushes the mutations (each with its `op_id`) to the sync service, which dedupes on `op_id`, applies them to the record store, bumps the account's server sequence, appends to the op log, and returns the new versions and cursor. Recording applied `op_id`s makes a retried push idempotent.
 3. The sync service asks the **push service** to wake the user's other devices with a "come sync" nudge.
 4. Each other device, on push wake or next foreground, **pulls deltas since its cursor**, applies the changed records and new cursor to local SQLite, resolves any conflict against its pending edits, and updates the UI.
 
@@ -257,7 +259,7 @@ Stress the design against the NFRs, fix each bottleneck, and name the trade. Thi
 
 The Director line: **never silently lose user data**; scalar fields take LWW, text fields merge or keep both. I delegate the merge UX with a stated prior: per-field LWW plus a conflict copy now, a CRDT for the body once telemetry shows the concurrent-edit rate justifies the complexity.
 
-**3. Sync storms, many clients reconnect after an outage.** ~500k devices reconnect within a minute, an ~8k/s burst. Four fixes: **jittered exponential backoff** so clients do not all hit at t=0; the **cheap cursor fast-path** answers "nothing changed" by reading one per-account sequence; push wakes are already coalesced by APNs/FCM; and the sync service is **stateless and horizontally scaled** with read replicas absorbing the pull burst. *Trade:* jitter adds a few seconds to worst-case propagation, invisible for a notes app.
+**3. Sync storms, many clients reconnect after an outage.** ~500k devices reconnect within a minute, an ~8k/s burst (the whole convoy returning at once). Four fixes: **jittered exponential backoff** so clients do not all hit at t=0; the **cheap cursor fast-path** answers "nothing changed" by reading one per-account sequence; push wakes are already coalesced by APNs/FCM; and the sync service is **stateless and horizontally scaled** with read replicas absorbing the pull burst. *Trade:* jitter adds a few seconds to worst-case propagation, invisible for a notes app.
 
 **4. Large-account cold sync.** A new device pulls the whole account, 4 MB typically and 40 MB for a power user, plus attachments. Three fixes: **paginated pull** (`limit` + `has_more`) newest-first, so recent notes appear within a second while the tail loads; **lazy attachments** (metadata and pointers first, blob bytes from the CDN on demand); and **prioritized sync** of the notes the user opens first. *Trade:* newest-first leaves the search index incomplete until the tail lands, so we show a "syncing" state; acceptable versus blocking the UI on a 40 MB download.
 

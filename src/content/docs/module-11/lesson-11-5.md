@@ -5,6 +5,8 @@ sidebar:
   order: 5
 ---
 
+> Client performance is not the server's stopwatch, it is **how long the user felt they waited**: under 100 ms reads as instant, and every 100 ms of latency costs roughly 1% of conversion. Every trick that buys perceived speed (optimistic UI, cache-first render, prefetch) creates a **second copy of the truth** or a rollback you now own. And the client runs on budgets, not goodwill: a ~1 to 2 s cold start, a 12 MP photo decoding to ~48 MB, battery drained by chatty polling.
+
 ### Learning objectives
 - Treat **perceived latency** as the product metric and defend the tricks that buy it, optimistic UI, skeleton screens, cache-first render, and prefetch, while naming the staleness and rollback cost each one incurs.
 - Reason about the **client caching tiers** (in-memory, on-disk/SQLite, HTTP/ETag, dedicated image cache), pick an invalidation strategy, and state the "second copy of the truth" trade that every client cache reopens.
@@ -23,7 +25,7 @@ That image carries the whole lesson. **Perceived speed is the product**, not the
 
 The number that moves the business is not how long the server took. It is how long the **user felt** they waited. Human perception has sharp thresholds: under ~100 ms feels instant, under ~1 s keeps someone in flow, and past ~10 s you have lost their attention. So the entire game is to fill the gap between the tap and the truth with something that reads as progress. Four moves do this, and each trades a real cost:
 
-- **Optimistic UI.** Apply the write locally and render success immediately, then reconcile with the server in the background. You tap "like" and the heart fills instantly, the POST is still in flight. The trade is the ugly one you must say out loud: you are showing a state that might **fail and have to roll back**. If the write is rejected, you have to un-fill the heart, or worse, silently drop a comment the user believes they posted. Use it where the write almost always succeeds and reversal is cheap (likes, reorders, marking read); avoid it where a false success is dangerous (a payment confirmation, a "your seat is booked").
+- **Optimistic UI.** Apply the write locally and render success immediately, then reconcile with the server in the background. You tap "like" and the heart fills instantly, the POST is still in flight. The trade is the ugly one you must say out loud: you are showing a state that might **fail and have to roll back** (the steak that turns out sold out). If the write is rejected, you have to un-fill the heart, or worse, silently drop a comment the user believes they posted. Use it where the write almost always succeeds and reversal is cheap (likes, reorders, marking read); avoid it where a false success is dangerous (a payment confirmation, a "your seat is booked").
 - **Skeleton screens.** Render the page's shape, grey placeholder blocks, the instant navigation starts, then swap in real content as it arrives. A skeleton makes a 1.5 s load *feel* faster than a spinner does, because the layout is already there and the eye has something to settle on. The cost is engineering a second, throwaway view of every screen and keeping it in sync with the real layout.
 - **Cache-first render.** Show cached data instantly, then refresh in the background and reconcile ("stale-while-revalidate"). The feed you saw yesterday paints in under 100 ms while the network fetch updates it a beat later. The cost is staleness: for a moment the user is looking at old truth.
 - **Prefetch the likely-next.** Fetch what the user will probably want before they ask, the next page of an infinite scroll, the article behind a link they are hovering, the detail screen for the row they are about to tap. The cost is wasted battery and data on guesses that miss, so you prefetch on a *strong* signal (visible-and-scrolling-toward, hover intent), not blindly.
@@ -32,7 +34,7 @@ The Director framing: these are not polish. Latency is a retention and revenue l
 
 #### 2. Client caching tiers, and the second-copy-of-the-truth problem
 
-A client cache is not one thing. It is a hierarchy, fastest and smallest at the top:
+A client cache is not one thing. It is a hierarchy, fastest and smallest at the top (counter, pantry, grocery store):
 
 - **In-memory** (a hash map, an LRU). Nanosecond reads, survives nothing, bounded by RAM. Holds the current session's hot objects.
 - **On-disk, structured** (**SQLite** or a key-value store). Millisecond reads, survives app restarts and offline, bounded by device storage. This is where the "show me the feed instantly on cold start" data lives.
@@ -63,7 +65,7 @@ The resolution is not either/or: split aggressively so the critical path is tiny
 
 A fast client that drains the battery, burns the data plan, or gets killed for memory is not fast, it is uninstalled. Three budgets, each with a concrete mechanism:
 
-- **Battery.** The dominant cost on mobile is waking the **cellular radio**, which stays in a high-power state for several seconds after every transfer (the radio "tail"), so ten small chatty requests cost far more energy than one batched request of the same total bytes. The moves: **batch and coalesce** network calls, avoid tight polling loops (use push or a single periodic sync), respect the OS's background-execution limits, and never hold a wakelock longer than the work needs. Chatty polling every few seconds is the classic battery killer.
+- **Battery.** The dominant cost on mobile is waking the **cellular radio**, which stays in a high-power state for several seconds after every transfer (the radio "tail"), so ten small chatty requests cost far more energy than one batched request of the same total bytes. The moves: **batch and coalesce** network calls (no grocery run for a single lemon), avoid tight polling loops (use push or a single periodic sync), respect the OS's background-execution limits, and never hold a wakelock longer than the work needs. Chatty polling every few seconds is the classic battery killer.
 - **Data.** Cellular plans are metered, and users on a capped or expensive plan will resent an app that burns it. **Adapt to the network type**: serve lower-resolution images and defer prefetch on cellular or a metered connection, compress payloads, and let the user opt into "high quality on Wi-Fi only." A feed that pulls full-res images on a train is a data-budget failure.
 - **Memory.** Two silent killers. First, **decoding images at full resolution**: a 12-megapixel photo decoded to a bitmap is ~48 MB in RAM (12M pixels x 4 bytes), but shown in a 400 px-wide thumbnail slot it needs under ~1 MB, so decoding full-res wastes tens of times the memory and pushes the app toward an out-of-memory kill. You **downsample to display size** at decode time. Second, **rendering long lists eagerly**: a 10,000-row list that instantiates 10,000 view objects will exhaust memory and stutter. **List virtualization / view recycling** (Android's `RecyclerView`, iOS's reusable cells, windowing on web) keeps only the ~20 rows on screen plus a small buffer as live view objects and recycles them as you scroll, so memory is bounded by the viewport, not the dataset.
 

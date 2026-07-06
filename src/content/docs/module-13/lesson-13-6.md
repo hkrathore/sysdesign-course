@@ -5,6 +5,8 @@ sidebar:
   order: 6
 ---
 
+> Abuse, fraud, and DDoS are availability and integrity under adversarial load: the traffic wants your system to fail and adapts. One rate limiter is not a posture; defense is layered along the request path: edge (rate limits, WAF, volumetric floods absorbed on anycast, you cannot auto-scale terabits), application (challenge on anomaly), account (risk-based MFA, >99% cut in automated takeover). Every control buys safety at a cost in false positives: blocking 1% of good orders on a \$10M/day checkout is \$100k/day, so challenge over block at the margin.
+
 ### Learning objectives
 - State the governing fact of this lesson: this is **availability and integrity under adversarial load**, an attacker is actively trying to break your system or steal value, and every defense you add buys safety at a measured cost in **legitimate-user friction and false positives** that a Director names out loud.
 - Design defense as **layers in the request path** (edge → application → account), so each control catches what the layer above missed and no single failure is total, and **reject** the single-box rate limiter that interviewers hear most often.
@@ -23,9 +25,9 @@ That image carries the whole lesson. **The bouncer absorbs the crowd so the room
 
 **Layer the controls along the request path, because each layer catches a different failure.** Three layers, named by where the request is when the control fires:
 
-- **Edge / gateway** (before the request reaches your code): coarse **rate limiting and quotas**, **WAF** rules, **volumetric DDoS absorption**, IP reputation. This layer is cheap per request and protects everything behind it, so the rule is **enforce here, not deep in the app**, a request you reject at the edge costs you almost nothing, a request you let reach your auth service and database costs you compute, connections, and possibly a lock.
+- **Edge / gateway** (before the request reaches your code): coarse **rate limiting and quotas**, **WAF** rules, **volumetric DDoS absorption**, IP reputation. This layer is cheap per request and protects everything behind it, so the rule is **enforce here, not deep in the app**, a request you reject at the edge costs you almost nothing (the mob stopped at the velvet rope), a request you let reach your auth service and database costs you compute, connections, and possibly a lock.
 - **Application** (inside your service, with business context): **bot challenges on anomaly** (not on everyone), **fraud risk scoring**, per-feature quotas that need to know what the user is doing. This layer has context the edge lacks, "this account just changed its shipping address and is buying ten gift cards", and pays for it in latency and complexity.
-- **Account** (tied to the identity over time): **MFA**, **breached-password checks**, login **velocity and anomaly detection**, device fingerprinting and trust. This layer defends the asset attackers actually want, the account and its stored value or payment methods.
+- **Account** (tied to the identity over time): **MFA**, **breached-password checks**, login **velocity and anomaly detection**, device fingerprinting and trust. This layer defends the asset attackers actually want, the account and its stored value or payment methods (the bartender guarding the tab).
 
 The trade-off a Director foregrounds: **lower layers are cheaper and blunter, higher layers are smarter and more expensive.** You push as much rejection as possible to the edge, and reserve the smart, costly checks for traffic that survived the cheap ones.
 
@@ -46,7 +48,7 @@ The Director point: enforce the limit at the **edge gateway** (a CDN, an API gat
 
 - **Device fingerprinting and behavioral signals**, invisible to the user, browser/TLS fingerprint, mouse and timing patterns, request shape, score how bot-like a session is. **Zero friction, never definitive**, a good signal to *decide whether to challenge*, not to hard-block on alone.
 - **JavaScript / invisible challenges** (the modern default, e.g. Turnstile-style), the browser silently solves a proof-of-work or behavioral check. **Near-zero friction for real users, stops naive bots.**
-- **CAPTCHA**, the explicit "prove you're human" puzzle. It works, but it **costs a few percentage points of conversion** every time you show it, and well-funded attackers solve it with cheap human farms. So you **show it on anomaly, not to everyone**, the cardinal rule, a CAPTCHA on every login is a permanent tax on every real user to stop a problem most of them never had.
+- **CAPTCHA**, the explicit "prove you're human" puzzle. It works, but it **costs a few percentage points of conversion** every time you show it, and well-funded attackers solve it with cheap human farms. So you **show it on anomaly, not to everyone** (no pat-down for every guest), the cardinal rule, a CAPTCHA on every login is a permanent tax on every real user to stop a problem most of them never had.
 
 **Account takeover is the highest-value attack, and the math favors the defender heavily.** Attackers buy **breach dumps** (billions of leaked email/password pairs) and run **credential stuffing**: try each pair against your login, because users reuse passwords. The defenses, with their numbers:
 

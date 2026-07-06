@@ -31,7 +31,7 @@ The Netflix format is Grand Rounds for systems. The panel has read your notes. Y
 
 ## R: Requirements: re-derive them, honestly
 
-Write the original requirements *as they were stated when the design locked*, then write them *as you understand them today*. The gap is where the hardest questions live.
+Write the original requirements *as they were stated when the design locked*, then write them *as you understand them today* (what the surgeon knew at each decision point). The gap is where the hardest questions live.
 
 **Self-interrogation:** What did you scope out, and do you still agree? Which NFRs (non-functional requirements), latency budget, availability target, consistency model, were stated explicitly vs. inherited informally? ("We needed it to be fast" is not a requirement; "p99 < 500 ms" is.) Which requirement changed mid-build and how did it affect the design?
 
@@ -121,7 +121,7 @@ Typical cost: schema migration to extract the fields, plus rewriting queries. On
 
 ## E: Evaluation: the bottlenecks you actually hit
 
-The evaluation step in a live whiteboard round stress-tests a hypothetical design; here it narrates **real production failures**, with numbers, timelines, and honest ownership. For each significant incident, pre-write: (1) user-visible impact in numbers, (2) root cause at the architectural level ("no circuit breaker between A and B", not "disk was full"), (3) the fix, (4) the design change it drove, (5) what you'd do differently at design time.
+The evaluation step in a live whiteboard round stress-tests a hypothetical design; here it narrates **real production failures**, with numbers, timelines, and honest ownership (the incision that didn't go cleanly). For each significant incident, pre-write: (1) user-visible impact in numbers, (2) root cause at the architectural level ("no circuit breaker between A and B", not "disk was full"), (3) the fix, (4) the design change it drove, (5) what you'd do differently at design time.
 
 **Pre-answer the 10 hostile questions in writing before the round:**
 
@@ -142,7 +142,7 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 ## D: Design evolution: the "what I'd do differently" section
 
-> Every candidate describes what they built. The Director stands outside their own design, evaluates it against what they now know, and articulates a specific actionable alternative, with the trade-off named.
+> Every candidate describes what they built. The Director stands outside their own design, evaluates it against what they now know, and articulates a specific actionable alternative, with the trade-off named (the incision you'd redo, named unprompted).
 
 **Pre-write this section with the structure below, 3 items max:**
 

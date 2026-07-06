@@ -59,7 +59,7 @@ So the Director's move is never "pick active-active or active-passive." It's: **
 - **Blanket active-passive (warm standby for everything):** ≈ **+$13M/yr** at ~30% standby capacity, but RTO is now 30-60 min *for checkout too*, and a warm fleet that never takes traffic is the classic failover that fails.
 - **Tiered (the proposal):** Tier 0 ≈ 15% of spend, fully duplicated → **+$6M**; Tier 1 warm standby at ~30% capacity on ~50% of spend → **+$6M**; Tier 2 backups + vault → **+$0.5M**. Total ≈ **+$12.5M/yr, ~$18M/yr less than blanket active-active**, with a *better* RTO on the revenue path than blanket-passive.
 
-**What the spend buys.** Expected event: one regional outage per ~2 years, ~4 hours. At peak: 4 × $1M ≈ **$4M** plus trust damage, call expected loss **~$20M/decade, almost all of it in Tier 0**. Blanket active-active spends **$300M/decade** against that, mostly protecting analytics pipelines nobody would miss for a day. Tiered spends **$125M/decade**, concentrated where the loss concentrates. **Saying the ~$18M/yr delta out loud is the Director signal.**
+**What the spend buys.** Expected event: one regional outage per ~2 years, ~4 hours. At peak: 4 × $1M ≈ **$4M** plus trust damage, call expected loss **~$20M/decade, almost all of it in Tier 0**. Blanket active-active spends **$300M/decade** against that, mostly protecting analytics pipelines nobody would miss for a day (a duplicate, fully staffed library). Tiered spends **$125M/decade**, concentrated where the loss concentrates. **Saying the ~$18M/yr delta out loud is the Director signal.**
 
 **The number people forget:** survivor-region **capacity headroom**. Tier 0 in each region must be provisioned, or pre-warmed with reserved quota, for 100% of peak Tier-0 traffic. Cloud quota limits are the silent DR killer. That headroom is *in* the +$6M; omit it and your RTO is fiction.
 
@@ -78,7 +78,7 @@ So the Director's move is never "pick active-active or active-passive." It's: **
 
 **Tier 1, async replica, promote on failover.** Catalog/search/profile keep a cross-region **asynchronous replica**; seconds of lag = seconds of RPO, well inside the 5-min sign-off. *Rejected, sync replication:* an RTT inside every catalog write to protect data the business agreed to lose 5 minutes of.
 
-**Tier 2, backup-restore.** Snapshots and incrementals to a **cross-region, logically isolated vault**; rebuild compute from infrastructure-as-code. The rule everyone skips: **a backup never restored is a hope, not a backup**, quarterly timed restore drills, the measured time *becoming* the real RTO. *Rejected, warm standby for analytics:* paying 24/7 compute to protect a 24-hour RTO.
+**Tier 2, backup-restore.** Snapshots and incrementals to a **cross-region, logically isolated vault** (the library's off-site archive); rebuild compute from infrastructure-as-code. The rule everyone skips: **a backup never restored is a hope, not a backup**, quarterly timed restore drills, the measured time *becoming* the real RTO. *Rejected, warm standby for analytics:* paying 24/7 compute to protect a 24-hour RTO.
 
 **Backups exist in every tier, including Tier 0**, replication faithfully copies corruption and `DELETE`s region-to-region in milliseconds. Replication is for region death; point-in-time backups are for human and software error. Conflating them is a classic red flag.
 
@@ -119,7 +119,7 @@ flowchart TB
 
 **Steady state:** traffic steering (latency-based DNS or anycast) splits users by proximity. Tier 0 serves actively in **both** regions, carts homed per user, ledger on the 3-leg quorum. Tier 1 serves from East with West warm at ~30%, replica trailing by seconds. Tier 2 lives in East only, shipping backups to the vault.
 
-**Region-death state:** steering withdraws East; West's Tier 0, *already live*, absorbs the rest within minutes. **Tier 0's failover is a traffic shift, not a cold start**, that's why its RTO is minutes. Tier 1 promotes its replica and scales to full. Tier 2 waits, or restores from the vault.
+**Region-death state:** steering withdraws East; West's Tier 0, *already live*, absorbs the rest within minutes (the second operating theater, already staffed). **Tier 0's failover is a traffic shift, not a cold start**, that's why its RTO is minutes. Tier 1 promotes its replica and scales to full. Tier 2 waits, or restores from the vault.
 
 **The load-bearing property:** Tier 0's standby is never idle, it serves production daily, so it cannot silently rot. Active-passive's deepest flaw isn't the 30-min RTO; it's that the passive side is **unproven by construction** until the worst possible moment.
 

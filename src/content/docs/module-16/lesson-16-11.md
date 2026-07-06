@@ -32,7 +32,7 @@ The governing intuition: **your blast radius is not "how many machines could bre
 
 - *What does "success" mean for a machine?* → The machine boots, passes a health check suite (services up, sensor reads valid, safety interlocks functional), and reports `HEALTHY` status within N minutes of install.
 - *What does "bricked" mean?* → Machine becomes unresponsive (no status beacon) OR reports a critical fault that disables core function. Distinguish **soft-brick** (recoverable via software revert) from **hard-brick** (requires physical intervention, never acceptable).
-- *What is the communications window model?* → Each machine has a contact window with Earth (direct link or lunar relay) averaging **2 × 20-minute windows per 24 hours** (~40 min/day of reachability). Between windows, machines operate autonomously.
+- *What is the communications window model?* → Each machine has a contact window with Earth (direct link or lunar relay) averaging **2 × 20-minute windows per 24 hours** (~40 min/day of reachability). Between windows, machines operate autonomously (submarines between surfacings).
 - *Can we roll back to the previous version?* → Yes. Each machine carries a **dual-partition layout**: slot A (running) and slot B (previous version). Revert = set boot pointer to slot B, reboot. Assume revert always succeeds (prior version is known-good, stored immutably on-device).
 - *How many machines, and what are their connectivity and compute profiles?* → **500,000 machines**. Bandwidth per machine from Earth: assume **10 Mbps** per machine during contact (shared uplink from a relay station; realistic aggregate ceiling ~**1 Gbps** for a relay, so ~**100 machines downloading simultaneously**). Package size: **500 MB** per update.
 - *What is the acceptable fleet-level risk?* → Tolerate **at most 1% of the fleet** (5,000 machines) in a degraded state at any time. A bricked wave must never propagate beyond the current wave without a human go decision.
@@ -56,7 +56,7 @@ The governing intuition: **your blast radius is not "how many machines could bre
 **Blast radius per wave, derived from tolerance (≤1% = 5,000 machines):**
 - Wave 1 (canary): **500 machines** (0.1%). If all brick: 500 auto-reverted, well inside tolerance.
 - Wave 2: **2,500** (0.5%). Wave 3+: **5,000** (1% ceiling). Widen to 10K, 25K, 50K as confidence builds.
-- Gate soak: minimum **24 hours**, enough for every machine in the wave to have at least one contact window.
+- Gate soak: minimum **24 hours**, enough for every machine in the wave to have at least one contact window (every submarine has surfaced once).
 
 **Rollout calendar:** `500K ÷ 5K per wave × 1 day/wave ≈ 100 days` for the full fleet. That is the risk-management plan. You accelerate by widening waves, never by shortening gate soaks.
 
@@ -106,7 +106,7 @@ flowchart TB
 
 **Abort path:** If the gate evaluator sees error rate > 5% at wave close, it halts the rollout, sets wave state to HALTED, fires an alert, and does not open the next wave. No additional machines receive the update until a human reviews.
 
-**Auto-revert path (no Earth contact needed):** The on-device watchdog runs continuously, independent of the contact window. If the new image fails the health check within its boot-confirmation window (e.g., 10 minutes post-boot), or if critical services fail to come up, the watchdog writes `REVERT` to the boot manager config and reboots into slot A, the prior known-good image. On the next contact window, the machine sends a `REVERTED` beacon. Earth learns about it within a contact cycle, not in real time.
+**Auto-revert path (no Earth contact needed):** The on-device watchdog runs continuously, independent of the contact window. If the new image fails the health check within its boot-confirmation window (e.g., 10 minutes post-boot), or if critical services fail to come up, the watchdog writes `REVERT` to the boot manager config and reboots into slot A, the prior known-good image. On the next contact window, the machine sends a `REVERTED` beacon. Earth learns about it within a contact cycle, not in real time (you hear at the next surfacing).
 
 **The key architectural insight:** Earth-side abort gates stop the *next wave*. Device-side watchdogs stop the *current machine*. These are different failure modes requiring different mechanisms, and most candidates conflate them.
 

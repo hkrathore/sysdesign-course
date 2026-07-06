@@ -24,7 +24,7 @@ Company calibration is exactly this for behavioral answers. Your termination sto
 
 ## The five grading schemes
 
-Five archetypes cover most Director loops. Each scores the *same* dimensions this track named, altitude, decision quality, self-awareness, quantification, probe-survival, but weights them differently and tests them through a different instrument.
+Five archetypes cover most Director loops. Each scores the *same* dimensions this track named, altitude, decision quality, self-awareness, quantification, probe-survival, but weights them differently and tests them through a different instrument (five rooms for the same talk).
 
 **Amazon, LP-mapped, bar-raiser veto, vocally self-critical.** Every answer is silently mapped to one of the 16 Leadership Principles, with interviewers pre-assigned which LPs they score. The loop includes a **Bar Raiser**, a trained interviewer outside the hiring chain with an explicit veto, there to protect the long-term bar against a hiring manager's pressure to fill a req. They drill STAR-L three and four levels deep (the hard-people round is run Amazon-style for exactly this reason) and reward **"vocally self-critical"**, their actual phrase, volunteering what you got wrong before they dig. "I" not "we": at a company scoring individual ownership, an all-plural story reads as someone who was *near* the work, not driving it.
 
@@ -87,7 +87,7 @@ The meta-point: calibration is a moving target because the companies move. Re-re
 
 ### Worked example: one termination story, three companies
 
-Take the firing story, senior engineer, eight years tenured, missed three committed milestones on a revenue-blocking payments integration, diagnosed system-then-skill-vs-will, dated feedback March 4th, a 60-day plan, hit one of four criteria, exited personally in eight minutes with severance above policy, velocity recovered in a sprint, learning "act a quarter earlier" plus a two-week-trigger mechanism. **Every fact below is identical.** Watch only the open, vocabulary, and close move.
+Take the firing story, senior engineer, eight years tenured, missed three committed milestones on a revenue-blocking payments integration, diagnosed system-then-skill-vs-will, dated feedback March 4th, a 60-day plan, hit one of four criteria, exited personally in eight minutes with severance above policy, velocity recovered in a sprint, learning "act a quarter earlier" plus a two-week-trigger mechanism. **Every fact below is identical.** Watch only the open, vocabulary, and close move (one talk, three rooms).
 
 ### Amazon: lead with the self-critical L, map to an LP, say "I"
 
@@ -134,7 +134,7 @@ Meta and Google follow the same dials: at Meta, lead with how you pulled the tea
 
 - **Re-aiming until it's a lie.** Calibration tunes emphasis and vocabulary, never facts. Inventing a beat to fit a rubric is the one fail worse than mis-calibration, the probe lands exactly on the invented part.
 - **Quoting stale canon.** The Netflix 2009 deck, "we're a family," 2021 LP phrasings, using last-cycle's artifact is the loudest tell of stale prep. Re-read the *current* source the week of the loop.
-- **One-size-fits-all delivery.** Telling the identical story with the identical open at all five companies leaves signal on the table everywhere, and trips the specific tripwire at the one company whose rubric you ignored.
+- **One-size-fits-all delivery.** Telling the identical story with the identical open at all five companies leaves signal on the table everywhere, and trips the specific tripwire at the one company whose rubric you ignored (the great talk that lands flat).
 - **Wrong instrument for the company's style.** Drilling a rehearsed STAR monologue at Google (hypothetical-heavy, committee-read) or going vague-philosophical at Amazon (STAR-drilled, LP-mapped) is reaching for the wrong shape in the wrong room.
 - **Over-calibrating into pandering.** Parroting a company's slogans without substance reads as a candidate who studied the careers page, not one who operates that way. Calibration is emphasis and vocabulary on a *real* story, not a personality transplant.
 

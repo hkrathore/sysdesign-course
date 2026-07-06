@@ -5,6 +5,8 @@ sidebar:
   order: 3
 ---
 
+> Pooling tenants is the entire economics of SaaS, and it ships with a structural threat: load follows a power law, the top 1% of tenants drive 40 to 60% of traffic, and any one whale (100 to 1,000x the median) can starve the fleet. The answer is fixtures, not hope: per-tenant token-bucket limits, fair queuing, and a billing-grade metering pipeline reconciled to under 0.1% drift, because a metering bug is a revenue incident. The trap the lesson names: flat infinite usage, which makes your heaviest tenants margin-negative and invisible.
+
 ### Learning objectives
 - Contain the **noisy-neighbor problem** in a pooled system: name the **power-law load share** (top 1% of tenants drive ~half the traffic) that makes it inevitable, and defend the fleet with **per-tenant, per-plan rate limits and quotas** (token-bucket keyed by tenant), **fair scheduling**, and a **quarantine** lever, without throttling a growing customer.
 - Design a **billing-grade usage-metering pipeline** (emit, stream, aggregate/rollup, rate) held to billing's own discipline: **idempotent, no double-count, no drop, reconciled**, because a metering error is a revenue or compliance incident.
@@ -62,7 +64,7 @@ The **limits are per-plan, not global, and adjustable**, and that is the whole t
 
 #### 3. Usage metering: a billing-grade pipeline
 
-Metering turns raw activity into the numbers you bill on, in four stages: **emit, stream, aggregate, rate.**
+Metering turns raw activity into the numbers you bill on (reading each unit's meter), in four stages: **emit, stream, aggregate, rate.**
 
 1. **Emit.** Every billable action publishes a usage event carrying `event_id` (a unique idempotency key), `tenant_id`, `meter` (api_calls, compute_seconds, storage_bytes, seats), `quantity`, `timestamp`, off the critical latency path (fire-and-forget into a local buffer flushed to the bus).
 2. **Stream.** Events land in **Kafka** (a durable, ordered, replayable log), partitioned by `tenant_id` so a tenant's events stay ordered and a hot tenant's volume spreads across partitions. Replay is what makes the pipeline auditable: if the aggregator has a bug, you replay the log.
@@ -80,7 +82,7 @@ Four models, each aligning price to a different value axis:
 - **Seat-based (per-user subscription).** Price = seats x price/seat/month. Simple, predictable, and decoupled from infrastructure cost. The risk: 20 seats hammering the API cost far more than 20 quiet seats, so seat pricing alone can invert margin. Best where value tracks headcount (collaboration tools).
 - **Usage-based / consumption.** Price = metered usage x unit price ($0.50 per 1,000 calls, per compute-hour, per GB). Revenue tracks cost (protects margin) and small tenants start cheap, but revenue is unpredictable and a surprise bill churns customers. Best where cost is usage-dominated (infrastructure and API platforms).
 - **Tiered.** Named plans (Free / Pro / Enterprise), each bundling an allowance and limits, with **overage** priced per unit beyond it. The common shape: buyer predictability (the plan price) plus your margin protection (overage rate and hard limits).
-- **Hybrid.** A base subscription **plus** metered usage above an allowance. Most mature SaaS lands here: predictable base revenue plus usage upside, with the metered component keeping heavy tenants profitable.
+- **Hybrid.** A base subscription **plus** metered usage above an allowance. Most mature SaaS lands here: predictable base revenue plus usage upside (base rent plus metered utilities), with the metered component keeping heavy tenants profitable.
 
 **Rating** maps usage-and-plan to amount owed: apply the allowance, price the overage, apply discounts, prorate. You do not build invoicing, tax, dunning, and payment rails yourself, you integrate a **billing provider (Stripe)**. The division of labor: **your metering pipeline is the system of record for usage** (billable quantity per tenant per meter), pushed to Stripe as usage records; **Stripe is the system of record for money** (price, invoice, proration on mid-cycle upgrades, failed-charge retries, tax). Building billing in-house is the rejected alternative for almost everyone: payments, cross-jurisdiction tax, dunning, and PCI scope are a multi-year product you buy, not build.
 
@@ -98,7 +100,7 @@ This whole machine exists to protect **unit economics**: the per-tenant relation
 - **Metering integrity is revenue integrity.** A metering bug is not a defect ticket, it is a **revenue or compliance incident**: undercounting forfeits money, overcounting overbills customers and, for regulated buyers, is a legal and trust liability. Hence the idempotent, reconciled treatment above.
 - **QoS tiers are a monetization lever.** Differentiated limits, priority, and SLA are things customers pay to move up for, so the tiering that protects the fleet is also expansion revenue.
 
-**The rejected design that names the whole lesson: flat, infinite usage.** An all-you-can-eat price with no metering, limits, or tiers feels customer-friendly and destroys margin: your heaviest tenants (100 to 1,000x the median) pay the same flat rate as the lightest, so they are your least profitable and can be deeply negative, and with no meter you cannot prove it, let alone fix it. Fairness and metering are what convert pooling from a margin trap into a business.
+**The rejected design that names the whole lesson: flat, infinite usage.** An all-you-can-eat price with no metering, limits, or tiers feels customer-friendly and destroys margin: your heaviest tenants (100 to 1,000x the median) pay the same flat rate as the lightest (the car wash running on your dime), so they are your least profitable and can be deeply negative, and with no meter you cannot prove it, let alone fix it. Fairness and metering are what convert pooling from a margin trap into a business.
 
 ### Diagram: fairness at the gateway, then the metering-to-billing pipeline
 ```mermaid

@@ -25,7 +25,7 @@ A three-star restaurant does not generate its own electricity or write its own p
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *Which capability, for what business?* → Anchor scenario: a **400-engineer, ~$150M-revenue B2B SaaS company** deciding observability (the worked example), with the other four domains as calibration points.
-- *Is this the product, near the product, or plumbing?* → The **differentiation test**: would a customer pay more, or churn less, because *ours* is better? Observability here: **no**, pure plumbing.
+- *Is this the product, near the product, or plumbing?* → The **differentiation test**: would a customer pay more, or churn less, because *ours* is better? Observability here: **no**, pure plumbing (a capability customers never taste).
 - *Hard constraints?* → Compliance (PCI, SOC 2 (System and Organization Controls 2), data residency), **data gravity** (egress cost of 50 TB/day), latency (a per-request auth check can't absorb a 100 ms vendor round-trip without a cache plan).
 - *Timeline?* → Capability needed in **one quarter**. Time-to-capability is a requirement, not a preference, and it usually decides v1.
 
@@ -68,7 +68,7 @@ The renewal quote lands: **$2.4M/yr** for the 400-engineer org (metrics + logs +
 
 **The verdict on raw dollars: roughly a wash** ($7.8M vs ~$7M). Which is precisely why raw dollars don't decide it, the next two numbers do.
 
-**Opportunity cost, the number juniors omit.** Six strong platform engineers are roughly two product teams' worth of roadmap. At ~$150M revenue, if dedicated product capacity drives even a few points of growth, that capacity is worth **$1M+ of revenue impact per year**, and the build consumes it rebuilding a commodity that wins zero customers. The engineer's framing is "$2.4M is six engineers." The Director's framing is "**six engineers are two product teams, what am I *not* shipping?**"
+**Opportunity cost, the number juniors omit.** Six strong platform engineers are roughly two product teams' worth of roadmap. At ~$150M revenue, if dedicated product capacity drives even a few points of growth, that capacity is worth **$1M+ of revenue impact per year**, and the build consumes it rebuilding a commodity that wins zero customers. The engineer's framing is "$2.4M is six engineers." The Director's framing is "**six engineers are two product teams, what am I *not* shipping?**" (the menus you didn't make).
 
 **Where the crossover sits.** Build starts to win when the vendor bill durably clears **~2× the loaded cost of the team that would replace it**, the 2× margin covering infra, the v1 year, and the risk that your in-house version is worse. Here: team ≈ $2.1M/yr all-in → crossover ≈ **$4-5M/yr of vendor spend**, roughly 2× today's bill. That's the trigger to write down (Evaluation, below), not a feeling at renewal time.
 
@@ -186,7 +186,7 @@ Four artifacts, owned and versioned like code:
 
 **Failure modes, both directions, named honestly:**
 - *Buy gone wrong:* renewal shock with no exit leverage (no seam, no export, you ARE the captive customer the pricing model assumes); the vendor's outage becoming your outage; spend growing silently because nobody owns the bill. Mitigation: everything above, plus a named spend owner.
-- *Build gone wrong:* v1 ships, the team moves on, the platform rots, you now run a *worse* Datadog with no SLA and no one to call; the maintenance tail quietly consumes 4 of the 6 engineers forever; sunk cost keeps it alive. **"We could build it better" never prices the decade of ownership.**
+- *Build gone wrong:* v1 ships, the team moves on, the platform rots, you now run a *worse* Datadog with no SLA and no one to call (the custom oven at 2 a.m.); the maintenance tail quietly consumes 4 of the 6 engineers forever; sunk cost keeps it alive. **"We could build it better" never prices the decade of ownership.**
 - *The hybrid trap:* buying *and* half-building ("buy Datadog but write our own metrics layer on top"), both costs, neither benefit. If you bought, use it; customize only at the seam.
 
 **Re-check vs requirements:** capability in one quarter ✓ (buy delivers now); 3-yr TCO bounded ✓ (~$7M with caps negotiated); opportunity cost zero ✓; reversible ✓ (seam + export + runbook); survives a 30% price hike ✓ (cap negotiated; trigger written for what the cap doesn't catch).

@@ -43,7 +43,7 @@ Both are real architectures running at real companies. That's the point. Now the
 - **Team capability, a first-class requirement, not a soft factor:** four teams deep in Postgres/REST; **zero production Kafka experience**; on-call is already stretched. A design the team can't operate at 3 a.m. fails an NFR (non-functional requirement) exactly the way a missed latency budget does.
 - **Evolvability:** 3-year plan says 5-10× order volume and 3+ new consumer teams of order data.
 
-**What R dissolved:** half the fight. A was designing for 140/s now; B was designing for 1,400/s in three years. Both were *right about their own question*. Now there is one question.
+**What R dissolved:** half the fight. A was designing for 140/s now; B was designing for 1,400/s in three years. Both were *right about their own question* (two doctors treating different imagined patients). Now there is one question.
 
 ---
 
@@ -69,7 +69,7 @@ Both are real architectures running at real companies. That's the point. Now the
 
 > **Adaptation, said out loud:** "what persists" here is not order data, it's **the decision itself**. The durable artifact of this entire problem is the **Architecture Decision Record**, and where it lives is a design choice.
 
-ADRs live **in the repo, in git, next to the code they govern**, numbered, immutable, superseded rather than edited. *Rejected, wiki/Confluence pages:* they rot, they're invisible at the moment an engineer is about to violate the decision, and they get edited in place until the original reasoning is gone. A decision record's value is exactly its immutability: eighteen months later, when someone says "why on earth is there a synchronous orchestrator here?", the answer is a two-minute read, context, the options weighed, the dissent, and the tripwires, instead of a re-litigation meeting at ~$2K/hour of staff-engineer time. **Chesterton's fence, with the plaque attached.** The decision log is also the onboarding curriculum and, as we'll see in Design evolution, the script for the 10x conversation: you wrote the answer to the follow-up the day you decided.
+ADRs live **in the repo, in git, next to the code they govern**, numbered, immutable, superseded rather than edited (the chart stays with the patient). *Rejected, wiki/Confluence pages:* they rot, they're invisible at the moment an engineer is about to violate the decision, and they get edited in place until the original reasoning is gone. A decision record's value is exactly its immutability: eighteen months later, when someone says "why on earth is there a synchronous orchestrator here?", the answer is a two-minute read, context, the options weighed, the dissent, and the tripwires, instead of a re-litigation meeting at ~$2K/hour of staff-engineer time. **Chesterton's fence, with the plaque attached.** The decision log is also the onboarding curriculum and, as we'll see in Design evolution, the script for the 10x conversation: you wrote the answer to the follow-up the day you decided.
 
 ---
 
@@ -99,7 +99,7 @@ flowchart TD
 
 **Move 5, Score, decide, inside a timebox.** Two weeks of structured process for a one-way door, then the designated decider decides **even without consensus**. The deadlock math from the intuition section is the justification: the blocked workstream costs ~$40K/week; consensus is a luxury good.
 
-**Move 6, ADR + disagree-and-commit.** The dissenter's objection goes *into* the ADR as a named risk with a **tripwire metric**, the observable signal that would prove them right and trigger a revisit. This is what makes commit honest rather than performed: dissent isn't suppressed, it's **scheduled**.
+**Move 6, ADR + disagree-and-commit.** The dissenter's objection goes *into* the ADR as a named risk with a **tripwire metric**, the observable signal that would prove them right and trigger a revisit (the follow-up scan, booked at decision time). This is what makes commit honest rather than performed: dissent isn't suppressed, it's **scheduled**.
 
 ---
 

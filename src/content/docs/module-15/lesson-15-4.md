@@ -5,6 +5,8 @@ sidebar:
   order: 4
 ---
 
+> A SEV1 is a **coordination problem before it is a technical one**: the room fails from three parallel theories and a VP DMing the debuggers, not from lack of skill. The whole response turns on one split, a single **Incident Commander who decides and never touches the keyboard**, with Ops fixing, Comms talking on a 15-minute drumbeat, and a Scribe writing the timeline. Declaring is a lookup against pre-agreed SEV1–SEV4 triggers, biased early: a five-minute false alarm is cheap, a forty-minute undeclared outage is not.
+
 ### Learning objectives
 - State the **central thesis**: a major incident is a *coordination* problem before it is a *technical* problem, and a single decision-maker beats a flailing crowd, so the first move under fire is to **declare and assign roles**, not to start typing.
 - Describe the **Incident Command System** at architecture altitude: an **Incident Commander** who coordinates and decides but does not touch the keyboard, an **Ops lead** doing the fixing, a **Comms/Liaison lead** owning stakeholders and the status page, and a **Scribe** owning the timeline.

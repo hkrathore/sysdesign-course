@@ -51,7 +51,7 @@ That is the entire lesson: inspect (the 90-day audit), stabilize (observability,
 
 **The first-90-days framework, what to measure before touching anything:**
 
-1. **Revenue map (weeks 1-2).** Which code paths carry money: checkout + billing carry ~$550K/day (~$200M ÷ 365); one hour of checkout downtime ≈ **$23K direct**. This number prices every risk decision that follows.
+1. **Revenue map (weeks 1-2).** Which code paths carry money (the load-bearing walls): checkout + billing carry ~$550K/day (~$200M ÷ 365); one hour of checkout downtime ≈ **$23K direct**. This number prices every risk decision that follows.
 2. **Risk map (weeks 2-5).** Twelve months of incidents mapped to modules; MTTR; **bus factor per module** (billing: 2 people, both flight risks, the scariest finding); EOL dependencies with dates; whether backup *restore* has ever been tested (assume no until proven).
 3. **Change map (weeks 3-6).** Git churn × incident density per module, the **hotspot quadrant** that drives all sequencing. Typical finding: ~80% of commits land in ~15% of modules (here: pricing, checkout, billing). High + high = strangle first; low + low = leave alone.
 4. **Coverage and deployability audit (weeks 4-8).** Line coverage (assume ~10-15%, concentrated in easy modules, not the money path); whether *anything* deploys independently (no); time-to-rollback ("restore the weekend deploy" ≈ 8+ hours, a finding worth escalating by itself).
@@ -104,10 +104,10 @@ flowchart TD
 
 - **Strangle** (pricing, checkout, billing, the hotspot 15%): highest churn, highest incident density, highest payoff. Billing goes early for bus-factor reasons, *especially* because it's scary.
 - **First slice** (a high-churn, *low-risk* edge module, notifications): the cheapest place to prove the façade, the CDC pipe, the parity harness, and the team's muscle memory before betting the money path on them.
-- **Leave alone** (the cold half): stable, low-churn, off the money path, gets observability and a deploy pipeline, then nothing. **Migration risk is real and these modules earn nothing from it.** Saying this list out loud, with data, is a top-three Director signal here.
+- **Leave alone** (the cold half): stable, low-churn, off the money path, gets observability and a deploy pipeline, then nothing (the guest bedroom). **Migration risk is real and these modules earn nothing from it.** Saying this list out loud, with data, is a top-three Director signal here.
 - **Retire** (the dead ~third): instrumentation will show a surprising fraction of endpoints get near-zero traffic. Deleting them is the cheapest modernization there is, parity with nothing.
 
-**Sequencing principle:** stabilize → prove → strangle → decommission. You cannot strangle safely at a 25% change-failure rate with quarterly deploys, **stabilization makes the strangle survivable**. Foundation: observability on the money path, CI and a weekly deploy train, tested restores, **characterization tests** pinning current behavior, bugs included, on the modules about to move.
+**Sequencing principle:** stabilize → prove → strangle → decommission. You cannot strangle safely at a 25% change-failure rate with quarterly deploys, **stabilization makes the strangle survivable** (wiring and foundation before any renovation). Foundation: observability on the money path, CI and a weekly deploy train, tested restores, **characterization tests** pinning current behavior, bugs included, on the modules about to move.
 
 ---
 

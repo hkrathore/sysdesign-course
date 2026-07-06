@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> The diagnostic round hands you a burning system instead of a blank page: it scores **method under uncertainty**, not design. The loop is observe → hypothesize → bisect → confirm → mitigate → root-cause, and the order is the answer. Ask **"what changed?"** first, because **70–80% of incidents trace to a change**, then bisect the request path like a binary search (O(log n), not O(n)). The tension the round turns on: mitigate first or root-cause first, and the senior default is **stop the bleeding**, rollback in minutes, autopsy later.
+
 ### Learning objectives
 - Understand why this module carries **two distinct probes**: the **diagnostic round** ("the service is down, walk me through it"), which tests structured reasoning under uncertainty, and the **operational-leadership** probe ("how do you run on-call and incidents for a large org"), which tests the detect/respond/learn system you build; this lesson owns the first.
 - Run the **diagnostic loop** as a discipline, observe symptoms and blast-radius, form hypotheses, **bisect** the system to localize, confirm, **mitigate**, and only then root-cause, instead of flailing at the first knob you can reach.

@@ -31,7 +31,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 - *What exactly hurts?* → **Deploy velocity and blast radius.** 100 engineers in ~12 teams ship through one weekly release train; one bad commit rolls back everyone; a checkout bug takes down search.
 - *Architecture or code quality?* → Worth pressing: a **modular monolith** with a clean build and module ownership fixes 60-70% of this pain for ~10% of the cost. Assume here it's been tried and the coupling is structural.
 - *Is headcount growing?* → Yes, 100 → 160 over two years. Coupling cost grows superlinearly with team count - this tips the math.
-- *Can we freeze features?* → **No.** Revenue platform. This single answer **eliminates the big-bang rewrite** before we discuss its other flaws.
+- *Can we freeze features?* → **No.** Revenue platform. This single answer **eliminates the big-bang rewrite** (felling the tree leaves the business without shade) before we discuss its other flaws.
 - *Appetite?* → ~18-24 months, ≤ ~20% of engineering capacity at any time.
 
 **The pain, quantified (this is the requirements list):**
@@ -106,7 +106,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 > **Adaptation, said out loud:** the "architecture diagram" here is not the end-state service mesh - it's the **strangler-fig facade and the phase machine**. The end state is an output, not a blueprint.
 
-**The facade:** a routing layer in front of the monolith - usually the API gateway or L7 load balancer you already run, not new infrastructure. All traffic hits the monolith on day one; each extraction claims routes (`/notifications/*` → new service). Cutover and rollback are **routing config changes** - percentage-based, canaried, instant to revert.
+**The facade:** a routing layer in front of the monolith - usually the API gateway or L7 load balancer you already run, not new infrastructure. All traffic hits the monolith on day one; each extraction claims routes (`/notifications/*` → new service), one fig root at a time. Cutover and rollback are **routing config changes** - percentage-based, canaried, instant to revert.
 
 **An anti-corruption layer** sits between each new service and the monolith: a thin translation boundary so the clean new model doesn't import the monolith's tangled one. *Rejected: new services speaking the monolith's internal types* - it silently re-couples everything you just paid to separate.
 
@@ -200,7 +200,7 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 - **Quarters 7-8, the hard seam (checkout):** only with proven muscle, the 25-join breakup pre-paid by in-monolith severing.
 - **Then: stop.**
 
-**The stopping condition (say it unprompted - the strongest signal in the answer):** catalog, identity, and every stable low-change module **stay in the monolith permanently** - perhaps 50-60% of today's code. They change rarely, so they pay no release-train tax; extracting them buys nothing R asked for. The end state is **8-12 services around a modular-monolith core**, not 100 services. Stop when the R-metrics are under the bar, not when the monolith is gone. **The monolith's death is not the goal; the deploy-velocity number is.**
+**The stopping condition (say it unprompted - the strongest signal in the answer):** catalog, identity, and every stable low-change module **stay in the monolith permanently** - perhaps 50-60% of today's code. They change rarely, so they pay no release-train tax; extracting them buys nothing R asked for. The end state is **8-12 services around a modular-monolith core**, not 100 services (the host tree never fully hollowed). Stop when the R-metrics are under the bar, not when the monolith is gone. **The monolith's death is not the goal; the deploy-velocity number is.**
 
 **Kill criteria:** if after two seams the deploy metrics haven't moved, or lockstep deploys dominate, pause extraction - the failure is more likely seam placement or platform gaps than strategy, but the budgeted answer to "it isn't working" must exist before month 1.
 

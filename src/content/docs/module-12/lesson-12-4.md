@@ -5,6 +5,8 @@ sidebar:
   order: 4
 ---
 
+> The control plane is the real product of a SaaS platform: a low-QPS machine that knows every tenant, provisions them, configures them, routes them, and deletes them, while the data planes just serve traffic. The structural move: keep the plane that changes tenants apart from the plane that serves them, which is what lets a small team run thousands of tenants across regions. The numbers that frame it: self-serve onboarding in seconds, white-glove silos in days, and right-to-erasure across every system and backup inside a 30-day SLA.
+
 ### Learning objectives
 - Separate the **control plane** (registry, provisioning, config, plans, routing, lifecycle) from the **data plane** (where tenant traffic runs), and say why the split buys blast-radius isolation, independent scaling, and one control plane governing many data planes.
 - Trace how a request resolves to a tenant (subdomain, header, or token claim) and how that identity propagates through every hop for routing, authorization, data scoping, and metering.
@@ -32,7 +34,7 @@ Why separate them (trade-offs a reviewer will test):
 
 1. **Blast radius.** A bad control-plane deploy must not take down live tenant traffic, and a one-region data-plane outage must not stop you onboarding, billing, or configuring every other tenant. Keeping the plane that *changes tenants* apart from the plane that *serves tenants* contains each failure to its own surface.
 2. **Independent scaling.** The control plane handles tens of ops per second; the data plane, tens or hundreds of thousands of requests per second. Coupling them forces a read-mostly metadata service to scale to data-plane volume.
-3. **One control plane, many data planes.** A single global control plane governs N data planes: one per region for residency, one per large silo tenant, or a pool plane plus a fleet of silo planes. The registry and provisioning logic live once; the data planes multiply. That is what lets a small team run thousands of tenants across regions.
+3. **One control plane, many data planes.** A single global control plane governs N data planes (one HQ, many buildings): one per region for residency, one per large silo tenant, or a pool plane plus a fleet of silo planes. The registry and provisioning logic live once; the data planes multiply. That is what lets a small team run thousands of tenants across regions.
 
 The rejected alternative is a **fused design** where each service carries its own tenant table and provisioning logic. It ships faster on day one, then every tenant-scoped decision (routing, plan gating, deletion) drifts across services, with no single place answering "does this tenant exist and where does it live." Past a handful of tenants it becomes the thing you cannot operate.
 
@@ -68,7 +70,7 @@ The Director framing: **provisioning is automation, not a runbook.** If standing
 
 Tenants want to differ: features per plan, their own branding, domain, and login. The governing rule: **all of this is data the control plane owns, not code that forks per tenant.**
 
-- **Plan-based features and settings** live in the registry, enforced by **feature flags** evaluated per tenant. Upgrading a plan flips flags and takes effect in **milliseconds** with no deploy; a config change fans out through the flag service, not a release. Branding (logo, colors, email templates) is likewise per-tenant data rendered by one codebase. The rejected alternative, gating with `if (tenant == "acme")` in code, makes every plan change a deploy, and the branches accrete until no one can reason about what a tenant sees.
+- **Plan-based features and settings** live in the registry, enforced by **feature flags** evaluated per tenant (the switches HQ already installed). Upgrading a plan flips flags and takes effect in **milliseconds** with no deploy; a config change fans out through the flag service, not a release. Branding (logo, colors, email templates) is likewise per-tenant data rendered by one codebase. The rejected alternative, gating with `if (tenant == "acme")` in code, makes every plan change a deploy, and the branches accrete until no one can reason about what a tenant sees.
 - **Custom domains** let a tenant serve at `app.acme.com`. The tenant points a **CNAME** at your platform, and the control plane must **issue and renew a TLS certificate** for that hostname automatically (ACME / Let's Encrypt), because at thousands of domains, each cert renewing every ~90 days, manual issuance is impossible. The domain and cert are tenant metadata; the data plane terminates TLS with whatever cert the control plane provisioned.
 - **SSO / SAML (Security Assertion Markup Language) / OIDC per enterprise tenant**: each tenant federates to its own identity provider (Okta, Entra ID, Google). The per-tenant IdP config lives in the registry; the auth flow selects it by tenant.
 
@@ -100,7 +102,7 @@ The trade is explicit: **per-region data planes close deals and satisfy regulato
 
 1. **Suspension**: the tenant is disabled (non-payment, trial expiry, security hold) but data is retained. Routing returns a suspended state; nothing is destroyed. Reversible.
 2. **Data export**: the tenant takes their records in a portable format, both a courtesy and, under GDPR data portability, sometimes a right.
-3. **Deletion / right-to-erasure**: the hard one. GDPR requires deleting a tenant's personal data **"without undue delay,"** which teams operationalize as a concrete SLA, commonly **within 30 days** of a verified request. The data is not in one place: it spans the primary database, caches, search index, analytics warehouse, event logs, object store, and hardest of all, **backups**. A deletion that clears the primary DB but leaves the tenant in search, analytics, and last night's backup has not satisfied erasure.
+3. **Deletion / right-to-erasure**: the hard one. GDPR requires deleting a tenant's personal data **"without undue delay,"** which teams operationalize as a concrete SLA, commonly **within 30 days** of a verified request. The data is not in one place: it spans the primary database, caches, search index, analytics warehouse, event logs, object store, and hardest of all, **backups** (the off-site archive). A deletion that clears the primary DB but leaves the tenant in search, analytics, and last night's backup has not satisfied erasure.
 
 The design that meets the SLA drives deletion from the control plane as a **tracked, auditable workflow** that fans out a delete to every system holding tenant data and records completion per system, so "is tenant X fully deleted" is provable. Online systems (DB, cache, search, analytics) clear within days. **Backups**, which you cannot surgically edit, get one of two strategies: **honor the deletion on restore** (a suppression list the restore applies, plus bounded retention that ages the tenant out), or **crypto-shredding**, encrypt each tenant's data with a per-tenant key and delete the key, rendering its bytes in every backup permanently unreadable in one operation. Crypto-shredding is the cleaner answer for backup-heavy systems.
 

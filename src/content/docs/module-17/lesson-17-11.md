@@ -42,8 +42,8 @@ The merge: the layoff, budget-cut, and "were you laid off" variants are **past-e
 One spine, three pull-able sub-stories. A full layoff answer walks all three; a narrower question pulls the relevant one. The whole thing defends a single posture, *I owned this, not the people above me*, under probe.
 
 - **Selection, criteria before names.** Define the future org shape first, then derive criteria: role and skill criticality, coverage you can't lose, documented performance. Names come *out of* the criteria, never the reverse. Run an **adverse-impact sanity check** with HR/legal so the cut doesn't disproportionately land on a protected group. And own the number, fought down with a model or accepted honestly, but never "they gave me a list."
-- **Communication, with dignity.** Affected people first, individually, by their own manager or by you, *before* any org-wide message, never a mass email or a dead badge. Then a **same-day survivor all-hands**: the honest *why*, what is explicitly *not* changing, and "this is the only planned round" *only if it's true*, say nothing rather than lie, because the survivors will remember which one you did.
-- **Rebuild, the survivor half.** Re-scope the work to the smaller team: **cut projects, not just people**, survivors carrying 130% load is a failure signal, not heroism. Re-recruit keepers with explicit "you have a future here" conversations inside 48 hours, before they self-select out. Over-communicate for a quarter. And track a **named recovery metric**, regretted attrition among keepers, delivery recovery, so "it went fine" has a number behind it. The compassion marker for the *departed* lives here too: references, intro calls, severance advocacy.
+- **Communication, with dignity.** Affected people first, individually, by their own manager or by you, *before* any org-wide message, never a mass email or a dead badge. Then a **same-day survivor all-hands**: the honest *why*, what is explicitly *not* changing, and "this is the only planned round" *only if it's true*, say nothing rather than lie, because the survivors will remember which one you did (they're deciding whether the bleeding has stopped).
+- **Rebuild, the survivor half.** Re-scope the work to the smaller team: **cut projects, not just people**, survivors carrying 130% load is a failure signal, not heroism (the overloaded unit the surgeon failed). Re-recruit keepers with explicit "you have a future here" conversations inside 48 hours, before they self-select out. Over-communicate for a quarter. And track a **named recovery metric**, regretted attrition among keepers, delivery recovery, so "it went fine" has a number behind it. The compassion marker for the *departed* lives here too: references, intro calls, severance advocacy.
 
 For the **RTO / unpopular mandate**: **disagree-and-commit-with-mitigation**, advocate upward with data (quit-intent and attrition math), then implement *humanely* with regretted attrition as a tracked KPI, separating personal preference from your duty as a steward. For **budget cuts**: an ROI structure, no-headcount alternatives first, then a **ranked list of what won't happen** with the requester's explicit sign-off. Never peanut-butter until nothing works.
 
@@ -58,7 +58,7 @@ flowchart TD
     OWN --> DEPART["For the departed<br/>references intros severance"]
 ```
 
-Never announce the spine aloud, and never let the answer stop at selection, an interviewer who hears about *who* and not about the survivors has heard half a leader.
+Never announce the spine aloud, and never let the answer stop at selection, an interviewer who hears about *who* and not about the survivors has heard half a leader (a surgeon judged only on the cutting).
 
 <details>
 <summary>Go deeper, jurisdiction sidebars: US, India, UAE (IC depth, optional)</summary>
