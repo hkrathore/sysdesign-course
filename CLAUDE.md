@@ -43,8 +43,9 @@ Two failure directions, both fatal: **too high** (hand-waving, "it scales horizo
 
 ## 5. Pedagogy contract — EVERY lesson includes all 11, in this order
 
+0. **60-second opener (July 2026 learning pass):** a 3–5 sentence blockquote (≤90 words) before the learning objectives giving the lesson's shape — what the system/concept *really* is, the one decision it turns on, the headline number(s). No em-dashes, no "In this lesson".
 1. Learning objectives (3–5).
-2. **Intuition first** — a plain-English analogy before any jargon.
+2. **Intuition first** — a plain-English analogy before any jargon. **Carry it through the body (July 2026 learning pass):** 2–3 short call-back clauses (≤12 words) where mechanics return, or one bridging sentence at the section's end mapping the analogy onto the mechanics to come.
 3. Deep explanation — real mechanics, concrete numbers, named technologies (Cassandra/DynamoDB, Kafka, Redis, S3, Postgres, etc.).
 4. A **diagram** (Mermaid) — architecture or flow.
 5. An **interactive widget** when the concept is dynamic (see §8 inventory).
@@ -52,7 +53,7 @@ Two failure directions, both fatal: **too high** (hand-waving, "it scales horizo
 7. Trade-offs table (A vs B vs C, with a "use when" column).
 8. "What interviewers probe here" — strong-signal vs red-flag answers (Director altitude).
 9. Common mistakes / misconceptions.
-10. 3–5 practice questions WITH model answers.
+10. 3–5 practice questions WITH model answers — each model answer wrapped in `<details><summary>Model answer, try yours out loud first</summary>` (July 2026 learning pass: active recall; blank lines around the blockquote so markdown renders).
 11. Key takeaways (5) + a 2–3 line spaced-repetition recap.
 
 ## 6. Director-altitude writing rules
