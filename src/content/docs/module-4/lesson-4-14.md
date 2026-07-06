@@ -3,6 +3,9 @@ title: "4.14 - Ticketmaster"
 description: The high-contention seat-reservation problem - millions of fans, tens of thousands of seats, one instant - solved with TTL holds, an atomic AVAILABLE->HELD->SOLD transition to prevent oversell, and a virtual waiting room that bounds the per-event write rate so a strongly-consistent core survives, reasoned through RESHADED at Director altitude.
 sidebar:
   order: 14
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

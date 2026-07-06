@@ -3,6 +3,9 @@ title: "11.1 - Client-Side Architecture for System Designers"
 description: Treat the client as a first-class design surface, not a thin window on the server. The thick-vs-thin spectrum, the five constraints that reshape every decision (offline/latency, device budgets, app-store release latency, device heterogeneity, cold start), and where computation, state, and cache should live across device, edge, and origin, all framed as product-latency and retention decisions at Director altitude.
 sidebar:
   order: 1
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

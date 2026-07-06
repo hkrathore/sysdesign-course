@@ -3,6 +3,9 @@ title: "4.8 - Uber / Proximity Service"
 description: Match riders to nearby drivers at a write-dominated 0.5M-pings/sec ingest - geospatial indexing (geohash vs quadtree vs S2/H3), dense-city hot-spotting, the nearby query, dispatch, and ETA - reasoned through RESHADED at Director altitude.
 sidebar:
   order: 8
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

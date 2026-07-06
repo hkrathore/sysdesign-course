@@ -3,6 +3,9 @@ title: "1.2 - Functional vs. non-functional requirements"
 description: "Functional vs. non-functional requirements"
 sidebar:
   order: 2
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

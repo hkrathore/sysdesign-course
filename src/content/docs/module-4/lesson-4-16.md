@@ -3,6 +3,9 @@ title: "4.16 - ChatGPT / LLM Serving"
 description: Serve LLM inference at scale - an API + request queue in front of a GPU fleet, continuous batching and the KV-cache that bound throughput, SSE token streaming, the TTFT-vs-throughput trade, GPU autoscaling and token-based quotas - reasoned through RESHADED at Director altitude, where the binding resource is GPU HBM, not disk.
 sidebar:
   order: 16
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

@@ -3,6 +3,9 @@ title: "1.5 - Common failure modes & how to recover live"
 description: "Common failure modes & how to recover live"
 sidebar:
   order: 5
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

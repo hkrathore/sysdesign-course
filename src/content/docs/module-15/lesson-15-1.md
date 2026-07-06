@@ -3,6 +3,9 @@ title: "15.1 - The Diagnostic Method"
 description: The diagnostic round tests structured reasoning under uncertainty, not design — a disciplined observe → hypothesize → bisect → confirm loop, "what changed?" triage, bisecting the request path to localize, and mitigating before root-causing, all reasoned calmly out loud.
 sidebar:
   order: 1
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

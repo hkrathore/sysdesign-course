@@ -3,6 +3,9 @@ title: "18.2 - The Director Rubric: Red Flags vs Strong Signals"
 description: The self-assessment scorecard, what reads as Director-altitude signal vs anti-signal, across the 5 axes and 8 RESHADED steps.
 sidebar:
   order: 2
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### What this is

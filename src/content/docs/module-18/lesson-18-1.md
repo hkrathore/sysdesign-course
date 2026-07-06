@@ -3,6 +3,9 @@ title: "18.1 - Capstone: Drive Your Own Design"
 description: A fresh, meaty problem, a real-time collaborative document editor, that you design end-to-end yourself, then critique against a RESHADED-keyed strong-signal/red-flag rubric. The exercise is the lesson; the critique loop is the skill.
 sidebar:
   order: 1
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 > This is the **capstone**, and it inverts every lesson before it. The walkthrough and the design problems watched *me* run RESHADED on sixteen problems, you read a finished design and absorbed the moves. That builds recognition, not production. The interview tests production: under pressure, *you* must scope, quantify, decide, and stress a design that doesn't exist yet, with no answer key on the wall. So this lesson hands you a **fresh problem and an empty whiteboard**, and then, and this is the part that actually moves the needle, a **critique framework** to turn on your own work, keyed step-by-step to RESHADED. The spine here is not a solution. It is the **drive-then-critique loop**: you produce a first-pass design, then interrogate it with the exact questions a Staff/Principal interviewer would ask, marking each answer **strong-signal** or **red-flag**. Run the loop, find your own gaps, close them. That self-critique reflex, *"where would a good interviewer push, and would my answer survive it?"*, is the single most transferable thing this course can give a Director. Drive it yourself. Paste your design into an AI and have it ask you the §C questions verbatim. The point is the loop, not my approval.

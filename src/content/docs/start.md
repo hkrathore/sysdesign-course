@@ -121,6 +121,8 @@ Built as self-contained React artifacts, no network calls, at the module where e
 
 An honest accounting: the full course is **~820k words across 18 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
 
+> **Navigate it from the sidebar:** every lesson on the unconditional path below, plus each specialized track's spine lesson(s), carries a **Fast** badge in the left sidebar, so you can walk the fast track without coming back to this page. Cheat sheets carry no badge because *all* of them are on the path.
+
 **Must do (full reads):**
 - **Module 1**, interview mechanics and estimation reps.
 - **Lesson 4.1**, the complete RESHADED walkthrough (TinyURL); it's the template every other Module 4 problem reuses.

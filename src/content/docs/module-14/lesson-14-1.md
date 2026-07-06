@@ -3,6 +3,9 @@ title: "14.1 - Quality Engineering for System Designers"
 description: Quality as an operating system, not a phase — the test pyramid and where the ROI actually is, why the shape reshapes for distributed systems (the seams, not the units, break), and the platform-plus-process-plus-incentives model that makes safe shipping the default across many teams.
 sidebar:
   order: 1
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

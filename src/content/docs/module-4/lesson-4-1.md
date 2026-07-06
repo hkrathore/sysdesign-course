@@ -3,6 +3,9 @@ title: "4.1 - TinyURL - RESHADED Warm-Up"
 description: The teaching warm-up, running all eight RESHADED steps end-to-end on a read-skewed URL shortener, modelling the method a Director uses to scope, quantify, decide, and stress a design.
 sidebar:
   order: 1
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 > This is the **method lesson**. Earlier lessons built the vocabulary (estimation, storage engines, replication, sharding, caching, sequencers, DNS, load balancers). This lesson is where we run the whole **RESHADED** spine, **R**equirements, **E**stimation, **S**torage, **H**igh-level design, **A**PI, **D**ata model, **E**valuation, **D**esign evolution, once, slowly, on a deliberately *easy* problem so the **sequence becomes muscle memory**. TinyURL is the canonical warm-up precisely because the business logic is trivial; all the signal is in *how you run the steps, quantify the calls, and name the trade-offs.* At each step I add one sentence on **what the step is for** and **how to approach it in general**, then apply it here.

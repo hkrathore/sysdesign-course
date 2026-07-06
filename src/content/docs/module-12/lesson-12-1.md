@@ -3,6 +3,9 @@ title: "12.1 - Multi-Tenancy for System Designers"
 description: Why tenancy is a first-class design axis, not a bolt-on tenant_id column - the silo/bridge/pool isolation spectrum, the isolation-vs-efficiency trade that recurs at every layer, control-plane vs data-plane, cross-tenant leakage as the existential SaaS bug, and why the tenancy model is a unit-economics and deal-gating decision a Director owns with numbers.
 sidebar:
   order: 1
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

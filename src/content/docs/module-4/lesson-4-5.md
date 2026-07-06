@@ -3,6 +3,9 @@ title: "4.5 - Twitter & News Feed"
 description: The fan-out problem at its sharpest, push vs pull vs hybrid timelines, the celebrity write-amplification trade, and the follow graph, walked end-to-end through RESHADED at Director altitude.
 sidebar:
   order: 5
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

@@ -3,6 +3,9 @@ title: "4.7 - Typeahead / Autocomplete"
 description: A RESHADED walkthrough of search suggestions under a sub-100ms budget, trading exactness and freshness for latency.
 sidebar:
   order: 7
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

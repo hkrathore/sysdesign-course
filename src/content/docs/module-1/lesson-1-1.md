@@ -3,6 +3,9 @@ title: "1.1 - What interviewers actually score (the 5 axes)"
 description: "What interviewers actually score (the 5 axes)"
 sidebar:
   order: 1
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

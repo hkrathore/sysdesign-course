@@ -3,6 +3,9 @@ title: "4.15 - Distributed Job Scheduler"
 description: A full RESHADED walkthrough of a cron-at-scale job scheduler, durable job store, time-bucketed due-poll, leader election, a worker pool, at-least-once execution with idempotency on (job_id, fire_time), retries/backoff, and silent-miss monitoring, sized in numbers at Director altitude.
 sidebar:
   order: 15
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 > This is the system-design *assembly* of the building block from the task-scheduler building block (Distributed Task Scheduler). 3.15 derived the hard primitives, the scheduler/executor split, leader election and its **failover gap**, **fencing with epochs**, and the thesis that **exactly-once-*effect* = at-least-once everywhere + idempotency on `(job_id, fire_time)`**. This lesson runs the full **RESHADED** spine, sizes it in numbers, and stresses the assembled design, using the primitives by name, not re-deriving them.

@@ -3,6 +3,9 @@ title: "7.3 - Data Warehouse, Lake & Lakehouse"
 description: The three analytical-storage architectures and their evolution, proprietary warehouse → cheap-but-ungoverned lake → lakehouse, where an open table format gives a lake warehouse guarantees on lake economics, plus the decoupled-storage/compute shift and what Iceberg/Delta/Hudi add over raw Parquet.
 sidebar:
   order: 3
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

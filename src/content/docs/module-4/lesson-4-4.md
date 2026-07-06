@@ -3,6 +3,9 @@ title: "4.4 - Instagram"
 description: "Full RESHADED walkthrough of a photo-sharing feed at FAANG scale, the upload path (object store + CDN, async transcode), the follow graph, and the home-feed build: fan-out-on-write vs fan-out-on-read and the celebrity hybrid, metadata in a partitioned store, likes/comments via sharded counters, quantified and argued at Director altitude."
 sidebar:
   order: 4
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 > Instagram is really **three systems in a trench coat**: a write-heavy **upload pipeline** putting bytes into an object store and onto a CDN, a **social graph**, and a brutally read-heavy **home-feed builder** assembling a personalized timeline in tens of milliseconds. The one decision the whole interview turns on is **how you build that feed**, at *write* time (precompute every follower's feed when someone posts) or *read* time (gather-and-merge on app open)? Each is correct for a different part of the user base, and the senior answer is a **hybrid** routed by follower count. The Director-altitude move is to keep saying, at each RESHADED step, *which requirement forces this choice and what it costs me.*

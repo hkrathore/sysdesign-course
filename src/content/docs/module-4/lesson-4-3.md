@@ -3,6 +3,9 @@ title: "4.3 - Distributed Rate Limiter"
 description: "RESHADED walkthrough of a multi-tenant rate-limiting service: the write-dominated counter plane, two-store split, where to enforce, and the hot-key ceiling - quantified and defended at Director altitude."
 sidebar:
   order: 3
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 ### Learning objectives

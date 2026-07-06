@@ -3,6 +3,9 @@ title: "17.1 - The Leadership Round, Recalibrated for 2026"
 description: What the Director leadership loop actually scores, altitude, currency, and probe-survival, and the six environmental shifts since 2015 that silently re-grade every behavioral answer.
 sidebar:
   order: 1
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 > **Why this track exists, and why it is not "soft":** You can run RESHADED flawlessly and still fail the loop in the behavioral rounds. At Director and Senior Director, the leadership interview is *not* a vibe check, it is a graded technical assessment of judgment, run by the same Principal/Staff engineers and senior leaders who scored your system design, probing **3-4 levels deep** to dismantle any rehearsed or AI-prepped surface answer. The two house rules from the system-design track carry over verbatim: **quantify everything**, and **every position names its limit and the alternative you rejected**. A philosophy answer with no numbers and no downside is the behavioral equivalent of "it scales horizontally." This lesson sets the altitude and exposes the trap most senior candidates walk into: **answers calibrated to the 2015 growth era that the post-2022 world now actively penalizes.**

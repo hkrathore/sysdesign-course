@@ -3,6 +3,9 @@ title: "4.2 - Pastebin"
 description: A full RESHADED walkthrough of Pastebin, why text snippets split into a small strongly-consistent metadata store and a dumb blob plane, with TTL/burn-after-read, base62 keys, and a CDN for the hot tail, at Director altitude.
 sidebar:
   order: 2
+  badge:
+    text: Fast
+    variant: tip
 ---
 
 > The first full **RESHADED** problem, deliberately *storage-shaped*. Pastebin looks trivial, "store some text, give back a link", and that's the trap. The single decision separating a Director answer from a junior one is whether you **split the metadata from the blob** or stuff both into one database. This walkthrough assembles four building blocks, blob store, key-value store, CDN, sequencer, and treats the metadata-vs-blob split as the load-bearing decision it is.
