@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-> **Why this gets asked at Director level:** Top-K and leaderboards look like two unrelated problems and are really one, *who are the heavy hitters, ranked, right now?*, under three knobs: precision, cost, freshness. The trap is that the math is seductive. An IC dives into Count-Min Sketch row/column tuning or sorted-set memory layout and never makes a decision; a Director interrogates whether **exact rank is even a requirement**, frames three options in five minutes, and picks one against the numbers. Meta asks the "top-10 songs in the last hour" variant; YouTube's "top-K most-viewed" is on Meta's most-asked list; gaming leaderboards show up at Riot, Blizzard, Strava, and Duolingo. The canonical failure is computing a sketch the question didn't need, or quoting "just use a Redis sorted set" without the memory bill.
+> **Why this gets asked at Director level:** Top-K and leaderboards look like two unrelated problems and are really one, *who are the heavy hitters, ranked, right now?*, under three knobs: precision, cost, freshness. The trap is that the math is seductive. An IC (individual contributor) dives into Count-Min Sketch row/column tuning or sorted-set memory layout and never makes a decision; a Director interrogates whether **exact rank is even a requirement**, frames three options in five minutes, and picks one against the numbers. Meta asks the "top-10 songs in the last hour" variant; YouTube's "top-K most-viewed" is on Meta's most-asked list; gaming leaderboards show up at Riot, Blizzard, Strava, and Duolingo. The canonical failure is computing a sketch the question didn't need, or quoting "just use a Redis sorted set" without the memory bill.
 
 ### Learning objectives
 
@@ -197,7 +197,7 @@ Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/wid
 
 **Bottleneck 2, exact rank for a huge population is the cost wall.** Exact rank over a billion trending keys is 50 GB/window discarded down to 100. *Fix:* **don't.** Exact **top-K** (heap) + **approximate frequencies** (CMS) + **percentile buckets** for the tail, giving up exact rank for a long tail the requirement never asked for, to cut memory ~1000×. This *is* the central decision, surfaced as a bottleneck on purpose.
 
-**Bottleneck 3, top-K merge across shards (read cost).** Reading `S × K` candidates on every query is wasteful on a read-heavy board. *Fix:* **cache the merged top-K** with a short TTL (the freshness budget); reads serve it O(1), the merge runs on the TTL cadence, the same **freshness-vs-cost knob** as the counter rollup interval and the search-index refresh. *Rejected:* merging on every read.
+**Bottleneck 3, top-K merge across shards (read cost).** Reading `S × K` candidates on every query is wasteful on a read-heavy board. *Fix:* **cache the merged top-K** with a short TTL (time-to-live) (the freshness budget); reads serve it O(1), the merge runs on the TTL cadence, the same **freshness-vs-cost knob** as the counter rollup interval and the search-index refresh. *Rejected:* merging on every read.
 
 **Bottleneck 4, window aging (trending must forget).** Old events must stop counting or yesterday's news trends forever. *Fix:* **bucketed sub-sketches** dropped as they age (O(1) per roll), not per-key TTLs (a billion-key scan). *Trade-off:* window edges accurate to one bucket width (±1 min), invisible for a trending board.
 
@@ -221,7 +221,7 @@ Column-level fields (entityId, score, lastUpdate, windowBucketId, sketch row/wid
 - **Sketch error vs the head.** CMS overestimates, so a cold key never displaces a true heavy hitter, but two *close* hitters near rank K can swap. If exact ordering at the bottom of the top-K matters, widen the sketch or keep an exact counter for just the heap's candidates.
 
 **Where I'd delegate (the explicit Director move):**
-- **Sketch tuning:** *"Data-platform owns CMS width/depth and HLL precision to hit our error target; my prior is a CMS sized for <1% error on the top-K with per-minute buckets, they benchmark it against our key distribution."* (Mechanics in the count-min-sketch building block.)
+- **Sketch tuning:** *"Data-platform owns CMS width/depth and HLL (HyperLogLog) precision to hit our error target; my prior is a CMS sized for <1% error on the top-K with per-minute buckets, they benchmark it against our key distribution."* (Mechanics in the count-min-sketch building block.)
 - **Anti-cheat / score validation:** *"Trust-and-safety owns score validation and bot filtering before events count; my prior is server-authoritative scoring with anomaly detection on ingest."*
 - **The exact reconciliation pipeline:** *"Data-eng owns the batch recompute from the event log for any board that pays out; my prior is a dedup-and-validate job, sketch board for display only."* What I keep, the exact-vs-approximate decision, the shard/merge shape, the freshness dial, and what I hand off with priors, is the altitude.
 

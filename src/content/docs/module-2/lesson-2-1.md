@@ -16,9 +16,9 @@ The network is a **postal system.** DNS is the *address book*, it turns a human 
 
 ### Deep explanation
 **The request lifecycle (what actually happens when a user hits your service):**
-1. **DNS resolution**, the resolver walks root → TLD → authoritative servers; results are heavily cached at each layer under a **TTL (time-to-live)**. Result: a name maps to one or more IPs. *This is eventually consistent and cached*, a fact with real consequences (below).
+1. **DNS resolution**, the resolver walks root → TLD (top-level domain) → authoritative servers; results are heavily cached at each layer under a **TTL (time-to-live)**. Result: a name maps to one or more IPs. *This is eventually consistent and cached*, a fact with real consequences (below).
 2. **TCP handshake**, SYN / SYN-ACK / ACK, ~1 round trip.
-3. **TLS handshake**, ~1 RTT with TLS 1.3 (down from 2 in TLS 1.2); **0-RTT resumption** for returning clients. On a cross-region path each RTT is ~150 ms, so handshakes alone can dominate first-byte latency.
+3. **TLS handshake**, ~1 RTT (round-trip time) with TLS 1.3 (down from 2 in TLS 1.2); **0-RTT resumption** for returning clients. On a cross-region path each RTT is ~150 ms, so handshakes alone can dominate first-byte latency.
 4. **HTTP exchange**, HTTP/1.1 (head-of-line blocking per connection) → HTTP/2 (multiplexed streams over one connection) → HTTP/3 (QUIC over UDP, removes TCP head-of-line blocking, faster on lossy/mobile links).
 
 **DNS as a control plane, not just a phonebook.** Record types you should name: A/AAAA (IPv4/IPv6), CNAME (alias), NS, MX. The **TTL trade-off** is the interview point: a *low* TTL means fast failover (you can repoint traffic in seconds) but more lookups and resolver load; a *high* TTL means fewer lookups but **slow propagation** when you need to drain a dead region. **GeoDNS / latency-based routing** steers users to the nearest healthy region; **anycast** advertises one IP from many locations so the network routes to the closest, both are how global services cut RTT and survive regional loss.
@@ -55,7 +55,7 @@ flowchart LR
 2. A **CDN edge** in Tokyo serves static assets locally (~10-30 ms) and terminates TLS near the user, so the expensive handshakes don't cross the Pacific.
 3. Dynamic `/api` requests hit a regional **reverse proxy (Envoy)** that terminates TLS, applies rate limiting, and routes to services.
 4. An **L4 LB** spreads connections across stateless app servers.
-5. **Failover:** if the AP region dies, health checks + a *low DNS TTL* (e.g., 30-60 s) repoint traffic to another region within ~1 minute. The Director-level caveat: DNS caching means failover is **not instant**, so for hard SLAs you pair it with anycast withdrawal or a global L7 LB that fails over faster than DNS can.
+5. **Failover:** if the AP region dies, health checks + a *low DNS TTL* (e.g., 30-60 s) repoint traffic to another region within ~1 minute. The Director-level caveat: DNS caching means failover is **not instant**, so for hard SLAs (service-level agreements) you pair it with anycast withdrawal or a global L7 LB that fails over faster than DNS can.
 
 ### Trade-offs table: load balancing layer
 | Option | Pro | Con | Use when… |
@@ -78,7 +78,7 @@ flowchart LR
 
 ### Practice questions
 **Q1.** Why might you deliberately set a low DNS TTL, and what's the cost?
-> *Model:* Low TTL enables fast failover/traffic shifting (repoint within seconds). The cost is more frequent resolver lookups (load, marginal latency) and reliance on clients/resolvers honoring the TTL, and many don't honor it exactly, so DNS failover is a best-effort floor, not a guarantee. For tight RTOs, pair it with anycast or a global L7 LB.
+> *Model:* Low TTL enables fast failover/traffic shifting (repoint within seconds). The cost is more frequent resolver lookups (load, marginal latency) and reliance on clients/resolvers honoring the TTL, and many don't honor it exactly, so DNS failover is a best-effort floor, not a guarantee. For tight RTOs (recovery time objectives), pair it with anycast or a global L7 LB.
 
 **Q2.** A client complains the *first* request to your API is slow but subsequent ones are fast. What's likely, and what would you do?
 > *Model:* Cold-path costs: DNS lookup (uncached), TCP + TLS handshakes (multiple RTTs, worse cross-region), and possibly connection-pool warm-up. Mitigations: edge TLS termination near the user, TLS 1.3 / 0-RTT resumption, HTTP/2 or HTTP/3 connection reuse, and keeping warm connection pools.

@@ -8,7 +8,7 @@ sidebar:
 import EstimationCalculator from '@components/widgets/EstimationCalculator.jsx';
 
 ### Learning objectives
-- Produce QPS, storage, bandwidth, and server-count estimates in under three minutes.
+- Produce QPS (queries per second), storage, bandwidth, and server-count estimates in under three minutes.
 - Use power-of-ten shortcuts and round aggressively without losing the order of magnitude.
 - Apply peak-to-average multipliers and the read:write ratio correctly.
 - Frame estimation as *"enough math to make a defensible call,"* not accounting.
@@ -40,7 +40,7 @@ Estimation is a **feasibility sniff test**, not a spreadsheet. A structural engi
    `servers ≈ peak QPS ÷ per-server capacity`. This is the number that tells you whether you're building a small fleet or a hyperscale system.
 
 **Worked numeric example, a Twitter-scale write path (illustrative; assumptions stated):**
-- Assume 200M DAU, each posts 2 tweets/day → 400M tweets/day.
+- Assume 200M DAU (daily active users), each posts 2 tweets/day → 400M tweets/day.
 - Write QPS = 400M ÷ 86,400 ≈ **4.6k/s** avg; peak ×3 ≈ **~14k/s**.
 - Read:write 100:1 → read QPS ≈ **460k/s** avg; peak ≈ **~1.4M/s**.
 - Storage: 400M tweets × ~300 bytes (text + metadata) ≈ **120 GB/day** → ~44 TB/yr; ×3 replication ≈ **~130 TB/yr** of tweet text. (Media would dwarf this, flag it, don't compute it.)
@@ -97,7 +97,7 @@ flowchart LR
 > *Model:* 50M × 2 = 100M photos/day × 1.5 MB = **150 TB/day** raw; with ×3 replication ≈ **450 TB/day**; ~164 PB/yr replicated. Conclusion that matters: this is a *blob-store + CDN* problem dominated by storage and egress cost, not a QPS problem.
 
 **Q2.** A chat app has 500M DAU sending 40 messages/day. Average and peak write QPS?
-> *Model:* 500M × 40 = 20B msgs/day ÷ 86,400 ≈ **~230k/s** avg. Peak ×3 ≈ **~700k/s**. Conclusion: write-heavy, so a partitioned log/queue front door and LSM-tree storage, not a read-cache architecture.
+> *Model:* 500M × 40 = 20B msgs/day ÷ 86,400 ≈ **~230k/s** avg. Peak ×3 ≈ **~700k/s**. Conclusion: write-heavy, so a partitioned log/queue front door and LSM-tree (LSM = log-structured merge) storage, not a read-cache architecture.
 
 **Q3.** Why round 86,400 to 100,000?
 > *Model:* It's within ~16%, far inside back-of-envelope tolerance, and makes QPS = DAU × req/user ÷ 10⁵ a one-step mental division. It also rounds the *denominator up*, so the QPS estimate is mildly conservative, which is the safe direction for capacity planning.

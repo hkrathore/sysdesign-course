@@ -98,6 +98,7 @@ export default defineConfig({
 					{ label: 'Module 18 · Capstone & Rubric', collapsed: true, items: [{ autogenerate: { directory: 'module-18' } }] },
 				] },
 				{ label: 'Cheat Sheets', collapsed: true, items: [{ autogenerate: { directory: 'cheatsheets' } }] },
+				{ label: 'Glossary', link: '/glossary/' },
 			],
 		}),
 		react(),

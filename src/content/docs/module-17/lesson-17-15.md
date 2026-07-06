@@ -5,7 +5,7 @@ sidebar:
   order: 15
 ---
 
-> Every lesson before this taught you to *describe* leadership well, frameworks, a probe-hardened story bank, a current position per category, tuned to the room. This lesson is where the loop stops letting you describe and makes you *do*. The 2026 Director loop assumes the monologue is rehearsed and possibly AI-drafted, so it replaces "what's your philosophy?" with a live exercise: here are your team's OKRs, fix them; here's an engagement survey, your first three moves; you're my struggling staff engineer, give the feedback now; you start Monday, present your first 90 days. The exercise is unfakeable in a way the monologue isn't, which is exactly why interviewers reach for it. This is the behavioral twin of the system-design drive-and-critique exercise: there you drove a fresh system design and critiqued it against a RESHADED rubric; here you run four live exercises and score yourself against the five dimensions a real panel uses. The skill isn't having good answers, it's *performing judgment under observation*. Drive these yourself, out loud, on a timer.
+> Every lesson before this taught you to *describe* leadership well, frameworks, a probe-hardened story bank, a current position per category, tuned to the room. This lesson is where the loop stops letting you describe and makes you *do*. The 2026 Director loop assumes the monologue is rehearsed and possibly AI-drafted, so it replaces "what's your philosophy?" with a live exercise: here are your team's OKRs (objectives and key results), fix them; here's an engagement survey, your first three moves; you're my struggling staff engineer, give the feedback now; you start Monday, present your first 90 days. The exercise is unfakeable in a way the monologue isn't, which is exactly why interviewers reach for it. This is the behavioral twin of the system-design drive-and-critique exercise: there you drove a fresh system design and critiqued it against a RESHADED rubric; here you run four live exercises and score yourself against the five dimensions a real panel uses. The skill isn't having good answers, it's *performing judgment under observation*. Drive these yourself, out loud, on a timer.
 
 ### Learning objectives
 - Recognize the **four live-exercise formats** the modern loop uses to replace philosophy monologues, OKR critique, org-health read, feedback roleplay, 90-day plan, and the distinct judgment each tests.
@@ -28,7 +28,7 @@ The loop's live exercises aren't random; each isolates a competency the monologu
 | **OKR / goals critique** | "Here are a team's OKRs, what's wrong with them?" | Can you tell outcomes from activity, and *rewrite*, not just complain | Lists problems, never produces a better version, diagnosis without prescription |
 | **Org-health read** | "Here's a synthesized engagement survey, your first three actions?" | Do you read data into *prioritized action*, or drown in it | Reads every number, acts on none; or acts on the loudest, not the load-bearing |
 | **Feedback roleplay** | "I'm your underperforming staff engineer. Go." | Can you deliver candor *live*, specific, kind, with a path, under push-back | Describes the feedback model fluently, can't say the hard sentence to a face |
-| **First-90-days plan** | "You start Monday. Present your plan." | Listen-fast-then-act sequencing at Director scope, not an EM onboarding | A listening tour with no decisions, or day-one reorg with no diagnosis |
+| **First-90-days plan** | "You start Monday. Present your plan." | Listen-fast-then-act sequencing at Director scope, not an EM (engineering manager) onboarding | A listening tour with no decisions, or day-one reorg with no diagnosis |
 
 The through-line: every format punishes **description and rewards production**, the rewritten objective not a teardown, three moves not a summary, the sentence said out loud not the framework named, sequenced decisions not a calendar. Below is one full worked rep of each; drive each yourself before reading the annotations.
 
@@ -71,7 +71,7 @@ The migration, observability stack, and coverage work are now *initiatives*, the
 <summary>Go deeper, why the OKR rewrite scores (annotations)</summary>
 
 - **Diagnoses the category error, doesn't just nitpick**, names output-vs-outcome (the post-McKinsey-debate literacy) as the *root* fault, not four separate complaints.
-- **Produces a better artifact**, the rewrite is the deliverable; critique-only fails the "demonstrate" bar. The new KRs are DORA-shaped, with a baseline *and* a target.
+- **Produces a better artifact**, the rewrite is the deliverable; critique-only fails the "demonstrate" bar. The new KRs are DORA-shaped (DORA = DevOps Research and Assessment), with a baseline *and* a target.
 - **Includes a guardrail KR** (change-failure), proves they know outcome metrics get gamed, and reframes the initiatives as subordinate, even willing to question whether the migration is worth it (cost discipline). A number on every KR, house rule one, live.
 
 </details>
@@ -178,7 +178,7 @@ The shift to live exercises *is* the calibration, and the bar inside each one al
 
 - **The format is the headline shift.** A 2015 loop ran on monologue questions and accepted a fluent answer. The 2026 loop assumes fluency is cheap and possibly AI-generated, so it reaches for the *exercise* precisely because performance under observation can't be pre-drafted. Prepare only polished answers and the live exercise is where the floor falls out.
 - **The listening tour got a clock.** "I'd spend 90 days listening" was respected in 2015; in 2026 it reads slow. The calibration is **listen-fast-then-act**, visible diagnosis by day 30, first decisions by 60-90, evidenced by *specifics*, not duration.
-- **Every exercise carries an efficiency constraint.** The 90-day prompt comes with "post-layoff, no headcount"; the OKR rewrite questions whether the work is worth the quarter; the survey response can't reach for a perks budget. The post-ZIRP assumption is baked into the prompts, a plan that assumes growth dates you instantly.
+- **Every exercise carries an efficiency constraint.** The 90-day prompt comes with "post-layoff, no headcount"; the OKR rewrite questions whether the work is worth the quarter; the survey response can't reach for a perks budget. The post-ZIRP (zero interest-rate policy) assumption is baked into the prompts, a plan that assumes growth dates you instantly.
 - **Feedback's compassion bar rose alongside its candor bar.** Cold, clinical delivery now scores *worse* post-2022, while conflict-avoidant cushioning still fails. The scored delivery is candor *and* care, held under push-back.
 - **Outcome-over-activity is assumed literacy.** Post-McKinsey-debate and post-AI (code volume is free), output KRs are an instant fail, the exercise scores whether you reach for *outcome* metrics with guardrails.
 
@@ -194,7 +194,7 @@ After any rep, yours or a model answer, score it on the five dimensions a real p
 | **Decision quality** | Commits to a move, names the rejected alternative and the trade-off, sequences it | Lists problems or options and never decides; or decides with no alternative considered |
 | **Self-awareness** | Names a limit, a thing it would *not* do, or a cost it's accepting, and why | Flawless, costless, all-upside, reads as rehearsed or unreflective |
 | **Quantification** | Real numbers, baselines, targets, team sizes, percentages, timelines | "It'll improve," "significantly," "a lot", house rule one violated |
-| **Altitude consistency** | Holds Director altitude across all four exercises and three probe levels | Drifts up into hand-waving or down into IC detail when pushed |
+| **Altitude consistency** | Holds Director altitude across all four exercises and three probe levels | Drifts up into hand-waving or down into IC (individual contributor) detail when pushed |
 
 Two columns are this track's house rules: **quantification** is "always quantify," and **decision quality**'s rejected-alternative requirement is "name the trade-off." Both transfer verbatim from the system-design track, the same Principal/Staff interviewer often scores both your rounds, so altitude consistency *across* rounds is itself a signal. The system-design self-critique loop applies exactly: run the exercise, score it cold, find the 1, drill *that* dimension rather than re-running your strongest one.
 

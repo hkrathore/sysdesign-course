@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-> **You already designed this system, at the other altitude.** Ticketmaster (Ticketmaster) solved seat reservation as HLD: sharded stores, waiting rooms, CDN tiers. This is the *same domain dropped to LLD*, the form Flipkart/Swiggy/Paytm loops actually ask: "design BookMyShow, two users book the same seat concurrently; exactly one succeeds." The rubric flips: **entity model, seat state machine, hold TTL, and the exact concurrency mechanism**, pressed until it holds or leaks a double-booking. A junior answer reaches for `synchronized`. A Director answer names three locking strategies, **picks one by traffic shape** (opening night ≠ Tuesday matinee), makes the payment-failure and expiry paths race-proof, and **narrates the climb to the distributed form** when one database stops being enough. Same problem, two altitudes, two rubrics, learn the climb.
+> **You already designed this system, at the other altitude.** Ticketmaster (Ticketmaster) solved seat reservation as HLD (high-level design): sharded stores, waiting rooms, CDN tiers. This is the *same domain dropped to LLD* (low-level design), the form Flipkart/Swiggy/Paytm loops actually ask: "design BookMyShow, two users book the same seat concurrently; exactly one succeeds." The rubric flips: **entity model, seat state machine, hold TTL (time-to-live), and the exact concurrency mechanism**, pressed until it holds or leaks a double-booking. A junior answer reaches for `synchronized`. A Director answer names three locking strategies, **picks one by traffic shape** (opening night ≠ Tuesday matinee), makes the payment-failure and expiry paths race-proof, and **narrates the climb to the distributed form** when one database stops being enough. Same problem, two altitudes, two rubrics, learn the climb.
 
 ### Learning objectives
 
@@ -143,7 +143,7 @@ The TTL lives in **two places on purpose**: on `seat_holds.expires_at` (the enti
 <details>
 <summary>Go deeper, full entity schemas and the three claim implementations in SQL (IC depth, optional)</summary>
 
-**`show_seats`:** `(show_id, seat_id)` PK; `status` enum; `hold_id` uuid null; `expires_at` timestamp null; `version` bigint (for the optimistic variant); partial index on `status='AVAILABLE'` for map builds and sweeps.
+**`show_seats`:** `(show_id, seat_id)` PK (primary key); `status` enum; `hold_id` uuid null; `expires_at` timestamp null; `version` bigint (for the optimistic variant); partial index on `status='AVAILABLE'` for map builds and sweeps.
 
 **`seat_holds`:** `hold_id` PK; `show_id`; `seat_ids[]`; `user_id`; `status` enum (`ACTIVE`/`CONFIRMED`/`RELEASED`/`EXPIRED`); `expires_at`; index on `(status, expires_at)` for the sweeper.
 
@@ -204,11 +204,11 @@ A single Postgres serves a cinema chain comfortably. Now make it a Coldplay on-s
 | `seat_holds` row + TTL + lazy reclaim | Never, survives intact | Identical: TTL holds, lazy reclaim, sweeper for repaint |
 | Seat map read from the DB/short cache | Read volume swamps the core | Redis seat-map cache fed by a change stream, **map becomes a hint; claim stays the truth** |
 
-That table is the interview move: **the atomic claim and the TTL hold are the invariant core that never changes; everything that changes is protection around it.** When the interviewer says "now it's a Coldplay concert," you don't redesign, you climb: shard for locality, queue for rate, cache for reads, keep the CAS. (The full distributed argument lives in 5.13.)
+That table is the interview move: **the atomic claim and the TTL hold are the invariant core that never changes; everything that changes is protection around it.** When the interviewer says "now it's a Coldplay concert," you don't redesign, you climb: shard for locality, queue for rate, cache for reads, keep the CAS (compare-and-swap). (The full distributed argument lives in 5.13.)
 
 **The flash-sale / general-admission variant, in one line:** unreserved inventory collapses per-seat rows into a **bounded counter**, claim = a conditional decrement that can't go negative (`SET avail = avail - 1 WHERE avail > 0`), and at extreme contention you shard the counter trading an exact live count for N× write throughput.
 
-**Where I'd delegate (the explicit Director move):** payments/PCI behind `charge(idempotencyKey, amount, token)`, the payments team owns gateway SLAs and the compliance surface; the lock-strategy bake-off to the persistence team with my stated prior (optimistic CAS); bot throttling on hot on-sales to platform security, my prior being per-account claim caps enforced *inside the claim transaction*, the only place a cap can't be raced.
+**Where I'd delegate (the explicit Director move):** payments/PCI behind `charge(idempotencyKey, amount, token)`, the payments team owns gateway SLAs (service-level agreements) and the compliance surface; the lock-strategy bake-off to the persistence team with my stated prior (optimistic CAS); bot throttling on hot on-sales to platform security, my prior being per-account claim caps enforced *inside the claim transaction*, the only place a cap can't be raced.
 
 ---
 

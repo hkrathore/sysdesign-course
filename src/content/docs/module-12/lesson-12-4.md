@@ -10,7 +10,7 @@ sidebar:
 - Trace how a request resolves to a tenant (subdomain, header, or token claim) and how that identity propagates through every hop for routing, authorization, data scoping, and metering.
 - Walk the full **tenant lifecycle**: provisioning (self-serve seconds vs white-glove days), configuration (feature flags, custom domains, SSO), tenant-aware deploys and canary, data residency, pool-to-silo migration, and offboarding.
 - Own the deal-gating trade-offs: self-serve vs white-glove onboarding, one global data plane vs per-region planes for residency, and data-driven config vs per-tenant code forks.
-- Design a **right-to-erasure** path that deletes a tenant across every system, including caches, search, analytics, and backups, within a stated SLA such as 30 days.
+- Design a **right-to-erasure** path that deletes a tenant across every system, including caches, search, analytics, and backups, within a stated SLA (service-level agreement) such as 30 days.
 
 ### Intuition first
 A multi-tenant SaaS is a **property-management company**, not a single building.
@@ -25,7 +25,7 @@ Everything else here is a property-management task. Signing a lease is instant f
 
 The move that makes multi-tenant SaaS operable at scale is separating the **control plane** from the **data plane**.
 
-- The **control plane** is the SaaS operating system. It owns the **tenant registry** (who exists, their plan, region, config, isolation model), **provisioning** (turning a signup into running infrastructure), **configuration** (settings and feature flags), **routing** (resolving a request to the right tenant and data plane), **billing/metering**, and the **lifecycle** state machine (trial, active, suspended, deleting, deleted). It is low-QPS, metadata-heavy, read-mostly.
+- The **control plane** is the SaaS operating system. It owns the **tenant registry** (who exists, their plan, region, config, isolation model), **provisioning** (turning a signup into running infrastructure), **configuration** (settings and feature flags), **routing** (resolving a request to the right tenant and data plane), **billing/metering**, and the **lifecycle** state machine (trial, active, suspended, deleting, deleted). It is low-QPS (queries per second), metadata-heavy, read-mostly.
 - The **data plane** is where tenant workloads run: app services, databases, queues, and caches serving real user traffic. It is high-QPS and latency-sensitive.
 
 Why separate them (trade-offs a reviewer will test):
@@ -40,7 +40,7 @@ The rejected alternative is a **fused design** where each service carries its ow
 
 - **Subdomain / custom domain**: `acme.app.com` or `app.acme.com` maps to `tenant=acme`. Best for browser apps and white-labeling.
 - **Request header**: `X-Tenant-ID: acme`. Common for internal and API traffic.
-- **Token claim**: a JWT/OIDC token carrying `org_id` / `tenant_id`. Best, because the tenant is cryptographically bound to the caller's identity and cannot be spoofed by editing a header.
+- **Token claim**: a JWT/OIDC (JWT = JSON Web Token) (OpenID Connect) token carrying `org_id` / `tenant_id`. Best, because the tenant is cryptographically bound to the caller's identity and cannot be spoofed by editing a header.
 
 Once resolved, that identity becomes **context that flows through every hop**: it selects the data plane (routing), scopes authorization and data access (row filter, schema, or database selection), tags rate limits and metering, and rides in tracing as baggage so every log line carries the tenant. The failure mode to design against is a hop that **drops** the tenant context and falls back to a default or another tenant's scope, the root cause of the most severe multi-tenant bug: cross-tenant data leakage.
 
@@ -60,7 +60,7 @@ Onboarding is where the control plane earns its keep, and it splits into two mod
 
 **Self-serve signup** is fully automated. The control plane creates a registry row, allocates the tenant into **pooled** (shared) infrastructure, seeds default config, and points the router at the pool. Nothing new is stood up, so onboarding completes in **seconds**, converting a marketing funnel to a live workspace with no human in the loop. It is the right default for SMB and product-led growth. The trade: a pooled tenant gets only the pool's isolation guarantees, fine for most and unacceptable for some.
 
-**Enterprise white-glove** onboarding may provision a **dedicated silo**: its own database or stack, wired for SSO, a custom domain, and a specific region. That is real infrastructure, driven by **infrastructure-as-code** (Terraform, Pulumi, CloudFormation) in the control plane's provisioning workflow, and it takes **hours to days**, gated as much by contract, security review, DNS, and TLS issuance as by the `terraform apply` itself. The trade is instant-but-shared versus slow-but-isolated: pooled is instant, cheap, less isolated, with no per-tenant residency; siloed is deal-gating for regulated buyers but multiplies the infrastructure the team operates.
+**Enterprise white-glove** onboarding may provision a **dedicated silo**: its own database or stack, wired for SSO (single sign-on), a custom domain, and a specific region. That is real infrastructure, driven by **infrastructure-as-code** (Terraform, Pulumi, CloudFormation) in the control plane's provisioning workflow, and it takes **hours to days**, gated as much by contract, security review, DNS, and TLS issuance as by the `terraform apply` itself. The trade is instant-but-shared versus slow-but-isolated: pooled is instant, cheap, less isolated, with no per-tenant residency; siloed is deal-gating for regulated buyers but multiplies the infrastructure the team operates.
 
 The Director framing: **provisioning is automation, not a runbook.** If standing up a silo is a human clicking through consoles, you cannot onboard enterprises at volume and every tenant becomes a snowflake. The control plane treats "create tenant" as a declarative, idempotent, resumable workflow (a durable workflow engine helps: many steps, each can fail and must retry without double-creating resources). Onboarding is the first thing an enterprise buyer sees: days is acceptable, flaky is not.
 
@@ -70,7 +70,7 @@ Tenants want to differ: features per plan, their own branding, domain, and login
 
 - **Plan-based features and settings** live in the registry, enforced by **feature flags** evaluated per tenant. Upgrading a plan flips flags and takes effect in **milliseconds** with no deploy; a config change fans out through the flag service, not a release. Branding (logo, colors, email templates) is likewise per-tenant data rendered by one codebase. The rejected alternative, gating with `if (tenant == "acme")` in code, makes every plan change a deploy, and the branches accrete until no one can reason about what a tenant sees.
 - **Custom domains** let a tenant serve at `app.acme.com`. The tenant points a **CNAME** at your platform, and the control plane must **issue and renew a TLS certificate** for that hostname automatically (ACME / Let's Encrypt), because at thousands of domains, each cert renewing every ~90 days, manual issuance is impossible. The domain and cert are tenant metadata; the data plane terminates TLS with whatever cert the control plane provisioned.
-- **SSO / SAML / OIDC per enterprise tenant**: each tenant federates to its own identity provider (Okta, Entra ID, Google). The per-tenant IdP config lives in the registry; the auth flow selects it by tenant.
+- **SSO / SAML (Security Assertion Markup Language) / OIDC per enterprise tenant**: each tenant federates to its own identity provider (Okta, Entra ID, Google). The per-tenant IdP config lives in the registry; the auth flow selects it by tenant.
 
 The trade to name: **deep customization sells enterprise deals but forks complexity.** Every bespoke behavior is a permanent maintenance cost, so absorb customization as **configuration data** (flags, settings, templates, per-tenant IdP records) and resist per-tenant code branches, the fastest way to a system you can no longer deploy uniformly. When a bespoke integration is unavoidable, isolate it behind an interface so the fork is contained.
 
@@ -86,7 +86,7 @@ The rejected alternative, a synchronous big-bang migration, either needs a full-
 
 #### 5. Data residency and sovereignty
 
-Some tenants are legally or contractually required to keep data in a jurisdiction: an EU tenant under GDPR, a public-sector tenant, a bank, a healthcare provider. This is where "one control plane, many data planes" pays off.
+Some tenants are legally or contractually required to keep data in a jurisdiction: an EU tenant under GDPR (General Data Protection Regulation), a public-sector tenant, a bank, a healthcare provider. This is where "one control plane, many data planes" pays off.
 
 You run a **global control plane** and **per-region data planes** (for example `us-east`, `eu-west`, `ap-south`, three or four planes), each a full stack living entirely within its region. A tenant's registry record pins its **home region**, and the router sends every request for that tenant to that region's data plane, so an EU tenant's data is created, stored, and processed only in the EU plane. The control plane holds only **metadata** (name, plan, region pointer, config), not the regulated bulk.
 

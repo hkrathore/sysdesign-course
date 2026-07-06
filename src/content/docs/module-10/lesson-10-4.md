@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **Why this problem separates Directors from ICs:** the naive answer — "run a frontier LLM on every item, it's the best classifier" — is the answer that gets you eliminated, because the cost math says no before the accuracy math says yes. At 1–10M items/s, an LLM-on-everything design costs more per day than the platform's entire revenue, and the LLM's latency blows the inline budget on the surfaces that need a synchronous verdict. The deeper trap is treating precision and recall as a model metric you maximize, when in Trust & Safety they are a **business-and-legal knob** you *tune per policy* — CSAM recall is mandated at ~1.0 regardless of cost; spam tolerates false negatives. The Director answer is a **tiered cascade** (cheap classifiers and hashes first, LLM for the ambiguous middle, humans for the hard tail) with a feedback loop, run against an adversary who is actively trying to evade you. A Director owns that cost ceiling, that legal exposure, and the human-reviewer ops org from the first sentence.
+> **Why this problem separates Directors from ICs (individual contributors):** the naive answer — "run a frontier LLM on every item, it's the best classifier" — is the answer that gets you eliminated, because the cost math says no before the accuracy math says yes. At 1–10M items/s, an LLM-on-everything design costs more per day than the platform's entire revenue, and the LLM's latency blows the inline budget on the surfaces that need a synchronous verdict. The deeper trap is treating precision and recall as a model metric you maximize, when in Trust & Safety they are a **business-and-legal knob** you *tune per policy* — CSAM (child sexual abuse material) recall is mandated at ~1.0 regardless of cost; spam tolerates false negatives. The Director answer is a **tiered cascade** (cheap classifiers and hashes first, LLM for the ambiguous middle, humans for the hard tail) with a feedback loop, run against an adversary who is actively trying to evade you. A Director owns that cost ceiling, that legal exposure, and the human-reviewer ops org from the first sentence.
 
 ---
 
@@ -107,7 +107,7 @@ Content moderation is exactly this airport, scaled to millions of items per seco
 - Rejected, hardcoding thresholds in the classifier service: makes "retune a policy in days" (NFR 7) impossible and makes decisions non-reproducible for audit.
 
 **2. Known-bad hash store (point lookup, near-free, tier 0).**
-- Access pattern: exact-match lookup of a perceptual/cryptographic hash per item; massive read QPS, rare writes.
+- Access pattern: exact-match lookup of a perceptual/cryptographic hash per item; massive read QPS (queries per second), rare writes.
 - Choice: **sharded in-memory store (Redis-class) with persistence**, fronting a durable store. CSAM perceptual hashes (PhotoDNA-class) and spam fingerprints. A hit is an instant, high-confidence block.
 - Rejected, running a classifier on known-bad content: you already *know* it's bad — a hash hit is cheaper and more reliable than any model. Hashes are the cheapest tier and should run first.
 
@@ -126,7 +126,7 @@ Content moderation is exactly this airport, scaled to millions of items per seco
 - Choice: **append-only label store** (same warehouse), joined to the decision log. This is the training data the feedback loop produces.
 
 **6. Recently-seen content cache (dedupe, cost lever).**
-- Choice: **content-hash → prior verdict cache** (Redis, TTL hours–days). Viral content is classified once; the next million copies are a cache hit. Directly buys back LLM cost.
+- Choice: **content-hash → prior verdict cache** (Redis, TTL (time-to-live) hours–days). Viral content is classified once; the next million copies are a cache hit. Directly buys back LLM cost.
 
 ---
 
@@ -238,7 +238,7 @@ GET  /v1/decisions?user_id=&from=&to=       -> 200 { decisions:[...] }   # regul
 
 **`decisions`** (append-only, the audit spine). Key `decision_id` (UUID); columns: `item_id`, `content_hash`, `user_id`, `surface`, `scores` (JSON: per-policy float), `triggered_policy`, `action` (ALLOW / BLOCK / AGE_GATE / REVIEW), `tier` (0/1/2/3), `model_version`, `threshold_version`, `created_at`. Never updated. An appeal or reconsideration produces a **new** decision record linked by `item_id`, never a mutation — same immutability principle as the payments ledger: you can see every verdict ever rendered on an item and why.
 
-**`labels`** (append-only, training/feedback). Key `label_id`; columns: `decision_id` (FK), `item_id`, `reviewer_id`, `policy`, `present` (bool — was this policy actually violated), `action_taken`, `notes`, `created_at`. This is the ground truth the feedback loop mines to retrain tier-1 classifiers and recalibrate thresholds.
+**`labels`** (append-only, training/feedback). Key `label_id`; columns: `decision_id` (FK (foreign key)), `item_id`, `reviewer_id`, `policy`, `present` (bool — was this policy actually violated), `action_taken`, `notes`, `created_at`. This is the ground truth the feedback loop mines to retrain tier-1 classifiers and recalibrate thresholds.
 
 **`policy_thresholds`** (versioned config). Key `(policy, surface, version)`; columns: `block_threshold`, `allow_threshold`, `escalate_band` (the [allow, block] ambiguous window that routes to tier 2), `default_action_on_ambiguous`, `effective_from`. The **escalate_band width is the cost knob**: narrow it and fewer items hit the LLM (cheaper, but more confident-but-wrong verdicts); widen it and more items escalate (safer, costlier).
 
@@ -314,7 +314,7 @@ The cascade structure holds; the per-tier mechanics change:
 
 **On-device pre-filter:** for client-side surfaces (a camera upload, an on-device keyboard), run a tiny model **on the device** to catch the obvious before it ever hits the network — saves bandwidth and server cost and reduces exposure. Trade-off: on-device models are weak and reverse-engineerable by adversaries, so they are a cost optimization layered *on top of* server-side tiers, never a replacement.
 
-**Regulator reporting:** the immutable decision log becomes the source for mandated transparency reports (volumes acted on per policy, appeal-reversal rates, response-time SLAs — e.g., EU DSA-style obligations). Built on the audit spine that already exists; the requirement is to make it queryable and provable, not to add new capture.
+**Regulator reporting:** the immutable decision log becomes the source for mandated transparency reports (volumes acted on per policy, appeal-reversal rates, response-time SLAs (service-level agreements) — e.g., EU DSA-style obligations). Built on the audit spine that already exists; the requirement is to make it queryable and provable, not to add new capture.
 
 **Cross-references:** Guardrails, Safety & Security (the prompt-injection-of-the-moderator defense and the "contain, don't prevent" stance); Evaluation & LLMOps (how you actually measure per-policy precision/recall and detect model drift in the feedback loop); LLM Cost & Latency Optimization (the cascade-and-cache pattern this whole design is an instance of); the Ad Click Aggregator (the firehose speed-vs-truth split, fast-approximate vs slow-truth); the Online Judge (the adjacent problem of handling untrusted input safely, where blast radius is the probe).
 

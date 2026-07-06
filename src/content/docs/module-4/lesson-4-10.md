@@ -32,14 +32,14 @@ RESHADED starts by scoping *before* building, the signal is **cutting** to a def
 4. **Browse / search / recommend**, treated as a **side path**, mostly delegated.
 
 **Explicitly cut (stated out loud, so it reads as choice, not omission):**
-- **Live streaming**, real-time/low-latency transcode, LL-HLS, no offline ladder; I'd reuse the byte plane and CDN but rebuild the encode path. A Design-evolution extension, not v1.
-- **DRM** (Widevine/FairPlay/PlayReady), non-negotiable for *Netflix* (studios won't license without it), a bolt-on for UGC. Named as a **delegated workstream** (player-security team owns key exchange; my pipeline produces encrypted segments) so the omission reads as scope control.
+- **Live streaming**, real-time/low-latency transcode, LL-HLS (HTTP Live Streaming), no offline ladder; I'd reuse the byte plane and CDN but rebuild the encode path. A Design-evolution extension, not v1.
+- **DRM** (Widevine/FairPlay/PlayReady), non-negotiable for *Netflix* (studios won't license without it), a bolt-on for UGC (user-generated content). Named as a **delegated workstream** (player-security team owns key exchange; my pipeline produces encrypted segments) so the omission reads as scope control.
 - **The recommendation model itself**, I build the serving system and log the signals; the ranking model is a **delegated deep-dive**.
 - **Comments, channels/monetization, Shorts**, known patterns or separate systems; cut for time.
 
 **Clarifying questions (and assumptions if waved on):**
 - *Scale?* **~2B monthly users, ~500 hours uploaded/min, ~1B watch-hours/day.**
-- *VOD or live?* **VOD.** This single answer *permits* the entire offline-ladder approach.
+- *VOD (video on demand) or live?* **VOD.** This single answer *permits* the entire offline-ladder approach.
 - *Start-up latency?* **Time-to-first-frame p99 ≲ 2 s, rebuffer < ~0.5%** of watch time.
 - *View-count semantics?* **Eventually-consistent display is fine**, but counts must be **deduplicated and fraud-filtered**, they drive creator payouts and trending, so a view is *not* a casual `+1`. This forces a separate exact reconciliation path.
 
@@ -82,11 +82,11 @@ Five distinct data shapes, each with a different access pattern, naming them sep
 
 | Data | Shape & access pattern | Store **type** | Real system | Rejected alternative (and why) |
 |---|---|---|---|---|
-| **Video segments + manifests** | Enormous, immutable, write-once read-many-billions | **Object store + CDN/edge** | **S3 / GCS** behind **CloudFront** / private CDN (Netflix: **Open Connect** in ISPs) | DB BLOBs / NFS, melts at EB scale, can't reach 11 nines economically, can't sit at the edge. |
+| **Video segments + manifests** | Enormous, immutable, write-once read-many-billions | **Object store + CDN/edge** | **S3 / GCS** behind **CloudFront** / private CDN (Netflix: **Open Connect** in ISPs) | DB BLOBs (binary large objects) / NFS, melts at EB scale, can't reach 11 nines economically, can't sit at the edge. |
 | **Source / mezzanine masters** | Huge, immutable, *cold*, irreplaceable | **Object store, archive tier** | **S3 Glacier-class** | Hot storage for sources, read maybe once after upload; pure waste. |
-| **Video & channel metadata** | Small (~2 KB) rows, keyed point reads, very high read rate | **Wide-column / partitioned KV** | **Cassandra** / Bigtable / DynamoDB | A single Postgres, holds 6 TB fine, but can't absorb the read rate or partition across regions without sharding work the store should own. |
+| **Video & channel metadata** | Small (~2 KB) rows, keyed point reads, very high read rate | **Wide-column / partitioned KV** (key-value) | **Cassandra** / Bigtable / DynamoDB | A single Postgres, holds 6 TB fine, but can't absorb the read rate or partition across regions without sharding work the store should own. |
 | **View counts (+ likes)** | Hot write keys, display-tolerant lag, exact for payouts | **Sharded counters + exact recompute from a log** | **Redis** shards + **Kafka** → batch recompute | A single `UPDATE count+1` row, hot-key wall on a viral video, no fraud/dedup hook. |
-| **Watch events / signals** | Append-only firehose, analytics + recommendations | **Log → columnar warehouse** | **Kafka** → BigQuery / S3+Spark | Writing events into the OLTP store, pollutes serving with analytics load. |
+| **Watch events / signals** | Append-only firehose, analytics + recommendations | **Log → columnar warehouse** | **Kafka** → BigQuery / S3+Spark | Writing events into the OLTP (online transaction processing) store, pollutes serving with analytics load. |
 
 Two sub-decisions worth defending:
 - **Erasure coding vs 3× replication**: ~11 nines at **~1.4× overhead instead of 3×**, **~3 EB/year of raw disk saved**, accepting slower reconstruction on the rare degraded read. *Rejected:* 3× everywhere; at EB scale the 200% overhead is a budget I won't sign.
@@ -134,7 +134,7 @@ flowchart TD
 
 **Upload.** A **resumable multipart upload** PUTs the source **directly to the object store** (app servers never touch the bytes; a dropped connection retries one chunk, not a 10 GB file). Completion fires a `source-uploaded` event and commits a metadata row (`status: processing`), the video exists immediately, just not yet watchable.
 
-**Transcode (the engine, go deep here).** The orchestrator **splits the source at GOP/keyframe boundaries** (each chunk independently decodable) and emits one job per **(chunk × rung × codec)** onto a Kafka queue; a **stateless worker fleet** encodes in parallel. Because the work is chunked, a 2-hour movie's ladder finishes in **minutes of wall-clock, not hours**, and a worker crash re-queues **one chunk**, idempotent by chunk id. A **packager** stitches completed rungs, cuts 2-6 s streaming segments, writes the **HLS/DASH manifests**, and flips the row to `ready`. **This chunked-parallel DAG is the heart of the problem**, fast, fault-isolated, elastically scalable.
+**Transcode (the engine, go deep here).** The orchestrator **splits the source at GOP/keyframe boundaries** (each chunk independently decodable) and emits one job per **(chunk × rung × codec)** onto a Kafka queue; a **stateless worker fleet** encodes in parallel. Because the work is chunked, a 2-hour movie's ladder finishes in **minutes of wall-clock, not hours**, and a worker crash re-queues **one chunk**, idempotent by chunk id. A **packager** stitches completed rungs, cuts 2-6 s streaming segments, writes the **HLS/DASH manifests**, and flips the row to `ready`. **This chunked-parallel DAG (directed acyclic graph) is the heart of the problem**, fast, fault-isolated, elastically scalable.
 
 **Watch.** The client gets metadata plus a **manifest URL** from us, then fetches the manifest and **segments adaptively from the CDN**, starting low for a fast first frame, climbing as throughput allows. **Every byte of video comes from the edge, never from us.** In parallel the client fires watch events to Kafka; the view-count service **dedups, fraud-filters**, and updates the sharded count. Tiny metadata call to us, all bytes from the edge, ABR on the client, that's what makes p99 TTFF ≲ 2 s feasible.
 
@@ -182,7 +182,7 @@ Three decisions worth defending. **Resumable multipart, not a single presigned P
 ## D: Data model
 
 **Partition keys, not column inventories, are the load-bearing detail:**
-- `videos`, **PK `video_id`** for point reads, with a second query-shaped table **`videos_by_chan` (PK `channel_id`, clustered by `created_at DESC`)**, the denormalize-by-query Cassandra idiom, not secondary indexes. Manifest/rendition fields are **object-store paths; the bytes are never in the DB.**
+- `videos`, **PK (primary key) `video_id`** for point reads, with a second query-shaped table **`videos_by_chan` (PK `channel_id`, clustered by `created_at DESC`)**, the denormalize-by-query Cassandra idiom, not secondary indexes. Manifest/rendition fields are **object-store paths; the bytes are never in the DB.**
 - `transcode_jobs`, **PK `video_id`**, clustered **(rung, codec, chunk_idx)**: all of one video's job state in one bounded partition, and idempotency per `(video_id, rung, codec, chunk_idx)`, a re-run overwrites the same output key.
 - **View counts**, *not* a column you `UPDATE`: **N sharded sub-counters per `video_id`** in Redis, summed on read, with **dedup per `session_id` applied before the increment**, plus the authoritative count recomputed from the event log.
 - `watch_events`, Kafka, **keyed by `video_id`** (a hot video streams through a bounded set of partitions; videos parallelize), and the log is what lets the exact count be recomputed independently of the display counter.
@@ -222,7 +222,7 @@ Stress your own design: re-check the NFRs, hunt the bottlenecks, fix each **nami
 **Bottleneck 2, Transcode throughput, latency, and cost.** Whole-file serial encoding of a 2-hour 4K source takes *hours*, and one failure restarts the lot.
 > **Fix, chunked parallel transcode** (the engine from H): split at GOP boundaries, fan independent chunk jobs across a stateless fleet, idempotent per chunk, package when complete. **H.264 first** so the video is watchable on anything within minutes; **VP9/AV1 backfill asynchronously**, so first-watchability never waits on slow codecs. **Trade:** orchestration complexity (split/track/stitch) for minutes-not-hours latency and fault isolation. *Rejected:* whole-file serial, simplest, but hours of latency and all-or-nothing failure.
 
-**Bottleneck 3, Codec economics (a bandwidth/compute trade worth real money).** The Director call: **AV1 saves ~30% of bytes ≈ ~37 Tbps at our scale, but costs far more encode compute, so serve a multi-codec ladder (H.264 universal floor, VP9/AV1 for capable clients), gate the expensive codecs behind popularity so the savings land where the egress is, and delegate the ladder design to the media team with a cost SLA.** *Rejected:* one codec either way, H.264-only overpays egress forever; AV1-only breaks old devices and melts the encode fleet.
+**Bottleneck 3, Codec economics (a bandwidth/compute trade worth real money).** The Director call: **AV1 saves ~30% of bytes ≈ ~37 Tbps at our scale, but costs far more encode compute, so serve a multi-codec ladder (H.264 universal floor, VP9/AV1 for capable clients), gate the expensive codecs behind popularity so the savings land where the egress is, and delegate the ladder design to the media team with a cost SLA (service-level agreement).** *Rejected:* one codec either way, H.264-only overpays egress forever; AV1-only breaks old devices and melts the encode fleet.
 
 <details>
 <summary>Go deeper, the codec comparison (IC depth, optional)</summary>

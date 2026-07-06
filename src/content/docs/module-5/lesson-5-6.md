@@ -10,7 +10,7 @@ sidebar:
 ### Learning objectives
 
 1. Articulate why strict price-time priority mandates a **single-threaded, deterministic matching engine**, and why that is the right answer, not a design flaw to engineer away.
-2. Adapt the RESHADED Estimation step to a **latency budget in microseconds** rather than QPS; recognize that throughput and latency pull in opposite directions here.
+2. Adapt the RESHADED Estimation step to a **latency budget in microseconds** rather than QPS (queries per second); recognize that throughput and latency pull in opposite directions here.
 3. Design an **event-sourced** order book, append to a journal, derive state by replay, as the mechanism for determinism, audit, and crash recovery.
 4. Scale by **partitioning symbols across independent engines**, not by distributing one book; state the trade-offs of that choice.
 5. Sketch the **brokerage-reconciliation variant** (orders vs. executions drift when you don't own the exchange) and delegate kernel-bypass networking with a stated prior.
@@ -44,7 +44,7 @@ That is the entire design, restated: **one matching engine per symbol (or symbol
 5. **Cancel or modify** a resting order before it fills.
 6. **Replay** the full order history for audit, dispute resolution, and crash recovery.
 
-**Explicitly cut:** user accounts and KYC, settlement and clearing (a separate regulated layer), risk/margin pre-trade checks beyond the exchange boundary, dark pools, payment for order flow, FIX protocol framing at the wire level, cross-exchange arbitrage. State what you are cutting and why, scope discipline is the signal.
+**Explicitly cut:** user accounts and KYC (know your customer), settlement and clearing (a separate regulated layer), risk/margin pre-trade checks beyond the exchange boundary, dark pools, payment for order flow, FIX protocol framing at the wire level, cross-exchange arbitrage. State what you are cutting and why, scope discipline is the signal.
 
 **Non-functional requirements:**
 
@@ -84,7 +84,7 @@ A 1 ms order-to-acknowledgement budget: network ingress ~50-200 µs; risk pre-ch
 
 - *Access pattern:* sequential append at every order event; read sequentially during replay; random-access rare (single-order lookup for cancel). Throughput: ~50M events/day, burst ~50K events/sec per symbol group.
 - *Choice:* a **purpose-built append-only log**, either a local NVMe WAL (Kafka-style segment files, or a custom ring-buffer journal replicated to a standby) or **Apache Kafka** with a dedicated exchange-internal topic per symbol. The journal is the single source of truth; everything else is derived.
-- *Rejected, a general-purpose RDBMS as the journal:* row-level locking and MVCC overhead add latency on the write path. The engine needs sequential-append semantics, not random-update transactions.
+- *Rejected, a general-purpose RDBMS (relational database management system) as the journal:* row-level locking and MVCC (multi-version concurrency control) overhead add latency on the write path. The engine needs sequential-append semantics, not random-update transactions.
 - *Rejected, an in-memory-only structure with no journal:* unrecoverable on crash; fails the audit NFR. A matching engine without a durable journal is a liability, not a design.
 
 **2. The live order book (in-memory, derived state).**
@@ -108,7 +108,7 @@ Common implementations:
 - **Red-black tree / skip list keyed by price:** O(log N) insert and remove per price level; works for any price range. The standard in many open-source engines (e.g., OpenHFT Chronicle-FIX). In practice N (number of distinct price levels) is small (hundreds to thousands), so log N is a handful of comparisons.
 - **Within a price level:** a simple FIFO doubly-linked list; O(1) enqueue and dequeue; order lookup by ID via a separate hash map for cancels.
 
-The data-structure choice matters for the engine's 1-10 µs budget but is legitimately IC-level tuning. At Director altitude the decisions that matter are: all-in-memory, single-threaded, FIFO within price level, no shared state across symbols.
+The data-structure choice matters for the engine's 1-10 µs budget but is legitimately IC-level (IC = individual contributor) tuning. At Director altitude the decisions that matter are: all-in-memory, single-threaded, FIFO within price level, no shared state across symbols.
 
 </details>
 
@@ -250,7 +250,7 @@ Journal fsync on every event costs **~1-5 ms** on spinning disk, **~50-200 µs**
 | **Group commit (batch fsync)** | Avg 10-50 µs at steady load; tail spikes on flush | At-most-one event lost on ungraceful shutdown | High throughput; can tolerate a re-send from broker on reconnect |
 | **Async log + synchronous replication to hot standby** | ~20-100 µs (replication RTT on co-located standby) | No loss if standby is healthy; risk window = replication lag | Exchange-grade HA; standby promotes in <1 s |
 
-The right answer for an exchange is **async log + synchronous standby replication**, it achieves near-synchronous-fsync durability at replication-RTT latency, and keeps the hot-standby ready for instant failover. I would propose this and delegate the storage-team benchmark of group-commit vs. sync-replication on the specific NVMe/network topology to confirm the p99 numbers.
+The right answer for an exchange is **async log + synchronous standby replication**, it achieves near-synchronous-fsync durability at replication-RTT (round-trip time) latency, and keeps the hot-standby ready for instant failover. I would propose this and delegate the storage-team benchmark of group-commit vs. sync-replication on the specific NVMe/network topology to confirm the p99 numbers.
 
 **Bottleneck 2, network latency and kernel overhead.**
 
@@ -297,7 +297,7 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 **Where I'd delegate:**
 
-- **FIX protocol and co-location networking:** *"The market-connectivity team owns the FIX session layer and co-location NIC configuration. My prior is FIX 4.4 for equities and institutional crypto; kernel bypass only after profiling confirms it's the latency-binding layer at our participant tier."*
+- **FIX protocol and co-location networking:** *"The market-connectivity team owns the FIX session layer and co-location NIC (network interface card) configuration. My prior is FIX 4.4 for equities and institutional crypto; kernel bypass only after profiling confirms it's the latency-binding layer at our participant tier."*
 - **Clearing and settlement:** *"Clearing (matching the confirmed fill to a settlement obligation) is a separate regulated system, I scope the exchange to fill reporting and would interface to the clearing house via a standard FIX/ISO 20022 execution record. The clearing team owns the settlement lifecycle."*
 - **Pre-trade risk engine:** *"The risk team owns position-limit and buying-power checks. My prior is a low-latency in-process check inside the Order Gateway (microsecond, stateful per participant) for hard limits, with a separate async risk monitor for portfolio-level checks that do not need to block order submission."*
 
@@ -307,7 +307,7 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 | Decision | Option A | Option B | Option C | Use when |
 |---|---|---|---|---|
-| **Matching engine threading** | **Single-threaded per symbol group** (our choice) | Multi-threaded with lock-per-price-level | Lock-free CAS on shared book | **A**: determinism, no synchronization, the correct answer for CLOB. **B**: complex, non-deterministic under replay. **C**: possible for simple book ops but ordering guarantees break under concurrent inserts at the same price level. |
+| **Matching engine threading** | **Single-threaded per symbol group** (our choice) | Multi-threaded with lock-per-price-level | Lock-free CAS (compare-and-swap) on shared book | **A**: determinism, no synchronization, the correct answer for CLOB. **B**: complex, non-deterministic under replay. **C**: possible for simple book ops but ordering guarantees break under concurrent inserts at the same price level. |
 | **Scaling axis** | **Partition symbols across engines** (our choice) | Replicate one engine horizontally | Shard the order book by price range | **A**: independent engines, linear scale, no cross-shard coordination. **B**: violates price-time priority, two replicas can process the same symbol independently and produce different fills. **C**: a distributed transaction on every cross-range match (nearly every match). |
 | **Journal write durability** | **Async log + sync standby replication** (our choice) | Synchronous fsync per event | In-memory only, no journal | **A**: exchange-grade durability at replication-RTT latency, instant failover. **B**: correct but 50-200 µs per event budget hit. **C**: no audit trail, unacceptable. |
 | **Price representation** | **Integer ticks** (our choice) | IEEE 754 double | Fixed-point decimal string | **A**: exact, deterministic, trivially comparable. **B**: rounding non-determinism across platforms breaks audit replay. **C**: correct but slow; serialization cost on the hot path. |
@@ -350,7 +350,7 @@ The reconciliation design is a **state machine per order** at the broker (SUBMIT
 
 **Q4. How would you design differently for 10 million symbols (crypto long-tail)?**
 
-> *Model answer:* Static symbol grouping breaks on core count when most symbols trade near-zero volume. Use **dynamic engine allocation**: a pool of engine threads; assign a symbol to a thread on first order, evict inactive symbols on TTL. Hot symbols (top 1% by volume) get dedicated threads; cold symbols share threads, with the invariant that a thread processes one symbol's events at a time, no interleaving. Journal and sequencer do not change. The operational challenge: a sudden spike on a cold symbol (listing, news) must trigger re-assignment within seconds. Instrument order-rate per symbol; delegate the scheduling policy to the exchange ops team.
+> *Model answer:* Static symbol grouping breaks on core count when most symbols trade near-zero volume. Use **dynamic engine allocation**: a pool of engine threads; assign a symbol to a thread on first order, evict inactive symbols on TTL (time-to-live). Hot symbols (top 1% by volume) get dedicated threads; cold symbols share threads, with the invariant that a thread processes one symbol's events at a time, no interleaving. Journal and sequencer do not change. The operational challenge: a sudden spike on a cold symbol (listing, news) must trigger re-assignment within seconds. Instrument order-rate per symbol; delegate the scheduling policy to the exchange ops team.
 
 ---
 

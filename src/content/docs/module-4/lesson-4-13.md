@@ -28,25 +28,25 @@ RESHADED step 1. Pin the scope before building, and establish the skew that driv
 - **User preferences & quiet-hours**, honor per-user, per-channel, per-category opt-in/opt-out and a do-not-disturb window.
 - **Rate-limiting / throttling**, cap how many notifications a user gets per window (anti-spam) and cap our own send rate into each gateway.
 - **Dedup**, the same logical notification must not be delivered twice (idempotency).
-- **Prioritization**, a 2FA/OTP code must not queue behind a marketing blast.
+- **Prioritization**, a 2FA/OTP (one-time password) code must not queue behind a marketing blast.
 - **Retries with backoff** to flaky third-party gateways, and **delivery tracking** (sent → delivered → opened/clicked → failed).
 
 **Cut from scope (state it out loud, scoping is the signal):**
-- **Building the gateways themselves** (an SMTP server, a push-notification protocol stack). We **integrate** APNs/FCM, Twilio, SES, we do not reimplement them. Naming this boundary is the whole point of the design.
+- **Building the gateways themselves** (an SMTP server, a push-notification protocol stack). We **integrate** APNs/FCM (Firebase Cloud Messaging), Twilio, SES, we do not reimplement them. Naming this boundary is the whole point of the design.
 - **The notification *content* / ML targeting** (who should get a promo, send-time optimization). That is a separate recommendation system; we accept a recipient list.
 - **In-app inbox UI / real-time websocket push** to an open client, that is the feed/WebSocket problem (WhatsApp/5.6 territory); we persist the in-app notification and expose a fetch API, and leave live delivery to that layer.
 - **Hard, synchronous "exactly-once" delivery.** Explicitly traded away (see below), it is impossible across third parties.
 
 **Non-functional (these are the problem):**
 - **Reliability / durability:** an **accepted** notification is **never silently lost**, at-least-once delivery, durable buffering, retries. This is the hard constraint.
-- **Latency:** **tiered.** Transactional (OTP, "your driver is here") want **end-to-end seconds** (p99 < ~5 s). Marketing/digest are **best-effort minutes**, and may be *deliberately delayed* (quiet-hours, batching). So there is **no single latency SLO**, priority class sets it.
+- **Latency:** **tiered.** Transactional (OTP, "your driver is here") want **end-to-end seconds** (p99 < ~5 s). Marketing/digest are **best-effort minutes**, and may be *deliberately delayed* (quiet-hours, batching). So there is **no single latency SLO** (service-level objective), priority class sets it.
 - **Throughput & burst tolerance:** must absorb **bursty** load, a campaign or a "your team scored" event can 10-100× the steady rate in seconds without dropping or melting.
 - **Availability:** ~99.9% for ingestion (accepting work must almost never fail); delivery is **eventually** completed, gated by gateway uptime we don't own.
-- **Cost:** a first-class NFR. SMS is **~$0.0075/message**; at our scale that is the **single largest line item** (computed in E). Directors own this number.
+- **Cost:** a first-class NFR (non-functional requirement). SMS is **~$0.0075/message**; at our scale that is the **single largest line item** (computed in E). Directors own this number.
 
-**Read:write skew, the headline, and it is the *inverse* of most problems.** This is **write- and fan-out-dominated**. There is essentially **no high-QPS read path** on the hot path, the "reads" are config lookups (preferences, templates) that we **cache to near-zero cost**, and an occasional "show me my in-app inbox" / "what's the status of notification X". The dominant flow is **write → fan-out → deliver → record**. Where typeahead was ~500:1 *reads*, this is effectively a **write/fan-out pipeline**: one ingested event can become **thousands of individual sends**, each itself a write (enqueue) plus an external call plus a status write. That single fact, *amplifying writes, not serving reads*, licenses the queue-first, worker-pool, throughput-oriented architecture and makes "throughput + reliability under unreliable downstreams," not "read latency," the spine of the design.
+**Read:write skew, the headline, and it is the *inverse* of most problems.** This is **write- and fan-out-dominated**. There is essentially **no high-QPS (queries per second) read path** on the hot path, the "reads" are config lookups (preferences, templates) that we **cache to near-zero cost**, and an occasional "show me my in-app inbox" / "what's the status of notification X". The dominant flow is **write → fan-out → deliver → record**. Where typeahead was ~500:1 *reads*, this is effectively a **write/fan-out pipeline**: one ingested event can become **thousands of individual sends**, each itself a write (enqueue) plus an external call plus a status write. That single fact, *amplifying writes, not serving reads*, licenses the queue-first, worker-pool, throughput-oriented architecture and makes "throughput + reliability under unreliable downstreams," not "read latency," the spine of the design.
 
-**Scale assumption to anchor estimation:** model a large consumer app, **500M registered users, 100M DAU** (Uber / DoorDash / a large social app tier). We will size for **~1B notifications/day** across all channels and verify the channel mix, the burst, and, critically, the **cost** fall out of it.
+**Scale assumption to anchor estimation:** model a large consumer app, **500M registered users, 100M DAU** (daily active users) (Uber / DoorDash / a large social app tier). We will size for **~1B notifications/day** across all channels and verify the channel mix, the burst, and, critically, the **cost** fall out of it.
 
 ---
 
@@ -109,11 +109,11 @@ RESHADED step 3. What must persist, matched to access pattern, with real systems
 
 **Role 3, delivery tracking / status (what must persist for "did Jane get it?").**
 - **Need:** ~300 GB/day, append-heavy, status-updated a few times per record (queued→sent→delivered→opened/failed), queried by support (by user/notification id) and analytics (aggregate delivery rates), 30-day hot.
-- **Choice:** a **wide-column / write-optimized store, Cassandra** (or DynamoDB / Bigtable). Append-and-update-heavy, time-partitioned, no joins, point + small-range reads → an LSM store's sweet spot (recall the indexing lesson). **Rejected, Postgres:** the write/update volume (1B+ status writes/day) and the pure scan/point-read access pattern don't need OLTP transactions and would cost far more per TB; we use a relational store only for the *small* config data, not the *firehose* of status. **Rejected, Elasticsearch as primary:** great for the ad-hoc "search all failed SMS yesterday" query, but expensive and not a system-of-record; we'd **mirror** status into ES for ops search, not store it there authoritatively.
+- **Choice:** a **wide-column / write-optimized store, Cassandra** (or DynamoDB / Bigtable). Append-and-update-heavy, time-partitioned, no joins, point + small-range reads → an LSM (log-structured merge) store's sweet spot (recall the indexing lesson). **Rejected, Postgres:** the write/update volume (1B+ status writes/day) and the pure scan/point-read access pattern don't need OLTP (online transaction processing) transactions and would cost far more per TB; we use a relational store only for the *small* config data, not the *firehose* of status. **Rejected, Elasticsearch as primary:** great for the ad-hoc "search all failed SMS yesterday" query, but expensive and not a system-of-record; we'd **mirror** status into ES for ops search, not store it there authoritatively.
 
 **Role 4, dedup / idempotency keys (short-lived, hot).**
 - **Need:** "have I already accepted/sent this exact (notification id, user, channel)?", checked on the hot path, only needs to remember recent keys (a dedup window of minutes-to-hours).
-- **Choice:** **Redis** with `SETNX` + TTL (or a Bloom filter for scale). O(1), in-memory, auto-expiring. **Rejected, a unique constraint in the tracking DB:** works but adds a synchronous DB round-trip on the hot path and couples dedup to the slower store; Redis keeps dedup at memory speed and self-cleaning via TTL.
+- **Choice:** **Redis** with `SETNX` + TTL (time-to-live) (or a Bloom filter for scale). O(1), in-memory, auto-expiring. **Rejected, a unique constraint in the tracking DB:** works but adds a synchronous DB round-trip on the hot path and couples dedup to the slower store; Redis keeps dedup at memory speed and self-cleaning via TTL.
 
 ---
 
@@ -242,7 +242,7 @@ RESHADED step 7. Stress the design against the NFRs, find the bottlenecks, and *
 
 **Bottleneck 4, Duplicate delivery (the exactly-once trap).** At-least-once + retries means we *will* occasionally attempt the same send twice (e.g., a worker sent, then crashed before committing the offset). *Fix:* **idempotency dedup at two layers**, at ingest (`SETNX` on the caller's key) and at the worker (check "did I already get a gateway message-id for this (notification, channel)?" before re-sending). *Trade-off:* dedup is **best-effort within a window**, not a global guarantee, and many gateways are themselves at-least-once, so we **minimize**, not eliminate, dupes. **We explicitly do not promise exactly-once**, because true exactly-once across a third party we don't control is **impossible**; we promise at-least-once + aggressive dedup, which is the honest and standard answer.
 
-**Bottleneck 5, Tracking-store hot partition / write amplification.** 1B+ status writes/day, and a system/power-user partition can go wide. *Fix:* Cassandra (LSM) absorbs the append/update volume; **bucket** extreme partitions by `(user_id, month)`; **TTL** old rows out of the hot table; stream a copy to a **warehouse/ES** for analytics so we never run heavy aggregate scans against the serving table. *Trade-off:* more pipelines (CDC → warehouse) and eventual-consistency on analytics, fine, analytics tolerates lag.
+**Bottleneck 5, Tracking-store hot partition / write amplification.** 1B+ status writes/day, and a system/power-user partition can go wide. *Fix:* Cassandra (LSM) absorbs the append/update volume; **bucket** extreme partitions by `(user_id, month)`; **TTL** old rows out of the hot table; stream a copy to a **warehouse/ES** for analytics so we never run heavy aggregate scans against the serving table. *Trade-off:* more pipelines (CDC (change data capture) → warehouse) and eventual-consistency on analytics, fine, analytics tolerates lag.
 
 **Bottleneck 6, Quiet-hours / timezone correctness.** One sentence: store the user's **timezone**, evaluate quiet-hours **in their local time**, and **defer** (re-enqueue via the scheduler) rather than drop non-urgent sends, with the explicit product rule that urgent traffic (OTP) overrides DND while promos respect it.
 
@@ -270,7 +270,7 @@ RESHADED step 8. How it holds at 10×, the hardest trade-offs, what to revisit, 
 **Where I'd delegate (the Director move):**
 - "I'd have the **messaging-infra team benchmark Kafka vs Pulsar** for our fan-out + multi-consumer pattern and report the per-message cost and operational burden at 10B/day. My prior is Kafka for maturity, but I want the cost/ops trade defended with data, not my preference."
 - "I'd have the **payments/finance partner own the carrier-rate negotiation and the SMS-budget policy**, the ~$82M (→$820M) SMS spend is a business lever I set the *target* for and delegate the *mechanism*."
-- "I'd task **SRE with the circuit-breaker thresholds and the multi-provider failover** under a simulated gateway outage, and defend the delivery-SLO with the data, I own the SLO, they own the knob."
+- "I'd task **SRE (site reliability engineering) with the circuit-breaker thresholds and the multi-provider failover** under a simulated gateway outage, and defend the delivery-SLO with the data, I own the SLO, they own the knob."
 - "The **dedup-window sizing and the tracking-store partition/bucketing** at 10× is a focused study for the data-platform team; I set the dedup correctness bar and the 30-day retention SLO, they choose the layout."
 
 That division, **own the SLOs, the reliability bar, the cost envelope, and the priority classes; delegate the broker benchmark, the carrier negotiation, the breaker tuning, and the storage layout**, is the altitude this round is scoring.
@@ -290,7 +290,7 @@ That division, **own the SLOs, the reliability bar, the cost envelope, and the p
 
 ### What interviewers probe here
 
-At Director altitude the probes are about **judgment, cost, and delegation**, not whether you can integrate APNs.
+At Director altitude the probes are about **judgment, cost, and delegation**, not whether you can integrate APNs (Apple Push Notification service).
 
 - **"Walk me through what happens when a gateway (say Twilio) goes down for 10 minutes."**
   *Strong signal:* the SMS topic **buffers in Kafka**, the **circuit breaker trips** so workers fast-fail instead of stalling, **isolated pools** mean push/email/in-app are untouched, and on recovery we **drain the backlog with backoff**, bounded by `ttl_seconds`. Names that **ingestion never blocks**. *Red flag:* "we retry" with no mention of decoupling, isolation, circuit breaking, or what happens to *other* channels; or assuming the gateway is reliable.

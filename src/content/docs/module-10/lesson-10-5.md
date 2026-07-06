@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-> **Why this problem separates Directors from ICs:** the instinct is to read this as "a RAG chatbot with a few API calls bolted on." That instinct loses the offer. The moment an LLM can move money or mutate customer state, the problem inverts: it is no longer *"is the answer good?"* but *"what can this thing do, and what is the blast radius when the model is wrong — or when someone talks it into doing the wrong thing?"* An IC wires up function-calling and ships. A Director designs the **containment**: least-privilege tools, server-side spending caps, idempotent actions, a human gate on anything irreversible, and the assumption that every token of user text — and every retrieved document — is a potential attacker trying to trigger a privileged action. The career-ending failure here is not a wrong answer. It is the agent issuing 10,000 duplicate refunds during a deploy, or a crafted message talking it into refunding $5,000. **Deflection rate is the business prize; uncontained autonomy is how you hand back the offer.**
+> **Why this problem separates Directors from ICs (individual contributors):** the instinct is to read this as "a RAG (retrieval-augmented generation) chatbot with a few API calls bolted on." That instinct loses the offer. The moment an LLM can move money or mutate customer state, the problem inverts: it is no longer *"is the answer good?"* but *"what can this thing do, and what is the blast radius when the model is wrong — or when someone talks it into doing the wrong thing?"* An IC wires up function-calling and ships. A Director designs the **containment**: least-privilege tools, server-side spending caps, idempotent actions, a human gate on anything irreversible, and the assumption that every token of user text — and every retrieved document — is a potential attacker trying to trigger a privileged action. The career-ending failure here is not a wrong answer. It is the agent issuing 10,000 duplicate refunds during a deploy, or a crafted message talking it into refunding $5,000. **Deflection rate is the business prize; uncontained autonomy is how you hand back the offer.**
 
 ---
 
@@ -29,7 +29,7 @@ The agent's job is exactly that shape: **deflect the routine, act within tightly
 
 ## R: Requirements
 
-> Scope before build. The NFR priority here is **inverted** from the read-heavy problems in this course — closer to payments than to a feed. Say that out loud.
+> Scope before build. The NFR (non-functional requirement) priority here is **inverted** from the read-heavy problems in this course — closer to payments than to a feed. Say that out loud.
 
 **Clarifying questions I'd ask (with assumed answers):**
 
@@ -37,7 +37,7 @@ The agent's job is exactly that shape: **deflect the routine, act within tightly
 - *Which actions?* → **Read:** order lookup. **Reversible writes:** address change, subscription pause, cancel-within-window. **Money / irreversible:** refund (up to a cap), order cancellation with refund. **Out of scope for the agent:** account deletion, large refunds, anything legal/abuse — those escalate to a human.
 - *Knowledge source?* → existing help center + policy docs + product catalog. **RAG over the docs**; the order/billing data lives in systems of record we *call*, not own.
 - *Who is the user?* → an **authenticated** customer — identity, authN/Z, and session are upstream and delegated. The agent acts *as that customer's request*, never above their entitlements.
-- *What does success mean?* → **deflection rate** (% resolved without a human) **and** CSAT **and** zero wrong/duplicate money actions. All three, or it's not a win.
+- *What does success mean?* → **deflection rate** (% resolved without a human) **and** CSAT (customer satisfaction) **and** zero wrong/duplicate money actions. All three, or it's not a win.
 - *Fraud / abuse scoring?* → delegated to a fraud service that the refund path consults. I own the consistency and containment boundary, not the fraud model.
 
 **Functional requirements:**
@@ -57,11 +57,11 @@ The agent's job is exactly that shape: **deflect the routine, act within tightly
 | 1 | **Action correctness** | Zero wrong or duplicate money/state mutations |
 | 2 | **Safety / containment** | No unauthorized or out-of-policy action; injection-resistant by design |
 | 3 | **Auditability** | Every action attributable, policy-stamped, and replayable |
-| 4 | **Latency** | Conversational TTFT < ~2 s; action confirmation prompt |
+| 4 | **Latency** | Conversational TTFT (time to first token) < ~2 s; action confirmation prompt |
 | 5 | **Availability** | 99.9% for the agent; degrade gracefully to the human queue |
 | 6 | **Throughput** | Thousands of concurrent conversations — **not** the binding constraint |
 
-**The inversion, stated explicitly:** like payments, the QPS here is trivial. The cost of being *fast* is nothing next to the cost of being *wrong once* — a single bad refund, a single leaked action, is a chargeback or an incident, not a slow response. Every architectural decision below flows from NFRs 1–3, not from throughput.
+**The inversion, stated explicitly:** like payments, the QPS (queries per second) here is trivial. The cost of being *fast* is nothing next to the cost of being *wrong once* — a single bad refund, a single leaked action, is a chargeback or an incident, not a slow response. Every architectural decision below flows from NFRs 1–3, not from throughput.
 
 ---
 
@@ -86,9 +86,9 @@ The agent's job is exactly that shape: **deflect the routine, act within tightly
 
 > Five data classes; what the agent **owns** vs. what it merely **calls** is the consequential split.
 
-**1. Conversation / session store (append-only, session-scoped).** Messages with role, content, citations, timestamps. Access pattern: read/write by `session_id`. **Choice: a wide-column store (Cassandra/DynamoDB)** or Postgres at this scale — either is fine; the load is light. Retention/TTL per privacy policy.
+**1. Conversation / session store (append-only, session-scoped).** Messages with role, content, citations, timestamps. Access pattern: read/write by `session_id`. **Choice: a wide-column store (Cassandra/DynamoDB)** or Postgres at this scale — either is fine; the load is light. Retention/TTL (time-to-live) per privacy policy.
 
-**2. Knowledge base / vector store (RAG).** Help-center + policy docs chunked, embedded, indexed. **Choice: pgvector or OpenSearch hybrid** to start (corpus is small, ops are simpler); dedicated store only if it grows. Policy docs may be internal → carry ACL tags and filter at retrieval. *Rejected:* fine-tuning policy into the model — policy changes weekly and must be **cited**, so RAG, not fine-tune.
+**2. Knowledge base / vector store (RAG).** Help-center + policy docs chunked, embedded, indexed. **Choice: pgvector or OpenSearch hybrid** to start (corpus is small, ops are simpler); dedicated store only if it grows. Policy docs may be internal → carry ACL (access control list) tags and filter at retrieval. *Rejected:* fine-tuning policy into the model — policy changes weekly and must be **cited**, so RAG, not fine-tune.
 
 **3. Tool / integration layer (not storage — adapters).** The agent does **not** own order, billing, or subscription data; those systems of record stay authoritative. The agent calls their APIs through typed, least-privilege adapters. *Rejected:* the agent maintaining its own copy of order/balance state — that invents a second source of truth and a reconciliation problem we don't need.
 
@@ -238,7 +238,7 @@ The policy layer is **deterministic code outside the model**. It receives the mo
 
 **Graduate autonomy, gated by reversibility.** The rollout ladder: **suggest-only / shadow → read actions auto → low-cap reversible writes auto → higher caps with sampling → irreversible actions gated forever.** Each step is earned by the eval/wrong-action metrics, not by a deadline. This is the operational contract a Director owns.
 
-**Broaden reach.** More tools and domains; **multilingual** support (RAG over localized docs); **multichannel** — voice (streaming ASR in front) and WhatsApp; **proactive** outreach (a shipment delayed → notify + offer options).
+**Broaden reach.** More tools and domains; **multilingual** support (RAG over localized docs); **multichannel** — voice (streaming ASR (automatic speech recognition) in front) and WhatsApp; **proactive** outreach (a shipment delayed → notify + offer options).
 
 **When to go multi-agent (and when not).** As one agent's tool surface and policy space grow unwieldy, split into specialists — billing, returns, technical — behind a router. But carry the caveat from the multi-agent orchestration design: **multi-agent multiplies token cost and coordination/failure surface.** Reach for it when the domains are genuinely separable, not by reflex; a single well-scoped agent beats a committee for most support flows.
 
@@ -303,7 +303,7 @@ The through-line at Director altitude: **the model proposes, the policy layer di
 4. **Prompt-injection → action is unsolved; contain it.** Treat all user *and retrieved* text as untrusted; rely on least privilege + server-side policy + HITL, not on prompt-level prevention.
 5. **The business case is deflection × human-cost − tokens (≈30×), guarded by zero-wrong-action + CSAT.** QPS is a footnote. Escalation is a first-class path, and autonomy ships eval-gated: shadow → read → reversible → gated-irreversible.
 
-> **Spaced-repetition recap:** A support agent = **RAG (knowledge) + scoped tools (actions)** — and the moment it can act, the design inverts to **action-correctness + blast-radius**. Containment, not prevention: **least-privilege tools + server-side policy layer (caps/eligibility) + HITL on irreversible + idempotent, audited actions** (deterministic key, written before the call, unique constraint — the payments exactly-once-effect pattern, on a durable runtime). The model **proposes**, the policy layer **disposes** — so a "refund me $5,000" injection bounces to a human, because the cap isn't in the prompt. Escalation is first-class; autonomy rolls out **by reversibility**, eval-gated (shadow → read → reversible → gated-irreversible), with wrong-action rate as the tripwire. Business case ≈ 30× (deflection × $6/ticket − ~$0.10 tokens); QPS is trivial. Builds on: RAG, the agent loop, tools/MCP, durable/idempotent runtime, action safety, payments idempotency + ledger, and multi-agent orchestration.
+> **Spaced-repetition recap:** A support agent = **RAG (knowledge) + scoped tools (actions)** — and the moment it can act, the design inverts to **action-correctness + blast-radius**. Containment, not prevention: **least-privilege tools + server-side policy layer (caps/eligibility) + HITL on irreversible + idempotent, audited actions** (deterministic key, written before the call, unique constraint — the payments exactly-once-effect pattern, on a durable runtime). The model **proposes**, the policy layer **disposes** — so a "refund me $5,000" injection bounces to a human, because the cap isn't in the prompt. Escalation is first-class; autonomy rolls out **by reversibility**, eval-gated (shadow → read → reversible → gated-irreversible), with wrong-action rate as the tripwire. Business case ≈ 30× (deflection × $6/ticket − ~$0.10 tokens); QPS is trivial. Builds on: RAG, the agent loop, tools/MCP (Model Context Protocol), durable/idempotent runtime, action safety, payments idempotency + ledger, and multi-agent orchestration.
 
 ---
 

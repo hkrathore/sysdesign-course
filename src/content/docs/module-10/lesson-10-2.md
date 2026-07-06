@@ -5,16 +5,16 @@ sidebar:
   order: 2
 ---
 
-> **Why this problem separates Directors from ICs:** the obvious answer — "put a chat UI on the model" — is the IC answer, and it fails on the second turn. The model is **stateless**; it remembers nothing between calls. Every illusion of a coherent multi-turn conversation is something *your system* manufactured by re-sending context on each turn. And that context is **finite and metered** — capped by the model's window and billed by the token. So the real system, the part you'd whiteboard, is not the model. It is the **context-assembly engine** that decides, on every single turn, what slice of history + memory + retrieved knowledge to spend the token budget on — and the streaming, safety, and cost machinery around it. A candidate who designs the GPU serving fleet here has answered the wrong question; that is a separate problem and the right move is to *delegate to it*. The Director answer owns the product layer and names the serving tier as a dependency.
+> **Why this problem separates Directors from ICs (individual contributors):** the obvious answer — "put a chat UI on the model" — is the IC answer, and it fails on the second turn. The model is **stateless**; it remembers nothing between calls. Every illusion of a coherent multi-turn conversation is something *your system* manufactured by re-sending context on each turn. And that context is **finite and metered** — capped by the model's window and billed by the token. So the real system, the part you'd whiteboard, is not the model. It is the **context-assembly engine** that decides, on every single turn, what slice of history + memory + retrieved knowledge to spend the token budget on — and the streaming, safety, and cost machinery around it. A candidate who designs the GPU serving fleet here has answered the wrong question; that is a separate problem and the right move is to *delegate to it*. The Director answer owns the product layer and names the serving tier as a dependency.
 
 ---
 
 ### Learning objectives
 
 1. Articulate why a stateless model produces a **coherent multi-turn chat** only because the system re-assembles context every turn — and quantify why that makes a long conversation grow **superlinearly** in cost.
-2. Design the **context-assembly pipeline** — system prompt + windowed recent history + summarized old turns + retrieved memory/RAG — as a budget-allocation problem inside a fixed token window.
+2. Design the **context-assembly pipeline** — system prompt + windowed recent history + summarized old turns + retrieved memory/RAG (retrieval-augmented generation) — as a budget-allocation problem inside a fixed token window.
 3. Treat **conversation/message storage** as an append-heavy, partition-by-conversation problem, and **long-term memory + RAG** as a vector-retrieval problem, choosing stores to match.
-4. Run the **RESHADED spine** where the binding constraints are **context-window economics and conversation continuity**, not raw inference — and delegate the GPU serving tier (queue, batching, KV-cache, SSE) to the serving lesson.
+4. Run the **RESHADED spine** where the binding constraints are **context-window economics and conversation continuity**, not raw inference — and delegate the GPU serving tier (queue, batching, KV-cache (KV = key-value), SSE) to the serving lesson.
 5. Design-evolve into **cross-session memory** (personalization), **tools/agents**, and **multimodal**, naming the new failure surface each adds.
 
 ---
@@ -36,7 +36,7 @@ That is the crux: **the model is stateless and the page is finite and metered, s
 **Clarifying questions I'd ask (with assumed answers):**
 
 - *Multi-turn with persisted history?* → **Yes.** Conversations persist; users return to old threads. This is the whole problem — a one-shot completion is trivial.
-- *Streaming?* → **Yes, token-by-token.** TTFT is the felt latency; the serving tier does the actual SSE. I own the path to and from it.
+- *Streaming?* → **Yes, token-by-token.** TTFT (time to first token) is the felt latency; the serving tier does the actual SSE. I own the path to and from it.
 - *File / document attach (RAG)?* → **Yes.** Users upload PDFs and ask questions over them. This is also the main **untrusted-input / prompt-injection** surface.
 - *Memory across sessions (personalization)?* → **v2.** Within-conversation continuity is v1; cross-session long-term memory is design evolution.
 - *Multiple models?* → **Yes — a frontier model and cheaper/faster small models.** Routing between them is a first-class cost lever, delegated to the router.
@@ -74,7 +74,7 @@ That is the crux: **the model is stateless and the page is finite and metered, s
 > Enough math to prove the crux is context economics, not inference throughput (which the serving tier sized). The number to land: **how context — and therefore cost — grows with conversation length.**
 
 **Demand:**
-- Assume **100M DAU**, **~15 messages/user/day** → `100M × 15 = 1.5B messages/day`.
+- Assume **100M DAU** (daily active users), **~15 messages/user/day** → `100M × 15 = 1.5B messages/day`.
 - `1.5B ÷ 86,400 ≈` **~17,000 messages/sec average**; peak ~5× → **~85,000 messages/sec**. (Each message is one chat-completion request to the serving tier.)
 
 **The superlinear cost of a conversation (the headline):**
@@ -104,12 +104,12 @@ TTFT ≈ **context assembly (mine)** + serving prefill + queue (the serving tier
 
 ## S: Storage
 
-> Four data classes. Their *access pattern* and *consistency* needs pick the store. The serving fleet is a fifth "store" of GPU HBM — delegated to the serving tier.
+> Four data classes. Their *access pattern* and *consistency* needs pick the store. The serving fleet is a fifth "store" of GPU HBM (high-bandwidth memory) — delegated to the serving tier.
 
 **1. Conversation & message store (append-heavy, huge, eventually consistent).**
 - Access pattern: append a message to a conversation; read the **last K turns** of a conversation by recency; list a user's conversations. Writes dominate; reads are conversation-scoped and recency-ordered.
 - Choice: **Cassandra / DynamoDB, partitioned by `conversation_id`, clustered by `seq` (sequence number) descending.** All of a conversation's turns co-locate on one partition; "fetch last K turns" is a single-partition range scan — exactly the context-assembly read. A secondary index / table maps `user_id → conversation_ids` for the thread list.
-- Rejected: **Postgres** as the primary message store — fine at low scale, but 1.5 TB/day append with conversation-scoped reads is the textbook wide-column workload; a relational primary forces sharding-by-hand and buys ACID guarantees chat messages don't need (a lost in-flight message is retried by the client; there's no money invariant here, unlike a payments ledger). Rejected: a single global table without `conversation_id` partitioning — turns "fetch this conversation" into a scatter-gather.
+- Rejected: **Postgres** as the primary message store — fine at low scale, but 1.5 TB/day append with conversation-scoped reads is the textbook wide-column workload; a relational primary forces sharding-by-hand and buys ACID (atomicity, consistency, isolation, durability) guarantees chat messages don't need (a lost in-flight message is retried by the client; there's no money invariant here, unlike a payments ledger). Rejected: a single global table without `conversation_id` partitioning — turns "fetch this conversation" into a scatter-gather.
 
 **2. User / session / persona store (small, strongly consistent, read-hot).**
 - Choice: **Postgres (or DynamoDB)** for accounts, tenant config, custom system prompts/instructions, quotas, model entitlements. Small, read on every turn (cacheable in Redis), wants consistency on writes (changing a tenant's system prompt must take effect predictably).
@@ -117,7 +117,7 @@ TTFT ≈ **context assembly (mine)** + serving prefill + queue (the serving tier
 **3. Long-term memory + RAG vector store (vector search, eventually consistent).**
 - Access pattern: on a turn, embed the query and **k-NN search** for relevant long-term memories and document chunks; on write, embed and upsert extracted memories / ingested document chunks.
 - Choice: a **vector database** (a managed vector store, or pgvector / a dedicated ANN service), sharded by `tenant_id` then `user_id`/`namespace`. Memory and RAG chunks live in the same retrieval substrate with a `source` tag.
-- Rejected: stuffing all memory into the prompt instead of retrieving — defeats the entire point; the window is finite. Rejected: exact nearest-neighbor — ANN (approximate) is the only thing that hits the ~20–50 ms latency slice.
+- Rejected: stuffing all memory into the prompt instead of retrieving — defeats the entire point; the window is finite. Rejected: exact nearest-neighbor — ANN (approximate nearest neighbor) (approximate) is the only thing that hits the ~20–50 ms latency slice.
 
 **4. Async work / event log (durable, replayable).**
 - Choice: **Kafka.** Post-turn jobs — title generation, memory extraction, safety logging, usage metering — are emitted as events and processed off the hot path. Decouples the latency-critical stream from the bookkeeping.
@@ -267,7 +267,7 @@ One enterprise tenant fires huge-context requests and starves shared capacity; o
 > Three evolutions, each adding a distinct new failure surface.
 
 **1. Cross-session memory (true personalization).**
-v1's memory is mostly within-conversation. v2 makes the assistant remember you **across all conversations**: the async memory-extraction job distills durable facts ("works in fintech," "prefers terse answers") into the user's long-term `memory_records`, retrieved on *any* future conversation. *New problems:* **memory hygiene** — stale/wrong facts must decay (`last_used_at`, salience scoring) and be user-editable/deletable (a privacy + GDPR-style requirement, not just a feature); and **retrieval precision** — irrelevant memories injected into context waste budget and can derail answers. *Director framing:* memory is a **trust and privacy surface**, not just a quality feature; "forget this about me" must actually purge the vector record.
+v1's memory is mostly within-conversation. v2 makes the assistant remember you **across all conversations**: the async memory-extraction job distills durable facts ("works in fintech," "prefers terse answers") into the user's long-term `memory_records`, retrieved on *any* future conversation. *New problems:* **memory hygiene** — stale/wrong facts must decay (`last_used_at`, salience scoring) and be user-editable/deletable (a privacy + GDPR-style (GDPR = General Data Protection Regulation) requirement, not just a feature); and **retrieval precision** — irrelevant memories injected into context waste budget and can derail answers. *Director framing:* memory is a **trust and privacy surface**, not just a quality feature; "forget this about me" must actually purge the vector record.
 
 **2. Tools → it becomes an agent.**
 Let the model call tools (search, code execution, internal APIs). The chat loop becomes an **agent loop**: model emits a tool call → system executes → result is fed back as context → model continues. *New problems:* multi-step latency (several model+tool round-trips per turn), **failure handling** (a tool errors mid-loop), and a much larger **injection/permission blast radius** (an injected instruction can now *act*, not just talk). This is a different design — covered in the AI-agents lesson; the context-assembly engine here is its foundation.
@@ -280,7 +280,7 @@ Image/audio inputs change tokenization and context accounting (an image is worth
 **Where I'd delegate (the Director move):**
 - **The GPU serving engine** (batching, KV-cache, SSE, autoscaling) → the inference-systems team behind `generate()` — *"my prior is the vLLM/TensorRT-class stack; I'm not whiteboarding attention kernels."*
 - **The safety classifiers** → the trust & safety / ML team; I own the moderation *pipeline and policy*, they own the *models*.
-- **The routing policy / model-quality eval** → the applied-ML team; I own the router's *interface and the cost/quality SLOs* it's tuned against.
+- **The routing policy / model-quality eval** → the applied-ML team; I own the router's *interface and the cost/quality SLOs* (service-level objectives) it's tuned against.
 
 ---
 

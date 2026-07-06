@@ -5,14 +5,14 @@ sidebar:
   order: 3
 ---
 
-> **Why this problem separates Directors from ICs:** there is no model to train here and barely any clever algorithm — and that is exactly the trap. The candidate who reaches for clever loses; the candidate who treats this as **the API gateway and rate-limiter pattern, re-pointed at LLM providers** wins. The whole difficulty is operational and organizational: this box sits on the request path of **every AI feature in the company**, so if it adds 50 ms it taxes all of them, and if it goes down it takes *all of them* down at once. Meanwhile it is the single layer where the things a Director is actually accountable for — **cost control, vendor lock-in avoidance, and governance** — stop being slideware and become enforced code. Get the framing wrong (build an "AI router" with a model picking the model) and you've added latency, cost, and a failure mode to solve a control-plane problem. Get it right and you've built the most leveraged piece of AI infrastructure the org owns.
+> **Why this problem separates Directors from ICs (individual contributors):** there is no model to train here and barely any clever algorithm — and that is exactly the trap. The candidate who reaches for clever loses; the candidate who treats this as **the API gateway and rate-limiter pattern, re-pointed at LLM providers** wins. The whole difficulty is operational and organizational: this box sits on the request path of **every AI feature in the company**, so if it adds 50 ms it taxes all of them, and if it goes down it takes *all of them* down at once. Meanwhile it is the single layer where the things a Director is actually accountable for — **cost control, vendor lock-in avoidance, and governance** — stop being slideware and become enforced code. Get the framing wrong (build an "AI router" with a model picking the model) and you've added latency, cost, and a failure mode to solve a control-plane problem. Get it right and you've built the most leveraged piece of AI infrastructure the org owns.
 
 ---
 
 ### Learning objectives
 
 1. Recognize this as a **control-plane / platform** problem — the AI-era API gateway — and inherit the gateway + rate-limiter + circuit-breaker patterns from the core distributed-systems building blocks rather than inventing new ones.
-2. Design for the two NFRs that dominate everything else: **negligible added latency** and **"never the single point of failure for all AI,"** and quantify both.
+2. Design for the two NFRs (non-functional requirements) that dominate everything else: **negligible added latency** and **"never the single point of failure for all AI,"** and quantify both.
 3. Make the gateway the enforcement point for **cost control** (routing + caching) and **lock-in avoidance** (a stable internal contract over swappable providers), with the numbers that justify each.
 4. Reason about **semantic caching** as a correctness/cost trade — when a near-match answer is safe to reuse and when it is a bug — and bound it.
 5. Make the **fail-open vs fail-closed** call for both the gateway itself and a downstream provider outage, and defend it against the requirement.
@@ -21,7 +21,7 @@ sidebar:
 
 ### Intuition first
 
-Picture a large company where forty product teams have each independently wired their feature straight to a model provider's SDK. Forty copies of API keys in forty secret stores. Forty different retry behaviors. No one can answer "what are we spending on AI this quarter, by team?" without a spreadsheet archaeology project. When the provider has a bad afternoon, forty incidents open. When the company wants to try a cheaper model, that's forty migrations. And when legal asks "are we sending customer PII to a vendor that trains on it?", the honest answer is "we don't know."
+Picture a large company where forty product teams have each independently wired their feature straight to a model provider's SDK. Forty copies of API keys in forty secret stores. Forty different retry behaviors. No one can answer "what are we spending on AI this quarter, by team?" without a spreadsheet archaeology project. When the provider has a bad afternoon, forty incidents open. When the company wants to try a cheaper model, that's forty migrations. And when legal asks "are we sending customer PII (personally identifiable information) to a vendor that trains on it?", the honest answer is "we don't know."
 
 Now put **one switchboard** in front of all of it. Every AI call dials the switchboard, not the provider. The switchboard speaks one stable internal dialect, knows which provider to actually connect each call to, hangs up and redials a backup if a line is dead, refuses calls from a team that's blown its budget, remembers answers to identical questions so it needn't place the call at all, and writes down every call's cost against the team that made it. That switchboard is the LLM gateway. It is deliberately **dumb and bulletproof** — a fast, stateless proxy — because it is on the critical path of everything, and the cardinal sin of a thing on the critical path of everything is to be slow, clever, or fragile. The interesting engineering is not in the box; it's in making the box disappear (latency) and never fall over (availability) while quietly enforcing the policies a Director will be asked about in the boardroom.
 
@@ -50,7 +50,7 @@ Now put **one switchboard** in front of all of it. Every AI call dials the switc
 7. **Metering & observability** — token + dollar accounting per tenant/feature/model; full request tracing.
 8. **Guardrails hook** — a pluggable point to call moderation/PII redaction on input/output.
 
-**Explicitly cut:** model inference/serving (providers or the serving fleet), prompt *content* engineering (caller's job), the RAG pipeline (RAG calls *through* the gateway), and fine-tuning. I'll name these as "upstream of" or "downstream of" the gateway.
+**Explicitly cut:** model inference/serving (providers or the serving fleet), prompt *content* engineering (caller's job), the RAG (retrieval-augmented generation) pipeline (RAG calls *through* the gateway), and fine-tuning. I'll name these as "upstream of" or "downstream of" the gateway.
 
 **Non-functional requirements, priority order:**
 
@@ -71,15 +71,15 @@ Now put **one switchboard** in front of all of it. Every AI call dials the switc
 
 > Enough math to prove the gateway is cheap to run, expensive to get wrong, and a large cost lever.
 
-**Assumptions:** ~5,000 LLM req/s at peak across the org; average call streams for ~2 s (TTFT + decode); average ~1,500 total tokens (1k in, 500 out).
+**Assumptions:** ~5,000 LLM req/s at peak across the org; average call streams for ~2 s (TTFT (time to first token) + decode); average ~1,500 total tokens (1k in, 500 out).
 
-**Concurrency, not CPU, is the gateway's load.** At 5,000 req/s each held open ~2 s, in-flight concurrency ≈ `5,000 × 2 = 10,000 concurrent streams`. The gateway does almost no CPU work per request (parse, look up policy, proxy bytes) — it is **connection-bound**. With async I/O, one modern instance holds thousands of idle-ish streaming connections, so **~6–10 instances** carry peak with headroom, across ≥3 AZs. Compare that to the provider's GPU bill behind it: the gateway is a **rounding error in compute** and a **giant lever on spend**.
+**Concurrency, not CPU, is the gateway's load.** At 5,000 req/s each held open ~2 s, in-flight concurrency ≈ `5,000 × 2 = 10,000 concurrent streams`. The gateway does almost no CPU work per request (parse, look up policy, proxy bytes) — it is **connection-bound**. With async I/O, one modern instance holds thousands of idle-ish streaming connections, so **~6–10 instances** carry peak with headroom, across ≥3 AZs (availability zones). Compare that to the provider's GPU bill behind it: the gateway is a **rounding error in compute** and a **giant lever on spend**.
 
 **The cost lever (why this box pays for itself).** Suppose un-optimized org LLM spend trends to **~$2M/month** if every call hit a frontier model. Two gateway levers:
 - **Caching.** A ~30% exact+semantic hit rate on repetitive traffic (FAQs, retries, identical system-prompt calls) removes ~30% of provider calls outright → **~$600K/month** saved, and those requests return in **single-digit ms** instead of seconds.
 - **Cascade / cheap-default routing.** Route the ~70% of simple requests to a small/cheap model (or self-hosted open-weights), escalating only hard ones to the frontier model. If the cheap model is ~8× cheaper and absorbs 70% of traffic, blended model cost falls **5–8×** on that slice.
 
-The headline: the gateway team is a handful of engineers and ~10 boxes; the spend it governs is millions/month. **Estimation decided the framing:** optimize for reliability and cost-attribution, not for the gateway's own QPS.
+The headline: the gateway team is a handful of engineers and ~10 boxes; the spend it governs is millions/month. **Estimation decided the framing:** optimize for reliability and cost-attribution, not for the gateway's own QPS (queries per second).
 
 **Added-latency budget.** Provider calls take **hundreds of ms to seconds**. To stay "invisible," gateway overhead must be **<1%** of that — hence the p50 < 5 ms / p99 < 20 ms target. That budget is what forbids putting a *model* in the routing path (a classifier LLM would add hundreds of ms — self-defeating).
 
@@ -159,13 +159,13 @@ flowchart TB
 1. Caller hits the unified endpoint with an internal API key. LB (multi-AZ, health-checked, **no sticky sessions** — instances are stateless) picks any instance.
 2. **Auth + tenant resolve** (validate key, attach tenant/feature identity).
 3. **Rate-limit + quota check** against Redis. Over the req/s limit → `429`; over the spend budget → `402`/`429` with a clear reason. Fail-fast, microseconds.
-4. **Cache lookup**: exact key in Redis; if miss and the route opts into semantic caching, embed + ANN search the vector store within the similarity threshold. Hit → return immediately (single-digit ms, no provider call, no token cost).
+4. **Cache lookup**: exact key in Redis; if miss and the route opts into semantic caching, embed + ANN (approximate nearest neighbor) search the vector store within the similarity threshold. Hit → return immediately (single-digit ms, no provider call, no token cost).
 5. **Route**: read in-memory policy. If the caller pinned a model, honor it; else select by class (cheap-default with escalation, or by latency/capability). 
 6. **Guardrails hook** (optional per route): input moderation/PII redaction.
 7. **Provider call** with a **timeout, bounded retries, and a circuit breaker** per provider. On error/timeout/open-circuit, **fall back** to the configured alternate (e.g., Provider A → Provider B → self-hosted). Stream tokens straight back to the caller as they arrive.
 8. **After** the stream completes, **emit a usage event** to Kafka (async) and increment the Redis spend counter. The durable ledger write never blocks the response.
 
-**Why stateless matters:** because every instance is identical and holds no session, the LB can route anywhere, a dead instance just stops receiving traffic, and we scale by adding boxes — the standard HA story. The only shared state (quotas, cache) lives in Redis, itself replicated.
+**Why stateless matters:** because every instance is identical and holds no session, the LB can route anywhere, a dead instance just stops receiving traffic, and we scale by adding boxes — the standard HA (high availability) story. The only shared state (quotas, cache) lives in Redis, itself replicated.
 
 ---
 

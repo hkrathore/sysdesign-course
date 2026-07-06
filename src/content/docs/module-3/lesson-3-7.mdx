@@ -10,8 +10,8 @@ import CachingStrategiesSimulator from '@components/widgets/CachingStrategiesSim
 - Size a **distributed cache tier** from a read:write ratio and a target hit rate, and justify *why* a cache is the highest-leverage move for a read-heavy system - in real numbers (QPS shed, latency dropped, origin nodes saved).
 - Choose an **eviction policy** (LRU vs LFU vs TTL) from the access pattern, and reason about its **hit-rate impact**.
 - **Shard** the cache fleet with **consistent hashing** so that adding or losing a node remaps a minimal slice of keys, and contrast Redis Cluster (server-side) with Memcached (client-side).
-- Engineer **replication and failover** for the cache, and decide whether the cache even *deserves* HA.
-- Defend against **hot keys** and **cache stampede / thundering herd** with request coalescing, TTL jitter, and early refresh - and state the **consistency cost** of caching authoritative data.
+- Engineer **replication and failover** for the cache, and decide whether the cache even *deserves* HA (high availability).
+- Defend against **hot keys** and **cache stampede / thundering herd** with request coalescing, TTL (time-to-live) jitter, and early refresh - and state the **consistency cost** of caching authoritative data.
 
 ### Intuition first
 A distributed cache is the **front-of-house at a busy restaurant**, and the database is the **kitchen**. Most diners order the same ten dishes, so the front-of-house keeps those plated under a heat lamp: a request for the popular dish is served in **seconds from the lamp (a cache hit)** instead of **minutes from the kitchen (an origin read)**. The cache absorbs the repetitive demand so the slow, expensive kitchen only does the rare or genuinely new work.
@@ -31,7 +31,7 @@ A distributed cache is an in-memory key-value tier - **Redis** or **Memcached** 
 
 #### Why a cache, in numbers (the leverage)
 
-Take a read-heavy service at **50,000 read QPS**. An origin Postgres read costs ~**10 ms**; a Redis hit costs ~**0.5-1 ms** (the latency hierarchy). Put a read-through cache in front at a **90% hit rate**:
+Take a read-heavy service at **50,000 read QPS** (queries per second). An origin Postgres read costs ~**10 ms**; a Redis hit costs ~**0.5-1 ms** (the latency hierarchy). Put a read-through cache in front at a **90% hit rate**:
 
 - **Origin load:** the database sees only the 10% misses = **5,000 QPS** instead of 50,000 - a **10x reduction**. If one Postgres replica handles ~5,000 read QPS, you've gone from ~10 read replicas to ~1. That is real money and real operational surface removed.
 - **Latency:** blended p50 ≈ `0.9 × 1ms + 0.1 × 10ms ≈ 1.9 ms`, down from a flat ~10 ms.

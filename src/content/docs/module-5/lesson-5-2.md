@@ -5,12 +5,12 @@ sidebar:
   order: 2
 ---
 
-> **Why this appears in Director loops:** P2P money movement (Venmo, Cash App) is asked because it isolates the hardest distributed-systems problem in payments, **atomic debit + credit across two accounts that may live on different database shards**, with no external payment rail to hide behind. The junior answer draws a single-database transaction and calls it done. The Director answer **sizes TPS first, chooses the simplest consistency mechanism the number justifies, quantifies the failure cost of each approach, and names where money can go missing mid-transfer**. Unlike the full payment platform (card rails, PSPs, global interchange), this problem is purely internal-ledger money movement. The cross-shard atomicity question is the load-bearing tension here; that is where the interview lives.
+> **Why this appears in Director loops:** P2P money movement (Venmo, Cash App) is asked because it isolates the hardest distributed-systems problem in payments, **atomic debit + credit across two accounts that may live on different database shards**, with no external payment rail to hide behind. The junior answer draws a single-database transaction and calls it done. The Director answer **sizes TPS (transactions per second) first, chooses the simplest consistency mechanism the number justifies, quantifies the failure cost of each approach, and names where money can go missing mid-transfer**. Unlike the full payment platform (card rails, PSPs (payment service providers), global interchange), this problem is purely internal-ledger money movement. The cross-shard atomicity question is the load-bearing tension here; that is where the interview lives.
 
 ### Learning objectives
 
 - Size a P2P wallet's **write TPS and storage** before reaching for distributed-transaction machinery.
-- Articulate the **three mechanisms** for cross-shard atomicity, 2PC, saga, event-sourced ledger, with their failure modes and cost drivers, in a trade-off table that doubles as your interview answer.
+- Articulate the **three mechanisms** for cross-shard atomicity, 2PC (two-phase commit), saga, event-sourced ledger, with their failure modes and cost drivers, in a trade-off table that doubles as your interview answer.
 - Identify exactly where money can **"exist on neither shard"** mid-transfer under each mechanism, and design the recovery path.
 - Prevent **double-spend** under concurrent withdrawals from the same account, choosing the right concurrency primitive.
 - Operate at Director altitude: delegate ledger-consistency deep-dives to storage specialists; state a prior on the right mechanism for a given TPS band.
@@ -29,7 +29,7 @@ That is the cross-shard transfer problem. The three mechanisms, 2PC, saga, and e
 
 **Clarifying questions I'd ask (with assumed answers):**
 
-- *What is the transfer scope?* → **Internal wallet-to-wallet only.** No ACH, no card, no external rails. Balance debit on sender + credit on receiver, both in our system.
+- *What is the transfer scope?* → **Internal wallet-to-wallet only.** No ACH (Automated Clearing House), no card, no external rails. Balance debit on sender + credit on receiver, both in our system.
 - *What consistency guarantee does the business require?* → **No money created or destroyed.** Every transfer must be atomic: sender balance decreases by exactly X and receiver increases by exactly X, or neither happens. A temporary "in-flight" state is tolerable if it is bounded and recoverable.
 - *Idempotency on retry?* → **Yes, mandatory.** Network timeouts cause client retries; a retry must not double-debit.
 - *What is the expected TPS?* → **~500 peak internal transfers/sec, ~50 average.** (Venmo/Cash App scale; we will size from this.)
@@ -44,7 +44,7 @@ That is the cross-shard transfer problem. The three mechanisms, 2PC, saga, and e
 4. **Transfer history**, queryable ledger per account.
 5. **Insufficient-funds check**, reject before debit, not after.
 
-**Explicitly out of scope:** card rails, ACH/wire, fraud scoring, KYC/AML, currency conversion, fee calculation, interest, reversals (beyond a compensating transfer). These belong to a broader payments platform.
+**Explicitly out of scope:** card rails, ACH/wire, fraud scoring, KYC/AML (KYC = know your customer), currency conversion, fee calculation, interest, reversals (beyond a compensating transfer). These belong to a broader payments platform.
 
 **Non-functional requirements:**
 
@@ -83,7 +83,7 @@ That is the cross-shard transfer problem. The three mechanisms, 2PC, saga, and e
 **1. Account balances (strongly consistent, write-contended).**
 
 - *Choice:* **relational/NewSQL, Postgres or CockroachDB, sharded by `account_id` hash.** Row-level atomic conditional updates and multi-row transactions (within a shard) are exactly what SQL stores do cheaply.
-- *Rejected, Cassandra LWW:* last-write-wins can create or destroy money under concurrent writes. Even with Cassandra LWT, cross-partition atomicity requires application-level coordination. Invariant is cheap on SQL; expensive on Cassandra.
+- *Rejected, Cassandra LWW:* last-write-wins can create or destroy money under concurrent writes. Even with Cassandra LWT (lightweight transaction), cross-partition atomicity requires application-level coordination. Invariant is cheap on SQL; expensive on Cassandra.
 
 **2. Ledger / transaction log (append-only, immutable).**
 
@@ -92,7 +92,7 @@ That is the cross-shard transfer problem. The three mechanisms, 2PC, saga, and e
 
 **3. In-flight transfer state.**
 
-- *Choice:* **Redis with TTL** for saga stage tracking (fast, self-cleaning). For 2PC, the coordinator log lives in the transactional DB (durability required). *Trade-off:* Redis loses state on restart, requiring the saga recovery sweeper; the DB is durable but adds write overhead.
+- *Choice:* **Redis with TTL** (time-to-live) for saga stage tracking (fast, self-cleaning). For 2PC, the coordinator log lives in the transactional DB (durability required). *Trade-off:* Redis loses state on restart, requiring the saga recovery sweeper; the DB is durable but adds write overhead.
 
 ---
 
@@ -202,7 +202,7 @@ flowchart LR
     end
 ```
 
-**Two-Phase Commit (2PC):** the coordinator sends PREPARE to both shards; both lock and vote YES/NO; coordinator sends COMMIT or ABORT. The shards remain locked between PREPARE and COMMIT, this is the **blocking problem**: if the coordinator crashes after PREPARE but before COMMIT, shards are locked until recovery. At 500 TPS with cross-shard on the fast path, a coordinator crash during peak locks money for the duration of coordinator recovery (seconds to minutes). *Rejected for high-TPS hot-path* unless using a distributed SQL system (CockroachDB, Spanner) that handles 2PC internally with Raft-based coordinator recovery, those systems make 2PC viable by keeping commit latency under ~10 ms p99 and eliminating the single-coordinator SPOF.
+**Two-Phase Commit (2PC):** the coordinator sends PREPARE to both shards; both lock and vote YES/NO; coordinator sends COMMIT or ABORT. The shards remain locked between PREPARE and COMMIT, this is the **blocking problem**: if the coordinator crashes after PREPARE but before COMMIT, shards are locked until recovery. At 500 TPS with cross-shard on the fast path, a coordinator crash during peak locks money for the duration of coordinator recovery (seconds to minutes). *Rejected for high-TPS hot-path* unless using a distributed SQL system (CockroachDB, Spanner) that handles 2PC internally with Raft-based coordinator recovery, those systems make 2PC viable by keeping commit latency under ~10 ms p99 and eliminating the single-coordinator SPOF (single point of failure).
 
 **Saga (choreography / orchestration):** debit sender first (local transaction on sender's shard), then credit receiver (local transaction on receiver's shard). If credit fails, issue a compensating debit on the receiver and a compensating credit on the sender. Each step is independently atomic. The in-flight window is real: between the debit commit and the credit commit, **money exists on neither shard**, it is "in transit" in the saga state. Recovery is the sweeper: it finds PENDING sagas older than a TTL and re-drives or compensates. *Trade-off:* no coordinator lock, high availability, forward-progress under partition, but the compensating transaction must be idempotent and retryable, and you must handle the case where compensation itself fails (compensation of the compensation). Operationally complex but well-understood at Uber, Airbnb, and similar scale.
 
@@ -260,7 +260,7 @@ Saga in state DEBIT_COMMITTED / CREDIT_PENDING. Sweeper finds the record after T
 
 **Failure mode 2, double-spend (concurrent debits).**
 
-Optimistic CAS on `balance + version`, one winner commits; the other sees 0 rows updated and returns INSUFFICIENT_FUNDS. *Rejected: Redis SETNX per account*, adds a distributed lock dependency on the fast path; CAS has no external dependency.
+Optimistic CAS (compare-and-swap) on `balance + version`, one winner commits; the other sees 0 rows updated and returns INSUFFICIENT_FUNDS. *Rejected: Redis SETNX per account*, adds a distributed lock dependency on the fast path; CAS has no external dependency.
 
 **Failure mode 3, idempotency store miss (Redis restart).**
 
@@ -284,7 +284,7 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 **At 50× (25,000 TPS, super-app scale):** Saga sweeper throughput becomes the bottleneck. The event-sourced ledger earns its complexity: Kafka's append log scales to millions of events/s; projectors maintain balance snapshots cheaply; audit is free. The engineering tax (snapshot management, projector idempotency) is now justified.
 
-**At global multi-region:** Cross-region 2PC (~100 ms RTT) is untenable on the fast path. The pattern: **region-affinity routing** (~70% of transfers are intra-region) + async saga for cross-region. The sender sees PENDING; the credit completes asynchronously.
+**At global multi-region:** Cross-region 2PC (~100 ms RTT (round-trip time)) is untenable on the fast path. The pattern: **region-affinity routing** (~70% of transfers are intra-region) + async saga for cross-region. The sender sees PENDING; the credit completes asynchronously.
 
 **Hardest trade-offs to defend:**
 
@@ -294,7 +294,7 @@ At 500 system TPS, no single account is a problem. A business account at ~1,000 
 
 **What I'd delegate (the explicit Director move):**
 
-- *"The storage team benchmarks saga vs CockroachDB 2PC at our peak TPS on the actual shard topology. My prior is CockroachDB 2PC under 2,000 TPS, simpler operational model, lower compensation-code surface, and saga above that. They own the SLA on commit latency."*
+- *"The storage team benchmarks saga vs CockroachDB 2PC at our peak TPS on the actual shard topology. My prior is CockroachDB 2PC under 2,000 TPS, simpler operational model, lower compensation-code surface, and saga above that. They own the SLA (service-level agreement) on commit latency."*
 - *"The fraud / AML team owns the transfer-velocity checks (N transfers/hour per account, unusual amount thresholds). I expose a synchronous `fraud.check(transferId)` call in the transfer service; they own the model. I treat it as a latency budget item: if they need >100 ms, we make it async and hold in PENDING."*
 - *"The ledger reconciliation job is a daily batch that verifies sum(all balances) = constant. The storage team writes it; it runs on a read replica. I want an alert if it detects drift > $0.01."*
 

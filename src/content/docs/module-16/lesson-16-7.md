@@ -12,7 +12,7 @@ sidebar:
 - Frame the load-bearing tension, **golden path vs mandate**: adoption is voluntary, so the path must beat the status quo, with **escape hatches** so the paved road never becomes a cage.
 - Make the **Backstage/Humanitec vs in-house** call with the build-vs-buy rule: buy the undifferentiated chassis, build the paths that encode *your* opinions.
 - Sequence the **8-team Jenkins migration** so no release is ever blocked, pilots, dual-running, the deadline arriving last.
-- Operate the platform as a **Team Topologies platform team**: a product org with a roadmap, support SLAs, and a budget defended in toil-hours returned.
+- Operate the platform as a **Team Topologies platform team**: a product org with a roadmap, support SLAs (service-level agreements), and a budget defended in toil-hours returned.
 
 ### Intuition first
 A city wants people off a dangerous dirt road. Option one: barricade it by decree, drivers are furious, half cut through farm fields (shadow IT). Option two: **build a highway that is faster than the dirt road**, and watch traffic move on its own. The dirt road empties because the highway *wins*; only then do you decommission it. An IDP is the highway: the **golden path** is the paved, opinionated route from "I have code" to "running in production with logs, metrics, and rollback," so much faster than hand-rolled Jenkins-plus-Terraform that choosing it is self-interest, not obedience. And highways have **exits**: a team with a genuinely unusual workload (GPU training, an embedded toolchain) must be able to leave the paved road *without leaving the city*, a sanctioned escape hatch at a lower support tier. Platforms without exits don't get compliance; they get covert off-roading you can no longer see, secure, or budget.
@@ -25,13 +25,13 @@ The math that makes this real: in a 400-engineer org, infrastructure toil, pipel
 
 > **Adaptation, said out loud:** in a product design, R scopes user features. Here the users are **internal developers**, and R is literally **customer discovery, interview the 8 teams before drawing boxes**. Skip it and you build the platform the platform team wants. The artifact is a ranked pain inventory, not a feature list.
 
-**Anchor scenario:** ~400 engineers, ~50 services, 8 product teams (stream-aligned, in Team Topologies vocabulary) on a self-hosted Jenkins: ~200 hand-written Jenkinsfiles, plugins two years behind on CVEs, **~1.5 FTE of informal labor** keeping it alive, and **2-3 days** from repo creation to first production deploy.
+**Anchor scenario:** ~400 engineers, ~50 services, 8 product teams (stream-aligned, in Team Topologies vocabulary) on a self-hosted Jenkins: ~200 hand-written Jenkinsfiles, plugins two years behind on CVEs (Common Vulnerabilities and Exposures), **~1.5 FTE of informal labor** keeping it alive, and **2-3 days** from repo creation to first production deploy.
 
 **What the team interviews surface (assumed answers):**
 - *Top pain?* → **Time-to-first-deploy** (days of yak-shaving) and **flakiness** (Jenkins stalls block releases ~2×/month).
 - *What do teams NOT want?* → To learn Kubernetes internals, write Terraform, or be migrated mid-quarter. Two teams: "don't touch my release dates."
 - *Outliers?* → One GPU/ML team, one mobile team. **The golden path will not fit everyone, plan for it now.**
-- *Who pages?* → Teams own their services' on-call (keep that), but everyone pages *the Jenkins guy*, an informal SPOF that is itself part of the case for change.
+- *Who pages?* → Teams own their services' on-call (keep that), but everyone pages *the Jenkins guy*, an informal SPOF (single point of failure) that is itself part of the case for change.
 
 **Functional requirements (golden path, v1):**
 1. **Scaffold**: new service from a template, repo, pipeline, infra, observability wired, in minutes.
@@ -45,14 +45,14 @@ The math that makes this real: in a 400-engineer org, infrastructure toil, pipel
 **Non-functional requirements, unusual ones:**
 - **Adoption is voluntary.** No VP edict in year one; the path wins on merit or the design has failed. (The security baseline is the one legitimate mandate, and the platform makes compliance *free*.)
 - **Never block a product team's release.** The migration NFR; any cutover that risks a date is rejected by construction.
-- **Metrics pinned up front:** % of services on the golden path (target 70% by month 12), **time-to-first-deploy < 1 hour**, support tickets per service trending *down*, DORA deploy frequency trending up. Not feature count.
-- **The platform is a product:** a named owner, a public roadmap, a support SLA (< 4h first response), quarterly developer-NPS. Directors fund products, not projects.
+- **Metrics pinned up front:** % of services on the golden path (target 70% by month 12), **time-to-first-deploy < 1 hour**, support tickets per service trending *down*, DORA (DevOps Research and Assessment) deploy frequency trending up. Not feature count.
+- **The platform is a product:** a named owner, a public roadmap, a support SLA (< 4h first response), quarterly developer-NPS (net promoter score). Directors fund products, not projects.
 
 ---
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS. Estimation is two ledgers, **platform-team cost vs toil removed**, plus the **adoption arithmetic** that decides whether they ever balance. Same estimation discipline: round aggressively, state assumptions.
+> **Adaptation, said out loud:** no QPS (queries per second). Estimation is two ledgers, **platform-team cost vs toil removed**, plus the **adoption arithmetic** that decides whether they ever balance. Same estimation discipline: round aggressively, state assumptions.
 
 **Cost.** Heuristic: platform teams run **~5-8% of engineering**. At 400 engineers, 7 × $250K ≈ $1.75M/yr + ~$300K infra/tooling ≈ **$2M/yr all-in**.
 
@@ -160,7 +160,7 @@ Four entities: **Component** (service: repo, runtime type, `tier`, lifecycle), *
 
 **`resources`**: `id` (pk), `component` (fk), `kind` (postgres/redis/queue/bucket), `size`, `state` (requested/ready/failed), the reconciliation target for the infra orchestrator.
 
-**`scorecard_results`**: `component` (fk), `check_id`, `status`, `checked_at`. Typical v1 checks: manifest on current `apiVersion`; SLO + dashboard exist; paging route verified; rollback exercised in last 90 days; no direct-to-prod side-door deploys detected (the fake-adoption detector, compare platform-API deploy events against running image digests).
+**`scorecard_results`**: `component` (fk), `check_id`, `status`, `checked_at`. Typical v1 checks: manifest on current `apiVersion`; SLO (service-level objective) + dashboard exist; paging route verified; rollback exercised in last 90 days; no direct-to-prod side-door deploys detected (the fake-adoption detector, compare platform-API deploy events against running image digests).
 
 Adoption rate = `count(tier='golden' AND no side-door flag) / count(*)` over production-lifecycle components. Publish weekly, per team, *to the platform team first*, public per-team shaming dashboards are a mandate in disguise and poison the customer relationship.
 

@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> **Why this problem separates Directors from ICs:** QPS is trivial, 1,000 transactions per second is nothing for a distributed system. The failure mode that ends careers is treating money movement like data movement. Two of eleven candidates passed a Stripe-style payments interview at one major fintech; the other nine were eliminated for the same reason: they built an eventually-consistent CRUD service. Money demands *exactly-once* effects on *at-least-once* infrastructure talking to *external rails that cannot roll back*. Get that wrong once in production and you have a regulatory incident, not a bug ticket. A Director must own that tension from the first sentence.
+> **Why this problem separates Directors from ICs (individual contributors):** QPS (queries per second) is trivial, 1,000 transactions per second is nothing for a distributed system. The failure mode that ends careers is treating money movement like data movement. Two of eleven candidates passed a Stripe-style payments interview at one major fintech; the other nine were eliminated for the same reason: they built an eventually-consistent CRUD (create, read, update, delete) service. Money demands *exactly-once* effects on *at-least-once* infrastructure talking to *external rails that cannot roll back*. Get that wrong once in production and you have a regulatory incident, not a bug ticket. A Director must own that tension from the first sentence.
 
 ---
 
@@ -15,7 +15,7 @@ sidebar:
 2. Design **idempotency keys** as the mechanism that gives exactly-once semantics on at-least-once infrastructure; name the exact failure mode each layer of the stack prevents.
 3. Model an **immutable double-entry ledger** at decision level and defend why append-only is non-negotiable for audit, reconciliation, and regulatory compliance.
 4. Frame **reconciliation as a first-class operational process**, not error recovery but the owned admission that the system *will* drift, with jobs, alerting, and a finance partnership to close it.
-5. Run a **RESHADED spine with inverted NFR priority**, consistency and auditability dominate; QPS is a footnote, and design-evolve into subscription/recurring billing.
+5. Run a **RESHADED spine with inverted NFR (non-functional requirement) priority**, consistency and auditability dominate; QPS is a footnote, and design-evolve into subscription/recurring billing.
 
 ---
 
@@ -31,12 +31,12 @@ Imagine you walk up to an ATM, insert your card, and press "Withdraw $200." The 
 
 **Clarifying questions I'd ask (with assumed answers):**
 
-- *Payment rails?* → **Card networks (Visa/Mastercard) via a PSP, plus ACH/bank transfer.** Stripe-style: we are the platform; merchants integrate with us; we integrate with the external rails.
+- *Payment rails?* → **Card networks (Visa/Mastercard) via a PSP (payment service provider), plus ACH/bank transfer.** Stripe-style: we are the platform; merchants integrate with us; we integrate with the external rails.
 - *Payout model?* → **Collect from buyer, hold in platform ledger, settle to merchant T+1 or T+2.**
 - *Recurring billing?* → **Yes, subscriptions, dunning.** Cover in design evolution (D step).
 - *Refunds?* → **Yes, partial and full.** Modeled as ledger entries, not deletes.
 - *Multi-currency?* → **Yes, but treat FX as a delegated microservice.** Scope to single-currency core.
-- *Fraud / AML?* → **Delegated to a fraud-scoring service.** I own the consistency boundary; I don't own the scoring model.
+- *Fraud / AML (anti-money laundering)?* → **Delegated to a fraud-scoring service.** I own the consistency boundary; I don't own the scoring model.
 
 **Functional requirements:**
 
@@ -46,7 +46,7 @@ Imagine you walk up to an ATM, insert your card, and press "Withdraw $200." The 
 4. Expose a **transaction history** API for merchants and internal auditors.
 5. Generate **reconciliation reports** against PSP and bank settlement files.
 
-**Explicitly cut:** fraud ML, FX conversion, dispute/chargeback lifecycle, tokenization vault internals, compliance reporting UI, merchant onboarding/KYC. I'll name these and say "delegated" or "separate service."
+**Explicitly cut:** fraud ML, FX conversion, dispute/chargeback lifecycle, tokenization vault internals, compliance reporting UI, merchant onboarding/KYC (know your customer). I'll name these and say "delegated" or "separate service."
 
 **Non-functional requirements, priority order:**
 
@@ -55,9 +55,9 @@ Imagine you walk up to an ATM, insert your card, and press "Withdraw $200." The 
 | 1 | **Exactly-once money effects** | Zero duplicate charges; zero lost payments |
 | 2 | **Audit trail completeness** | Every state transition immutably persisted; 7-year retention |
 | 3 | **Consistency** | Ledger debits = credits at all times; no phantom balances |
-| 4 | **Durability** | RPO ≈ 0; synchronous replication before client ack |
+| 4 | **Durability** | RPO (recovery point objective) ≈ 0; synchronous replication before client ack |
 | 5 | **Availability** | 99.99% (4 nines, ~52 min/yr downtime) for the charge path |
-| 6 | **Latency** | Charge API p99 < 2 s end-to-end (card network RTT dominates) |
+| 6 | **Latency** | Charge API p99 < 2 s end-to-end (card network RTT (round-trip time) dominates) |
 | 7 | **Throughput** | 1,000-5,000 TPS peak; **trivially served by any reasonable DB** |
 
 **The inversion, stated explicitly:** in the URL shortener and Twitter problems we scaled read throughput. Here, **1,000 TPS is not the challenge, a single Postgres node handles 10K+ TPS on simple writes.** The challenge is correctness under partial failure. Every architectural decision flows from NFRs 1-4, not from NFR 7.
@@ -76,7 +76,7 @@ Imagine you walk up to an ATM, insert your card, and press "Withdraw $200." The 
 - Transactions: `100M/day × 2 KB × 365 days × 7 years ≈ 511 TB` over 7 years. Tiered storage, hot 90 days on NVMe, warm 1 year on standard SSD, cold archival on S3 Glacier, keeps the live DB at **~18 TB**. Manageable.
 - Ledger entries: each transaction creates 2-4 journal entries; at ~500 B each → **~100 GB/day**, ~36 TB/year. Hot set <1 TB.
 
-**Idempotency key store:** one Redis entry per in-flight request, TTL ~24 hours, ~50 B each; at 5,800 req/s peak with a 24-hour window → `5,800 × 86,400 × 50 B ≈ 25 GB`. **Fits comfortably in Redis**.
+**Idempotency key store:** one Redis entry per in-flight request, TTL (time-to-live) ~24 hours, ~50 B each; at 5,800 req/s peak with a 24-hour window → `5,800 × 86,400 × 50 B ≈ 25 GB`. **Fits comfortably in Redis**.
 
 **Reconciliation job:** PSP settlement files arrive once per day, ~100M rows; a batch job at 2 AM comparing against our ledger at ~100K rows/s takes **~17 minutes**. Acceptable.
 
@@ -214,7 +214,7 @@ GET  /v1/ledger/{account_id}?from=&to=&page=  -> 200 { entries:[{entryId,debit,c
 
 **`transactions`**, primary key `transaction_id` (UUID), shard key **`merchant_id`**. Columns: `status` (enum: PENDING / AUTHORIZED / CAPTURED / SETTLED / REFUNDED / FAILED), `amount`, `currency`, `idempotency_key`, `psp_charge_id` (external reference), `created_at`, `updated_at`. Unique index on `(merchant_id, idempotency_key)`, the database enforces deduplication even if the application layer is bypassed.
 
-**`ledger_entries`**, append-only, never updated or deleted. Primary key `entry_id`; columns: `transaction_id` (FK), `account_id` (buyer / merchant / suspense / fee), `entry_type` (DEBIT / CREDIT), `amount`, `currency`, `created_at`. Partial index on `(account_id, created_at)` for balance queries. The invariant: for any completed transaction, `SUM(credits) = SUM(debits)` across all entries. This is asserted at commit time by the application; a DB constraint or a periodic reconciliation job catches any drift.
+**`ledger_entries`**, append-only, never updated or deleted. Primary key `entry_id`; columns: `transaction_id` (FK (foreign key)), `account_id` (buyer / merchant / suspense / fee), `entry_type` (DEBIT / CREDIT), `amount`, `currency`, `created_at`. Partial index on `(account_id, created_at)` for balance queries. The invariant: for any completed transaction, `SUM(credits) = SUM(debits)` across all entries. This is asserted at commit time by the application; a DB constraint or a periodic reconciliation job catches any drift.
 
 **`idempotency_records`**, primary key `(merchant_id, idempotency_key)`. Columns: `status` (PENDING / COMPLETE / FAILED), `response_body` (JSON-serialized final response), `created_at`, `expires_at`. Written before the PSP call; updated atomically with the transaction commit.
 
@@ -270,7 +270,7 @@ Application bug writes a transaction record but skips a ledger entry. The reconc
 
 **Reconciliation as a first-class operational process (the Director framing):**
 
-Most candidates treat reconciliation as a bug-fix script. The Director framing: reconciliation is the **explicit architectural admission that your distributed system will drift.** PSPs double-charge. Settlement files arrive late. Clock skew puts a transaction in the wrong day's batch. It is the **operational contract** with the financial rails, not error recovery. It requires: a daily job comparing your ledger against PSP settlement files; alerting on any discrepancy > $0 within 2 hours; a finance-team SLA for resolution (typically 24 hours); an audit trail of every discrepancy and its resolution. Cost: one reconciliation engineer and a finance partnership. Without it, you fail your first SOC 2 audit. I'd delegate the job implementation to my data-engineering team with a stated requirement: zero unresolved discrepancies older than 24 hours.
+Most candidates treat reconciliation as a bug-fix script. The Director framing: reconciliation is the **explicit architectural admission that your distributed system will drift.** PSPs double-charge. Settlement files arrive late. Clock skew puts a transaction in the wrong day's batch. It is the **operational contract** with the financial rails, not error recovery. It requires: a daily job comparing your ledger against PSP settlement files; alerting on any discrepancy > $0 within 2 hours; a finance-team SLA (service-level agreement) for resolution (typically 24 hours); an audit trail of every discrepancy and its resolution. Cost: one reconciliation engineer and a finance partnership. Without it, you fail your first SOC 2 (System and Organization Controls 2) audit. I'd delegate the job implementation to my data-engineering team with a stated requirement: zero unresolved discrepancies older than 24 hours.
 
 ---
 
@@ -286,7 +286,7 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 2. **Dunning state machine.** When a renewal charge fails (card declined, expired card), the subscription enters a dunning sequence: retry at T+1 day, T+3 days, T+7 days, then cancel. The state machine lives in the `subscription_billing_events` table (append-only, same ledger pattern). States: ACTIVE → PAST_DUE → DUNNING → CANCELED (or RENEWED on recovery). Each retry is a new charge attempt with a new idempotency key derived from `(subscription_id, billing_period, retry_number)`.
 
-3. **The operational dimension Directors must name:** dunning is a customer experience and a revenue problem, not just a technical one. A 1% improvement in dunning recovery on $1B ARR is $10M. The dunning retry schedule, the copy in the "update your card" email, and the grace period before cancellation are business decisions that belong to product and finance, not engineering. The engineering contract is: expose a clean `dunning.retryCharge(subscriptionId, billingPeriod, retryN)` interface with idempotency, and fire events that the CRM can consume.
+3. **The operational dimension Directors must name:** dunning is a customer experience and a revenue problem, not just a technical one. A 1% improvement in dunning recovery on $1B ARR (annual recurring revenue) is $10M. The dunning retry schedule, the copy in the "update your card" email, and the grace period before cancellation are business decisions that belong to product and finance, not engineering. The engineering contract is: expose a clean `dunning.retryCharge(subscriptionId, billingPeriod, retryN)` interface with idempotency, and fire events that the CRM can consume.
 
 **At 10× throughput (50,000 TPS):**
 
@@ -300,7 +300,7 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 | Decision | Option A | Option B | Option C | Use when... |
 |---|---|---|---|---|
-| **Idempotency key store (fast path)** | **Redis + Postgres (Redis as read-cache, Postgres as truth)** | Postgres only | Distributed KV (DynamoDB conditional write) | **A** for latency + durability at this scale. **B** if Redis ops cost is unjustified or you're early-stage. **C** if you're already all-in on AWS and want a single datastore. |
+| **Idempotency key store (fast path)** | **Redis + Postgres (Redis as read-cache, Postgres as truth)** | Postgres only | Distributed KV (key-value) (DynamoDB conditional write) | **A** for latency + durability at this scale. **B** if Redis ops cost is unjustified or you're early-stage. **C** if you're already all-in on AWS and want a single datastore. |
 | **Ledger co-location** | **Ledger entries in the same Postgres txn as the transaction record** | Separate ledger microservice with saga | Event-sourced ledger (Kafka as truth) | **A** for atomic commit, no distributed transaction on the critical path (our choice). **B** when org boundaries force microservices (accept the saga complexity). **C** for high-throughput append-heavy workloads where Kafka is already the platform truth. |
 | **Reconciliation timing** | **Nightly batch (Spark vs PSP settlement file)** | Near-real-time streaming (Flink vs PSP webhooks) | Manual, on-demand | **A** for most payment platforms where PSP settlement files are daily anyway. **B** at 10× scale or when the PSP supports webhooks with low latency. **C** never in production, this is a compliance requirement, not optional. |
 | **Shard key** | **`merchant_id`**, locality for per-merchant queries and idempotency | `transaction_id` hash, even distribution | `(merchant_id, date_bucket)`, locality + hot-merchant mitigation | **A** as default. **C** for platforms with a handful of very large merchants. **B** rejected, scatters per-merchant queries and cross-shards idempotency checks. |
@@ -339,7 +339,7 @@ A subscription is a charge that recurs on a schedule. The new components:
 
 **Q2. An engineer proposes switching the ledger to Cassandra for write throughput. Evaluate.**
 
-> *Model:* At 5,800 TPS, Postgres handles this comfortably, solving a problem we don't have. Cassandra's LWW model breaks the double-entry invariant: two concurrent writes can resolve via LWW to a balance that's wrong for both. The ledger needs atomic multi-row commits across multiple accounts. If we hit ~50K TPS, I'd move to CockroachDB or Spanner, ACID at horizontal scale. Cassandra is right for a different data class (append-only time-series, high-throughput wide-column reads); not for a ledger that requires transaction atomicity.
+> *Model:* At 5,800 TPS, Postgres handles this comfortably, solving a problem we don't have. Cassandra's LWW model breaks the double-entry invariant: two concurrent writes can resolve via LWW to a balance that's wrong for both. The ledger needs atomic multi-row commits across multiple accounts. If we hit ~50K TPS, I'd move to CockroachDB or Spanner, ACID (atomicity, consistency, isolation, durability) at horizontal scale. Cassandra is right for a different data class (append-only time-series, high-throughput wide-column reads); not for a ledger that requires transaction atomicity.
 
 **Q3. Nightly reconciliation finds 47 transactions where PSP shows "captured" but our ledger shows "failed." What happened and how do you resolve it?**
 

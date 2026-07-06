@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> **This is the most-asked low-level design problem in the industry, Amazon, Google, Microsoft, Uber all use it, and every OOD course opens with it, precisely because it is small.** A junior candidate fills the whiteboard with an inheritance tree and four design patterns before asking a single question. A Director answer locks scope to 2-3 clean entities, builds the boring v1 the stated requirements paid for, **volunteers the one real correctness problem (two cars racing for the last spot) unprompted**, and shows where the design would flex, without building that flexibility on spec. The interviewer is not scoring UML vocabulary. They are scoring **restraint**, a question about how you'll run an org, asked through a parking lot.
+> **This is the most-asked low-level design problem in the industry, Amazon, Google, Microsoft, Uber all use it, and every OOD (object-oriented design) course opens with it, precisely because it is small.** A junior candidate fills the whiteboard with an inheritance tree and four design patterns before asking a single question. A Director answer locks scope to 2-3 clean entities, builds the boring v1 the stated requirements paid for, **volunteers the one real correctness problem (two cars racing for the last spot) unprompted**, and shows where the design would flex, without building that flexibility on spec. The interviewer is not scoring UML vocabulary. They are scoring **restraint**, a question about how you'll run an org, asked through a parking lot.
 
 ### Learning objectives
 - Adapt the **RESHADED** spine to an LLD problem, say out loud which letters shrink (E becomes capacity math, not QPS) and which transform (A = class interfaces, H = class/state diagram, D = entity model).
@@ -23,7 +23,7 @@ Everything a weak answer adds, `AbstractVehicleFactory`, a `Car`/`Truck`/`Motorc
 
 ## R: Requirements
 
-> Identical to HLD: scope is the first signal. In LLD the cut list matters even more, because every uncut requirement becomes a class, and classes are where gold-plating hides.
+> Identical to HLD (high-level design): scope is the first signal. In LLD the cut list matters even more, because every uncut requirement becomes a class, and classes are where gold-plating hides.
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *One facility or a chain?* → **One lot, single facility.** (A chain changes S and E entirely, see Design evolution.)
@@ -48,7 +48,7 @@ Everything a weak answer adds, `AbstractVehicleFactory`, a `Car`/`Truck`/`Motorc
 
 ## E: Estimation
 
-> Here is the first loud adaptation: **E nearly drops.** There is no QPS story, there is capacity sizing and an arrival rate, and the honest conclusion is that the numbers are tiny. Saying "the numbers are tiny, so the design is driven by correctness and maintainability, not throughput" *is* the Director estimation answer.
+> Here is the first loud adaptation: **E nearly drops.** There is no QPS (queries per second) story, there is capacity sizing and an arrival rate, and the honest conclusion is that the numbers are tiny. Saying "the numbers are tiny, so the design is driven by correctness and maintainability, not throughput" *is* the Director estimation answer.
 
 - **Capacity:** 4 floors × 250 spots = **1,000 spots** (say 100 small / 700 regular / 200 large).
 - **Arrival rate:** 2 entry gates × ~1 car per 15 s at rush ≈ **0.13 cars/s**, about *four orders of magnitude* below anything we'd call a throughput problem.
@@ -192,7 +192,7 @@ The correctness hinges on one line: `poll()` on `ConcurrentLinkedQueue` is an at
 **Three viable fixes, name all three, pick one, defend it:**
 
 1. **Coarse lock:** one mutex around `park`/`unpark`. Trivially correct, fully serialized. *Quantify before sneering:* at 0.13 arrivals/s with a ~10 µs critical section, contention is ~0.0001%, a coarse lock is **not wrong here**, and saying so is itself a restraint signal.
-2. **Per-spot CAS:** `status.compareAndSet(AVAILABLE, HELD)`; loser retries the next spot. Maximal concurrency, but near-full, losers scan many spots retrying: O(n) under exactly the contention you built it for.
+2. **Per-spot CAS (compare-and-swap):** `status.compareAndSet(AVAILABLE, HELD)`; loser retries the next spot. Maximal concurrency, but near-full, losers scan many spots retrying: O(n) under exactly the contention you built it for.
 3. **Concurrent free-list per spot type**, a lock-free queue of available spots; atomic `poll()` to claim, `offer()` to release. The claim **is** the dequeue: one winner by construction, losers get `null` in O(1) and fall through to the next size or "full."
 
 **Decision: the concurrent free-list (option 3).** It makes the invariant structural, a spot is claimable *because* it's in the pool, rather than guarded. *Rejected: the coarse lock*, not on throughput (the math says it survives) but because the free-list is the same line count with no shared bottleneck to reason about; *rejected: per-spot CAS*, because it degrades precisely at high occupancy, the only contention regime this system has. The `Held` window between claim and ticket persistence gets a timeout sweep, so a gate crash mid-assignment self-heals, lazy reclaim, exactly as Ticketmaster's holds.

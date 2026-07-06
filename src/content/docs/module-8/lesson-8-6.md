@@ -60,7 +60,7 @@ I'll design for **both detection modes on one collection layer**, and the load-b
 - **Scale to thousands of tables**, collection and detection horizontal in table count.
 - **Heterogeneous-source lineage**, the graph must span warehouse, lake, and transform engines (dbt, Spark, Airflow), which is the hard part of lineage.
 
-**The skew, stated:** this is **metadata-read-heavy, scan-cost-constrained, precision-sensitive.** The hard parts are *keeping monitoring cheap (metadata not scans), keeping false positives low (alert fatigue), and capturing lineage across heterogeneous engines*, not write throughput or query latency. The volume is *thousands of tables × a handful of checks per interval*, modest in QPS, brutal in scan cost if done naively. That shapes every downstream choice.
+**The skew, stated:** this is **metadata-read-heavy, scan-cost-constrained, precision-sensitive.** The hard parts are *keeping monitoring cheap (metadata not scans), keeping false positives low (alert fatigue), and capturing lineage across heterogeneous engines*, not write throughput or query latency. The volume is *thousands of tables × a handful of checks per interval*, modest in QPS (queries per second), brutal in scan cost if done naively. That shapes every downstream choice.
 
 ---
 
@@ -86,7 +86,7 @@ I'll design for **both detection modes on one collection layer**, and the load-b
 **False-positive / alert-fatigue budget (the precision constraint):**
 - 5,000 tables × 5 checks × 24/day ≈ **~600k checks/day.** Even a **1% false-positive rate is 6,000 false alerts/day**, instant alert fatigue, the platform gets muted and dies. The design target is **< 0.1% effective alert rate after dedup and grouping**, achieved by lineage-based grouping (one root cause = one incident, not 50), seasonality-aware baselines, and tiered severity. **Precision is a first-class budget**, not an afterthought.
 
-**Storage (the health time-series, reusing 9.12):** per-table pillar metrics are a **time series** (row count, freshness lag, null rate per column, over time). 5,000 tables × ~20 tracked metrics × hourly × 13 months ≈ a few billion points, **single-digit TB compressed** in a TSDB, trivial next to the platform it watches. Downsampling/retention tiers apply exactly as in 9.12.
+**Storage (the health time-series, reusing 9.12):** per-table pillar metrics are a **time series** (row count, freshness lag, null rate per column, over time). 5,000 tables × ~20 tracked metrics × hourly × 13 months ≈ a few billion points, **single-digit TB compressed** in a TSDB (time-series database), trivial next to the platform it watches. Downsampling/retention tiers apply exactly as in 9.12.
 
 ---
 
@@ -101,10 +101,10 @@ I'll design for **both detection modes on one collection layer**, and the load-b
 
 **2. Lineage graph (the diagnosis store, the new piece).**
 - *Access pattern:* given a broken table, traverse **upstream** ("what feeds this?", for root cause) and **downstream** ("what consumes this?", for impact); both are multi-hop graph traversals over thousands of nodes (tables, columns, dashboards, models, jobs) and their edges (derivation, dependency).
-- *Choice:* a **graph store** (a property graph like Neo4j, or an adjacency model in Postgres/a wide-column store for moderate scale) holding the lineage DAG, populated by the lineage-capture system. Traversal queries answer root-cause and impact directly.
+- *Choice:* a **graph store** (a property graph like Neo4j, or an adjacency model in Postgres/a wide-column store for moderate scale) holding the lineage DAG (directed acyclic graph), populated by the lineage-capture system. Traversal queries answer root-cause and impact directly.
 - *Rejected, recomputing lineage on demand by parsing query logs at incident time:* far too slow when on-call needs the impact set *now*; lineage is captured continuously and stored as a queryable graph. *Rejected, flat foreign-key tables for a deep DAG:* multi-hop impact analysis becomes a pile of self-joins; a graph store is the right model for transitive reachability.
 
-**3. Checks, incidents, and SLO/quality state (small, strongly-consistent).**
+**3. Checks, incidents, and SLO/quality (SLO = service-level objective) state (small, strongly-consistent).**
 - *Access pattern:* test definitions, table criticality tiers, anomaly thresholds, and **open incidents** (status, owner, severity), small, slow-changing, but must be correct and durable (a lost incident is an unrouted failure).
 - *Choice:* a **relational store** (Postgres) for check/test definitions and the incident workflow state machine; strongly consistent, transactional status transitions.
 - *Rejected, co-locating incident state in the TSDB:* couples slow-changing control state to the metric firehose; keep the control plane (definitions, incidents) separate from the data plane (metrics), the same split as 9.12.

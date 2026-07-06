@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-> **This is the most Director-distinctive question in the loop, no IC can fake it.** The documented prompt is blunt: *"You have 40 engineers and this architecture, draw the org,"* or its growth twin, *"the team is going from 15 to 50, reorganize ownership."* It is asked as an org-design case precisely because it tests something no coding round can: whether you know that **the org chart is an architectural input, not an HR artifact**. Conway's law says your system will copy your communication structure whether you like it or not; the junior answer draws the services first and staffs them afterward, then watches the seams land wherever the existing teams already talk. The Director answer draws **both diagrams as one artifact**, and treats the human cost as a first-class constraint: a reorg that loses three senior engineers has destroyed more architecture than it created. Shaping teams to induce the target system (**inverse Conway**) while managing that cost is the entire question.
+> **This is the most Director-distinctive question in the loop, no IC (individual contributor) can fake it.** The documented prompt is blunt: *"You have 40 engineers and this architecture, draw the org,"* or its growth twin, *"the team is going from 15 to 50, reorganize ownership."* It is asked as an org-design case precisely because it tests something no coding round can: whether you know that **the org chart is an architectural input, not an HR artifact**. Conway's law says your system will copy your communication structure whether you like it or not; the junior answer draws the services first and staffs them afterward, then watches the seams land wherever the existing teams already talk. The Director answer draws **both diagrams as one artifact**, and treats the human cost as a first-class constraint: a reorg that loses three senior engineers has destroyed more architecture than it created. Shaping teams to induce the target system (**inverse Conway**) while managing that cost is the entire question.
 
 ### Learning objectives
 - Run an **adapted RESHADED** spine where the system is the *organization*: H becomes the **service diagram and team topology drawn together**, E becomes **cognitive-load and headcount math**, D becomes the **ownership map**.
@@ -25,7 +25,7 @@ The catch the analogy must also carry: families are people. Reassign the grandmo
 
 > **Adaptation, said out loud:** in a product design, R scopes features. Here R scopes the *organization*: what must this org be able to deliver, at what change rate, with what failure modes? The clarifying questions are about business flows, growth, and constraints on people, and they are exactly the questions a junior candidate forgets to ask before drawing boxes around names.
 
-**Anchor scenario (used throughout):** a **40-engineer e-commerce company**, ~$150M GMV, a modular monolith mid-decomposition into domain services, currently organized **by layer**: a frontend team (10), a backend team (16), a data/search team (6), an ops/DBA team (8). Classic Conway: a 3-tier org has produced a 3-tier system, and every feature, "add gift wrapping", crosses three team backlogs and two sprint boundaries.
+**Anchor scenario (used throughout):** a **40-engineer e-commerce company**, ~$150M GMV (gross merchandise value), a modular monolith mid-decomposition into domain services, currently organized **by layer**: a frontend team (10), a backend team (16), a data/search team (6), an ops/DBA team (8). Classic Conway: a 3-tier org has produced a 3-tier system, and every feature, "add gift wrapping", crosses three team backlogs and two sprint boundaries.
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *What does the business need the org to do faster?* → **Ship vertical features end-to-end.** Today a one-week feature takes 6-8 weeks of cross-team queuing. Flow, not raw output, is the complaint.
@@ -41,7 +41,7 @@ The catch the analogy must also carry: families are people. Reassign the grandmo
 4. The org supports the migration itself: someone must own the monolith *while it shrinks*.
 
 **Non-functional requirements (the load-bearing ones):**
-- **Team cognitive load stays within budget**, no team owns more domains than it can hold; this is the org's equivalent of a latency SLO, and we quantify it in E.
+- **Team cognitive load stays within budget**, no team owns more domains than it can hold; this is the org's equivalent of a latency SLO (service-level objective), and we quantify it in E.
 - **≤ 1 owning team per system boundary.** Two teams per boundary only during an explicit, end-dated handover; three or more is a design error, not a compromise.
 - **Regrettable attrition through the reorg < ~5%** (2 of 40). Above that, the reorg is destroying the asset it's reorganizing.
 - **No feature freeze.** The business doesn't stop; the reorg sequences around delivery, the way a zero-downtime migration sequences around live traffic.
@@ -52,7 +52,7 @@ The catch the analogy must also carry: families are people. Reassign the grandmo
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS. Estimation here is **communication-path math, cognitive-load budgets, headcount arithmetic, and the dollar cost of the reorg itself**, the same estimation discipline (round aggressively, state assumptions) applied to people.
+> **Adaptation, said out loud:** no QPS (queries per second). Estimation here is **communication-path math, cognitive-load budgets, headcount arithmetic, and the dollar cost of the reorg itself**, the same estimation discipline (round aggressively, state assumptions) applied to people.
 
 **Communication paths, why team boundaries exist at all.** 40 people fully meshed is `40 × 39 ÷ 2 = 780` potential pairwise channels. Six teams of ~7 cuts that to ~21 high-bandwidth channels *inside* each team plus **15 inter-team channels**, and the entire design question is *which 15*. Conway's law says the system's seams will land on whichever channels stay chatty; inverse Conway means choosing them deliberately.
 
@@ -144,7 +144,7 @@ flowchart LR
 
 ## A: API design
 
-> **Adaptation, said out loud:** the interfaces here are **team APIs**, the contract each team publishes to the rest of the org. A team's API is its services' endpoints *plus* how to engage the humans: what's self-service, what needs a conversation, what the support SLA is. Inter-team arrows on the H diagram are exactly the things this step specifies.
+> **Adaptation, said out loud:** the interfaces here are **team APIs**, the contract each team publishes to the rest of the org. A team's API is its services' endpoints *plus* how to engage the humans: what's self-service, what needs a conversation, what the support SLA (service-level agreement) is. Inter-team arrows on the H diagram are exactly the things this step specifies.
 
 ```yaml
 # Team API — Fulfilment team (the org-design analogue of an interface)
@@ -182,12 +182,12 @@ engage:
 | Deploy / observability / data rails | Platform (6) | the rails | All teams | X-as-a-service |
 | Test + migration capability | Enabling (2, fractional) | none | rotating | Facilitating, time-boxed |
 
-Two structural notes. **Payments stays inside Checkout** rather than getting its own team: 40 engineers won't sustain a 7th team, the PSP integration is mostly bought, and the PCI scope is contained behind a tokenization boundary, *revisit at 60+ engineers or if in-house risk/fraud is built.* **The 4-person search subsystem is deliberately under two-pizza size**, the price of carving out a specialism; mitigated by pairing it with the shopper team for on-call backup, an explicit, named exception rather than an accident.
+Two structural notes. **Payments stays inside Checkout** rather than getting its own team: 40 engineers won't sustain a 7th team, the PSP (payment service provider) integration is mostly bought, and the PCI scope is contained behind a tokenization boundary, *revisit at 60+ engineers or if in-house risk/fraud is built.* **The 4-person search subsystem is deliberately under two-pizza size**, the price of carving out a specialism; mitigated by pairing it with the shopper team for on-call backup, an explicit, named exception rather than an accident.
 
 <details>
 <summary>Go deeper, fracture planes: where to cut when the seam isn't obvious (IC depth, optional)</summary>
 
-Team Topologies' checklist of viable fracture planes, in rough order of preference for product orgs: **business domain / bounded context** (the default, align with DDD contexts); **regulatory or compliance scope** (PCI, HIPAA, isolate the audited surface, as we did with payments tokenization); **change cadence** (split fast-moving experimentation from slow-moving core); **risk profile** (the part that can never go down vs the part that A/B tests daily); **performance isolation** (a hot path with its own scaling law); **technology** (last resort, mobile/embedded toolchains justify it; "frontend vs backend" does not, which is exactly the layer-org anti-pattern); **geography/time zones** (only when overlap is < ~4 hours, a seam forced by physics). A boundary that doesn't sit on *any* of these planes will leak no matter how clean the diagram looks.
+Team Topologies' checklist of viable fracture planes, in rough order of preference for product orgs: **business domain / bounded context** (the default, align with DDD contexts); **regulatory or compliance scope** (PCI, HIPAA (Health Insurance Portability and Accountability Act), isolate the audited surface, as we did with payments tokenization); **change cadence** (split fast-moving experimentation from slow-moving core); **risk profile** (the part that can never go down vs the part that A/B tests daily); **performance isolation** (a hot path with its own scaling law); **technology** (last resort, mobile/embedded toolchains justify it; "frontend vs backend" does not, which is exactly the layer-org anti-pattern); **geography/time zones** (only when overlap is < ~4 hours, a seam forced by physics). A boundary that doesn't sit on *any* of these planes will leak no matter how clean the diagram looks.
 
 </details>
 

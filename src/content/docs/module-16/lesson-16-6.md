@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-> **This question separates Director from Staff because it isn't an engineering question.** It's attested verbatim in Director and Head-of-Engineering loops ("would you build or buy your auth/payments/search/observability/ML platform?") and it embeds inside every other case the moment you say "we'd use Stripe here." A Staff answer evaluates the technology. A Director answer evaluates the **capital allocation**: multi-year TCO where build cost is mostly *ongoing operations, not v1*; opportunity cost measured in the product work those engineers won't do; and exit triggers written down *before* the contract is signed. "Buy to accelerate, with a defined exit trigger" reads Director. "We could build it better" reads IC ego, and interviewers are listening for exactly that tell.
+> **This question separates Director from Staff because it isn't an engineering question.** It's attested verbatim in Director and Head-of-Engineering loops ("would you build or buy your auth/payments/search/observability/ML platform?") and it embeds inside every other case the moment you say "we'd use Stripe here." A Staff answer evaluates the technology. A Director answer evaluates the **capital allocation**: multi-year TCO (total cost of ownership) where build cost is mostly *ongoing operations, not v1*; opportunity cost measured in the product work those engineers won't do; and exit triggers written down *before* the contract is signed. "Buy to accelerate, with a defined exit trigger" reads Director. "We could build it better" reads IC (individual contributor) ego, and interviewers are listening for exactly that tell.
 
 ### Learning objectives
 - State and apply the decision rule, **build only what differentiates; buy or adopt everything commodity**, and defend it against the engineer's instinct to build.
@@ -26,7 +26,7 @@ A three-star restaurant does not generate its own electricity or write its own p
 **Clarifying questions I'd ask (with assumed answers):**
 - *Which capability, for what business?* → Anchor scenario: a **400-engineer, ~$150M-revenue B2B SaaS company** deciding observability (the worked example), with the other four domains as calibration points.
 - *Is this the product, near the product, or plumbing?* → The **differentiation test**: would a customer pay more, or churn less, because *ours* is better? Observability here: **no**, pure plumbing.
-- *Hard constraints?* → Compliance (PCI, SOC 2, data residency), **data gravity** (egress cost of 50 TB/day), latency (a per-request auth check can't absorb a 100 ms vendor round-trip without a cache plan).
+- *Hard constraints?* → Compliance (PCI, SOC 2 (System and Organization Controls 2), data residency), **data gravity** (egress cost of 50 TB/day), latency (a per-request auth check can't absorb a 100 ms vendor round-trip without a cache plan).
 - *Timeline?* → Capability needed in **one quarter**. Time-to-capability is a requirement, not a preference, and it usually decides v1.
 
 **Functional requirements of the *decision*:** (1) the differentiation verdict, argued; (2) 3-year TCO both ways; (3) opportunity cost named in foregone roadmap; (4) a reversibility plan with exit triggers; (5) an owner and a review date.
@@ -36,7 +36,7 @@ A three-star restaurant does not generate its own electricity or write its own p
 | Domain | Differentiates? | Default verdict |
 |---|---|---|
 | **Auth / identity** | Almost never (unless identity *is* the product) | **Buy or adopt** (Okta/Auth0/Cognito, or self-host Keycloak). Never hand-roll crypto/session logic, a breach is existential; the vendor amortizes a security team you can't afford. |
-| **Payments** | No, until fee volume is enormous | **Buy** (Stripe/Adyen): PCI scope stays out of your codebase. Direct-acquirer builds win only when ~20-30 bps of fees on multi-billion GMV exceed a payments team, a $10B-GMV problem, not a $150M-revenue one. |
+| **Payments** | No, until fee volume is enormous | **Buy** (Stripe/Adyen): PCI scope stays out of your codebase. Direct-acquirer builds win only when ~20-30 bps of fees on multi-billion GMV (gross merchandise value) exceed a payments team, a $10B-GMV problem, not a $150M-revenue one. |
 | **Search** | Sometimes, relevance can be product | **Hybrid**: buy/host the engine (Elastic/OpenSearch/Algolia), *build the relevance layer* if search quality drives revenue. |
 | **Observability** | No | **Buy early; revisit at scale**, the canonical crossover case, worked below. |
 | **ML platform** | The models and data differentiate; the orchestration doesn't | **Assemble/buy** (SageMaker/Vertex/Databricks; serve LLMs via API until token spend crosses the self-host crossover). Build the data moat, not the pipeline plumbing. |
@@ -49,11 +49,11 @@ A three-star restaurant does not generate its own electricity or write its own p
 
 ## E: Estimation
 
-> Adaptation, the centerpiece: E is not QPS. E is **TCO both ways plus opportunity cost**, over 3 years, with the crossover located. This math *is* the interview.
+> Adaptation, the centerpiece: E is not QPS (queries per second). E is **TCO both ways plus opportunity cost**, over 3 years, with the crossover located. This math *is* the interview.
 
 **The worked example: pay Datadog, or staff six engineers?**
 
-The renewal quote lands: **$2.4M/yr** for the 400-engineer org (metrics + logs + APM, observability bills commonly run **$3-6K per engineer per year** at full adoption). The platform lead says: "for that money I can hire six engineers and build it on Prometheus, Grafana, Loki, and Tempo." Run it honestly, both ways.
+The renewal quote lands: **$2.4M/yr** for the 400-engineer org (metrics + logs + APM (application performance monitoring), observability bills commonly run **$3-6K per engineer per year** at full adoption). The platform lead says: "for that money I can hire six engineers and build it on Prometheus, Grafana, Loki, and Tempo." Run it honestly, both ways.
 
 **The build side, count everything, not just salaries:**
 - **People:** 6 engineers × **~$250K loaded** (salary + benefits + equity + overhead, never base salary) = **$1.5M/yr, forever.** Observability platforms are never "done", agents break on every runtime upgrade, retention asks grow, every new service needs onboarding.
@@ -96,8 +96,8 @@ A reusable 3-year TCO sheet, per side:
 Classify what the vendor will hold, by exit pain:
 
 - **Telemetry:** high-volume, short half-life. Exit pain is *low if* you own the pipe, an **OTel collector you operate** makes redirecting the stream a config change; dual-shipping raw data to your own S3 (~$25K/yr) preserves history. *Rejected, vendor agents writing straight to the vendor:* every emit point in 400 engineers' code speaks one vendor's dialect; the exit becomes a 2-year migration instead of a quarter.
-- **Identities (auth):** small data, **enormous** exit pain, password hashes often non-exportable, MFA enrollments don't transfer, sessions invalidate at cutover. Mitigation: integrate via **standards (OIDC/SAML/SCIM)**, never the proprietary SDK.
-- **Payment instruments:** card data lives in the PSP's vault *by design*, that's the PCI scope you're buying your way out of. Mitigation: confirm **vault portability** *at contract time*; keep your own `payment_method_id` indirection so a PSP swap is a mapping table, not a schema change.
+- **Identities (auth):** small data, **enormous** exit pain, password hashes often non-exportable, MFA (multi-factor authentication) enrollments don't transfer, sessions invalidate at cutover. Mitigation: integrate via **standards (OIDC/SAML/SCIM (OIDC = OpenID Connect))**, never the proprietary SDK.
+- **Payment instruments:** card data lives in the PSP's vault *by design*, that's the PCI scope you're buying your way out of. Mitigation: confirm **vault portability** *at contract time*; keep your own `payment_method_id` indirection so a PSP (payment service provider) swap is a mapping table, not a schema change.
 - **Search indexes:** derived data, rebuildable from your source of truth in hours; lowest exit pain, *provided* the index-build pipeline is yours.
 - **ML artifacts:** training data and feature definitions stay **in your own warehouse**; the platform is compute over data you own, never the system of record.
 
@@ -180,7 +180,7 @@ Four artifacts, owned and versioned like code:
 
 **Exit triggers, written into the memo, with numbers:**
 - **Price:** spend exceeds **$4.5M/yr** (the ~2×-team crossover from E) after negotiation and pipeline controls → commission the build.
-- **Reliability:** vendor SLA breach materially extends *our* incidents more than twice a year → re-evaluate (your observability being down during your outage is a compounding failure).
+- **Reliability:** vendor SLA (service-level agreement) breach materially extends *our* incidents more than twice a year → re-evaluate (your observability being down during your outage is a compounding failure).
 - **Roadmap:** a differentiating product need the vendor won't serve within two quarters → build *that slice* on the seam (partial build, not wholesale exit).
 - **Corporate:** vendor acquired, or pricing-model change >20% effective increase → trigger the runbook review immediately, while the wind-down clause is fresh.
 
@@ -219,7 +219,7 @@ Run it before signing (sets the mitigation list), then annually (catches drift, 
 - **Contract terms:** *"Procurement and counsel own the paper; I give them the four data terms from D as non-negotiables, egress rights, price cap, portability, wind-down."*
 - **The pipeline tier:** *"The observability team owns the OTel collector and sampling policy; my prior is tail-based sampling on traces and aggressive log filtering, because that's where 40% of the bill hides."*
 
-What I keep, the differentiation verdict, the crossover number, the exit triggers, and what I hand off, with stated priors, *is* the altitude. The developer-platform lesson applies this whole memo to one concrete platform case (Backstage vs in-house IDP); the behavioral pairing is telling a build-vs-buy decision you actually owned, including the one you got wrong.
+What I keep, the differentiation verdict, the crossover number, the exit triggers, and what I hand off, with stated priors, *is* the altitude. The developer-platform lesson applies this whole memo to one concrete platform case (Backstage vs in-house IDP (internal developer platform)); the behavioral pairing is telling a build-vs-buy decision you actually owned, including the one you got wrong.
 
 ---
 

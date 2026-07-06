@@ -5,7 +5,7 @@ sidebar:
   order: 10
 ---
 
-> **This problem is asked precisely because you cannot have rehearsed it.** Parking Lot and LRU Cache have canned solutions on every prep platform; Amazon Locker does not, which is why it sits at #2 in recommended practice order and in heavy rotation at Amazon-flavored loops. With no template to recall, it isolates the skills templates hide: **requirement scoping under ambiguity** and **entity judgment**. A junior answer models cabinets and doors and drowns; a Director answer scopes to the allocation decision and the expiry-and-reclaim lifecycle, argues smallest-fit vs first-fit vs assign-on-arrival **with capacity arithmetic**, and notices the trap no memorized problem contains: **expiry here does not free the resource, a human has to come take the package away.** Treat this lesson as a drill, not a read.
+> **This problem is asked precisely because you cannot have rehearsed it.** Parking Lot and LRU (least recently used) Cache have canned solutions on every prep platform; Amazon Locker does not, which is why it sits at #2 in recommended practice order and in heavy rotation at Amazon-flavored loops. With no template to recall, it isolates the skills templates hide: **requirement scoping under ambiguity** and **entity judgment**. A junior answer models cabinets and doors and drowns; a Director answer scopes to the allocation decision and the expiry-and-reclaim lifecycle, argues smallest-fit vs first-fit vs assign-on-arrival **with capacity arithmetic**, and notices the trap no memorized problem contains: **expiry here does not free the resource, a human has to come take the package away.** Treat this lesson as a drill, not a read.
 
 ::tip[How to drill this, the cold-open protocol]
 **Do not read past the Intuition section until you have attempted this solo.** Set a 35-minute timer, blank document, and run the RESHADED spine from memory on "Design Amazon Locker": scope it, put rough numbers on capacity, name the entities and their state machines, defend an allocation strategy against one alternative, and find at least one race or lifecycle leak unprompted. When the timer fires, stop mid-sentence, that is what the real cut-off feels like, then read on and grade yourself section by section. The gap you find *is* the prep. (Want a 10-minute low-stakes warm-up first? The Connect Four rep in the chess LLD is the stretching exercise; this is the loaded set.)
@@ -55,13 +55,13 @@ A locker bank is a **coat check with no attendant**. The system must pick a cubb
 
 **The reserve-early tax (the headline calculation):** if checkout **hard-reserves a physical slot** and transit takes ~2 days, dwell becomes `2 + 1.5 = 3.5 days` → capacity falls to `30K ÷ 3.5 ≈ 8.5K/day`. **Hard-reserving at checkout costs ~60% of the network's throughput**, empty steel held against a package still on a truck. That one division decides the design in §S/§H: reserve a *promise* early, bind the *slot* late.
 
-**Load is trivial, say so and move on:** 20K allocations/day ≈ 0.25/s average, ~2/s at evening peak metro-wide, ~7 reservations/hour per location. One Postgres yawns. Storage: 20K/day × ~1 KB ≈ **7 GB/year**. Codes: 6 digits = 1M combinations vs ≤100 active packages per location, guessing is handled by kiosk rate-limiting, not longer codes. **Verdict: a capacity-management and lifecycle-correctness problem at toy QPS**, the inverse of the canonical design problems, and noticing that inversion out loud is a senior signal.
+**Load is trivial, say so and move on:** 20K allocations/day ≈ 0.25/s average, ~2/s at evening peak metro-wide, ~7 reservations/hour per location. One Postgres yawns. Storage: 20K/day × ~1 KB ≈ **7 GB/year**. Codes: 6 digits = 1M combinations vs ≤100 active packages per location, guessing is handled by kiosk rate-limiting, not longer codes. **Verdict: a capacity-management and lifecycle-correctness problem at toy QPS** (queries per second), the inverse of the canonical design problems, and noticing that inversion out loud is a senior signal.
 
 ---
 
 ## S: Storage
 
-> **Adaptation:** as in the movie-booking LLD, "storage" at LLD altitude means **where does the arbiter live**, which component decides who got the last M slot.
+> **Adaptation:** as in the movie-booking LLD (low-level design), "storage" at LLD altitude means **where does the arbiter live**, which component decides who got the last M slot.
 
 **Decision: one transactional relational database (Postgres) holds all three lifecycles and the per-location size-bucket counters.** At ~2 writes/s metro-wide, the only storage question is correctness of the contested transitions, last-slot reservation and single-use code redemption, both row-level atomic conditional updates, the primitive relational stores do best.
 
@@ -123,8 +123,8 @@ DELETE /v1/reservations/{id}              # order cancelled in transit -> counte
 
 > **Adaptation per spec: D is the heart here, locker, package, and pickup-code lifecycles.** Four tables; the judgment is what's *absent* (no cabinet, door, or screen entities).
 
-- **`slots`**, `(location_id, slot_id)` PK, `size_class`, `state` (`AVAILABLE / OCCUPIED / AWAITING_RETURN`), `current_package_id`. The physical truth.
-- **`size_buckets`**, `(location_id, size_class)` PK, `available_count`. The checkout-time promise ledger; reserve = conditional decrement `WHERE available_count > 0`, one winner for the last M slot, loser gets 409, no lock held (the CAS reflex from 5.13, applied at 1/10,000th the QPS).
+- **`slots`**, `(location_id, slot_id)` PK (primary key), `size_class`, `state` (`AVAILABLE / OCCUPIED / AWAITING_RETURN`), `current_package_id`. The physical truth.
+- **`size_buckets`**, `(location_id, size_class)` PK, `available_count`. The checkout-time promise ledger; reserve = conditional decrement `WHERE available_count > 0`, one winner for the last M slot, loser gets 409, no lock held (the CAS (compare-and-swap) reflex from 5.13, applied at 1/10,000th the QPS).
 - **`packages`**, `package_id` PK, `reservation_id`, `state` (the Mermaid machine), `slot_ref`, `delivered_at`, `expires_at`.
 - **`pickup_codes`**, `code` + `location_id` PK, `package_id`, `status` (`ACTIVE / USED / VOID`), single-use enforced by conditional update `WHERE status='ACTIVE'`.
 
@@ -137,7 +137,7 @@ DELETE /v1/reservations/{id}              # order cancelled in transit -> counte
 
 **`size_buckets`:** `(location_id, size_class)` PK, `available_count` (int, `CHECK >= 0`), `total_count`. Reserve: `UPDATE size_buckets SET available_count = available_count - 1 WHERE location_id=? AND size_class >= ? AND available_count > 0 ORDER BY size_class LIMIT 1` (smallest bucket with space, strategy in SQL).
 
-**`packages`:** `package_id` PK, `reservation_id` FK, `order_id`, `customer_id`, `state`, `slot_location_id` + `slot_id` (nullable until bind), `delivered_at`, `expires_at` (set at delivery = `delivered_at + 72h`), `returned_at`. Partial index on `(state, expires_at)` for the expiry scan.
+**`packages`:** `package_id` PK, `reservation_id` FK (foreign key), `order_id`, `customer_id`, `state`, `slot_location_id` + `slot_id` (nullable until bind), `delivered_at`, `expires_at` (set at delivery = `delivered_at + 72h`), `returned_at`. Partial index on `(state, expires_at)` for the expiry scan.
 
 **`pickup_codes`:** `(location_id, code)` PK, codes are unique *per location*, not globally, which keeps 6 digits comfortable; `package_id` FK, `status`, `issued_at`, `attempt_count`. Redemption: `UPDATE pickup_codes SET status='USED' WHERE location_id=? AND code=? AND status='ACTIVE'`, 1 row = open door; 0 rows = reject.
 
@@ -169,7 +169,7 @@ class NearestFallback decorates AllocationStrategy {
 
 > Hunt the leaks. On a cold open, finding two of these unprompted separates the grades.
 
-**Leak 1, the last-bucket race.** Two checkouts grab the final M promise simultaneously. *Fix:* the conditional decrement, one statement, one winner, loser 409s to the next-nearest location. *Rejected:* read-count-then-write (TOCTOU) and per-location mutexes (a lock for 7 events/hour).
+**Leak 1, the last-bucket race.** Two checkouts grab the final M promise simultaneously. *Fix:* the conditional decrement, one statement, one winner, loser 409s to the next-nearest location. *Rejected:* read-count-then-write (TOCTOU (time-of-check-to-time-of-use)) and per-location mutexes (a lock for 7 events/hour).
 
 **Leak 2, courier arrives, no physical slot.** The ledger said yes at checkout, but bind-time finds the bucket physically full, expired packages awaiting return ate the slack, or a package mis-declared its dims. *Fix:* the `NearestFallback` chain (size up → adjacent location → redirect as last resort), plus the real fix upstream: **count `AWAITING_RETURN` slots as unavailable in the promise ledger**, steel you cannot promise. Redirect rate < 2% is the system's primary health metric.
 
@@ -198,7 +198,7 @@ The promise ledger can deliberately overbook, airline-style: some reservations n
 - **Second lever, tune dwell (policy, cheap):** the 3-day window is a capacity dial. Cutting hot locations to 2 days raises throughput ~25% (Little's law again) at the cost of more expiries and support contacts. Run it as a per-location experiment, not a fleet-wide edict.
 - **Third lever, move steel (capex, last):** re-fit size mixes (downtown skews S) and add cabinets only where the first two levers exhaust. A location runs **$15-30K capex plus rent**; levers one and two are free utilization before any purchase order, *"I'd have network planning model re-fit vs new sites from the ledger's per-size miss rates; my prior is re-fitting size mix beats new locations, because our misses are size-shaped, not location-shaped."*
 
-**What I'd revisit if requirements changed:** multi-package consolidation breaks the one-package-one-slot invariant (a packing problem, scope it before accepting it); third-party carriers turn the courier API into a partner surface with auth and SLAs; refrigerated lockers add a slot *attribute* to matching, which the Strategy seam absorbs without redesign, say that sentence, it's why the seam earned its place.
+**What I'd revisit if requirements changed:** multi-package consolidation breaks the one-package-one-slot invariant (a packing problem, scope it before accepting it); third-party carriers turn the courier API into a partner surface with auth and SLAs (service-level agreements); refrigerated lockers add a slot *attribute* to matching, which the Strategy seam absorbs without redesign, say that sentence, it's why the seam earned its place.
 
 ---
 
@@ -235,7 +235,7 @@ The promise ledger can deliberately overbook, airline-style: some reservations n
 ### Interviewer follow-up questions (with model answers)
 
 **Q1. The courier scans in; no free slot of the right size. Now what?**
-> *Model:* Bind-time fallback chain: next size up (an M in an L, wastes capacity, saves the delivery), then the nearest location in a small radius, then courier redirect, each step logged against the <2% SLO. But the real answer is upstream: this mostly happens when `AWAITING_RETURN` slots were counted as promisable, so the fix is the ledger, expired-but-uncollected packages subtract from `available_count`, and the carrier return sweep becomes a capacity-critical operation with its own SLA, not housekeeping.
+> *Model:* Bind-time fallback chain: next size up (an M in an L, wastes capacity, saves the delivery), then the nearest location in a small radius, then courier redirect, each step logged against the <2% SLO (service-level objective). But the real answer is upstream: this mostly happens when `AWAITING_RETURN` slots were counted as promisable, so the fix is the ledger, expired-but-uncollected packages subtract from `available_count`, and the carrier return sweep becomes a capacity-critical operation with its own SLA, not housekeeping.
 
 **Q2. Why a 6-digit code? Couldn't someone guess it?**
 > *Model:* The space is 1M codes against ≤100 active packages per location, and codes are scoped per location, so a guess must also be at the right kiosk. The defense is rate, not entropy: 5 attempts then lockout and alert makes brute force need ~2,000 visits for a coin-flip on one package; longer codes punish every legitimate customer to defend against an attack the rate limit already kills. I'd delegate the threat model to security with that prior, holding one requirement: single-use redemption via conditional update, so a shoulder-surfed code dies on first use.

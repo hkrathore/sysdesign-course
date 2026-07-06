@@ -35,7 +35,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 - *Appetite?* → ~18-24 months, ≤ ~20% of engineering capacity at any time.
 
 **The pain, quantified (this is the requirements list):**
-1. **Deploy frequency:** 2 org-wide deploys/week → **0.17 deploys/week per team** (elite teams do daily-plus, DORA); a finished change waits a median ~3 days to ship.
+1. **Deploy frequency:** 2 org-wide deploys/week → **0.17 deploys/week per team** (elite teams do daily-plus, DORA (DevOps Research and Assessment)); a finished change waits a median ~3 days to ship.
 2. **Change failure + blast radius:** ~15% of release trains roll back, each reverting **~30 unrelated changes** from 12 teams. Every incident has 100% blast radius.
 3. **Coordination cost:** one shared 4-hour regression suite, a merge queue, a release-captain rotation; ~20-30% of sprint capacity lost to cross-team coordination.
 4. **Team coupling:** 12 teams = up to **66 pairwise coordination paths** through one codebase and one schema.
@@ -50,7 +50,7 @@ And there is a third character, worse than the monolith: the **distributed monol
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS here - E becomes **velocity and cost math**: before/after deploy numbers, coordination cost, the migration's price tag. Same estimation discipline: round aggressively, let the numbers make the call.
+> **Adaptation, said out loud:** no QPS (queries per second) here - E becomes **velocity and cost math**: before/after deploy numbers, coordination cost, the migration's price tag. Same estimation discipline: round aggressively, let the numbers make the call.
 
 **The tax, today.**
 - Throughput: 12 teams × 0.17 deploys/week ≈ **2 deploys/week org-wide**; merge-to-production lead time ~3-5 days.
@@ -83,12 +83,12 @@ And there is a third character, worse than the monolith: the **distributed monol
 4. **Cut over writes.** The service becomes the writer; the *monolith* consumes the CDC stream for legacy read paths until those die. The **outbox pattern** keeps the DB write and the published event atomic.
 5. **Drop the old tables.** Only now is the seam done. A seam stuck at step 3 for a year is a smell worth naming.
 
-**Rejected, keep the shared DB "temporarily":** the temporary becomes permanent, and it *is* the distributed-monolith trap - independent deploys in name only. **Rejected, app-level dual writes:** no atomicity, guaranteed drift; the outbox/CDC pattern exists precisely to avoid this. **Rejected, 2PC across seams:** availability coupling on hot paths; cross-service workflows become **sagas** - local transactions with compensations - and you accept eventual consistency at seams (the CAP trade, made at the org level). A workflow that truly can't tolerate that is evidence the seam is misplaced - move the boundary, don't add 2PC.
+**Rejected, keep the shared DB "temporarily":** the temporary becomes permanent, and it *is* the distributed-monolith trap - independent deploys in name only. **Rejected, app-level dual writes:** no atomicity, guaranteed drift; the outbox/CDC pattern exists precisely to avoid this. **Rejected, 2PC (two-phase commit) across seams:** availability coupling on hot paths; cross-service workflows become **sagas** - local transactions with compensations - and you accept eventual consistency at seams (the CAP trade, made at the org level). A workflow that truly can't tolerate that is evidence the seam is misplaced - move the boundary, don't add 2PC.
 
 <details>
 <summary>Go deeper, outbox, CDC, and backfill mechanics (IC depth, optional)</summary>
 
-**Outbox:** the service writes its business row and an event row to an `outbox` table *in the same local transaction*; a relay (or Debezium tailing the WAL/binlog) publishes outbox rows to Kafka and marks them sent. Consumers are idempotent (event IDs deduped), because the relay guarantees at-least-once.
+**Outbox:** the service writes its business row and an event row to an `outbox` table *in the same local transaction*; a relay (or Debezium tailing the WAL/binlog (WAL = write-ahead log)) publishes outbox rows to Kafka and marks them sent. Consumers are idempotent (event IDs deduped), because the relay guarantees at-least-once.
 
 **CDC hydration of a new store:** snapshot the source tables (consistent read), record the log position, replay the change stream from that position into the new store, then keep tailing. Verify with continuous row-count and checksum comparisons before any cutover.
 
@@ -171,7 +171,7 @@ Two readings matter. **Fan-in is destiny**: a table everyone joins (users, catal
 
 ## E: Evaluation
 
-> **Adaptation, said out loud:** you stress the **migration** against its failure modes, not an architecture against NFRs - this step and the next carry the lesson, because a strategy answer is judged on how it fails.
+> **Adaptation, said out loud:** you stress the **migration** against its failure modes, not an architecture against NFRs (non-functional requirements) - this step and the next carry the lesson, because a strategy answer is judged on how it fails.
 
 **Failure mode 1, the distributed monolith (the most likely outcome).**
 *Symptom:* services that deploy together, share a database, or break together. *Detection:* track **% of deploys touching exactly one service** (target >90%) and lockstep changes per quarter. *Fix:* stop extracting, fix the seams you have. *Rejected: pushing on to a service-count milestone* - service count is a cost, not a KPI.
@@ -205,7 +205,7 @@ Two systems, double cognitive load, CDC pipelines as permanent infrastructure. *
 **Kill criteria:** if after two seams the deploy metrics haven't moved, or lockstep deploys dominate, pause extraction - the failure is more likely seam placement or platform gaps than strategy, but the budgeted answer to "it isn't working" must exist before month 1.
 
 **Where I'd delegate (the explicit Director move):**
-- **Platform/CDC tooling:** *"The platform team owns the CDC pipeline and deploy tooling; my prior is Debezium + Kafka with the outbox pattern - log-tailing keeps producers honest. They own the bake-off and the SLA."*
+- **Platform/CDC tooling:** *"The platform team owns the CDC pipeline and deploy tooling; my prior is Debezium + Kafka with the outbox pattern - log-tailing keeps producers honest. They own the bake-off and the SLA (service-level agreement)."*
 - **Seam-by-seam migration:** *"Each owning team runs its breakup against the S-checklist; my prior is reads-first cutover with reverse-CDC as the rollback net."*
 - **What I keep:** the sequence, the gates, the stopping condition, the budget - where the org bets, not where it benchmarks.
 

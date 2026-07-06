@@ -73,7 +73,7 @@ I'll design for the **harder, real case: both.** Advertisers see a near-real-tim
 - The batch source of truth needs raw events for the **whole billing + late-event window**. Keep **~30 days hot**: `1.7 TB × 30 ≈ ~50 TB`, on cheap object storage (S3); compressed ~3-5× → **~10-15 TB billed.**
 - **The decision this forces:** raw retention is the price of having a recomputable source of truth. *Trade-off named:* ~50 TB/month of S3 (a few hundred dollars) buys the ability to replay and re-bill correctly. *Rejected:* keep only aggregates → you can never recompute, audit, or fix a counting bug after the fact. For a system where the output is invoices, retaining raw is non-negotiable.
 
-**Aggregated output (tiny by comparison):** counts by `(campaign, minute, a few dimensions)`. `500k campaigns × 1,440 min/day × ~tens of dimension combos × ~30 B ≈ low tens of GB/day`, orders of magnitude smaller than raw. The aggregates fit comfortably in an OLAP store; the raw is what costs.
+**Aggregated output (tiny by comparison):** counts by `(campaign, minute, a few dimensions)`. `500k campaigns × 1,440 min/day × ~tens of dimension combos × ~30 B ≈ low tens of GB/day`, orders of magnitude smaller than raw. The aggregates fit comfortably in an OLAP (online analytical processing) store; the raw is what costs.
 
 **Read load:** dashboards, say 10k advertisers polling every ~30s → **~few hundred reads/sec**, trivially cached. Billing, a periodic batch job, not interactive.
 
@@ -94,7 +94,7 @@ I'll design for the **harder, real case: both.** Advertisers see a near-real-tim
 
 **2. Aggregated counts for the dashboard (fast read, time-series, approximate-OK).**
 - *Choice:* an **OLAP / time-series store**, Druid, ClickHouse, or Pinot, fed by the stream processor, serving per-minute rollups. Tuned for fast group-by-time-window reads.
-- *Rejected, serve dashboards from a row store:* per-minute group-bys over high-cardinality dimensions are exactly what columnar OLAP does well and OLTP does badly.
+- *Rejected, serve dashboards from a row store:* per-minute group-bys over high-cardinality dimensions are exactly what columnar OLAP does well and OLTP (online transaction processing) does badly.
 
 **3. Billable aggregates (exact, auditable, settled).**
 - *Choice:* a **transactional/warehouse table** written by the batch job, exact counts per campaign per period, with the raw events retained behind them for audit. This is the number that goes on the invoice.

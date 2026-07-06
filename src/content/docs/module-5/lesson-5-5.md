@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-> **Why this gets asked at DoorDash, Uber, Grab, and Instacart, and what separates a Director answer.** This is not a proximity problem (that's the proximity-matching problem); it's a *marketplace coordination* problem with three actors whose incentives conflict, a restaurant-prep waiting period that makes naive dispatch wrong, a payment flow that must split a single charge across three parties, and a 5-10× intraday peak that the system must absorb without over-provisioning for. The IC answer draws a "place order → dispatch courier" flow and calls it done. The Director answer identifies the **order state machine** as the correctness core, draws service boundaries on **actor boundaries** (which also maps to org topology), names where eventual consistency is safe (menus, ETAs) and where it is not (order state, payment), and quantifies the fleet-sizing problem the peak creates.
+> **Why this gets asked at DoorDash, Uber, Grab, and Instacart, and what separates a Director answer.** This is not a proximity problem (that's the proximity-matching problem); it's a *marketplace coordination* problem with three actors whose incentives conflict, a restaurant-prep waiting period that makes naive dispatch wrong, a payment flow that must split a single charge across three parties, and a 5-10× intraday peak that the system must absorb without over-provisioning for. The IC (individual contributor) answer draws a "place order → dispatch courier" flow and calls it done. The Director answer identifies the **order state machine** as the correctness core, draws service boundaries on **actor boundaries** (which also maps to org topology), names where eventual consistency is safe (menus, ETAs) and where it is not (order state, payment), and quantifies the fleet-sizing problem the peak creates.
 
 ### Learning objectives
 - Run the full **RESHADED** spine on a three-sided marketplace; adapt H/D to decompose services by **actor boundary** and explain why that mirrors the team topology.
@@ -29,7 +29,7 @@ That timing problem is what distinguishes this question from proximity matching.
 **Clarifying questions I'd ask (with assumed answers):**
 
 - *Three-sided or two-sided?* → **Three-sided:** eater, restaurant partner, courier. Restaurant prep time is the distinguishing variable that makes naive dispatch wrong.
-- *What's the delivery SLA?* → Best-effort; **30-45 min end-to-end** is the UX bar. The NFR is customer-visible ETA accuracy, not a hard SLA.
+- *What's the delivery SLA (service-level agreement)?* → Best-effort; **30-45 min end-to-end** is the UX bar. The NFR (non-functional requirement) is customer-visible ETA accuracy, not a hard SLA.
 - *Is payment a split?* → Yes, a single eater charge must fan out to restaurant payment (food cost), courier payment (delivery fee), and platform fee. See the payment platform for the ledger design; scope here to the split trigger and idempotency.
 - *Scale?* → **~5M orders/day** globally (reasonable DoorDash/Uber Eats proxy), heavy concentration in US metros, 5-10× peak vs. off-peak.
 - *Consistency bar on menus vs. orders?* → **Menus: eventual** (a stale price by a few minutes is a minor UX issue, handled by re-pricing at checkout). **Order state: strong**, a courier and a restaurant must never observe the same order in contradictory states.
@@ -61,7 +61,7 @@ That timing problem is what distinguishes this question from proximity matching.
 
 **Assumptions:** 5M orders/day, avg order value ~$35, avg delivery time ~35 min, avg restaurant prep ~18 min, courier active-session ping every 5 s.
 
-**Steady-state order QPS:**
+**Steady-state order QPS (queries per second):**
 `5M ÷ 86,400 ≈ 58 orders/s` average. Lunch/dinner peak at 8× average → **~460 orders/s peak**. Write-contended but not extreme; a sharded transactional store handles this easily.
 
 **Order state events (the write amplification the state machine creates):**
@@ -95,7 +95,7 @@ Access pattern: atomic state transitions (`PLACED → ACCEPTED`, `ACCEPTED → C
 
 Choice: **relational/NewSQL transactional store**, sharded Postgres or CockroachDB, sharded by `order_id` (high-cardinality, no hot-shard). Each transition is a single conditional `UPDATE ... WHERE status = 'expected_state'`; multi-row operations (order + payment-ledger entry) need real transactions.
 
-Rejected, eventually-consistent KV for order state: last-write-wins on two concurrent `ACCEPTED` events can put a restaurant and a courier in contradictory states. The volume doesn't justify the operational complexity of strong-consistency workarounds on a store that isn't built for it.
+Rejected, eventually-consistent KV (key-value) for order state: last-write-wins on two concurrent `ACCEPTED` events can put a restaurant and a courier in contradictory states. The volume doesn't justify the operational complexity of strong-consistency workarounds on a store that isn't built for it.
 
 **2. Menu catalog and restaurant metadata (read-heavy, AP).**
 
@@ -230,7 +230,7 @@ POST /v1/orders/{orderId}/deliver
 |---|---|---|
 | `order_id` | UUID | Primary key, shard key |
 | `status` | enum | State machine current state |
-| `restaurant_id` | UUID | FK; also an index for restaurant-facing queries |
+| `restaurant_id` | UUID | FK (foreign key); also an index for restaurant-facing queries |
 | `courier_id` | UUID nullable | Assigned after dispatch |
 | `eater_id` | UUID | |
 | `idempotency_key` | string unique | On `POST /orders`; dedup client retries |
@@ -258,7 +258,7 @@ stateDiagram-v2
     CANCELLED --> [*]
 ```
 
-**Each transition is a conditional `UPDATE ... WHERE order_id = ? AND version = ? AND status = 'expected_state'`**, one row, optimistic CAS. Exactly one writer wins; the loser sees 0 rows updated and returns 409. No distributed lock needed; the transactional store's row-level serialization is sufficient.
+**Each transition is a conditional `UPDATE ... WHERE order_id = ? AND version = ? AND status = 'expected_state'`**, one row, optimistic CAS (compare-and-swap). Exactly one writer wins; the loser sees 0 rows updated and returns 409. No distributed lock needed; the transactional store's row-level serialization is sufficient.
 
 **Why `order_id` is the shard key (and not `restaurant_id`):**
 
@@ -322,7 +322,7 @@ I'd delegate this to a dedicated Dispatch/ML team with a stated prior: "greedy g
 
 **Bottleneck 5, 5-10× peak and infrastructure cost.**
 
-The trough is ~58 orders/s; peak is ~460 orders/s. Stateless services (API gateway, Menu, Notification, ETA) autoscale horizontally, add instances in 30-60 s with a container platform. The location ingest path is geo-sharded and handles peak natively. The constraint is the order-state database: you cannot instantly double its shard count at 12:01 pm. Mitigation: pre-provision for peak (accept the trough over-cost); or use a connection pool layer (PgBouncer) to absorb connection spikes without adding shards. The operational cost of a 10× over-provisioned order DB is small relative to overall COGS for a marketplace; the alternative (under-provisioned and degrading at peak) costs orders and courier trust. This is a business decision, not a purely technical one, name it as such.
+The trough is ~58 orders/s; peak is ~460 orders/s. Stateless services (API gateway, Menu, Notification, ETA) autoscale horizontally, add instances in 30-60 s with a container platform. The location ingest path is geo-sharded and handles peak natively. The constraint is the order-state database: you cannot instantly double its shard count at 12:01 pm. Mitigation: pre-provision for peak (accept the trough over-cost); or use a connection pool layer (PgBouncer) to absorb connection spikes without adding shards. The operational cost of a 10× over-provisioned order DB is small relative to overall COGS (cost of goods sold) for a marketplace; the alternative (under-provisioned and degrading at peak) costs orders and courier trust. This is a business decision, not a purely technical one, name it as such.
 
 ---
 
@@ -336,9 +336,9 @@ Order-state sharding scales linearly, `order_id` key distributes cleanly, add sh
 
 **Hardest trade-offs to defend:**
 
-- **Delayed dispatch vs. guaranteed courier availability.** The prep-time estimate has error; handle early-ready by subscribing to `READY_FOR_PICKUP` and firing immediately; handle late-ready by accepting some idle cost. The ±3-min SLO is the business decision on how much idle time to trade for model complexity.
+- **Delayed dispatch vs. guaranteed courier availability.** The prep-time estimate has error; handle early-ready by subscribing to `READY_FOR_PICKUP` and firing immediately; handle late-ready by accepting some idle cost. The ±3-min SLO (service-level objective) is the business decision on how much idle time to trade for model complexity.
 - **Actor-boundary decomposition under pressure.** As the codebase matures, each actor's service will be tempted to write order state directly ("it's faster"). Keeping Orchestration as the single writer is an organizational decision as much as a technical one. Enforce it via access control on the order store, not just convention.
-- **Menu staleness on flash deals.** 120-s TTL is fine for stable menus. Flash deals require push invalidation: `PATCH /menus/{id}` from the restaurant service calls a cache invalidation API; Kafka-buffered invalidation decouples the dependency at the cost of slightly longer max-staleness.
+- **Menu staleness on flash deals.** 120-s TTL (time-to-live) is fine for stable menus. Flash deals require push invalidation: `PATCH /menus/{id}` from the restaurant service calls a cache invalidation API; Kafka-buffered invalidation decouples the dependency at the cost of slightly longer max-staleness.
 
 **Where I'd delegate:**
 
@@ -355,7 +355,7 @@ Order-state sharding scales linearly, `order_id` key distributes cleanly, add sh
 |---|---|---|---|---|
 | **Order state store** | **Transactional SQL / NewSQL sharded by `order_id`** | Cassandra with conditional writes | DynamoDB with transactions | **A**, multi-row atomicity (order + ledger) + conditional CAS at ~460 writes/s peak; volume too small to justify NoSQL complexity. **B**, if single-row transitions only; fragile on multi-row. **C**, viable for single-region; cross-region gets expensive. |
 | **Dispatch timing** | **Delayed: fire at `estimated_ready_at - travel`** | Eager: dispatch at `ACCEPTED` | On-demand: dispatch at `READY_FOR_PICKUP` | **A** (our choice), minimizes courier idle; requires a reliable prep estimator. **B**, maximizes courier availability; wastes idle time at scale. **C**, zero idle time; pickup delay if no nearby courier. |
-| **Dispatch objective** | **Weighted score: proximity + fairness** | Pure proximity | Pure zone fairness | **A**, mature marketplace; courier retention matters. **B**, early growth; delivery time drives eater NPS. **C**, contractor-heavy models with income guarantees. |
+| **Dispatch objective** | **Weighted score: proximity + fairness** | Pure proximity | Pure zone fairness | **A**, mature marketplace; courier retention matters. **B**, early growth; delivery time drives eater NPS (net promoter score). **C**, contractor-heavy models with income guarantees. |
 | **Service decomposition** | **Actor boundaries** (eater / restaurant / courier / orchestration) | Technical layers (API / logic / data) | Monolith | **A**, enables team autonomy, aligns on-call with actor SLA. **B**, every feature crosses three team backlogs. **C**, fine at < 5 engineers; serializes at scale. |
 | **Menu staleness** | **Cache TTL ~120 s + push invalidation on explicit change** | Cache TTL only (no push) | Strong consistency (no cache) | **A**, best tradeoff: low staleness on changes, low cost at rest. **B**, up to TTL delay on explicit menu changes (unacceptable for flash deals). **C**, couples browse firehose to CP order store; never. |
 

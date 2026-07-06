@@ -5,19 +5,19 @@ sidebar:
   order: 5
 ---
 
-> **This question is a fixture of post-ZIRP Director loops because it is the job.** Boards stopped paying for growth-at-any-cost around 2023 and never went back; loops now ask it straight, "your bill is $X, cut 30-50% without breaking anything: 72 hours, 30 days, 6 months", with a behavioral twin behind it. A junior answer is a grab-bag of tips: spot, reserved instances, delete old stuff. A Director answer is a **sequenced program with guardrails**: a decomposition saying where the money actually is, a savings ladder whose *ordering* is load-bearing, quick wins funding the slow re-architecture, named SLO and velocity metrics that must hold throughout, and **one cut you refuse to make, defended to the CFO's face**. The refusal is the credibility moment: anyone can cut; leaders know what the cheap-looking line items are buying.
+> **This question is a fixture of post-ZIRP (zero interest-rate policy) Director loops because it is the job.** Boards stopped paying for growth-at-any-cost around 2023 and never went back; loops now ask it straight, "your bill is $X, cut 30-50% without breaking anything: 72 hours, 30 days, 6 months", with a behavioral twin behind it. A junior answer is a grab-bag of tips: spot, reserved instances, delete old stuff. A Director answer is a **sequenced program with guardrails**: a decomposition saying where the money actually is, a savings ladder whose *ordering* is load-bearing, quick wins funding the slow re-architecture, named SLO (service-level objective) and velocity metrics that must hold throughout, and **one cut you refuse to make, defended to the CFO's face**. The refusal is the credibility moment: anyone can cut; leaders know what the cheap-looking line items are buying.
 
 ### Learning objectives
 - Decompose a cloud bill into its **5-6 spend drivers** and attach a realistic savings percentage to each, reason in dollars, not vibes.
 - Run the **savings ladder in order**, delete idle → rightsize → commitment discounts → re-architect, and explain why the ordering is a correctness property.
 - Structure the answer as the **72-hour / 30-day / 6-month plan**, where ~30% lands in 30 days and buys the budget and credibility for the 6-month tail.
-- Define the **guardrails before the cuts**: the SLOs, RTO/RPO, and velocity metrics that must hold, on a dashboard from hour zero.
+- Define the **guardrails before the cuts**: the SLOs, RTO/RPO (recovery point objective), and velocity metrics that must hold, on a dashboard from hour zero.
 - Name the **one cut you refuse to make**, capacity whose job is to look idle, and defend it as risk management, not empire defense.
 
 ### Intuition first
 A turnaround consultant walks into a company bleeding cash. The amateur move is to cut 10% from every department by email, fast, fair-looking, and wrong: it starves the profitable lines and barely dents the bloated ones. The professional sequence is different. First, **read the books**, you cannot cut what you cannot see. Then **stop the obvious bleeding**: cancel unused licenses, sublet the empty floor, money nobody will miss, banked in days, buying the board's patience. Then **renegotiate the contracts** on what you're keeping, only *after* you know what you're keeping, because a three-year lease on an office you're about to vacate is waste with a signature on it. Only then the slow, structural work: change how the company operates so costs don't grow back. Throughout, two things stay sacrosanct: the **insurance policies**, pure waste right up until the fire, and the **pace of the business**, because a company that saves 30% and stops shipping has not been saved.
 
-That is this lesson. Cloud bill = the books. Idle resources = the empty floor. Commitments = the contracts. Re-architecture = the re-org. SLOs, RTO, deploy frequency = the insurance and the pace. The interview tests which way you cut.
+That is this lesson. Cloud bill = the books. Idle resources = the empty floor. Commitments = the contracts. Re-architecture = the re-org. SLOs, RTO (recovery time objective), deploy frequency = the insurance and the pace. The interview tests which way you cut.
 
 ---
 
@@ -28,18 +28,18 @@ That is this lesson. Cloud bill = the books. Idle resources = the empty floor. C
 **Anchor scenario:** a **$10M/yr cloud bill** (~$833K/mo) at a 400-engineer company, one hyperscaler, traffic growing ~20%/yr. Mandate: **cut 30-50% of run-rate within two quarters** without hurting reliability or delivery.
 
 **Clarifying questions I'd ask (with assumed answers):**
-- *Run-rate or absolute?* → **Run-rate, growth-normalized.** The honest metric is **unit cost** (per 1K requests / per DAU), not the headline bill, agree this with finance up front or argue about it forever.
+- *Run-rate or absolute?* → **Run-rate, growth-normalized.** The honest metric is **unit cost** (per 1K requests / per DAU (daily active users)), not the headline bill, agree this with finance up front or argue about it forever.
 - *Reliability commitments?* → 99.9% SLO; **RTO 1 hour, RPO 5 minutes** on tier-1 data. Contractual; the program must not move them.
 - *Is engineering time a cost?* → Yes, saving $2M of cloud by burning $3M of payroll and a quarter of roadmap is a loss.
 - *Compliance floors?* → 7-year audit-log retention, 35-day backups. **Cuts below these are off the table regardless of how the line item looks.**
 
 **The guardrails (this design's functional requirements):**
 1. **SLOs hold:** error-budget burn stays at baseline; any cut producing sustained burn reverts, no debate.
-2. **RTO/RPO hold, and are re-proven.** Every cut touching redundancy, backups, or failover triggers a **DR drill** before the saving is banked. Untested DR is the classic silent casualty of cost programs.
+2. **RTO/RPO hold, and are re-proven.** Every cut touching redundancy, backups, or failover triggers a **DR (disaster recovery) drill** before the saving is banked. Untested DR is the classic silent casualty of cost programs.
 3. **Velocity holds:** deploy frequency and lead time flat; product teams spend **≤10% of the quarter** on cost work, the heavy lifting belongs to a central team of 3-4.
 4. **Compliance floors are invariants.**
 
-**Explicitly CUT from scope:** SaaS/vendor renegotiation (procurement's program), headcount, and cloud repatriation (returns in Design evolution as a deliberately rejected default). Scope: **the cloud bill, two quarters, guardrails as stated, one owner (me), weekly guardrail review.** Program NFRs: every cut **reversible or rehearsed** (commitments are the exception, why they come last among the quick wins); savings reported as **realized run-rate** against a baseline finance has signed.
+**Explicitly CUT from scope:** SaaS/vendor renegotiation (procurement's program), headcount, and cloud repatriation (returns in Design evolution as a deliberately rejected default). Scope: **the cloud bill, two quarters, guardrails as stated, one owner (me), weekly guardrail review.** Program NFRs (non-functional requirements): every cut **reversible or rehearsed** (commitments are the exception, why they come last among the quick wins); savings reported as **realized run-rate** against a baseline finance has signed.
 
 ---
 
@@ -55,7 +55,7 @@ That is this lesson. Cloud bill = the books. Idle resources = the empty floor. C
 | Managed databases + caches | $2.0M | 20% | RDS/Aurora, Redis, search |
 | Storage + snapshots | $1.5M | 15% | S3/blob, EBS, snapshot sprawl |
 | Data transfer + networking | $0.8M | 8% | egress, cross-AZ, NAT |
-| Observability + logging | $0.7M | 7% | log ingest, metrics, APM |
+| Observability + logging | $0.7M | 7% | log ingest, metrics, APM (application performance monitoring) |
 | Support plan + everything else | $1.0M | 10% | enterprise support ≈ 3-10% of bill |
 
 Two insights fall out: **compute + databases are 60% of the bill**, the program lives there; and nobody reaches 30% by optimizing the 7% line, though observability is usually the most bloated *proportionally* (log-tiering fixes the log-ingest default).
@@ -70,7 +70,7 @@ Two insights fall out: **compute + databases are 60% of the bill**, the program 
 
 **30-day subtotal: ~32% (~$3.2M run-rate)**, the mandate's floor, met by configuration and procurement alone. Say that out loud.
 
-**Rung 4, Re-architect (6 months): another ~8-15%.** Spot for CI, batch, stateless workers (60-90% off that slice); ARM/Graviton (~15-20% price-perf); data-transfer surgery, CDN egress offload, cross-AZ chatter, NAT; log tiering and sampling (the $0.7M line typically halves); caching to shrink the DB tier. Lands at **~40-47%**, inside the band, honest about diminishing returns at the top.
+**Rung 4, Re-architect (6 months): another ~8-15%.** Spot for CI, batch, stateless workers (60-90% off that slice); ARM/Graviton (~15-20% price-perf); data-transfer surgery, CDN egress offload, cross-AZ (availability zone) chatter, NAT; log tiering and sampling (the $0.7M line typically halves); caching to shrink the DB tier. Lands at **~40-47%**, inside the band, honest about diminishing returns at the top.
 
 **What estimation decided:** the money is in compute + databases; 30 days delivers ~32% at near-zero risk via delete → rightsize → commit *in that order*; the last ~10-15% costs 6 months of real engineering; and the program reports unit cost, not the absolute bill.
 
@@ -81,7 +81,7 @@ Two insights fall out: **compute + databases are 60% of the bill**, the program 
 
 **Commitment math:** coverage = committed $ / eligible $; utilization = used / committed. Target 70-80% coverage of the *post-rightsize* baseline so variance and later optimization don't strand the commitment, unused commitment is contractual loss, worse than on-demand waste. 1-year no-upfront (~28-35% off) is the default; 3-year (~45-55% off) only for the floor you'd bet the company keeps (core DB tier), because a 3-year commit also forecloses the Graviton/spot moves rung 4 wants.
 
-**Storage quick math:** gp2→gp3 ≈ 20% cheaper at equal baseline IOPS, no downtime; snapshot sprawl is typically 10-20% of the storage line; S3 lifecycle to IA at 30 days / archive at 90 for cold prefixes, but check retrieval pricing against access patterns first, or the savings reverse.
+**Storage quick math:** gp2→gp3 ≈ 20% cheaper at equal baseline IOPS (I/O operations per second), no downtime; snapshot sprawl is typically 10-20% of the storage line; S3 lifecycle to IA at 30 days / archive at 90 for cold prefixes, but check retrieval pricing against access patterns first, or the savings reverse.
 
 </details>
 
@@ -158,7 +158,7 @@ provision_gate(res)   -> ALLOW | DENY untagged | ESCALATE above $X/mo
 
 > Adaptation: the schema of a cost program is the **allocation taxonomy**, the dimensions every dollar must be attributable to. Get this wrong and every later report is fiction.
 
-Four mandatory dimensions on every resource: **`team`** (answers the budget alert), **`service`** (the unit-cost denominator), **`env`** (prod vs non-prod, entirely different cut policies), **`cost_center`** (finance's join key, COGS vs R&D decides whether a dollar hits gross margin). Shared-platform spend (k8s control plane, data platform, observability) is **allocated by a published formula**, by usage where measurable, by headcount where not. *Rejected: leaving shared costs unallocated*, they're 20-30% of the bill, and unallocated is unaccountable. Also rejected: a 15-tag taxonomy, beyond 4-5 enforced dimensions, compliance collapses.
+Four mandatory dimensions on every resource: **`team`** (answers the budget alert), **`service`** (the unit-cost denominator), **`env`** (prod vs non-prod, entirely different cut policies), **`cost_center`** (finance's join key, COGS (cost of goods sold) vs R&D decides whether a dollar hits gross margin). Shared-platform spend (k8s control plane, data platform, observability) is **allocated by a published formula**, by usage where measurable, by headcount where not. *Rejected: leaving shared costs unallocated*, they're 20-30% of the bill, and unallocated is unaccountable. Also rejected: a 15-tag taxonomy, beyond 4-5 enforced dimensions, compliance collapses.
 
 One derived table outranks the rest: **`unit_cost(service, month)`**, allocated spend ÷ demand driver. The growth-normalizer, and the only number that proves savings *stuck* rather than merely happened.
 

@@ -5,11 +5,11 @@ sidebar:
   order: 3
 ---
 
-> **Why this gets asked.** The vending machine is the textbook explicit state machine, the State pattern shows up in roughly **30% of all LLD problems** (elevator, ATM, order lifecycle), and this is the cleanest specimen, which is why Google, Amazon, Microsoft, Apple, and Oracle keep asking it. A junior answer enumerates classes and gets the happy path vending. A Director answer **makes illegal state transitions unrepresentable** (no code path exists, not "an `if` guards it") and **owns the failure transitions**, motor jams *after* payment, exact change unavailable, power dies mid-dispense. The real test: would you catch the missing refund path in a design review. This is the module's **canonical State-pattern lesson**, which the other LLD lessons reference rather than re-derive.
+> **Why this gets asked.** The vending machine is the textbook explicit state machine, the State pattern shows up in roughly **30% of all LLD (low-level design) problems** (elevator, ATM, order lifecycle), and this is the cleanest specimen, which is why Google, Amazon, Microsoft, Apple, and Oracle keep asking it. A junior answer enumerates classes and gets the happy path vending. A Director answer **makes illegal state transitions unrepresentable** (no code path exists, not "an `if` guards it") and **owns the failure transitions**, motor jams *after* payment, exact change unavailable, power dies mid-dispense. The real test: would you catch the missing refund path in a design review. This is the module's **canonical State-pattern lesson**, which the other LLD lessons reference rather than re-derive.
 
 ### Learning objectives
 - Run the **RESHADED** spine on an LLD problem, stating how each step adapts, H becomes the **explicit state machine**, Evaluation the **failure-mode walk**, Estimation nearly drops.
-- Compare **flag soup, the State pattern, and a table-driven FSM**, defending the State pattern by maintenance cost, not taste.
+- Compare **flag soup, the State pattern, and a table-driven FSM** (finite state machine), defending the State pattern by maintenance cost, not taste.
 - State the **money-conservation invariant** and design the refund/compensation transitions that uphold it under jams and power loss.
 - Make dispense **idempotent across a power cut** with a write-ahead journal and boot-time reconciliation, the same probe the ATM variant runs.
 - Extend payment methods (coins → bills → card/NFC) **behind an interface** without touching the FSM core, and notice how card payment changes which failure is cheap.
@@ -45,7 +45,7 @@ The idea candidates miss: the prime directive is **conservation of money**, ever
 
 ## E: Estimation
 
-> The adaptation said out loud: **Estimation nearly drops**, no QPS or fleet to size. What survives is the habit of *quantifying the design pressure*: how big is the state space, and how often do the "rare" failures actually fire?
+> The adaptation said out loud: **Estimation nearly drops**, no QPS (queries per second) or fleet to size. What survives is the habit of *quantifying the design pressure*: how big is the state space, and how often do the "rare" failures actually fire?
 
 **State-space math (why flags lose):** **6 states × 8 events = 48 cells** in the transition matrix, roughly **15 legal**. The other ~33 cells *are the bug surface*, each must be deliberately a no-op or an error. Model the same machine with 4 booleans and you get **16 representable combinations for 6 meaningful states**, 10 meaningless configurations that type-check.
 
@@ -234,7 +234,7 @@ The context object owns `journal`, `inventory`, `change`, `motor` and threads th
 
 **Fleet telemetry, mobile pre-pay, dynamic pricing:** out of LLD scope; they bolt onto the journal stream. Name them, decline to design them, scope discipline reads as seniority.
 
-**Where I'd delegate (the explicit Director move):** *"Payments owns card/NFC behind `PaymentSession`; my prior is capture-on-dispense because it makes jam compensation free, they own PCI scope and the processor SLA. Firmware owns sensor debouncing and jam-timeout calibration; my prior is ~5 s with a latched drop flag."* I keep the state machine, the invariant, the journal ordering. That split is the altitude.
+**Where I'd delegate (the explicit Director move):** *"Payments owns card/NFC behind `PaymentSession`; my prior is capture-on-dispense because it makes jam compensation free, they own PCI scope and the processor SLA (service-level agreement). Firmware owns sensor debouncing and jam-timeout calibration; my prior is ~5 s with a latched drop flag."* I keep the state machine, the invariant, the journal ordering. That split is the altitude.
 
 ---
 

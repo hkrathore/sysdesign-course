@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> The request-lifecycle lesson surveyed DNS at a glance (the root→TLD→authoritative *walk* exists, TTL trades failover speed against lookup load, GeoDNS/anycast steer globally, failover isn't instant). This lesson is the **building-block deep-dive** at decision altitude: TTL as the operational knob, the four steering policies as distinct mechanisms, anycast's real semantics, and, the Director angle, DNS as a **global control plane** and an **outage blast-radius**.
+> The request-lifecycle lesson surveyed DNS at a glance (the root→TLD→authoritative *walk* exists, TTL trades failover speed against lookup load, GeoDNS/anycast steer globally, failover isn't instant). This lesson is the **building-block deep-dive** at decision altitude: TTL (time-to-live) as the operational knob, the four steering policies as distinct mechanisms, anycast's real semantics, and, the Director angle, DNS as a **global control plane** and an **outage blast-radius**.
 
 ### Learning objectives
 - State who does the work in resolution (the recursive resolver, not the client) and why caching makes DNS viable at internet scale.
@@ -20,7 +20,7 @@ DNS is the **directory-assistance operator for the internet**. You (your OS) cal
 ### Deep explanation
 
 #### The hierarchy and who owns what
-DNS is a delegated tree; no single server knows everything. The **root** points at the **TLD** servers (`.com`/`.net` run by Verisign), the TLD **refers** to your domain's **authoritative nameservers**, what a managed provider like Route 53 or Cloudflare runs for you, and only the authoritative server *answers* rather than refers. (The famous "13 root servers" are 13 anycast *clouds* of 1,000+ instances each, a relic of the old 512-byte UDP limit, not 13 machines.)
+DNS is a delegated tree; no single server knows everything. The **root** points at the **TLD** (top-level domain) servers (`.com`/`.net` run by Verisign), the TLD **refers** to your domain's **authoritative nameservers**, what a managed provider like Route 53 or Cloudflare runs for you, and only the authoritative server *answers* rather than refers. (The famous "13 root servers" are 13 anycast *clouds* of 1,000+ instances each, a relic of the old 512-byte UDP limit, not 13 machines.)
 
 **Record types a Director should name without hesitation:** `A`/`AAAA` (name→IP), `CNAME` (alias), `NS` (delegation), `SOA` (zone metadata, incl. the negative-cache TTL), `MX` (mail), `TXT` (SPF/DKIM/verification). Footnote: a `CNAME` is illegal at the zone apex, pointing `example.com` itself at an ELB/CloudFront hostname needs a provider `ALIAS`/ANAME/flattening feature, not a bare `CNAME`.
 
@@ -42,7 +42,7 @@ Your client makes **one recursive query** ("hand me the final answer") to its re
 
 1. **Failover / rollback speed.** TTL bounds how fast a record change actually takes effect. A **30-60 s** TTL lets you repoint a dead region or **roll back a bad DNS change** within a minute. A **24 h** TTL means a mistake, or a region outage, lingers for up to a day in resolver caches you don't control.
 2. **Query volume → cost.** Lower TTL = more lookups reaching your authoritative provider, who **bills per query**. Route 53 charges roughly **$0.40 per million standard queries**. Drop a TTL from 3600 s to 30 s on a domain serving **2B resolutions/day** and you can multiply authoritative query volume **~10-50×** depending on cacheability, a real line item, and a self-inflicted DDoS surface if mis-set.
-3. **Resolver slop.** Many resolvers and clients **don't honor TTL precisely**, some clamp a minimum, some serve stale. So a low TTL is a **best-effort floor on propagation, not a guarantee.** This is *the* Director caveat (worth repeating): **never design a hard RTO around DNS alone.**
+3. **Resolver slop.** Many resolvers and clients **don't honor TTL precisely**, some clamp a minimum, some serve stale. So a low TTL is a **best-effort floor on propagation, not a guarantee.** This is *the* Director caveat (worth repeating): **never design a hard RTO (recovery time objective) around DNS alone.**
 
 A common pattern: keep a **moderate TTL (300 s)** in steady state for cost, and **pre-lower it to 30-60 s** ahead of a planned migration or failover drill, then restore it.
 
@@ -57,7 +57,7 @@ The authoritative server can return **different answers to different resolvers**
 **The subtlety that trips people up:** geolocation and latency steering key off the **resolver's IP, not the end-user's**. A user on `8.8.8.8` can be routed as if they were wherever Google's resolver egressed. The fix is **EDNS Client Subnet (ECS)**, the resolver forwards a truncated client subnet so the authoritative server can steer accurately. **Google Public DNS sends ECS; Cloudflare `1.1.1.1` by default does not** (privacy stance). So "GeoDNS is accurate" is conditional on ECS, a real-world miss for the large public-resolver population.
 
 #### Anycast: BGP-nearest, not geo-nearest
-**Anycast advertises the same IP from many physical locations** and lets **BGP** route each client to the "nearest" instance. Critical precision: **"nearest" means fewest AS hops / best BGP path, not geographically closest and not guaranteed lowest-latency**, BGP optimizes for routing policy, not your latency.
+**Anycast advertises the same IP from many physical locations** and lets **BGP** (Border Gateway Protocol) route each client to the "nearest" instance. Critical precision: **"nearest" means fewest AS hops / best BGP path, not geographically closest and not guaranteed lowest-latency**, BGP optimizes for routing policy, not your latency.
 
 Anycast is **ideal for DNS** specifically because DNS is **short, stateless UDP**: each query is a self-contained round trip, so it doesn't matter if consecutive queries land on different instances. The **caveat**: long-lived **TCP/TLS** flows can **break on BGP reconvergence** (the path shifts mid-connection to a different anycast node that has no state), which is why anycast is used heavily for DNS and CDN entry, and more carefully for stateful protocols. Every serious DNS provider (Route 53, Cloudflare, the root letters) is anycast under the hood, it's how they get both low latency *and* DDoS absorption (attack traffic disperses across all instances).
 
@@ -84,11 +84,11 @@ flowchart TD
 ```
 
 ### Worked example: the DNS layer for a global, 3-region service
-Requirement (the R/E of RESHADED): a service in **us-east-1, eu-west-1, ap-southeast-1**, target **RTO ≤ 2 min** on a region loss, **EU PII must stay in EU**, and we run **canary deploys**. Design the DNS layer:
+Requirement (the R/E of RESHADED): a service in **us-east-1, eu-west-1, ap-southeast-1**, target **RTO ≤ 2 min** on a region loss, **EU PII (personally identifiable information) must stay in EU**, and we run **canary deploys**. Design the DNS layer:
 
-1. **Steering: latency-based routing** as the default, each user's resolver gets the lowest-latency region, cutting cross-ocean RTT (recall ~150 ms per intercontinental hop). This is the **performance** policy.
+1. **Steering: latency-based routing** as the default, each user's resolver gets the lowest-latency region, cutting cross-ocean RTT (round-trip time) (recall ~150 ms per intercontinental hop). This is the **performance** policy.
 2. **Compliance override: a geolocation rule for the EU** so EU-origin queries pin to `eu-west-1` regardless of latency, **data residency beats latency** for that population. (Rejected alternative: latency-only, simpler, but a Frankfurt user routed to a US region on a bad day would put PII outside the EU. Not acceptable.)
-3. **Failover: health checks + 30-60 s TTL.** When a region's health check fails, the authoritative provider stops returning it; resolvers pick it up within ~a TTL. (Rejected alternative: 3600 s TTL, far cheaper in query volume, but blows the 2-min RTO; a dead region would linger ~an hour in caches.) **The honest caveat:** DNS failover is a best-effort floor, resolver slop means a few clients lag. For a *hard* SLA, pair it with **anycast withdrawal** or a **global L7 LB** that fails over faster than DNS can.
+3. **Failover: health checks + 30-60 s TTL.** When a region's health check fails, the authoritative provider stops returning it; resolvers pick it up within ~a TTL. (Rejected alternative: 3600 s TTL, far cheaper in query volume, but blows the 2-min RTO; a dead region would linger ~an hour in caches.) **The honest caveat:** DNS failover is a best-effort floor, resolver slop means a few clients lag. For a *hard* SLA (service-level agreement), pair it with **anycast withdrawal** or a **global L7 LB** that fails over faster than DNS can.
 4. **Canary: weighted records** to shift 5% → 25% → 100% to the new version, watching metrics between steps. Rejected alternative, flip 100% at once, is faster but has no blast-radius control if the new version is bad.
 5. **Blast-radius: a second authoritative provider.** Run **two** managed DNS providers (e.g., Route 53 **and** NS1) as co-equal `NS` records, so one provider's outage doesn't take the domain dark. (See below, this is the Dyn lesson, and the single most important availability decision in the DNS layer.)
 
@@ -97,7 +97,7 @@ Requirement (the R/E of RESHADED): a service in **us-east-1, eu-west-1, ap-south
 ### Trade-offs table: DNS traffic-steering policies
 | Policy | Steers by | Health/load aware? | Use when… | Rejected because… |
 |---|---|---|---|---|
-| **Round-robin / Multivalue** | rotate multiple A records | No (Multivalue: yes, health-checked) | cheap spread across equal backends; simple HA | not real load balancing, bare round-robin keeps dead nodes in rotation |
+| **Round-robin / Multivalue** | rotate multiple A records | No (Multivalue: yes, health-checked) | cheap spread across equal backends; simple HA (high availability) | not real load balancing, bare round-robin keeps dead nodes in rotation |
 | **Geolocation** | query origin → coarse geo | optional | **data residency / compliance**, geo-blocking | poor for performance; coarse; resolver-IP unless ECS |
 | **Latency-based** | lowest measured RTT to resolver | optional | **performance** across multi-region | accuracy depends on ECS for public resolvers |
 | **Weighted** | assigned percentages | optional | **canary / blue-green / migration** | not location- or latency-aware on its own |

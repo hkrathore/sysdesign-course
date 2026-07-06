@@ -8,7 +8,7 @@ sidebar:
 import ConsistentHashingRing from '@components/widgets/ConsistentHashingRing.jsx';
 import QuorumCalculator from '@components/widgets/QuorumCalculator.jsx';
 
-> **Why this gets asked at Director level:** "Design Memcached" / "Design a distributed cache" / "Design a Dynamo-style KV store" is a Tier-1 question across Meta, Stripe, Walmart, Anthropic, Canva, Databricks, and Snowflake, and it is increasingly run as a **dedicated component round** alongside the broad system-design round. It is the **technical-credibility gate for leaders**: a single component, no product to hide behind, where the interviewer can dig until they hit the floor of your depth. The Director signal is *not* reciting the Dynamo paper. It is **defending one consistency posture against the use case and the cost**, narrating the operational failure modes you have actually seen, hot keys, thundering herd, resharding pain, and stating crisply **where your depth ends and the cache team's benchmark begins.** Too shallow ("it's just a hash map over the network") reads as not technical enough to lead infra; too deep (20 minutes tuning the LRU clock hand) reads as not operating at level.
+> **Why this gets asked at Director level:** "Design Memcached" / "Design a distributed cache" / "Design a Dynamo-style KV (key-value) store" is a Tier-1 question across Meta, Stripe, Walmart, Anthropic, Canva, Databricks, and Snowflake, and it is increasingly run as a **dedicated component round** alongside the broad system-design round. It is the **technical-credibility gate for leaders**: a single component, no product to hide behind, where the interviewer can dig until they hit the floor of your depth. The Director signal is *not* reciting the Dynamo paper. It is **defending one consistency posture against the use case and the cost**, narrating the operational failure modes you have actually seen, hot keys, thundering herd, resharding pain, and stating crisply **where your depth ends and the cache team's benchmark begins.** Too shallow ("it's just a hash map over the network") reads as not technical enough to lead infra; too deep (20 minutes tuning the LRU clock hand) reads as not operating at level.
 
 ### Learning objectives
 
@@ -35,13 +35,13 @@ Now the consistency picture: a cache is a **photocopy, not the original.** You k
 - *What's the data?* → **Opaque values up to ~1 MB** (serialized objects, rendered fragments, session blobs). No range scans, no secondary indexes, pure point `GET`/`SET` by key. That constraint is a gift: it's why partitioning is simple.
 - *Eviction or durability?* → For cache mode, **eviction (LRU/TTL) and memory-bounded**; losing the cache is a latency event, not a data-loss event. For KV mode, **durable, no silent eviction.**
 - *Acceptable staleness?* → For cache mode, **seconds of staleness is fine**; for KV/session mode, **read-your-writes is required.** This is the whole ballgame.
-- *Latency bar?* → **p99 < 1 ms intra-AZ** for the cache; single-digit ms cross-AZ. A cache that adds 10 ms isn't a cache.
+- *Latency bar?* → **p99 < 1 ms intra-AZ** (availability zone) for the cache; single-digit ms cross-AZ. A cache that adds 10 ms isn't a cache.
 
 **Functional requirements:**
 1. `GET(key)`, `SET(key, value, ttl)`, `DELETE(key)`, point operations only.
 2. **Partition** keys across N nodes; route a request to the right node in one hop.
 3. **Replicate** each key to R nodes so a single node loss doesn't lose (cache) or doesn't lose-and-can-recover (KV) the data.
-4. **Evict** under memory pressure (cache mode): TTL + LRU.
+4. **Evict** under memory pressure (cache mode): TTL (time-to-live) + LRU.
 5. **Rebalance** with minimal key movement when nodes join/leave.
 
 **Explicitly CUT (scoping is the signal):** range queries, secondary indexes, transactions, multi-key atomicity, cross-region active-active (called out as evolution), pub/sub, Lua scripting. I scope to **a partitioned, replicated point-lookup store with a defensible consistency posture**, and say so.
@@ -70,11 +70,11 @@ Now the consistency picture: a cache is a **photocopy, not the original.** You k
 
 **Throughput per node:** 1M GET/s ÷ ~20 nodes ≈ **50K GET/s per node**, trivially within a single in-memory node's budget (Memcached/Redis sustain 100K+ ops/s/core). So **CPU is not the bottleneck; memory and hot-key skew are.**
 
-**Bandwidth:** `1M GET/s × 10 KB ≈ 10 GB/s` aggregate read egress, ~500 MB/s/node, well within a 25 GbE NIC. Fine *unless* it concentrates on one hot key (the failure mode, not the average).
+**Bandwidth:** `1M GET/s × 10 KB ≈ 10 GB/s` aggregate read egress, ~500 MB/s/node, well within a 25 GbE NIC (network interface card). Fine *unless* it concentrates on one hot key (the failure mode, not the average).
 
 **Replication write amplification:** 100K SET/s × RF 3 = **300K replica writes/s** spread across the ring, ~15K/node, negligible. The cost of replication is **memory (×3), not write throughput.**
 
-**What estimation decided:** ~20 nodes, ~4 TB RAM, and a **memory-and-skew-bound** system, not a CPU- or throughput-bound one. The two expensive knobs are **replication factor** (each +1 is another full copy of 1 TB of RAM) and **hot-key handling**. The math says the panel conversation is about RAM dollars and tail latency, not QPS.
+**What estimation decided:** ~20 nodes, ~4 TB RAM, and a **memory-and-skew-bound** system, not a CPU- or throughput-bound one. The two expensive knobs are **replication factor** (each +1 is another full copy of 1 TB of RAM) and **hot-key handling**. The math says the panel conversation is about RAM dollars and tail latency, not QPS (queries per second).
 
 ---
 
@@ -85,7 +85,7 @@ Now the consistency picture: a cache is a **photocopy, not the original.** You k
 **The value store (in-memory, point-access).**
 - *Access pattern:* point `GET`/`SET`/`DELETE` by key; no scans, no indexes. Values opaque, ≤1 MB.
 - *Choice:* **in-memory hash table per node** (Memcached-style slab allocator, or Redis dict), partitioned across nodes by consistent hashing, replicated to RF copies. This is the entire storage layer, there's no separate index because point lookup *is* the access pattern. (Cache internals, slab classes, LRU clock, are delegated; see Go-deeper.)
-- *Rejected, a B-tree / LSM on disk (RocksDB-backed):* buys durability and range scans we don't need, and pays ~100 µs-1 ms disk latency that defeats the p99 < 1 ms bar. Correct for a durable KV at scale where the working set exceeds RAM; **wrong for a latency-first cache** where the whole point is staying in memory.
+- *Rejected, a B-tree / LSM (log-structured merge) on disk (RocksDB-backed):* buys durability and range scans we don't need, and pays ~100 µs-1 ms disk latency that defeats the p99 < 1 ms bar. Correct for a durable KV at scale where the working set exceeds RAM; **wrong for a latency-first cache** where the whole point is staying in memory.
 - *Rejected, eventually-consistent wide-column (Cassandra) as the cache:* over-built, we don't need its write path or its disk durability for ephemeral cache data, and its tail latency is milliseconds, not microseconds.
 
 **The membership/topology state (who owns which key range).**
@@ -158,7 +158,7 @@ DELETE /v1/kv/{key}?consistency=eventual|quorum
 
 > Trivial on purpose, but the **version metadata** and the **replica placement rule** are the two load-bearing fields, because they're what make eventual consistency *converge* instead of *drift.*
 
-**The value record** (per key, per node): `key → { value: bytes, version, ttl_expires_at }`. The `version` is a **vector clock** (or a simpler last-writer-wins timestamp for cache mode), it's the metadata that lets divergent replicas reconcile. For pure cache mode where staleness is harmless, **LWW by timestamp** is enough and cheaper; for KV mode where two clients may write concurrently, **vector clocks** preserve the conflict for the application to resolve.
+**The value record** (per key, per node): `key → { value: bytes, version, ttl_expires_at }`. The `version` is a **vector clock** (or a simpler last-writer-wins timestamp for cache mode), it's the metadata that lets divergent replicas reconcile. For pure cache mode where staleness is harmless, **LWW (last-write-wins) by timestamp** is enough and cheaper; for KV mode where two clients may write concurrently, **vector clocks** preserve the conflict for the application to resolve.
 
 **Replica placement:** key `k` lives on the node that owns `hash(k)` on the ring, **plus the next R−1 distinct physical nodes walking clockwise** (skipping vnodes of the same physical node, and preferably landing in different AZs). This placement rule is the single most consequential line in the data model, it's what turns "a node died" from an outage into a non-event.
 
@@ -167,7 +167,7 @@ DELETE /v1/kv/{key}?consistency=eventual|quorum
 
 A vector clock is a map `{node_id → counter}`. On each write, the coordinating node increments its own counter. Comparing two clocks: if every counter in A is ≥ the matching counter in B (and at least one is strictly greater), A **dominates** B (A is strictly newer) and B can be discarded. If neither dominates, the writes are **concurrent**, a genuine conflict the cache can't auto-resolve, so it either keeps both siblings (Dynamo's approach, resolved on next read) or falls back to LWW.
 
-**Read-repair**: on a quorum read, the coordinator gathers responses from R replicas, picks the dominating version, returns it to the client, and **asynchronously writes the winning version back** to any replica that returned a stale one. This is the cheap, on-the-read-path half of anti-entropy. **Merkle-tree anti-entropy** is the background half: each node keeps a Merkle tree over its key ranges; neighbors compare tree roots, and only diverging sub-ranges are exchanged, so a full sync transfers kilobytes of hashes, not gigabytes of data. The full LWW-vs-vector-clock and Merkle mechanics are IC depth; the Director keeps *which* one and *why*, and hands the implementation to the cache team.
+**Read-repair**: on a quorum read, the coordinator gathers responses from R replicas, picks the dominating version, returns it to the client, and **asynchronously writes the winning version back** to any replica that returned a stale one. This is the cheap, on-the-read-path half of anti-entropy. **Merkle-tree anti-entropy** is the background half: each node keeps a Merkle tree over its key ranges; neighbors compare tree roots, and only diverging sub-ranges are exchanged, so a full sync transfers kilobytes of hashes, not gigabytes of data. The full LWW-vs-vector-clock and Merkle mechanics are IC (individual contributor) depth; the Director keeps *which* one and *why*, and hands the implementation to the cache team.
 
 </details>
 
@@ -203,7 +203,7 @@ Drag N, W, R: when `W + R ≤ N` the read and write sets can miss each other →
 
 **At 10× (10 TB working set, multi-region, 10M GET/s):**
 - **Memory cost forces a tiering decision.** 10 TB ×3 in RAM is ~$200-300K/month, at that point you question RF=3 for cache data and consider **RF=2 + fast re-warm**, and tier cold-but-not-evictable keys to **local NVMe** (a Memcached-extstore / Redis-on-flash pattern). *Trade-off:* NVMe-tier reads are ~100 µs not ~10 µs, fine for the cold tail, and it roughly halves the RAM bill. The hot tier stays in RAM.
-- **Multi-region goes active-active eventual.** Each region owns a full ring; writes replicate cross-region async (CRDT-friendly LWW for cache data). *Trade-off:* cross-region staleness of tens to hundreds of ms, acceptable for cache, **not** for a global session store, which would need a region-pinned strong-consistency tier or a consensus layer (consensus-layer territory). Name that the consistency posture **can't** be uniform across regions and the cost of making it so.
+- **Multi-region goes active-active eventual.** Each region owns a full ring; writes replicate cross-region async (CRDT-friendly (CRDT = conflict-free replicated data type) LWW for cache data). *Trade-off:* cross-region staleness of tens to hundreds of ms, acceptable for cache, **not** for a global session store, which would need a region-pinned strong-consistency tier or a consensus layer (consensus-layer territory). Name that the consistency posture **can't** be uniform across regions and the cost of making it so.
 
 **Hardest trade-offs to defend:**
 - **The consistency posture itself**, eventual + read-repair for cache, quorum for KV, *in the same cluster*, chosen per request. The discipline is **keeping the strong-consistency surface as small as the use case demands**, every key forced to quorum is tail latency and availability you spent for correctness you didn't need.
@@ -211,7 +211,7 @@ Drag N, W, R: when `W + R ≤ N` the read and write sets can miss each other →
 - **Near-cache staleness**, the client-side hot-key cache that saves a melting node also creates a second, shorter staleness window. Worth it for hot keys; a bug magnet if applied universally.
 
 **Where I'd delegate (the explicit Director move):**
-- **The eviction internals:** *"The cache team owns whether we run Memcached slab/LRU or Redis with LFU eviction; my prior is Memcached for a pure look-aside cache because its memory efficiency and operational simplicity win, Redis only if we need its data structures. I want their benchmark on our value-size distribution before we commit."*
+- **The eviction internals:** *"The cache team owns whether we run Memcached slab/LRU or Redis with LFU (least frequently used) eviction; my prior is Memcached for a pure look-aside cache because its memory efficiency and operational simplicity win, Redis only if we need its data structures. I want their benchmark on our value-size distribution before we commit."*
 - **The membership protocol:** *"Whether ownership lives in gossip (Dynamo-style) or a thin etcd/ZooKeeper control plane is a reliability-engineering call; my prior is gossip for the data ring to avoid a coordination dependency on the hot path, with a control plane only for admin operations."*
 - **The benchmark that settles the consistency cost:** *"I'd have the team run our real read:write mix through eventual vs W=R=2 quorum and measure the actual p99 delta and the stale-read rate under induced partition, I'll set the policy from those numbers, not from the paper."* **What I keep, the consistency posture, the placement rule, the three failure-mode mitigations, and what I hand off, with a stated prior, is the altitude.**
 

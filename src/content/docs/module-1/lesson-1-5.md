@@ -37,9 +37,9 @@ Every senior candidate stumbles, the offer turns on **how you recover, not wheth
 
 | Failure mode | What it is | Mitigation to name |
 |---|---|---|
-| Single point of failure | One component whose loss takes the system down | Redundancy, multi-AZ, failover |
+| Single point of failure | One component whose loss takes the system down | Redundancy, multi-AZ (availability zone), failover |
 | Cascading failure | One overloaded service drags down its callers | Circuit breakers, bulkheads, timeouts |
-| Thundering herd / cache stampede | Many clients hit the DB at once when a hot key expires | Request coalescing, jittered TTL, lock-on-miss |
+| Thundering herd / cache stampede | Many clients hit the DB at once when a hot key expires | Request coalescing, jittered TTL (time-to-live), lock-on-miss |
 | Retry storm | Failures trigger retries that amplify the outage | Exponential backoff + jitter, retry budgets |
 | Hot shard / hot key | Skewed load concentrates on one partition | Better shard key, salting, dedicated cache |
 | Replication lag | Followers fall behind, reads go stale | Read-your-writes routing, bounded staleness |
@@ -90,7 +90,7 @@ flowchart TD
 > *Model:* Give the method and a bound: "It depends on write volume and network, but typically milliseconds to low seconds under healthy conditions, spiking under load. That's why I'd route read-your-writes traffic to the leader and only send staleness-tolerant reads to followers." Bounded reasoning beats a fabricated precise figure.
 
 **Q2.** Halfway through, you realize your estimate was off by 10×. Recover.
-> *Model:* "I need to correct an earlier number, I dropped a factor of ten, so peak QPS is ~500k, not ~50k. That actually changes my conclusion: a single cache tier won't absorb it, so I'll shard the cache. Good that we caught it." Owning + showing the *consequence* turns the error into a signal of rigor.
+> *Model:* "I need to correct an earlier number, I dropped a factor of ten, so peak QPS (queries per second) is ~500k, not ~50k. That actually changes my conclusion: a single cache tier won't absorb it, so I'll shard the cache. Good that we caught it." Owning + showing the *consequence* turns the error into a signal of rigor.
 
 **Q3.** The interviewer keeps pushing on a choice you're confident in. Are they telling you you're wrong?
 > *Model:* Usually no, repeated pushing is often a probe to test whether you understand *why* you chose what you chose and whether you'll cave under pressure. Hold your reasoned position, acknowledge the cost, and offer the condition under which you'd change. If they reveal a genuine new constraint, *then* update.

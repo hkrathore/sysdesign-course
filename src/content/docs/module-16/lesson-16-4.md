@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **This question has a dedicated section in every 2026 senior question bank, and L6+ candidates are expected to raise multi-region failure modes unprompted.** The standard EM form is concrete: *"A region just died during peak. Walk me through it."* The junior answer draws two identical regions and says "active-active." The Director answer knows **RPO≈0 active-active roughly doubles infra cost *and* imports a write-conflict problem you didn't have yesterday**, so it tiers services by criticality, pays the 2× only for checkout, lets analytics ride on backups, states the spend delta, and treats an untested DR plan as fiction. "Everything active-active" is not the strong answer. It is the failure mode.
+> **This question has a dedicated section in every 2026 senior question bank, and L6+ candidates are expected to raise multi-region failure modes unprompted.** The standard EM (engineering manager) form is concrete: *"A region just died during peak. Walk me through it."* The junior answer draws two identical regions and says "active-active." The Director answer knows **RPO (recovery point objective)≈0 active-active roughly doubles infra cost *and* imports a write-conflict problem you didn't have yesterday**, so it tiers services by criticality, pays the 2× only for checkout, lets analytics ride on backups, states the spend delta, and treats an untested DR plan as fiction. "Everything active-active" is not the strong answer. It is the failure mode.
 
 ### Learning objectives
 - Run an **adapted RESHADED** spine on a resilience strategy: R becomes **RTO/RPO pinned per service tier** (a business sign-off, not an engineering preference), E becomes **cost-delta math**, 2× infra vs revenue-at-risk per hour.
@@ -51,7 +51,7 @@ So the Director's move is never "pick active-active or active-passive." It's: **
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS sizing here. Estimation becomes **cost-delta math**, each DR posture's annual cost versus the expected revenue-at-risk it removes. Same estimation discipline: round aggressively, state assumptions, let the numbers decide.
+> **Adaptation, said out loud:** no QPS (queries per second) sizing here. Estimation becomes **cost-delta math**, each DR posture's annual cost versus the expected revenue-at-risk it removes. Same estimation discipline: round aggressively, state assumptions, let the numbers decide.
 
 **Option math, on the $40M base.** A region that must survive alone must carry **100% of peak by itself**, so blanket active-active isn't "2 × 50%," it's close to 2 × 100%-capable:
 
@@ -69,11 +69,11 @@ So the Director's move is never "pick active-active or active-passive." It's: **
 
 ## S: Storage
 
-> **Adaptation, said out loud:** S here is the **per-tier replication strategy**, and the *write-conflict problem is created or avoided in this step*. Replication mechanics and why cross-region agreement costs an RTT are covered elsewhere; here we only place those tools.
+> **Adaptation, said out loud:** S here is the **per-tier replication strategy**, and the *write-conflict problem is created or avoided in this step*. Replication mechanics and why cross-region agreement costs an RTT (round-trip time) are covered elsewhere; here we only place those tools.
 
 **Tier 0, two sub-decisions, because "checkout" is not one data shape:**
 
-- **Order/payment ledger, cross-region quorum, RPO 0.** Writes commit to a majority of replicas spanning 3 regions (N=3, W=2), Spanner-style. *Cost:* every ledger write pays ~30-70 ms of cross-region RTT, acceptable, because order placement is once-per-checkout, and compliance demands RPO≈0 anyway. *Rejected, multi-master with LWW/CRDT merge for money:* last-write-wins on a ledger double-charges or loses orders. **For money, avoid conflicts; don't resolve them.**
+- **Order/payment ledger, cross-region quorum, RPO 0.** Writes commit to a majority of replicas spanning 3 regions (N=3, W=2), Spanner-style. *Cost:* every ledger write pays ~30-70 ms of cross-region RTT, acceptable, because order placement is once-per-checkout, and compliance demands RPO≈0 anyway. *Rejected, multi-master with LWW/CRDT (conflict-free replicated data type) merge for money:* last-write-wins on a ledger double-charges or loses orders. **For money, avoid conflicts; don't resolve them.**
 - **Carts and sessions, single-writer-per-key, async replication.** Each user's cart is **homed** to one region; only the home region writes it; async replication mirrors it. On regional death, the survivor takes over homing, accepting **seconds of RPO on carts homed to the dead region**. A lost cart line is an apology; a conflicted payment is an incident. *Rejected, quorum writes for carts:* 70 ms on every cart-add to protect apology-grade data is the wrong exchange rate.
 
 **Tier 1, async replica, promote on failover.** Catalog/search/profile keep a cross-region **asynchronous replica**; seconds of lag = seconds of RPO, well inside the 5-min sign-off. *Rejected, sync replication:* an RTT inside every catalog write to protect data the business agreed to lose 5 minutes of.
@@ -199,7 +199,7 @@ If a dataset genuinely needs concurrent writes in two regions (collaborative edi
 <details>
 <summary>Go deeper, DNS vs anycast failover mechanics and timings (IC depth, optional)</summary>
 
-DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but real-world convergence is 1-5 min, a long tail of resolvers and ISPs ignore TTLs, and some mobile stacks pin resolutions for the app's lifetime. Health-check-driven record withdrawal is automatic but inherits the same tail. Anycast (Cloudflare/Google front-door style): one IP announced from many POPs; withdrawing a region is a BGP route withdrawal converging in seconds, no client-cache problem, but it requires owning or renting an anycast edge. Belt-and-suspenders for Tier 0: client SDKs with a fallback endpoint list and aggressive timeouts, so even TTL-ignoring clients fail over at the application layer within one retry cycle. Measure the real number in game days, "drain completes in 90 s for 95% of traffic, 5-min tail for the rest" is the measured fact that replaces hand-waving.
+DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but real-world convergence is 1-5 min, a long tail of resolvers and ISPs ignore TTLs, and some mobile stacks pin resolutions for the app's lifetime. Health-check-driven record withdrawal is automatic but inherits the same tail. Anycast (Cloudflare/Google front-door style): one IP announced from many POPs; withdrawing a region is a BGP (Border Gateway Protocol) route withdrawal converging in seconds, no client-cache problem, but it requires owning or renting an anycast edge. Belt-and-suspenders for Tier 0: client SDKs with a fallback endpoint list and aggressive timeouts, so even TTL-ignoring clients fail over at the application layer within one retry cycle. Measure the real number in game days, "drain completes in 90 s for 95% of traffic, 5-min tail for the rest" is the measured fact that replaces hand-waving.
 
 </details>
 
@@ -218,7 +218,7 @@ DNS-based steering (Route 53-style latency/health routing): TTL 30-60 s, but rea
 **What I'd revisit:** if outage data beats the 1-per-2-years prior, Tier 1 relaxes to pilot-light (replicas + IaC, no warm fleet), saving ~$4M; if the business launches same-day delivery, order-management's tier row gets re-signed.
 
 **Where I'd delegate (the explicit Director move):**
-- **Steering:** *"The traffic team owns DNS-vs-anycast and the client-failover SDK; my prior is an anycast front door with DNS fallback, because resolver-TTL tails are the documented failure mode, they own the measured drain time."*
+- **Steering:** *"The traffic team owns DNS-vs-anycast and the client-failover SDK; my prior is an anycast front door with DNS fallback, because resolver-TTL (time-to-live) tails are the documented failure mode, they own the measured drain time."*
 - **Quorum-store bake-off:** *"Storage benchmarks Spanner vs DynamoDB global tables vs self-run CockroachDB on ledger-write p99 across our three regions; my prior is the managed option, a self-run consensus layer is an on-call surface we'd be buying with the savings."*
 - **Game-day program:** *"Resilience engineering owns the drill calendar and chaos tooling; I own attending the quarterly evacuation and signing the measured-RTO report."* What I keep, the tier catalog, the RTO/RPO sign-offs, the spend delta, and what I hand off, with priors, is the altitude.
 

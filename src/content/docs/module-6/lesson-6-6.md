@@ -5,12 +5,12 @@ sidebar:
   order: 6
 ---
 
-> **Why this gets asked, and what separates a Director answer.** The meeting-room scheduler is a T2, high-frequency LLD/OOD question (Microsoft, Google, Amazon, Meta), rising because it *resembles real work*. A junior candidate writes `Room`, `Booking`, `Scheduler` classes and calls it done. A Director answer does three things in the first ten minutes: makes **interval overlap a first-class abstraction** with boundary semantics stated; names the **check-then-book race** and picks a serialization point on purpose; and - the best move in the OOD set - spots the **recurrence trap**, names RRULE's complexity in one breath, *bounds it* (a generator, never materialized rows), and moves on. The question is small on purpose; what's measured is whether you find the places it bites.
+> **Why this gets asked, and what separates a Director answer.** The meeting-room scheduler is a T2, high-frequency LLD/OOD (object-oriented design) question (Microsoft, Google, Amazon, Meta), rising because it *resembles real work*. A junior candidate writes `Room`, `Booking`, `Scheduler` classes and calls it done. A Director answer does three things in the first ten minutes: makes **interval overlap a first-class abstraction** with boundary semantics stated; names the **check-then-book race** and picks a serialization point on purpose; and - the best move in the OOD set - spots the **recurrence trap**, names RRULE's complexity in one breath, *bounds it* (a generator, never materialized rows), and moves on. The question is small on purpose; what's measured is whether you find the places it bites.
 
 ### Learning objectives
-- Run the RESHADED spine on an **LLD problem**, saying out loud how each step adapts - `D` becomes the interval/booking model, Evaluation becomes the double-booking race, the final `D` becomes "now make it Google Calendar."
+- Run the RESHADED spine on an **LLD (low-level design) problem**, saying out loud how each step adapts - `D` becomes the interval/booking model, Evaluation becomes the double-booking race, the final `D` becomes "now make it Google Calendar."
 - Make **`TimeRange` a value object** owning the half-open overlap predicate, so back-to-back meetings never false-conflict and the rule is defined exactly once.
-- Prevent double-booking by **choosing a serialization point** - and defend *pessimistic* locking here when Ticketmaster chose optimistic CAS, because the contention shape is 1,000× different.
+- Prevent double-booking by **choosing a serialization point** - and defend *pessimistic* locking here when Ticketmaster chose optimistic CAS (compare-and-swap), because the contention shape is 1,000× different.
 - Execute the **recurrence move**: store the rule, generate occurrences into a query window, edits as exceptions - and quantify why materializing is a trap.
 - Sketch the scale-out honestly: shard by calendar, keep the room invariant single-shard, federate free/busy.
 
@@ -54,7 +54,7 @@ The contrast to pocket: this is the check-then-book race at **1/1,000th the cont
 
 **Assumptions:** 50K employees, 2K rooms, each room booked ~12×/day, 250 working days/yr.
 
-**Write QPS:** `2K rooms × 12 ÷ 86,400 ≈ 0.3 bookings/s`; even a 20× Monday-9am peak is **~6 writes/s**. A laptop handles this.
+**Write QPS (queries per second):** `2K rooms × 12 ÷ 86,400 ≈ 0.3 bookings/s`; even a 20× Monday-9am peak is **~6 writes/s**. A laptop handles this.
 
 **Read QPS:** ~5 availability checks per booking plus passive views ≈ 50× writes → **~15 reads/s, peak ~300/s**. One replica absorbs it.
 
@@ -73,7 +73,7 @@ The contrast to pocket: this is the check-then-book race at **1/1,000th the cont
 **Choice: a single relational store (Postgres).** Three reasons, each tied to a requirement: (1) the no-double-book invariant wants **transactions and row locks** - the serialization point comes free; (2) availability queries are **range scans over time**, served natively by a B-tree on `(room_id, start_time)`; (3) Postgres can express **interval-overlap exclusion as a database constraint** - a tripwire no application bug can route around.
 
 - *Rejected - in-memory object model only:* the interview toy. The invariant then lives in application memory - two app instances silently double-book. One sentence covers it: "the in-memory `ConflictChecker` is a cache of the truth; the database holds the invariant."
-- *Rejected - NoSQL KV:* nothing needs its scale (1.8 GB/yr), and you'd hand-build the transactions, range scans, and constraint Postgres gives free. Fashion over fit.
+- *Rejected - NoSQL KV (key-value):* nothing needs its scale (1.8 GB/yr), and you'd hand-build the transactions, range scans, and constraint Postgres gives free. Fashion over fit.
 
 ---
 
@@ -167,7 +167,7 @@ Why materialization also fails *operationally*, beyond row count: a horizon job 
 
 > Adaptation: for LLD, evaluation means **attack your own design's invariant** - and here that means the double-booking race, plus the interaction between the race fix and unmaterialized recurrences.
 
-**The race, stated precisely.** Two requests for Room 4, Tuesday 3-4pm, arrive 10 ms apart. Both check; both see "free"; both insert. Classic TOCTOU - and at fleet scale not rare: thousands of booking pairs per day land within seconds of each other on hot rooms, so "unlikely" is a guarantee of corruption. Check and reserve must be **one atomic unit** at some serialization point. Three candidates:
+**The race, stated precisely.** Two requests for Room 4, Tuesday 3-4pm, arrive 10 ms apart. Both check; both see "free"; both insert. Classic TOCTOU (time-of-check-to-time-of-use) - and at fleet scale not rare: thousands of booking pairs per day land within seconds of each other on hot rooms, so "unlikely" is a guarantee of corruption. Check and reserve must be **one atomic unit** at some serialization point. Three candidates:
 
 **Option A - pessimistic per-room lock (chosen).** The booking transaction locks the room's row first; check and insert happen inside the lock. Cost: bookings for one room serialize. Run the number: the locked section is ~5 ms of indexed reads against ~25 bookings/room/day - **contention is effectively zero**, so the lock convoy that disqualified pessimistic locking in Ticketmaster (Ticketmaster, 33K req/s on one event) cannot form at 6 writes/s across 2,000 rooms. Same race, contention three orders of magnitude apart, **opposite choice** - making that contrast explicit is the strongest single sentence in this interview.
 
@@ -202,13 +202,13 @@ If you ever migrate to a store without exclusion constraints (MySQL), the lock r
 
 **1. One company → millions of tenants: shard by calendar.** A room's bookings are a calendar; a person's are a calendar. **Partition by `calendar_id`** - every hard operation (conflict-check a room, render a week view) stays **single-shard**, and the per-room lock survives sharding untouched. *Rejected: sharding by time* - it splits every calendar across shards and makes "current week" a hot partition under all load.
 
-**2. Meetings span calendars: refuse the distributed transaction.** A 10-person meeting touches 11 calendars on many shards; the junior reflex is 2PC across all of them. The Director observation: **only the room carries a hard invariant.** Book the room transactionally on its shard (the v1 path, unchanged), then **fan out attendee copies asynchronously** via a queue - attendee calendars may show conflicts, so eventual consistency there is *semantically correct*, not a compromise. Small CP core, everything else AP - the boundary discipline in a new place.
+**2. Meetings span calendars: refuse the distributed transaction.** A 10-person meeting touches 11 calendars on many shards; the junior reflex is 2PC (two-phase commit) across all of them. The Director observation: **only the room carries a hard invariant.** Book the room transactionally on its shard (the v1 path, unchanged), then **fan out attendee copies asynchronously** via a queue - attendee calendars may show conflicts, so eventual consistency there is *semantically correct*, not a compromise. Small CP core, everything else AP - the boundary discipline in a new place.
 
 **3. "Find a time for these 10 people": federated free/busy.** Each shard serves a compact **free/busy projection** (busy intervals only - privacy comes free); an aggregator intersects 10 small interval lists in memory, cached for hot users. Staleness of seconds is fine because **the room booking re-validates transactionally anyway** - projection is a hint, transaction is the truth (the seat-map pattern, verbatim). *Rejected: scatter-gather for full calendars* - slow, and over-shares meeting details.
 
 **4. Scale numbers, to stay honest:** 500M users × ~15 events/week ≈ **12K bookings/s sustained** - a real write load, but trivial per calendar-shard; ~300 B/event ≈ **100+ TB/yr**, finally justifying the distributed store v1 didn't need. The *model* - TimeRange, rules-not-rows, per-resource serialization - survives unchanged; only the deployment grows.
 
-**Where I'd delegate (the explicit Director move):** RRULE expansion to a vetted library wrapped by the platform team; the free/busy aggregation SLA to the serving team - *"my prior is precomputed projections refreshed on write, since meeting-time suggestions tolerate seconds of staleness"*; offline/mobile sync (a CRDT-adjacent problem - the capstone) to a dedicated effort rather than hand-waving it in.
+**Where I'd delegate (the explicit Director move):** RRULE expansion to a vetted library wrapped by the platform team; the free/busy aggregation SLA (service-level agreement) to the serving team - *"my prior is precomputed projections refreshed on write, since meeting-time suggestions tolerate seconds of staleness"*; offline/mobile sync (a CRDT-adjacent (CRDT = conflict-free replicated data type) problem - the capstone) to a dedicated effort rather than hand-waving it in.
 
 ---
 

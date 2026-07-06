@@ -5,10 +5,10 @@ sidebar:
   order: 12
 ---
 
-> **This gets asked because Directors own the two things this system is: the observability budget and the on-call rotation.** It's the most Director-authentic problem in the set, you are the customer of the thing you're designing. A Staff answer designs a clean ingest path and a TSDB. A Director answer treats **cardinality as the cost function of the entire system**, every label is a line item, and frames retention, downsampling, and sampling as **budget decisions with stated trade-offs**, then closes with the build-vs-buy crossover that decides whether this platform team should exist at all. This is the full-system assembly of the pillars and burn-rate alerting, plus the economics; the build-vs-buy memo is the worked example. The tell interviewers listen for: do you design for write volume, or do you design for *cardinality*, because they are not the same number.
+> **This gets asked because Directors own the two things this system is: the observability budget and the on-call rotation.** It's the most Director-authentic problem in the set, you are the customer of the thing you're designing. A Staff answer designs a clean ingest path and a TSDB (time-series database). A Director answer treats **cardinality as the cost function of the entire system**, every label is a line item, and frames retention, downsampling, and sampling as **budget decisions with stated trade-offs**, then closes with the build-vs-buy crossover that decides whether this platform team should exist at all. This is the full-system assembly of the pillars and burn-rate alerting, plus the economics; the build-vs-buy memo is the worked example. The tell interviewers listen for: do you design for write volume, or do you design for *cardinality*, because they are not the same number.
 
 ### Learning objectives
-- Run the **RESHADED** spine on a **write-heavy time-series** system whose dominant cost is not QPS but **cardinality**, and make the Estimation step the centerpiece: hosts × series/host × bytes/sample × resolution.
+- Run the **RESHADED** spine on a **write-heavy time-series** system whose dominant cost is not QPS (queries per second) but **cardinality**, and make the Estimation step the centerpiece: hosts × series/host × bytes/sample × resolution.
 - Derive the **write-amplification math** out loud (a 10K-host fleet emitting at 10 s resolution is millions of samples/sec and tens of millions of active series) and show why the ingest rate and the active-series count are two different budgets.
 - Treat **downsampling and retention tiers** as explicit budget decisions, raw at 10 s for days, rolled up to 1-minute and 1-hour for months and years, each stated as a trade-off, not a default.
 - Decide **push vs pull at fleet scale** as an operational call, and place the **alerting/query path** as a separate read system from the ingest firehose.
@@ -40,7 +40,7 @@ That asymmetry inverts the read-heavy, cache-everything social-feed problems: he
 1. **Ingest** metrics from a large fleet, counters, gauges, histograms.
 2. **Store** time series durably with high compression.
 3. **Query** for dashboards, aggregations, rate, percentiles over ranges.
-4. **Alert** continuously on **SLO burn-rate** rules.
+4. **Alert** continuously on **SLO (service-level objective) burn-rate** rules.
 5. **Downsample and expire** by retention tier.
 6. **Govern cardinality**, drop/limit high-cardinality labels at ingest.
 
@@ -95,7 +95,7 @@ That asymmetry inverts the read-heavy, cache-everything social-feed problems: he
 - *Choice:* an **inverted index** native to the TSDB (Prometheus's postings index), held largely in memory. *Rejected, unbounded growth:* without a per-tenant cap enforced here, one team's blowup evicts everyone's working set.
 
 **3. Alerting rules + SLO state (small, strongly-consistent).**
-- *Choice:* a small **relational/KV store** for rule definitions, SLO targets, and error-budget state, tiny, but correct and durable (a lost burn-rate rule is a missed page). *Rejected, co-locating in the TSDB:* couples slow-changing config to the firehose; keep control plane and data plane separate.
+- *Choice:* a small **relational/KV (key-value) store** for rule definitions, SLO targets, and error-budget state, tiny, but correct and durable (a lost burn-rate rule is a missed page). *Rejected, co-locating in the TSDB:* couples slow-changing config to the firehose; keep control plane and data plane separate.
 
 **Cardinality enforcement** lives at the **ingest collector** (an OTel tier you own): drop/aggregate high-cardinality labels *before* they reach the index, the cheapest series is the one you never stored.
 
@@ -210,7 +210,7 @@ GET  /v1/budget/{sloId}                        -> 200 { consumed: 0.42, remainin
 **Re-check vs NFRs:** write-availability, async 202 ingest that never blocks the fleet; lossless-enough, buffered collectors absorb spikes; freshness, alert evaluator reads the hot tier; cost-bounded, cardinality gate + retention tiers; multi-tenancy, per-tenant series caps. Now the bottlenecks.
 
 **Bottleneck 1, cardinality explosion (the cardinal cost risk).**
-A team ships a `user_id` label; active series jumps 1,000× and the index OOMs.
+A team ships a `user_id` label; active series jumps 1,000× and the index OOMs (out-of-memorys).
 *Fix:* **enforce cardinality at the collector**, drop/aggregate disallowed labels before storage, plus a **per-tenant active-series cap** (e.g. 1M/team) returning 429 when breached, isolating the blast radius to the offending tenant. *Rejected:* accept-then-alert, by the time the alert fires the index is gone. *Trade-off:* a hard cap can drop legitimately-needed series, so it's per-tenant and raisable on review, the explicit cost of multi-tenancy.
 
 **Bottleneck 2, the write firehose saturating a TSDB node.**
@@ -241,7 +241,7 @@ A heavy dashboard query scans hot data and starves the write path.
 
 **The build-vs-buy crossover, the worked example:**
 The decision a Director actually owns, and it turns on the cardinality math from E. The vendor bills **per host × per custom metric (= per unique series)**: at 10K hosts and 10M series, **multi-million/yr**, a `user_id` blowup spikes it to nine figures. Run it both ways:
-- **Buy:** capability **live today**, zero engineers consumed, bill a *negotiable trajectory*, a 3-year commit lands ~25-30% off, and an **OTel collector tier you own** (dropping unqueried series) cuts **30-50%**. Realistic governed 3-year TCO: **single-digit millions**.
+- **Buy:** capability **live today**, zero engineers consumed, bill a *negotiable trajectory*, a 3-year commit lands ~25-30% off, and an **OTel collector tier you own** (dropping unqueried series) cuts **30-50%**. Realistic governed 3-year TCO (total cost of ownership): **single-digit millions**.
 - **Build:** a credible Prometheus/Mimir + Grafana platform team is **~6 engineers × ~$250K loaded ≈ $1.5M/yr forever**, plus ~$0.5-0.7M/yr infra and a ~$1.5M v1 year, with a never-ending maintenance tail (agents break on every runtime upgrade). 3-year build TCO ≈ **$7-8M**, *plus* an on-call rotation for the tool that supports on-call.
 
 **The crossover, written down (the Director move):** build wins only when **governed vendor spend durably clears ~2× the loaded cost of the replacing team** (~$4-5M/yr here). Below it, **buy and govern the pipe**; the deciding number is opportunity cost, six platform engineers are two product teams not shipping a commodity that wins zero customers. The trigger goes in the memo: *"if governed observability spend exceeds $4.5M/yr after negotiation and pipeline controls, we commission the build."* The **cardinality lever governs cost on both paths**, drop unqueried series whether you build or buy, which is precisely why it's a Director's problem, not the on-call engineer's.

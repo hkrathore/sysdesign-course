@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-> **This problem is a trap with a scoreboard attached.** Amazon, Adobe, Meta, and Microsoft keep "design a chess game" in rotation because it runs two tests at once. Test one is the OOD judgment call: polymorphic `Piece.canMove()` versus a rules engine, when a pattern adds clarity vs abstraction theater. Test two is sneakier: full chess legality is **400+ lines and hours of work**, and the session is 45 minutes. A junior starts coding the Knight and dies in the weeds. A Director **negotiates scope out loud in the first five minutes**, splits piece geometry from game-state legality, implements the cheap layer, stubs the expensive one, and is scored on the negotiation itself. Connect Four and Tic-Tac-Toe are this family's screener variants, same Board/Player/win-check skeleton, no piece taxonomy; chess is the senior version because it tests the judgment.
+> **This problem is a trap with a scoreboard attached.** Amazon, Adobe, Meta, and Microsoft keep "design a chess game" in rotation because it runs two tests at once. Test one is the OOD (object-oriented design) judgment call: polymorphic `Piece.canMove()` versus a rules engine, when a pattern adds clarity vs abstraction theater. Test two is sneakier: full chess legality is **400+ lines and hours of work**, and the session is 45 minutes. A junior starts coding the Knight and dies in the weeds. A Director **negotiates scope out loud in the first five minutes**, splits piece geometry from game-state legality, implements the cheap layer, stubs the expensive one, and is scored on the negotiation itself. Connect Four and Tic-Tac-Toe are this family's screener variants, same Board/Player/win-check skeleton, no piece taxonomy; chess is the senior version because it tests the judgment.
 
 ### Learning objectives
 
@@ -22,7 +22,7 @@ Chess rules come in two boxes, and the whole interview is noticing the boxes are
 
 ## R: Requirements
 
-> LLD adaptation, said out loud: in HLD problems R cuts scope to a defensible core; here **R is the score**, seniors are graded on negotiating what 45 minutes can hold, not on knowing chess. Spend five real minutes here.
+> LLD (low-level design) adaptation, said out loud: in HLD (high-level design) problems R cuts scope to a defensible core; here **R is the score**, seniors are graded on negotiating what 45 minutes can hold, not on knowing chess. Spend five real minutes here.
 
 **The scope-negotiation script, say something close to this, verbatim:**
 
@@ -40,7 +40,7 @@ That paragraph quantifies the work, proposes a contract instead of asking permis
 
 ## E: Estimation
 
-> LLD adaptation: no QPS to compute, estimation becomes **time-budget math**, and it's what makes the scope negotiation defensible rather than lazy. Numbers, not vibes.
+> LLD adaptation: no QPS (queries per second) to compute, estimation becomes **time-budget math**, and it's what makes the scope negotiation defensible rather than lazy. Numbers, not vibes.
 
 **The state is trivial, say so in one breath:** 64 squares, ≤32 piece objects, a packed board ~32 bytes; a move encodes in ~4 bytes; average legal moves per position ≈ 35. Nothing is a scale problem; the only scarce resource is **interview minutes**.
 

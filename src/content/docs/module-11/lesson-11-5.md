@@ -38,11 +38,11 @@ A client cache is not one thing. It is a hierarchy, fastest and smallest at the 
 - **On-disk, structured** (**SQLite** or a key-value store). Millisecond reads, survives app restarts and offline, bounded by device storage. This is where the "show me the feed instantly on cold start" data lives.
 - **On-disk, blob / file cache.** Raw bytes: downloaded images, video segments, documents.
 - **HTTP cache.** The transport layer's own cache, governed by `Cache-Control`, `ETag`, and `Last-Modified`. A conditional request (`If-None-Match`) lets the server answer `304 Not Modified` with no body, so you revalidate freshness for the cost of headers, not a full re-download.
-- **Dedicated image cache.** A two-tier (memory + disk) LRU tuned for decoded bitmaps, because images dominate both memory and bytes and deserve their own eviction policy. Libraries like Glide, Coil, or SDWebImage exist precisely to run this tier well.
+- **Dedicated image cache.** A two-tier (memory + disk) LRU (least recently used) tuned for decoded bitmaps, because images dominate both memory and bytes and deserve their own eviction policy. Libraries like Glide, Coil, or SDWebImage exist precisely to run this tier well.
 
 The moment you cache, you have made a **second copy of the truth**, and every hard problem of distributed data reappears on the device. The copy goes stale, and you owe an **invalidation** strategy:
 
-- **TTL:** the copy is trusted for N seconds, then revalidated. Simple, but you are choosing a staleness window.
+- **TTL (time-to-live):** the copy is trusted for N seconds, then revalidated. Simple, but you are choosing a staleness window.
 - **Versioned / keyed:** the cache key includes a content version or hash, so new content is a new key and the old one just ages out. Clean, and it sidesteps the hardest bug in computing.
 - **Server push-to-invalidate:** the server tells the client "this is stale" via a push or a version bump on the next poll. Freshest, but it costs an invalidation channel and more complexity.
 
@@ -82,7 +82,7 @@ For most consumer apps, **images are the payload**, so image delivery is where t
 
 Two things separate a Director answer from an engineer's. First, **you tie performance to the business**: every +100 ms of latency measurably cuts conversion (Amazon famously put it near ~1% of sales per 100 ms), sites lose on the order of ~10% of users per extra second of load, and bounce probability climbs sharply as load goes from 1 s toward 3 s and beyond. Performance is a retention and revenue lever, and you say so before you talk tactics.
 
-Second, **you enforce budgets as a discipline, not as good intentions.** Perf that is left to individual heroics regresses the week after someone ships a heavy dependency. So you gate it: a **performance budget in CI** that fails the build when the JS bundle crosses its size limit or TTI regresses past its threshold, a **startup-time SLO** tracked in production telemetry, and a bundle-size limit enforced automatically. The alternative you name and reject is **"we'll optimize later"**: later never comes, because by then the regressions are spread across a hundred commits and nobody owns the whole. The Director move is to make the fast path the enforced default, so a team cannot accidentally ship a slow client, rather than catching it in review after it is already live.
+Second, **you enforce budgets as a discipline, not as good intentions.** Perf that is left to individual heroics regresses the week after someone ships a heavy dependency. So you gate it: a **performance budget in CI** that fails the build when the JS bundle crosses its size limit or TTI regresses past its threshold, a **startup-time SLO** (service-level objective) tracked in production telemetry, and a bundle-size limit enforced automatically. The alternative you name and reject is **"we'll optimize later"**: later never comes, because by then the regressions are spread across a hundred commits and nobody owns the whole. The Director move is to make the fast path the enforced default, so a team cannot accidentally ship a slow client, rather than catching it in review after it is already live.
 
 ### Diagram: client read path (cache tiers) and the optimistic write path
 

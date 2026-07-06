@@ -10,7 +10,7 @@ sidebar:
 ### Learning objectives
 - Answer in the **measured-operator shape**: ROI-anchored adoption → measurement honesty → enablement-plus-governance → org-shape implications → personal usage with one concrete number, describing a rollout you ran, not a trend you've read about.
 - Refuse the **vanity metrics** (lines of code, commits, Copilot acceptance rate) and name what actually moves: lead time, change-failure rate, downstream review/defect load, DevEx surveys, measured against a *baseline you took first*.
-- Hold the **honest-dividend position**: cite the contested data (≈60% of leaders report no significant boost; 51% believe GenAI is net-negative for the industry) and the **2025 DORA finding that AI amplifies whatever system it lands in**, so the prerequisite investment is the engineering system itself.
+- Hold the **honest-dividend position**: cite the contested data (≈60% of leaders report no significant boost; 51% believe GenAI is net-negative for the industry) and the **2025 DORA (DevOps Research and Assessment) finding that AI amplifies whatever system it lands in**, so the prerequisite investment is the engineering system itself.
 - State a defensible **junior-pipeline and org-shape** position, you still hire and grow juniors, onboarding rebuilt around *directing and verifying* AI output, with a view on seniority mix, review load, and the interview loop.
 - Avoid **both failure ditches** (mandate-theater hype, dismissive wait-and-see) and govern credibly: security/IP guardrails, human review on AI-generated code, structured exploration time, and your own daily usage as the credibility floor.
 

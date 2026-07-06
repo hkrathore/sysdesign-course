@@ -11,7 +11,7 @@ sidebar:
 - Run the execution story on a **system spine**, early detection, options costed, headline-first renegotiation, quantified recovery, durable mechanism change, delivered as STAR-L, not as a crunch-and-hope war story.
 - Command the **incident** answer on its own spine: severity classification, role separation (you coordinate, you don't type the fix), a comms cadence you wrote, a hard call under incomplete information with the risk reasoning shown, and a **blameless postmortem with verified action items**.
 - Answer the **wrong-decision** variant with decision-process maturity: a consequential Director-scale call, why it was reasonable *then*, reversal speed, and the **one-way / two-way-door guardrail** you built that later fired.
-- Make **"I recommended we kill it"** the default turnaround answer, cost discipline and portfolio thinking are what score in the post-ZIRP era, not the rescue.
+- Make **"I recommended we kill it"** the default turnaround answer, cost discipline and portfolio thinking are what score in the post-ZIRP (zero interest-rate policy) era, not the rescue.
 - Calibrate to the **2026 bar**: quantified impact in every behavioral answer, verified postmortem follow-through over the postmortem-as-meeting, and AI as a timeline lever, not only scope-cut and bodies.
 
 ### Intuition first
@@ -33,7 +33,7 @@ These are nearly all past-event questions (STAR-L). The unifying thread: at Dire
 | "Make the business case for paying down tech debt / a major refactor." | Debt framed in dollars and risk, not morality; a tool other than the rewrite-quarter. |
 | "An incident caused by a change you approved, what changed in your process?" | Owning your contribution, and a mechanism change with evidence it held. |
 
-The merge: every one is a **past-event** question, so they all take **STAR-L**, but on a *system spine* (below), with two specialized variants. The **incident** question runs on the IC command spine; the **wrong-decision** question on the reversibility spine. Both are STAR-L underneath; the spine just tells you which beats to hit.
+The merge: every one is a **past-event** question, so they all take **STAR-L**, but on a *system spine* (below), with two specialized variants. The **incident** question runs on the IC (individual contributor) command spine; the **wrong-decision** question on the reversibility spine. Both are STAR-L underneath; the spine just tells you which beats to hit.
 
 ---
 
@@ -44,7 +44,7 @@ The general spine is five beats, in order, each doubles as the probe-defense, be
 - **Detection, how you saw it early.** Milestone burn-down, forecast *ranges* not point estimates, a skip-level signal. The load-bearing line of the whole cluster: *missing the deadline isn't the failure; letting someone be surprised by it is.* If your story starts at the crisis, you've lost the round, start at the instrument that flagged it.
 - **Options, each costed.** Kill / descope / re-staff / re-architect, and what each costs in time, money, and risk. The decision *tree* is the Director signal, not the heroics; a candidate who jumped straight to "we worked weekends" skipped the part being scored.
 - **Decision + headline-first renegotiation.** Take the revised range and a recommendation to stakeholders *before they hear it elsewhere*, impact first, then the new date/cost, then options-with-a-recommendation in the *same* conversation (SCQA). No problem delivered without a recommendation.
-- **Quantified recovery, or a clean kill.** Percent of scope shipped, the new date hit, MTTR delta, or a well-executed kill with engineers redeployed to something that mattered. The kill is not the failure; the sunk-cost rescue often is.
+- **Quantified recovery, or a clean kill.** Percent of scope shipped, the new date hit, MTTR (mean time to recovery) delta, or a well-executed kill with engineers redeployed to something that mattered. The kill is not the failure; the sunk-cost rescue often is.
 - **Durable mechanism change.** Pre-mortems, estimation-with-ranges, a program-health check, a one-way-door one-pager, *with evidence it held* (a later slip the mechanism caught early). The story ends in a mechanism, not a feeling.
 
 Then survive the probe: hold the numbers, the rejected options, the stakeholders, and the timeline three levels down. Never announce the spine aloud.
@@ -108,7 +108,7 @@ This cluster got re-scored hard on cost discipline, hands-on validation, and ver
 
 - **"How did you detect the slip, and who did you tell, when?"**, *Strong:* a specific early instrument (a widening forecast range, a skip-level signal) and a same-day headline-first heads-up *before* stakeholders heard it elsewhere. *Red flag:* the story starts at the crisis with no early-warning mechanism, or stakeholders found out late.
 - **"Did you consider killing it?"**, *Strong:* the kill was a live option, costed against the rescue, with the redeploy named; sunk cost explicitly rejected. *Red flag:* never considered the kill, or killed reflexively with no analysis.
-- **"How did you confirm the postmortem action items actually shipped?"**, *Strong:* an owner and a date per item, a re-review at 30 days, reliability defended in SLO / error-budget / cost-of-downtime terms. *Red flag:* a meeting with a doc and no verification loop, "human error" as a root cause is the same fail one level down.
+- **"How did you confirm the postmortem action items actually shipped?"**, *Strong:* an owner and a date per item, a re-review at 30 days, reliability defended in SLO (service-level objective) / error-budget / cost-of-downtime terms. *Red flag:* a meeting with a doc and no verification loop, "human error" as a root cause is the same fail one level down.
 - **"When did you know the decision was wrong, and how fast did you reverse?"**, *Strong:* a clear recognition moment, fast public reversal, and a reversibility guardrail (one-way-door one-pager, named dissenter) that *later fired*. *Red flag:* "I'd make the same call again," or a low-stakes decade-old story dressed as humility.
 - **"Impossible deadline, what did you actually cut, and who signed off?"**, *Strong:* explicit scope-cut with named stakeholder consent, debt quantified onto the roadmap, AI/platform leverage considered before bodies. *Red flag:* quality cut silently, or proud crunch as the strategy.
 

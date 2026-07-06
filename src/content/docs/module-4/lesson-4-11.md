@@ -8,7 +8,7 @@ sidebar:
 ### Learning objectives
 - Run the full **RESHADED** spine on a **read-dominated** serving + routing system - the *inverse* of Uber: there the firehose was driver pings; here map data changes rarely and is read billions of times (read-heavy, massively cacheable).
 - Make the **precompute-vs-query-time-compute** trade the through-line: it appears **twice** - **pre-rendered tiles** vs render-on-demand, and **precomputed routing shortcuts** vs raw Dijkstra at query time. Same trade, two subsystems.
-- **Estimate** the headline numbers - tile-fetch QPS, the petabyte tile footprint that forces vector tiles, and the **CDN offload** that shrinks origin traffic ~100x - and show the subtraction.
+- **Estimate** the headline numbers - tile-fetch QPS (queries per second), the petabyte tile footprint that forces vector tiles, and the **CDN offload** that shrinks origin traffic ~100x - and show the subtraction.
 - Explain why **plain contraction hierarchies break under live traffic**, and how splitting topology preprocessing from metric customization restores both fast queries *and* fresh ETAs.
 - Operate at **Director altitude**: tie each call to a requirement, quantify the cost, own the routing depth that 5.7 *delegated* to "the Maps team," and name what *this* problem delegates next.
 
@@ -30,7 +30,7 @@ The whole interesting tension is the same in both machines: **how much do you co
 - *Latency budget?* → tiles **p99 < ~50 ms** (an image off an edge), route **p99 < ~300 ms**, search **p99 < ~200 ms**.
 - *Global?* → **Yes**, but a route is almost always **within one contiguous region** - a query in India never needs South America's graph. A natural geographic shard (the same locality gift 5.7 exploited).
 
-**CUT from scope (stated, with the reason):** Street View / satellite imagery (a separate capture pipeline with the same blob+CDN serving shape), turn-by-turn voice nav and re-routing UX, transit/bike/walk modes (additional graphs - a multi-graph extension), business reviews and the Places *write* side (UGC + moderation), indoor/3D. I scope to **tiles → CDN → client**, **road graph → routing+ETA**, and **places search**, and say so.
+**CUT from scope (stated, with the reason):** Street View / satellite imagery (a separate capture pipeline with the same blob+CDN serving shape), turn-by-turn voice nav and re-routing UX, transit/bike/walk modes (additional graphs - a multi-graph extension), business reviews and the Places *write* side (UGC (user-generated content) + moderation), indoor/3D. I scope to **tiles → CDN → client**, **road graph → routing+ETA**, and **places search**, and say so.
 
 **Functional requirements:** serve map tiles for any (lat, lng, zoom); compute a route A→B with a live-traffic ETA; search places near a location.
 
@@ -51,7 +51,7 @@ The whole interesting tension is the same in both machines: **how much do you co
 
 *Enough math to make a defensible call - round hard, state assumptions, expose where the cost actually is.*
 
-**Assumptions:** ~**1B** DAU (round anchor; public figures ~1-2B MAU); ~**2B map sessions/day**, ~**20 tiles** pulled per session; routing in ~10% of sessions → **~200M routes/day**; search similar.
+**Assumptions:** ~**1B** DAU (daily active users) (round anchor; public figures ~1-2B MAU (monthly active users)); ~**2B map sessions/day**, ~**20 tiles** pulled per session; routing in ~10% of sessions → **~200M routes/day**; search similar.
 
 **Tile-fetch read QPS (the headline read number):**
 ```
@@ -94,7 +94,7 @@ Three data classes - the **precompute-vs-query** trade shows up in the first two
 - *Rejected:* shortest-path against a disk database - a route exploration touches thousands-to-millions of edges; a disk round-trip per edge is fatal to the 300 ms budget. *Also rejected:* a generic **graph database (Neo4j)** as the live router - built for flexible traversals, not the specialized precompute-heavy shortest-path this needs; use a purpose-built routing engine (OSRM/GraphHopper-class) over the in-RAM graph.
 
 **3. Places / POIs (read-mostly, text + geo search).**
-- *Choice:* an **S2 geo-index** (reused from 5.7) for "near me" **plus an inverted text index** (Elasticsearch) for name/category/address, with POI metadata in a KV store (Bigtable/DynamoDB). The search service intersects geo ∩ text and ranks.
+- *Choice:* an **S2 geo-index** (reused from 5.7) for "near me" **plus an inverted text index** (Elasticsearch) for name/category/address, with POI metadata in a KV (key-value) store (Bigtable/DynamoDB). The search service intersects geo ∩ text and ranks.
 - *Rejected:* a relational `LIKE` + `ST_Distance` scan - can't serve typeahead-latency search at this scale; full-text needs an inverted index, "near me" needs a spatial one.
 
 **The routing *algorithm*** (precompute vs query-time, and what live traffic does to it) is decided in **Evaluation**.
@@ -202,7 +202,7 @@ POST /internal/maps/publish            # batch pipeline flips to a new tile+grap
 ```
 
 **Design notes (each a choice with a rejected alternative):**
-- **Tiles: `immutable` + year-long `max-age` + version in the path.** We **reject** short TTLs or cache-busting params: tiles never change for a given version, so the primitive is "cache forever, change the URL on a new version." The ~99% hit rate - and the cost of the whole serving tier - hinges on this header.
+- **Tiles: `immutable` + year-long `max-age` + version in the path.** We **reject** short TTLs (time-to-lives) or cache-busting params: tiles never change for a given version, so the primitive is "cache forever, change the URL on a new version." The ~99% hit rate - and the cost of the whole serving tier - hinges on this header.
 - **`route` returns the polyline + `eta_seconds` computed server-side** - we **reject** returning raw edges for the client to sum; ETA depends on the live overlay, which must be server-authoritative.
 - **`depart_at` distinguishes live from *predicted* traffic** ("leave at 8 a.m. tomorrow" uses historical time-of-day profiles) - a different metric, both needed.
 - **No write API for tiles or graph in the data plane** - the only "write" is the versioned batch publish, deliberately off the request path.
@@ -226,7 +226,7 @@ Re-check against the NFRs and break the design on purpose. The headline bottlene
 **Bottleneck 1 - the routing precompute (the central problem).**
 **Raw Dijkstra** on a continental graph (~10^8 nodes) touches millions of nodes per query - **~seconds**, far over the 300 ms budget at 7K QPS. **Contraction hierarchies (CH)** precompute a skeleton of shortcut edges so a query walks only the skeleton - **sub-millisecond**. That's the precompute-vs-query trade in its purest form: hours of preprocessing once, ~constant-time queries forever.
 
-**The tension: plain CH assumes *static* edge weights - live traffic breaks them.** The shortcut structure is built around fixed travel times; the moment a freeway's cost changes, the precompute is built for the wrong metric, and you cannot re-run hours of preprocessing every 2 minutes. **The fix splits the precompute in two: topology preprocessing (rare - redone only when roads change) and metric customization (frequent - stamp the current traffic weights onto the precomputed structure in ~seconds, every ~1-2 min).** Queries stay sub-millisecond against the freshly-customized structure. This is the CRP / customizable-CH family. We **reject** plain CH (can't re-weight cheaply) and **reject** raw Dijkstra (too slow at query time) - the customization split is the only point on the curve satisfying *both* fast queries *and* live traffic. **The Director move: I'd have the routing team benchmark CH vs CRP/CCH on our real graph and refresh cadence - my prior is the customization split, precisely because live traffic demands a cheap re-weight - measured on query p99 and customization time, not asserted.**
+**The tension: plain CH assumes *static* edge weights - live traffic breaks them.** The shortcut structure is built around fixed travel times; the moment a freeway's cost changes, the precompute is built for the wrong metric, and you cannot re-run hours of preprocessing every 2 minutes. **The fix splits the precompute in two: topology preprocessing (rare - redone only when roads change) and metric customization (frequent - stamp the current traffic weights onto the precomputed structure in ~seconds, every ~1-2 min).** Queries stay sub-millisecond against the freshly-customized structure. This is the CRP (critical rendering path) / customizable-CH family. We **reject** plain CH (can't re-weight cheaply) and **reject** raw Dijkstra (too slow at query time) - the customization split is the only point on the curve satisfying *both* fast queries *and* live traffic. **The Director move: I'd have the routing team benchmark CH vs CRP/CCH on our real graph and refresh cadence - my prior is the customization split, precisely because live traffic demands a cheap re-weight - measured on query p99 and customization time, not asserted.**
 
 <details>
 <summary>Go deeper - why CH breaks and how the customization split works (IC depth, optional)</summary>
@@ -264,7 +264,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 **At 10x (~10B sessions/day, ~5M tile reads/s, ~70K route QPS):**
 - **Egress dominates even harder.** More aggressive vector-tile reuse, **client-side tile caching**, finer CDN tiering. The origin stays tiny because the hit rate holds; the spend is the edge fleet and egress contracts.
 - **Routing scales with replicas, not shards.** The per-region graph is read-only between refreshes - add replicas of hot regions. *Trade:* more RAM copies (tens of GB each) - cheaper than recomputation.
-- **Faster traffic + prediction.** Tighten customization cadence and lean harder on **predicted traffic** (per-edge time-of-day models + ML on live conditions) - an ML system with its own SLAs, a place to delegate.
+- **Faster traffic + prediction.** Tighten customization cadence and lean harder on **predicted traffic** (per-edge time-of-day models + ML on live conditions) - an ML system with its own SLAs (service-level agreements), a place to delegate.
 
 **Hardest trade-offs to defend:**
 - **Precompute vs query, on both axes simultaneously - the unifying pattern.** Tiles: pre-render (storage) vs on-demand (latency+compute) → the hybrid. Routing: precomputed shortcuts vs query-time search → the customization split. Neither extreme works; the art is choosing the split point and naming what each side costs.
@@ -304,7 +304,7 @@ A dense-metro routing shard and a few popular commute routes take disproportiona
 ### Common mistakes
 
 - **Treating it as write-heavy / reusing the Uber framing.** Maps is read-dominated and cacheable; the heavy artifacts are batch-written and precomputed.
-- **"Use contraction hierarchies" and stopping.** Plain CH bakes static weights; **live traffic breaks it.** Naming the customization split is the IC-vs-Director line on this problem.
+- **"Use contraction hierarchies" and stopping.** Plain CH bakes static weights; **live traffic breaks it.** Naming the customization split is the IC-vs-Director (IC = individual contributor) line on this problem.
 - **Pre-rendering every tile.** ~15 PB/style of mostly-empty squares. Pre-render the hot set, render+cache the tail, ship vector.
 - **Mass-purging the CDN on every map update.** Collapses the ~99% hit rate. Version the tile key; old tiles age out, new ones warm gradually.
 - **Sharding the road graph by edge-id instead of region.** A local route becomes a fleet-wide scatter-gather. Shard by region, stitch long-haul via boundary nodes.

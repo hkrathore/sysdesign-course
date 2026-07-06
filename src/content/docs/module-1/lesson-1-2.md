@@ -8,7 +8,7 @@ sidebar:
 ### Learning objectives
 - Cleanly separate functional (what it does) from non-functional (how well) requirements.
 - Run the clarification dialogue that scopes the entire problem in 2-3 minutes.
-- Translate fuzzy non-functionals into **measurable SLOs** (p99 latency, availability nines, durability, consistency).
+- Translate fuzzy non-functionals into **measurable SLOs** (service-level objectives) (p99 latency, availability nines, durability, consistency).
 - Make each requirement *pre-commit* a downstream architectural decision.
 
 ### Intuition first
@@ -30,13 +30,13 @@ sidebar:
 - **Latency**, always as a percentile, never a mean. State a target: "p99 read < 100 ms, p99 write < 300 ms." p99/p999 is what users actually feel; the mean hides the pain.
 - **Consistency**, strong vs. eventual, *per feature*. Tie it to semantics: a follower count can be eventually consistent; a bank balance cannot.
 - **Durability**, probability you never lose committed data. S3 advertises 11 nines (99.999999999%). Say "I need high durability for uploaded media → replicated blob store / erasure coding," not "don't lose data."
-- **Scalability**, the target scale *and* the growth curve. "100M DAU today, planning for 3× in 18 months."
+- **Scalability**, the target scale *and* the growth curve. "100M DAU (daily active users) today, planning for 3× in 18 months."
 - **Throughput, cost, security/compliance**, name the ones that bind. At Director level, *cost* is rarely optional to mention.
 
-**The read:write ratio is a requirement, not a detail.** It's the single number that most shapes the architecture. 100:1 read-heavy → cache + read replicas, optimize the read path. Write-heavy (logging, metrics) → LSM-tree storage, batching, a log/queue front door. Always ask for it; if they won't say, state your assumption.
+**The read:write ratio is a requirement, not a detail.** It's the single number that most shapes the architecture. 100:1 read-heavy → cache + read replicas, optimize the read path. Write-heavy (logging, metrics) → LSM-tree (LSM = log-structured merge) storage, batching, a log/queue front door. Always ask for it; if they won't say, state your assumption.
 
 **The move that earns signal:** make every NFR drive a lever, out loud.
-> "p99 read under 100 ms with 100:1 read skew means I'm putting a cache in front of the database. The trade-off is staleness, bounded by a short TTL, which is acceptable here because the data tolerates a few seconds of lag. If this were account balances, I'd reject the cache and pay the latency."
+> "p99 read under 100 ms with 100:1 read skew means I'm putting a cache in front of the database. The trade-off is staleness, bounded by a short TTL (time-to-live), which is acceptable here because the data tolerates a few seconds of lag. If this were account balances, I'd reject the cache and pay the latency."
 
 ### Diagram: requirement → architectural lever
 ```mermaid

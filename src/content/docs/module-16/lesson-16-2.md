@@ -8,7 +8,7 @@ sidebar:
 > **This question appears nearly verbatim in Director and architect interview banks because it is the job:** "You've inherited a 15-year-old system that runs the business. Nobody fully understands it. The CEO wants features. What do you do?" It doubles as the behavioral "re-platforming you led" story. A junior answer reaches for the rewrite, new stack, clean slate, two years, and fails on the spot. A Director answer **measures before touching anything**, names the modules it will deliberately *leave alone*, sequences a strangle so **every quarter ships business-visible value**, and sells it to the CEO in capacity and risk dollars, not architecture diagrams. The interviewer is scoring whether you can run a multi-quarter change program without stopping the business.
 
 ### Learning objectives
-- Run a **first-90-days assessment**, revenue map, risk map, churn-×-incident hotspots, test coverage, KTLO burn, before changing a line of code.
+- Run a **first-90-days assessment**, revenue map, risk map, churn-×-incident hotspots, test coverage, KTLO (keep the lights on) burn, before changing a line of code.
 - Defend **stabilize-then-strangle** against the rewrite instinct with numbers: rewrite cost, historical failure rates, and the feature-freeze the CEO will never grant.
 - Adapt the **RESHADED** spine to an architecture-strategy problem, R becomes business-continuity constraints, E becomes a risk and coverage audit, Design evolution becomes the quarter-by-quarter sequence that *is* the deliverable.
 - Apply **feature-parity discipline**: scope parity to measured usage, not the legacy spec, and make the explicit case for "leave it alone" where migration buys nothing.
@@ -29,7 +29,7 @@ That is the entire lesson: inspect (the 90-day audit), stabilize (observability,
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *The actual pain, velocity, reliability, or cost?* → **All three, but velocity is what the CEO feels**: features that took 2 weeks now take 2 months.
-- *Forcing functions?* → **Java 8 and the Oracle version go end-of-support in 18 months**; a PCI/SOC 2 audit lands next year. Deadlines are leverage, use them.
+- *Forcing functions?* → **Java 8 and the Oracle version go end-of-support in 18 months**; a PCI/SOC 2 (System and Organization Controls 2) audit lands next year. Deadlines are leverage, use them.
 - *My real budget?* → **No dedicated re-platforming budget**, everything comes out of feature capacity. This constraint *is* the design: it forces incremental delivery and kills the rewrite on arrival.
 - *Revenue seasonal?* → **40% lands in Q4.** Therefore: a money-path change freeze every Q4, planned into the sequence, not discovered in October.
 
@@ -39,7 +39,7 @@ That is the entire lesson: inspect (the 90-day audit), stabilize (observability,
 3. Each migrated slice reaches **measured parity** (see A) before legacy retirement.
 4. Key-person risk on billing retired within two quarters.
 
-**Non-functional requirements:** deploys quarterly → weekly within 2 quarters; change-failure ~25% → <10%; MTTR hours → <30 min on the money path; EOL/compliance deadlines met with a quarter of slack.
+**Non-functional requirements:** deploys quarterly → weekly within 2 quarters; change-failure ~25% → <10%; MTTR (mean time to recovery) hours → <30 min on the money path; EOL/compliance deadlines met with a quarter of slack.
 
 **Explicitly CUT (scoping is the signal):** no stack migration for its own sake; no microservices-by-default ("a modular monolith plus 3-5 extracted services" is the honest target); no UI re-skin riding along; and, load-bearing, **no migration of modules the audit shows stable and low-churn.** "Leave it alone" is a first-class disposition, not a failure to finish.
 
@@ -47,7 +47,7 @@ That is the entire lesson: inspect (the 90-day audit), stabilize (observability,
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** there is no QPS to estimate. E becomes the **first-90-days assessment**, a risk map and a coverage audit. Same discipline as back-of-the-envelope math: a few load-bearing numbers, measured not guessed.
+> **Adaptation, said out loud:** there is no QPS (queries per second) to estimate. E becomes the **first-90-days assessment**, a risk map and a coverage audit. Same discipline as back-of-the-envelope math: a few load-bearing numbers, measured not guessed.
 
 **The first-90-days framework, what to measure before touching anything:**
 
@@ -75,7 +75,7 @@ That is the entire lesson: inspect (the 90-day audit), stabilize (observability,
 
 > **Adaptation, said out loud:** S compresses. There's no store to select, there's a store to *escape*: **the shared database, not the code, is the real monolith.**
 
-Anyone can split code into services; if they all still read and write the same 800 Oracle tables, you've built a **distributed monolith**, every schema change still coordinates every team, plus network hops you didn't have before. So: **data ownership follows the strangle**, an extracted domain gets its own store, populated by **CDC from the legacy schema** (replication machinery, pointed at Oracle), reads cut over first, writes second, legacy tables dropped via **expand-contract**. *Rejected, extract services now, split data later:* "later" never comes; you carry the monolith's coupling plus microservices' latency indefinitely. *Rejected, one big migration weekend:* an 800-table cutover is the rewrite in disguise. The strangler-fig lesson covers the dual-write/CDC mechanics; the Director-level point is the *ownership boundary*, not the pipe.
+Anyone can split code into services; if they all still read and write the same 800 Oracle tables, you've built a **distributed monolith**, every schema change still coordinates every team, plus network hops you didn't have before. So: **data ownership follows the strangle**, an extracted domain gets its own store, populated by **CDC (change data capture) from the legacy schema** (replication machinery, pointed at Oracle), reads cut over first, writes second, legacy tables dropped via **expand-contract**. *Rejected, extract services now, split data later:* "later" never comes; you carry the monolith's coupling plus microservices' latency indefinitely. *Rejected, one big migration weekend:* an 800-table cutover is the rewrite in disguise. The strangler-fig lesson covers the dual-write/CDC mechanics; the Director-level point is the *ownership boundary*, not the pipe.
 
 ---
 
@@ -132,7 +132,7 @@ Mirror production requests at the façade to the new implementation (fire-and-fo
 
 > **Adaptation, said out loud:** D compresses to one decision, how data moves per strangled slice, because the schemas are ordinary and the migration choreography is what fails in practice.
 
-Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, continuously checksum-verified) → cut reads → cut writes (brief dual-write window, legacy now the dark copy) → contract (freeze, then *actually drop* the legacy tables; every "temporarily kept" table becomes a decade of accidental reads). *Rejected, long-lived dual-write:* two writable sources of truth drift; reconciliation becomes a permanent team. *Rejected, cutover without the dark-read phase:* you find the checksum mismatch in production, on the money path, in Q4. One schema rule: the new domain model is designed from the domain and mapped to legacy via the ACL, never reverse-engineered table-for-table from the 800, or you've re-platformed the mess.
+Per slice: **expand-contract over CDC.** Expand (new store populated via CDC, continuously checksum-verified) → cut reads → cut writes (brief dual-write window, legacy now the dark copy) → contract (freeze, then *actually drop* the legacy tables; every "temporarily kept" table becomes a decade of accidental reads). *Rejected, long-lived dual-write:* two writable sources of truth drift; reconciliation becomes a permanent team. *Rejected, cutover without the dark-read phase:* you find the checksum mismatch in production, on the money path, in Q4. One schema rule: the new domain model is designed from the domain and mapped to legacy via the ACL (access control list), never reverse-engineered table-for-table from the 800, or you've re-platformed the mess.
 
 ---
 

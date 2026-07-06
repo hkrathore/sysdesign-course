@@ -9,7 +9,7 @@ sidebar:
 - Run the **RESHADED** spine where the hard part lives on an untrusted, frequently-partitioned device, defending each step against battery, data, and convergence cost.
 - Separate the two engines of offline-first: a **local database that is the source of truth for the UX** (reads and writes instant, offline-capable) and a **delta-sync protocol keyed by a per-account cursor** (reconnection cheap and incremental).
 - Quantify what a Director can stand behind: **20M users, 3 devices each, ~4 MB per account (40 MB for power users), ~6k mutations/s peak, KB-sized deltas, an ~8k/s reconnect storm**, and why this is a per-account sync problem, not a live-socket one.
-- Make the **conflict-resolution** call explicit: per-field last-writer-wins for scalar fields, merge or keep-both for text, never silent data loss, and know when it graduates to a **CRDT**.
+- Make the **conflict-resolution** call explicit: per-field last-writer-wins for scalar fields, merge or keep-both for text, never silent data loss, and know when it graduates to a **CRDT** (conflict-free replicated data type).
 - Know where a Director **goes deep** (conflict cases, cursor design, push-as-a-hint) and where they **delegate a benchmark** (on-device store, merge UX, CRDT investment).
 
 ### Intuition first
@@ -39,7 +39,7 @@ This is the **opposite** of a delete-on-delivery messaging system: the server is
 **Functional:** create, edit, view, delete notes and tasks **fully offline**; **automatic background sync** across the user's devices on reconnect; **correct conflict handling** for concurrent offline edits; **local full-text search**; **attachments** (images, files); a **push notification** to wake other devices (and, later, alert on a shared change).
 
 **Non-functional (these drive every later decision):**
-- **Offline-first correctness:** every operation succeeds locally with zero network. The headline NFR, forcing a local-authoritative store plus an outbound queue.
+- **Offline-first correctness:** every operation succeeds locally with zero network. The headline NFR (non-functional requirement), forcing a local-authoritative store plus an outbound queue.
 - **Durability / no data loss:** a committed local edit survives app kill, reboot, and a failed sync, and once synced is durably stored server-side across zones.
 - **Convergence:** after all devices reconnect, they converge to the same state (eventual consistency), conflicts resolved deterministically and never by dropping text.
 - **Efficiency:** sync is incremental (a delta, not a full re-download), and a day of edits costs tens of KB, not MB, respecting battery and metered-data budgets.
@@ -53,7 +53,7 @@ The decisive requirement is **offline-first plus convergence**. It forces the wh
 
 Enough math to size the account, sync payloads, and reconnect burst, and expose this as a **per-account delta-sync** problem, not a live-connection one.
 
-**Assumptions:** 20M registered users, 5M DAU; 3 devices per user; 2,000 notes per account average, with power users at 20,000+; a note averages ~2 KB of text plus metadata (attachments are separate); an active user makes ~50 mutations/day (creates, edits, check-offs).
+**Assumptions:** 20M registered users, 5M DAU (daily active users); 3 devices per user; 2,000 notes per account average, with power users at 20,000+; a note averages ~2 KB of text plus metadata (attachments are separate); an active user makes ~50 mutations/day (creates, edits, check-offs).
 
 **Account size (the number that drives cold sync):**
 ```
@@ -91,7 +91,7 @@ A regional outage heals; ~500k devices reconnect within a minute:
 ```
 This is a thundering-herd read spike, and naming it is the Director signal.
 
-**Push and connections (why this is not messaging):** we do **not** hold 20M live sockets. Sync is pull-based; APNs/FCM only **wake a device to sync**, built for billions of messages, so the coalesced ~100M wakes/day (~1,200/s) is trivial. At most we hold a socket for the **foreground, actively-editing sessions** (call it 500k to 1M concurrent) for snappier propagation, a fraction of a messaging app's load.
+**Push and connections (why this is not messaging):** we do **not** hold 20M live sockets. Sync is pull-based; APNs/FCM (Firebase Cloud Messaging) only **wake a device to sync**, built for billions of messages, so the coalesced ~100M wakes/day (~1,200/s) is trivial. At most we hold a socket for the **foreground, actively-editing sessions** (call it 500k to 1M concurrent) for snappier propagation, a fraction of a messaging app's load.
 
 **The one-line takeaway:** size for **KB-sized deltas, a painful tens-of-MB cold-sync tail, ~6k mutations/s, and an ~8k/s reconnect burst**, not for millions of sockets. The scarce resources are the user's **battery and data**, and the server's **cold-sync and reconnect** paths.
 
@@ -239,7 +239,7 @@ On the device these sit in the outbox until acked; on the server they are the ap
 
 **Sync cursor / checkpoint (per device):** the last per-account `server_seq` the device has fully consumed, stored locally and sent on pull. The server also tracks each device's last-seen cursor, so once **every** device is past sequence X, the op log and tombstones before X can be compacted, keeping the log from growing forever.
 
-**Version and merge strategy:** scalar fields (`done`, `due_date`, `title`) take **per-field last-writer-wins** by `version` and `updated_at`; the **body text** cannot, because per-field LWW there silently discards a concurrent edit, so the body is resolved by operation-based merge or, on a true same-field conflict, by keeping **both** as a conflict copy.
+**Version and merge strategy:** scalar fields (`done`, `due_date`, `title`) take **per-field last-writer-wins** by `version` and `updated_at`; the **body text** cannot, because per-field LWW (last-write-wins) there silently discards a concurrent edit, so the body is resolved by operation-based merge or, on a true same-field conflict, by keeping **both** as a conflict copy.
 
 ---
 
@@ -263,9 +263,9 @@ The Director line: **never silently lose user data**; scalar fields take LWW, te
 
 **5. Battery and data budget.** A tight poll loop keeps the radio hot and drains the battery; a fat payload burns metered data. Four fixes: **push-to-wake not polling**, so a device syncs when told or on foreground, not on a timer; **coalesced outbound pushes**, batching mutations on a debounce, not one request per keystroke; **delta-only transfer** keeping payloads in KB; and deferring big attachment fetches to Wi-Fi. *Trade:* push-to-wake makes propagation depend on APNs/FCM latency, usually seconds and occasionally delayed, fine for notes and not for chat.
 
-**6. Dropped and duplicate pushes.** APNs and FCM are **best-effort and droppable**: a device may be offline, its token stale, or throttled. So push is a **hint, never the source of truth**. Correctness rests on **cursor-based pull**: even if the wake is dropped, the device syncs on next foreground and on a safety-net poll (every 15 to 30 minutes where the OS allows background work), so a lost push only delays propagation, never loses data. Duplicate pushes are harmless because pull is idempotent. This is the key correctness argument: **convergence depends on pull, not on push delivery.**
+**6. Dropped and duplicate pushes.** APNs (Apple Push Notification service) and FCM are **best-effort and droppable**: a device may be offline, its token stale, or throttled. So push is a **hint, never the source of truth**. Correctness rests on **cursor-based pull**: even if the wake is dropped, the device syncs on next foreground and on a safety-net poll (every 15 to 30 minutes where the OS allows background work), so a lost push only delays propagation, never loses data. Duplicate pushes are harmless because pull is idempotent. This is the key correctness argument: **convergence depends on pull, not on push delivery.**
 
-**Re-check versus NFRs:** offline-first ✓ (local SQLite authoritative, client IDs, atomic outbox); durability ✓ (local SQLite across app kill before push, multi-AZ server-side after); convergence ✓ (per-account monotonic sequence + cursor pull + deterministic conflict rule, tombstones preventing resurrection); efficiency ✓ (KB deltas, push-to-wake not poll, lazy attachments); sync latency ✓ (a few seconds when online). The residual costs, op-log and tombstone GC, the conflict-copy UX, the cold-sync tail, push unreliability, are **named and handled**.
+**Re-check versus NFRs:** offline-first ✓ (local SQLite authoritative, client IDs, atomic outbox); durability ✓ (local SQLite across app kill before push, multi-AZ (availability zone) server-side after); convergence ✓ (per-account monotonic sequence + cursor pull + deterministic conflict rule, tombstones preventing resurrection); efficiency ✓ (KB deltas, push-to-wake not poll, lazy attachments); sync latency ✓ (a few seconds when online). The residual costs, op-log and tombstone GC (garbage collection), the conflict-copy UX, the cold-sync tail, push unreliability, are **named and handled**.
 
 ---
 

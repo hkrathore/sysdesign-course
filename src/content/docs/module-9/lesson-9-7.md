@@ -8,7 +8,7 @@ sidebar:
 ### Learning objectives
 - Articulate **why LLM evaluation is uniquely hard** — non-deterministic output, open-ended tasks, no single ground truth, and a quality bar that is *multi-dimensional* (correct? grounded? safe? on-tone?) — and why that makes "it looked fine in the demo" a failure mode, not a sign-off.
 - Build an **offline eval harness**: a curated golden set, reference-based metrics where a right answer exists, and **LLM-as-judge** for open-ended quality — while naming the judge's biases (position, verbosity, self-preference) and the mitigations that make it trustworthy.
-- Pick **task-specific metrics**: RAG splits into *retrieval* and *generation* failures; classification uses P/R/F1; open generation uses *win-rate vs a baseline* — because a single "accuracy" number hides which half broke.
+- Pick **task-specific metrics**: RAG (retrieval-augmented generation) splits into *retrieval* and *generation* failures; classification uses P/R/F1; open generation uses *win-rate vs a baseline* — because a single "accuracy" number hides which half broke.
 - Treat **eval as a CI gate**, not a report — every prompt/model/RAG change must pass the golden set before it ships. This is the single highest-leverage LLMOps practice.
 - Own the **observability stack** — trace the full chain (prompt, retrieved chunks, tool calls, tokens in/out, latency, cost) — as both your debugger and the source of new eval data, and plan for **drift** (the base model changes under you).
 

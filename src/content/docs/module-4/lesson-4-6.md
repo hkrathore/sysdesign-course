@@ -35,10 +35,10 @@ Two framing notes. First, the read:write skew is the **opposite of a feed**: a f
 **Functional:** 1:1 messages in real time; group messages (≤1,024); **offline delivery** (reliable on reconnect); **delivery + read receipts** (✓ / ✓✓ / blue); **presence** (online / last-seen); per-conversation FIFO with **exactly-once *display***.
 
 **Non-functional (these drive every later decision):**
-- **Latency:** p99 end-to-end **< 500 ms** when both online, the headline SLO.
+- **Latency:** p99 end-to-end **< 500 ms** when both online, the headline SLO (service-level objective).
 - **Availability ≥ 99.99% for send**, and **always-writable**: if the recipient is down, the sender must still succeed (decouple via a queue).
 - **Durability:** an *accepted* message is never lost before delivery.
-- **Scale/skew:** **~500M DAU, ~100B messages/day**, read:write ≈ 1:1 per message, but **fan-out heavy** (one group send → up to 1,024 delivery writes) and **receipt-amplified**.
+- **Scale/skew:** **~500M DAU (daily active users), ~100B messages/day**, read:write ≈ 1:1 per message, but **fan-out heavy** (one group send → up to 1,024 delivery writes) and **receipt-amplified**.
 
 The decisive requirement is **always-writable + offline delivery**: it forces an **asynchronous, queue-backed router**, the architectural fork everything else hangs off.
 
@@ -88,11 +88,11 @@ Contrast — IF we persisted history: 100B/day × 365 × 200 B ≈ 7.3 PB/year (
 
 Four distinct data shapes; conflating them into one database is the classic mistake.
 
-**1. The per-recipient inbox (undelivered messages).** ~6M writes/s, append-only, read-once-then-delete, keyed by recipient, ordered, the textbook **write-heavy LSM** workload. **Choice: Cassandra/ScyllaDB**, partition key = recipient, clustered by sequence, so a reconnect drains one ordered partition. *Rejected, Postgres/B-tree:* random-I/O writes and a single-leader bottleneck can't absorb 6M writes/s of churning short-lived rows; we give up ACID we don't need and inherit compaction pressure (Evaluation), the right tax. *The WhatsApp reality:* undelivered messages buffer in **RAM (Mnesia)** and delete on delivery; Cassandra is the portable answer, and the choice hinges on how long offline retention must be (RAM if minutes, Cassandra if 30 days).
+**1. The per-recipient inbox (undelivered messages).** ~6M writes/s, append-only, read-once-then-delete, keyed by recipient, ordered, the textbook **write-heavy LSM** (log-structured merge) workload. **Choice: Cassandra/ScyllaDB**, partition key = recipient, clustered by sequence, so a reconnect drains one ordered partition. *Rejected, Postgres/B-tree:* random-I/O writes and a single-leader bottleneck can't absorb 6M writes/s of churning short-lived rows; we give up ACID (atomicity, consistency, isolation, durability) we don't need and inherit compaction pressure (Evaluation), the right tax. *The WhatsApp reality:* undelivered messages buffer in **RAM (Mnesia)** and delete on delivery; Cassandra is the portable answer, and the choice hinges on how long offline retention must be (RAM if minutes, Cassandra if 30 days).
 
-**2. The session registry (user → gateway).** Read on every delivery (millions/s), written on every connect/disconnect, tiny, **expendable** (rebuildable from reconnections). **Choice: Redis**, `device_id → {gateway_id, conn_id, last_seen}` with heartbeat TTL. *Rejected, a disk store:* adds latency to the hottest lookup in the system, and persistence is *pointless*, if a gateway dies its sessions are gone anyway. Saying "this registry is *meant* to be losable" is stronger signal than forcing it into a durable store for tidiness.
+**2. The session registry (user → gateway).** Read on every delivery (millions/s), written on every connect/disconnect, tiny, **expendable** (rebuildable from reconnections). **Choice: Redis**, `device_id → {gateway_id, conn_id, last_seen}` with heartbeat TTL (time-to-live). *Rejected, a disk store:* adds latency to the hottest lookup in the system, and persistence is *pointless*, if a gateway dies its sessions are gone anyway. Saying "this registry is *meant* to be losable" is stronger signal than forcing it into a durable store for tidiness.
 
-**3. User/group metadata + key directory.** Read-heavy, genuinely relational (members of group Y, groups of user X), modest volume. **Choice: sharded Postgres/MySQL (Vitess/Spanner-class at this scale)**, membership and the E2E **public-key/prekey directory** live here. *Rejected, KV:* membership wants joins and secondary indexes.
+**3. User/group metadata + key directory.** Read-heavy, genuinely relational (members of group Y, groups of user X), modest volume. **Choice: sharded Postgres/MySQL (Vitess/Spanner-class at this scale)**, membership and the E2E **public-key/prekey directory** live here. *Rejected, KV (key-value):* membership wants joins and secondary indexes.
 
 **4. Receipts & presence.** Receipts are a 12M/s firehose of tiny ephemeral events, they ride the **same message path** back to senders, not a persisted SQL table. Presence is last-seen timestamps with heavy churn → **Redis with short TTL**, refreshed by the connection heartbeat.
 
@@ -187,7 +187,7 @@ The partition keys are the decisions that determine whether the system has hot s
 
 ## E: Evaluation
 
-Stress the design against the NFRs; fix each bottleneck and name the trade.
+Stress the design against the NFRs (non-functional requirements); fix each bottleneck and name the trade.
 
 **Bottleneck 1, the session registry is on every delivery's critical path.** 6M+ lookups/s; if Redis stalls, all delivery stalls. **Fix:** shard by `device_id`, co-locate router consumers with registry shards, cache sender-side contact→gateway hints. *Trade:* a briefly-stale hint can mis-route one message, which the router retries on the registry miss, rare extra hops to keep the common case at one fast in-memory read.
 
@@ -275,7 +275,7 @@ Pairwise Signal sessions would force the sender to encrypt each group message on
 > *Model:* Bounded impact, by design. Sockets drop and clients **auto-reconnect with jittered backoff** (no thundering herd); the dead box's registry entries **self-expire by TTL**; and **no accepted message is lost**, published messages are in Kafka, undelivered ones in Cassandra, and each user drains their inbox on reconnect. Net effect: a sub-second blip. The design choice that makes this safe: the gateway is the only stateful tier and holds **no source-of-truth state**. It's also why I run gateways at ~60% capacity, a failover surge has to fit.
 
 **Q3. Product wants full chat history on a newly-added device. Your design deletes on delivery. What changes, and what does it cost?**
-> *Model:* My model can't satisfy it, the server threw the history away, which is exactly what kept storage at ~5 TB/day transient instead of ~7 PB/yr. The change: **server-side E2E-encrypted history**, opaque blobs encrypted to keys the user's devices share. Costs I'd name: (a) the petabyte-scale storage bill, now real and growing; (b) **key management**, getting the history key to the new device without the server learning it (encrypted backups with a PIN/HSM, the iMessage/Telegram model, the genuinely hard part, delegated to security); (c) retention/compliance policy I now own. I'd take the trade only when multi-device-with-history is a hard requirement.
+> *Model:* My model can't satisfy it, the server threw the history away, which is exactly what kept storage at ~5 TB/day transient instead of ~7 PB/yr. The change: **server-side E2E-encrypted history**, opaque blobs encrypted to keys the user's devices share. Costs I'd name: (a) the petabyte-scale storage bill, now real and growing; (b) **key management**, getting the history key to the new device without the server learning it (encrypted backups with a PIN/HSM (hardware security module), the iMessage/Telegram model, the genuinely hard part, delegated to security); (c) retention/compliance policy I now own. I'd take the trade only when multi-device-with-history is a hard requirement.
 
 **Q4. How do presence and "last seen" scale when they change constantly for hundreds of millions of users?**
 > *Model:* Presence is high-churn, ephemeral, best-effort, **Redis with a short TTL**, refreshed by the same heartbeat that keeps the connection alive, so it's nearly free. The scaling trick is **don't push every transition to every contact**, that's an N² fan-out storm that would dwarf the message load. Subscribe lazily (only contacts in the currently-open chat list), coalesce flapping. *Trade:* presence can be a few seconds stale, completely acceptable for "last seen," and it saves an enormous fan-out.

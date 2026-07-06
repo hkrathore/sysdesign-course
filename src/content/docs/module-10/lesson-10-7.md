@@ -5,7 +5,7 @@ sidebar:
   order: 7
 ---
 
-> **Why this problem separates Directors from ICs:** the instinct after the ChatGPT-serving problem is "GPUs again — continuous batching, KV cache, stream the tokens." That instinct is **wrong here and the interviewer is watching for it.** Image generation is not a streaming-decode workload; it is a **multi-second, GPU-bound, all-or-nothing batch job** — a diffusion model runs 20–50 denoising steps and emits *nothing* until the last one. There are no tokens to stream. So the architecture is not a serving loop; it is a **fair-scheduled job queue over a pre-warmed GPU worker pool**, where the hard problems are *bursty demand against slow-to-scale GPUs*, *two-sided safety* (you must police both the prompt and the pixels — NSFW, CSAM, and a real person's likeness), and *cost-per-image* economics that decide whether the product has a viable margin. A Director who reaches for SSE token streaming has misread the workload in the first sentence.
+> **Why this problem separates Directors from ICs (individual contributors):** the instinct after the ChatGPT-serving problem is "GPUs again — continuous batching, KV (key-value) cache, stream the tokens." That instinct is **wrong here and the interviewer is watching for it.** Image generation is not a streaming-decode workload; it is a **multi-second, GPU-bound, all-or-nothing batch job** — a diffusion model runs 20–50 denoising steps and emits *nothing* until the last one. There are no tokens to stream. So the architecture is not a serving loop; it is a **fair-scheduled job queue over a pre-warmed GPU worker pool**, where the hard problems are *bursty demand against slow-to-scale GPUs*, *two-sided safety* (you must police both the prompt and the pixels — NSFW, CSAM, and a real person's likeness), and *cost-per-image* economics that decide whether the product has a viable margin. A Director who reaches for SSE token streaming has misread the workload in the first sentence.
 
 ---
 
@@ -14,8 +14,8 @@ sidebar:
 1. Recognize that diffusion generation is an **asynchronous, multi-second batch job** (no streaming), so the system is a **queue + GPU worker pool**, not a request-serving loop — and contrast it with the LLM serving design.
 2. Size the system in **GPU-seconds per image** and show that the **GPU fleet, and specifically its idle-vs-peak provisioning, is the entire cost story.**
 3. Design **fair scheduling under burst**: priority tiers, per-user quotas, a pre-warmed pool for known peaks, and backpressure/shed for the spikes — because GPU autoscaling is too slow to absorb a burst.
-4. Treat **safety as two-sided and non-negotiable**: an input prompt filter *and* an output-image classifier plus CSAM hash-matching and likeness/IP controls, with the legal duty named.
-5. Run the **RESHADED spine** with the NFR priority inverted toward throughput-cost-safety, and design-evolve toward distilled few-step models and video.
+4. Treat **safety as two-sided and non-negotiable**: an input prompt filter *and* an output-image classifier plus CSAM (child sexual abuse material) hash-matching and likeness/IP controls, with the legal duty named.
+5. Run the **RESHADED spine** with the NFR (non-functional requirement) priority inverted toward throughput-cost-safety, and design-evolve toward distilled few-step models and video.
 
 ---
 
@@ -61,7 +61,7 @@ That image gets everything right that matters here: it's **asynchronous** (ticke
 | 5 | **Availability** | 99.9% on submit/fetch; a GPU dying loses one job, retried |
 | 6 | **Latency** | p95 *queue+generate* within tier SLA (e.g., free ≤ 60 s, paid ≤ 10 s) — **seconds, by design** |
 
-**The inversion, stated out loud:** in the streaming-LLM problem latency (TTFT) was a top NFR and we engineered continuous batching to protect it. Here **latency is inherently seconds and acceptable**, throughput-under-burst and cost dominate, and **safety is #1 because the failure mode is a legal incident, not a slow response.** Every decision below flows from NFRs 1–4.
+**The inversion, stated out loud:** in the streaming-LLM problem latency (TTFT (time to first token)) was a top NFR and we engineered continuous batching to protect it. Here **latency is inherently seconds and acceptable**, throughput-under-burst and cost dominate, and **safety is #1 because the failure mode is a legal incident, not a slow response.** Every decision below flows from NFRs 1–4.
 
 ---
 
@@ -97,7 +97,7 @@ That image gets everything right that matters here: it's **asynchronous** (ticke
 - Rejected: a single FIFO queue — a free-tier batch of 500 jobs would head-of-line-block a paying customer. Fairness must be explicit (see D).
 
 **2. GPU worker pool + model artifacts.**
-- The diffusion model weights (~several to ~20+ GB depending on model) live on each warm worker's GPU HBM; a **model registry / object store** holds versioned weights that workers load at startup. Loading weights is the **slow cold-start** (tens of seconds), which is *why* we pre-warm rather than autoscale reactively.
+- The diffusion model weights (~several to ~20+ GB depending on model) live on each warm worker's GPU HBM (high-bandwidth memory); a **model registry / object store** holds versioned weights that workers load at startup. Loading weights is the **slow cold-start** (tens of seconds), which is *why* we pre-warm rather than autoscale reactively.
 
 **3. Image blob store + CDN.**
 - Access pattern: write-once, read-many, expire. Choice: **object store (S3-class) + CDN**. Thumbnails generated on write for gallery views. Rejected: serving images from app servers — wastes egress and ignores edge caching.
@@ -203,7 +203,7 @@ GET  /v1/users/{user_id}/images?cursor=&limit=   -> 200 { images:[...], next_cur
 
 **`jobs`** — primary key `job_id`, shard key **`user_id`**. Columns: `status` (QUEUED / RUNNING / DONE / BLOCKED / FAILED), `prompt`, `params` (JSON), `tier`, `priority`, `idempotency_key`, `enqueued_at`, `started_at`, `finished_at`, `worker_id`. Unique index on `(user_id, idempotency_key)` so a retry dedupes at the DB even if the app layer is bypassed.
 
-**`images`** — primary key `image_id`; columns: `job_id` (FK), `user_id`, `object_url`, `thumb_url`, `seed`, **`safety_labels`** (JSON: nsfw_score, csam_match bool, likeness_flags), `created_at`, `expires_at` (lifecycle). Partition by `user_id` for the gallery query.
+**`images`** — primary key `image_id`; columns: `job_id` (FK (foreign key)), `user_id`, `object_url`, `thumb_url`, `seed`, **`safety_labels`** (JSON: nsfw_score, csam_match bool, likeness_flags), `created_at`, `expires_at` (lifecycle). Partition by `user_id` for the gallery query.
 
 **`safety_audit`** — append-only, never updated: `decision_id`, `job_id`/`image_id`, `stage` (PROMPT / IMAGE), `verdict`, `policy`, `evidence_ref`, `created_at`. This is **legal evidence**; immutability and retention are requirements, not niceties.
 
@@ -227,15 +227,15 @@ GET  /v1/users/{user_id}/images?cursor=&limit=   -> 200 { images:[...], next_cur
 
 **Re-check vs NFRs:** safety = two gates + CSAM hashing + immutable audit (NFR 1); burst = queue + pre-warm pool + shed (NFR 2); fairness = tier queues + per-user WFQ + quotas (NFR 3); cost = batching + utilization flattening + distilled tier (NFR 4). Now the failure modes.
 
-**Failure 1 — a 10× burst (a viral moment) hits the GPU pool.** GPUs **cannot autoscale fast** (cold start = weight load, tens of seconds; and the cloud may not even have spare H100s instantly). So you do **not** rely on reactive autoscale to catch a spike. Instead: (a) a **pre-warmed pool** sized for the expected peak (you provision for the diurnal 5× and keep it warm); (b) the **queue absorbs the overflow** — latency degrades gracefully (free-tier wait grows) rather than the system collapsing; (c) **backpressure / shed** — when queue depth crosses a threshold, return `202` with a longer `est_wait_s` or shed free-tier submissions with a clear `429`, protecting paid SLAs; (d) **priority preemption** so paid jobs jump the line. The Director point: **you defend a burst with a warm pool + a queue + tiered shedding, not with an autoscaler that arrives ten minutes late.**
+**Failure 1 — a 10× burst (a viral moment) hits the GPU pool.** GPUs **cannot autoscale fast** (cold start = weight load, tens of seconds; and the cloud may not even have spare H100s instantly). So you do **not** rely on reactive autoscale to catch a spike. Instead: (a) a **pre-warmed pool** sized for the expected peak (you provision for the diurnal 5× and keep it warm); (b) the **queue absorbs the overflow** — latency degrades gracefully (free-tier wait grows) rather than the system collapsing; (c) **backpressure / shed** — when queue depth crosses a threshold, return `202` with a longer `est_wait_s` or shed free-tier submissions with a clear `429`, protecting paid SLAs (service-level agreements); (d) **priority preemption** so paid jobs jump the line. The Director point: **you defend a burst with a warm pool + a queue + tiered shedding, not with an autoscaler that arrives ten minutes late.**
 
-**Failure 2 — noisy neighbor / fairness.** Without per-user WFQ + quotas, one script-driven user starves the pool. Mitigation: token-bucket quotas at submit, weighted fair queuing across users within a tier, and concurrency caps per user. Bounded wait per tier is an SLO we measure.
+**Failure 2 — noisy neighbor / fairness.** Without per-user WFQ + quotas, one script-driven user starves the pool. Mitigation: token-bucket quotas at submit, weighted fair queuing across users within a tier, and concurrency caps per user. Bounded wait per tier is an SLO (service-level objective) we measure.
 
 **Failure 3 — safety escapes (the career-ending one).** Two-sided coverage is mandatory because **each gate misses different things**: the prompt filter catches obvious intent but a benign prompt can still yield NSFW pixels (so you *must* classify the output), and an adversarial "jailbreak" prompt may pass the text filter but the image classifier + CSAM hash catch the result. **CSAM is a legal duty** — perceptual-hash match against known sets, block, quarantine, and report; never serve, never silently delete (preserve the audit record per legal guidance). **Likeness/IP** (public figures, trademarks) is a policy classifier on the output. Residual risk: novel content no classifier flags — mitigate with human-review sampling, user reporting, and red-teaming. You **cannot** claim 100% prevention; you design **defense-in-depth + audit + reporting**.
 
 **Failure 4 — cost/image blows the margin.** If effective $/image (peak-provisioned, low average utilization) makes the free tier lose money, the levers are: **distilled few-step models** for the free/real-time tier (8–30× cheaper), **larger batch sizes**, **spot/preemptible GPUs** for free-tier batch work (it's interruptible — re-queue on preemption), **utilization flattening** via the queue, and **caching identical (prompt, seed, params)** requests. Rejected: "just buy more H100s" — that's the most expensive answer to a utilization problem.
 
-**Failure 5 — a worker dies mid-render.** The job is idempotent and re-queued (at-most-once *visible* result via the idempotency key); the user waits slightly longer, loses nothing. A GPU OOM on too-large a batch → cap batch size by resolution.
+**Failure 5 — a worker dies mid-render.** The job is idempotent and re-queued (at-most-once *visible* result via the idempotency key); the user waits slightly longer, loses nothing. A GPU OOM (out-of-memory) on too-large a batch → cap batch size by resolution.
 
 ---
 
@@ -304,7 +304,7 @@ The through-line at Director altitude: **own the GPU economics and the safety/le
 
 **Q4. How is your burst defense different from the autoscaling you'd use for a stateless web tier?**
 
-> *Model:* A stateless web tier scales in seconds, so reactive autoscaling on CPU/RPS works. A GPU worker's **cold start is dominated by loading multi-GB weights into HBM (tens of seconds)**, and spare H100s may not even be available on demand — so reactive autoscaling **can't catch a spike**. The defense is therefore **pre-warm a pool sized for the known (diurnal 5×) peak**, let the **queue absorb overflow** with graceful latency degradation, **shed/deprioritize free tier** under backpressure, and **preempt for paid jobs**. Autoscaling only adjusts the *baseline* slowly; it is never the burst defense.
+> *Model:* A stateless web tier scales in seconds, so reactive autoscaling on CPU/RPS (requests per second) works. A GPU worker's **cold start is dominated by loading multi-GB weights into HBM (tens of seconds)**, and spare H100s may not even be available on demand — so reactive autoscaling **can't catch a spike**. The defense is therefore **pre-warm a pool sized for the known (diurnal 5×) peak**, let the **queue absorb overflow** with graceful latency degradation, **shed/deprioritize free tier** under backpressure, and **preempt for paid jobs**. Autoscaling only adjusts the *baseline* slowly; it is never the burst defense.
 
 ---
 

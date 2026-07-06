@@ -5,10 +5,10 @@ sidebar:
   order: 9
 ---
 
-> This is a **sync-and-conflict** problem - that is what makes it different from every storage problem before it. The metadata-vs-blob split is **table stakes** here (Pastebin, 5.1, owned it). The genuinely new crux: **keep N devices byte-identical with a server source of truth, cheaply, while concurrent edits land from anywhere.** The blob-store building block (blob store), 3.4/2.5 (KV + partitioning), and 2.4/2.8 (replication, quorum) built the parts; this walkthrough assembles them around the one idea that ties sharing, sync, sharding, and ACLs together: the **namespace**.
+> This is a **sync-and-conflict** problem - that is what makes it different from every storage problem before it. The metadata-vs-blob split is **table stakes** here (Pastebin, 5.1, owned it). The genuinely new crux: **keep N devices byte-identical with a server source of truth, cheaply, while concurrent edits land from anywhere.** The blob-store building block (blob store), 3.4/2.5 (KV + partitioning), and 2.4/2.8 (replication, quorum) built the parts; this walkthrough assembles them around the one idea that ties sharing, sync, sharding, and ACLs (access control lists) together: the **namespace**.
 
 ### Learning objectives
-- Run the full **RESHADED** spine on a *sync-dominated* problem and recognize why the headline number is not one QPS but **"~120K durable metadata commits/s behind ~200M cheap idle connections"** - two planes, not one.
+- Run the full **RESHADED** spine on a *sync-dominated* problem and recognize why the headline number is not one QPS (queries per second) but **"~120K durable metadata commits/s behind ~200M cheap idle connections"** - two planes, not one.
 - **Estimate** users, storage (to exabytes), block count, and the **commit rate**, with the per-user basis stated and the chain internally consistent.
 - Justify **fixed 4MB content-addressed chunking** + **SHA-256 dedup** + a **metadata service split from a dumb block store**, each against its rejected alternative.
 - Design the **journal/cursor sync feed** and **conflicted-copy** resolution, then stress the design for the hot shared namespace, dedup-store deletion, and the far-behind client.
@@ -46,7 +46,7 @@ The shelf itself is two separate things, and keeping them separate is the load-b
 
 **Read:write skew - and why a single ratio is the wrong answer.** Two planes with opposite profiles: the **block plane** is **write-once, read-by-your-own-devices**, heavily write-deduplicated; the **metadata/notification plane** is **read-amplified by device + member fan-out** - one commit is read by every one of my devices *and* every member of a shared folder. The honest framing: **one expensive ordered commit, fanned out to many cheap reads over many idle connections.** That fan-out, not raw QPS, is what we engineer.
 
-**Assumptions carried forward:** **500M registered, 100M DAU, ~2 devices/active user → ~200M sync connections**; **~10GB/user blended**; **avg file ~1MB**; **~100 changes/user/day**.
+**Assumptions carried forward:** **500M registered, 100M DAU (daily active users), ~2 devices/active user → ~200M sync connections**; **~10GB/user blended**; **avg file ~1MB**; **~100 changes/user/day**.
 
 ---
 
@@ -94,7 +94,7 @@ The two-plane split is assumed (Pastebin proved it); the S-step job is picking t
 - *Rejected:* a leaderless eventually-consistent store (Cassandra/Dynamo) as the tree's system of record - sync **requires ordered, read-your-writes consistency**; a device reading a half-applied or out-of-order tree corrupts the user's folder. AP is fine for the immutable *bytes*, not for the *order of changes*.
 
 **3. The block index + journal (the glue - itself at scale).**
-- *Choice:* the **hash → location + refcount** map is a **sharded KV store**, hash-partitioned by block hash (naturally uniform); the **per-namespace ordered journal** is an append-only log in the metadata store (a monotonic cursor), or a partitioned Kafka-style log at high fan-out.
+- *Choice:* the **hash → location + refcount** map is a **sharded KV (key-value) store**, hash-partitioned by block hash (naturally uniform); the **per-namespace ordered journal** is an append-only log in the metadata store (a monotonic cursor), or a partitioned Kafka-style log at high fan-out.
 - *Rejected:* folding the block index into the metadata DB - ~5T rows with a completely different (hash-uniform point-lookup) access pattern. *Also rejected:* one global journal table - it must be **partitioned by namespace** so one user's sync never scans another's changes.
 
 ---
@@ -223,7 +223,7 @@ A 10,000-member company folder: one change must poke 10,000 connections, each tr
 
 **Bottleneck 3 - deletion in a dedup'd store (the correctness trap).**
 A block referenced by many files cannot die because *one* of them was deleted - naive "delete file → delete its blocks" silently corrupts every other file sharing those bytes.
-*Fix:* **GC at trillion-block scale - lazy mark-and-sweep over refcount contention; reclaim late, never wrongly.** Refcounts reclaim promptly but the decrement contends on hot blocks (a popular installer referenced by millions - the 3.16 sharded-counter problem); at ~1T blocks, storage is cheaper than counter contention. *Rejected:* exact refcounts as the primary mechanism (or only with heavy batching/approximation). Details in the Design-evolution Go deeper.
+*Fix:* **GC (garbage collection) at trillion-block scale - lazy mark-and-sweep over refcount contention; reclaim late, never wrongly.** Refcounts reclaim promptly but the decrement contends on hot blocks (a popular installer referenced by millions - the 3.16 sharded-counter problem); at ~1T blocks, storage is cheaper than counter contention. *Rejected:* exact refcounts as the primary mechanism (or only with heavy batching/approximation). Details in the Design-evolution Go deeper.
 
 **Bottleneck 4 - the far-behind client (a week offline).**
 `/delta?cursor=N` with N thousands of entries stale would return a huge, fragile payload.
@@ -245,7 +245,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 - **Metadata plane:** more namespace shards; the rare **cross-namespace move** needs a 2-phase distributed transaction - accept it's slow and rare, keep the common single-namespace commit fast.
 
 **Hardest trade-offs to defend:**
-- **Fixed 4MB blocks vs content-defined chunking (CDC):** **fixed-4MB for v1** - simple, uniform addressing, and dedup/delta work for in-place edits (most real saves); **CDC survives prepends/inserts but adds complexity - revisit if insert-heavy workloads appear in telemetry.** Naming fixed chunking's boundary-shift cost is what makes the rejection real, not hollow.
+- **Fixed 4MB blocks vs content-defined chunking (CDC):** **fixed-4MB for v1** - simple, uniform addressing, and dedup/delta work for in-place edits (most real saves); **CDC (change data capture) survives prepends/inserts but adds complexity - revisit if insert-heavy workloads appear in telemetry.** Naming fixed chunking's boundary-shift cost is what makes the rejection real, not hollow.
 - **Refcount vs GC for deletion** (Bottleneck 3): prompt-reclaim-with-contention vs simple-but-lazy. I lean GC at a trillion blocks.
 - **Sync latency vs fan-out cost:** coalesced pokes trade a few seconds of latency for surviving big shared folders - defensible because file sync isn't real-time.
 
@@ -263,7 +263,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 **Where I'd delegate (the Director move):**
 - **The chunking/diff algorithm:** *"the storage/sync team owns the chunker behind `chunk(file) → [blocks]`; my prior is fixed-4MB, moving to CDC if telemetry shows insert-heavy workloads - benchmarked on dedup ratio and CPU, not asserted."*
 - **The exabyte object store (Magic Pocket-class):** an entire storage org - erasure coding, hardware, placement. *"I scope and fund it; I don't design the coding scheme on the whiteboard."*
-- **Real-time co-editing (Docs/OT):** explicitly scoped out and handed to a collaboration team - same files, fundamentally different problem.
+- **Real-time co-editing (Docs/OT (operational transformation)):** explicitly scoped out and handed to a collaboration team - same files, fundamentally different problem.
 
 ---
 
@@ -282,7 +282,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 - **"What's the read:write skew, and why is a single ratio the wrong answer?"** - *Strong signal:* names **two planes** - write-once/dedup'd blocks vs a metadata plane **read-amplified by device + member fan-out** - and designs the cheap-connection / expensive-commit split. *Red flag:* "read-heavy like every app" and a byte read-cache the immutable block store already obviates.
 - **"How does a device know what changed without re-downloading everything?"** - *Strong:* the **per-namespace cursor + journal**, contrasted with full-tree-diff death. *Red flag:* periodic tree fetch-and-compare, or no notion of *order*.
 - **"You dedup blocks across users. How do you delete safely?"** - *Strong:* refcount-or-GC with the trade named (prompt-but-contended vs lazy-but-safe), leaning GC at ~1T blocks. *Red flag:* "delete the file's blocks" - corrupts every other file sharing them.
-- **"Two offline devices edit the same file. What happens - and why not merge?"** - *Strong:* **conflicted copy, never lose a write**, and why OT/CRDT is the *Docs* problem on structured text, a deliberate scope cut. *Red flag:* bare last-write-wins, or merging binary blobs.
+- **"Two offline devices edit the same file. What happens - and why not merge?"** - *Strong:* **conflicted copy, never lose a write**, and why OT/CRDT (conflict-free replicated data type) is the *Docs* problem on structured text, a deliberate scope cut. *Red flag:* bare last-write-wins, or merging binary blobs.
 - **"Where's the spend?"** - *Strong:* **$/GB of the exabyte block plane**; dedup and GC are the levers, and at the top end it's a **build-vs-buy** call (S3 → Magic Pocket) - a staffed multi-year program. *Red flag:* obsessing over compute while storage $/GB is the P&L.
 
 ---
@@ -303,7 +303,7 @@ Two offline devices edit the same file from the same `baseVersion`; the second `
 > *Model:* Basis stated first: **blended across all 500M registered at ~10GB/user** - free tier dominates, so a blended 50GB would be indefensible. Raw `= 5 EB`; dedup+compression ~35% → **~3 EB effective**. At ~1MB/file that's **~5T files ≈ ~5T blocks** (most files are one sub-4MB block), and the chain ties out (`10GB/1MB = 10K files/user`). Writes: ~100 changes/user/day × 100M DAU → **~120K commits/s avg, ~300-500K peak**. The headline is the pairing: **~120K durable ordered commits/s fanned out over ~200M idle connections.** The soft knob is changes/user/day - I'd anchor it and let the interviewer dial it.
 
 **Q2. Walk me through the upload path. Why the `/blocks/check` round-trip before uploading?**
-> *Model:* Chunk into **4MB blocks**, SHA-256 each locally, call **`/blocks/check`** → the server says which hashes it's missing; `PUT` **only those** (content-addressed, idempotent); then **`/commit`** the path + ordered hash list + `baseVersion` in one transaction that bumps refcounts and advances the namespace cursor. The check-first round-trip *is* dedup and instant upload: edit 2 slides in a 50MB deck → upload ~4-8MB (**~10×**); the file already exists server-side → **~0 bytes**. One extra RTT buys up to 100× bandwidth - rejecting it means re-uploading bytes the server already has.
+> *Model:* Chunk into **4MB blocks**, SHA-256 each locally, call **`/blocks/check`** → the server says which hashes it's missing; `PUT` **only those** (content-addressed, idempotent); then **`/commit`** the path + ordered hash list + `baseVersion` in one transaction that bumps refcounts and advances the namespace cursor. The check-first round-trip *is* dedup and instant upload: edit 2 slides in a 50MB deck → upload ~4-8MB (**~10×**); the file already exists server-side → **~0 bytes**. One extra RTT (round-trip time) buys up to 100× bandwidth - rejecting it means re-uploading bytes the server already has.
 
 **Q3. Design the sync feed. What about a device offline for a week?**
 > *Model:* Each **namespace** has a monotonic **cursor** and an ordered **journal**. A device stores "synced to N," holds an idle long-poll, and on a poke calls `/delta?cursor=N` → entries since N + new cursor, fetching only blocks it lacks. **O(changes), not O(tree)** - full-tree diff across 200M devices is bandwidth death for the no-change common case. Far-behind client: **paginate `/delta`**, and past the journal's compaction threshold **fall back to a snapshot reset** - a file edited 500 times offline syncs as its final state, not 500 deltas. Trade: snapshot transfers more, but bounds journal retention.

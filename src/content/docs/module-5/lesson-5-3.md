@@ -5,15 +5,15 @@ sidebar:
   order: 3
 ---
 
-> **Why this gets asked and what separates a Director answer.** Hotel reservation is in the top tier of business-domain HLD problems precisely because it looks like Ticketmaster but isn't. Seats are unique and indivisible, one CAS per row. Hotel rooms are **fungible inventory**: you don't care *which* room 312 you get, only that the property has a king non-smoking available on your dates. That fungibility drives a **count-decrement model** rather than a seat-lock model, and it opens the door to a deliberate business decision that Ticketmaster never makes: **controlled overbooking**. A Director answer recognises the structural difference immediately, names the two-tier consistency split (eventual search / strong booking), and treats overbooking as a policy knob rather than a correctness bug.
+> **Why this gets asked and what separates a Director answer.** Hotel reservation is in the top tier of business-domain HLD (high-level design) problems precisely because it looks like Ticketmaster but isn't. Seats are unique and indivisible, one CAS (compare-and-swap) per row. Hotel rooms are **fungible inventory**: you don't care *which* room 312 you get, only that the property has a king non-smoking available on your dates. That fungibility drives a **count-decrement model** rather than a seat-lock model, and it opens the door to a deliberate business decision that Ticketmaster never makes: **controlled overbooking**. A Director answer recognises the structural difference immediately, names the two-tier consistency split (eventual search / strong booking), and treats overbooking as a policy knob rather than a correctness bug.
 
 ---
 
 ### Learning objectives
 
 1. Distinguish **fungible-inventory count decrements** from per-seat row locks and explain when each model applies.
-2. Design the **search-vs-booking consistency split**: eventually-consistent availability index for ~1,000 QPS reads; strongly-consistent booking path for ~1 QPS writes per property, without serialising read traffic through the write path.
-3. Model a **reservation-hold TTL** and argue the right duration against abandonment rate and competitive re-availability.
+2. Design the **search-vs-booking consistency split**: eventually-consistent availability index for ~1,000 QPS (queries per second) reads; strongly-consistent booking path for ~1 QPS writes per property, without serialising read traffic through the write path.
+3. Model a **reservation-hold TTL** (time-to-live) and argue the right duration against abandonment rate and competitive re-availability.
 4. Articulate **overbooking as a deliberate policy knob**, the math that makes airlines and hotels set it above 100% on purpose, and design the system hook for it.
 5. Know where the Director delegates depth: rate-plan pricing, payment PCI, and fraud, and state credible priors for each.
 
@@ -67,7 +67,7 @@ The second wrinkle: the front desk clerk might sell the last room knowing a 10% 
 
 > Enough math to justify the search/booking split and right-size each tier.
 
-**Assumptions:** 500K bookable properties × avg 10 room types × 365 date-offsets (1 year forward) = **~1.8B availability cells** in the search index; ~100M DAU browsing, ~1M bookings/day.
+**Assumptions:** 500K bookable properties × avg 10 room types × 365 date-offsets (1 year forward) = **~1.8B availability cells** in the search index; ~100M DAU (daily active users) browsing, ~1M bookings/day.
 
 **Search QPS:** 100M users × ~30 searches/day ÷ 86,400 ≈ **35K reads/s** baseline; 3× peak → **~100K reads/s**. Even "3M QPS" (Booking.com cited) is a CDN+cache figure, the origin request rate after caching is closer to 100K-500K/s depending on cache-hit ratio. Either way, it must not touch the booking store.
 
@@ -75,7 +75,7 @@ The second wrinkle: the front desk clerk might sell the last room knowing a 10% 
 
 **The 1,000:1 ratio is the governing fact.** It rules out serving searches from the transactional booking store (would serialise read traffic through a CP core designed for 120 writes/s).
 
-**Storage, availability index:** 1.8B cells × ~100 B per cell ≈ **180 GB** raw. Fits in a distributed KV or wide-column store; replicated ×3 ≈ **~550 GB**. Search index (Elasticsearch/OpenSearch shards) of property metadata: ~50M documents × ~2 KB ≈ **100 GB** raw.
+**Storage, availability index:** 1.8B cells × ~100 B per cell ≈ **180 GB** raw. Fits in a distributed KV (key-value) or wide-column store; replicated ×3 ≈ **~550 GB**. Search index (Elasticsearch/OpenSearch shards) of property metadata: ~50M documents × ~2 KB ≈ **100 GB** raw.
 
 **Booking store:** 1M bookings/day × 365 days × ~1 KB/record ≈ **365 GB/year**, small; a sharded relational store holds this comfortably with years of history.
 
@@ -100,7 +100,7 @@ The second wrinkle: the front desk clerk might sell the last room knowing a 10% 
 
 - *Access pattern:* atomic decrement (or conditional insert) on `inventory` row; transactional order write; ~120 writes/s peak, strong consistency required.
 - *Choice:* **PostgreSQL sharded by `property_id`** (or CockroachDB for geo-distributed strong consistency). Row-level transactions, conditional inventory decrements, and foreign-key integrity between `reservations` and `inventory` are natural here.
-- *Rejected, Cassandra for bookings:* LWW semantics can permit two concurrent writes to both succeed and converge to an oversold state. Bookings demand linearisability per (property, room-type, date).
+- *Rejected, Cassandra for bookings:* LWW (last-write-wins) semantics can permit two concurrent writes to both succeed and converge to an oversold state. Bookings demand linearisability per (property, room-type, date).
 
 **3. Property catalog + search (AP, Elasticsearch).**
 
@@ -219,7 +219,7 @@ PUT /v1/properties/{propertyId}/inventory
 **Partition key = `property_id`. The load-bearing decision:**
 
 - *Why it's right:* a booking transaction touches inventory rows for each night of the stay (checkin to checkout-1 dates) and writes one reservations row, all scoped to one property. Sharding by `property_id` colocates those rows on one shard, enabling a multi-row transaction with no cross-shard coordination.
-- *Rejected: shard by `reservation_id` hash.* Spreads reservations evenly but scatters a property's inventory across shards → cross-shard 2PC on the hottest booking path. Wrong trade.
+- *Rejected: shard by `reservation_id` hash.* Spreads reservations evenly but scatters a property's inventory across shards → cross-shard 2PC (two-phase commit) on the hottest booking path. Wrong trade.
 - *Hot property concern:* a popular city-centre hotel might see 5-10 writes/s at peak, manageable on one shard. Unlike Ticketmaster's 33K/s per event, hotel bookings are distributed across dates and room types, diluting the per-row contention significantly.
 
 **Availability index (Cassandra):**
@@ -278,7 +278,7 @@ Set `overbook_buffer` too low and the property loses revenue; too high and guest
 
 A guest cancels a 5-night stay. The system must atomically increment `inventory.confirmed_count` for 5 date rows, write the cancellation record, compute refund (cancellation policy), and initiate payment reversal.
 
-*Fix:* cancellation runs as a single Postgres transaction on the `property_id` shard (all 5 date rows colocated). Refund policy is applied in-transaction via a policy function (no external call in the hot path); actual payment reversal is async via the payment service with an idempotency key. *Trade-off:* async refund means the guest sees "cancelled, refund in 3-5 days" rather than instant credit, standard industry behaviour, avoids blocking the cancel path on PSP latency.
+*Fix:* cancellation runs as a single Postgres transaction on the `property_id` shard (all 5 date rows colocated). Refund policy is applied in-transaction via a policy function (no external call in the hot path); actual payment reversal is async via the payment service with an idempotency key. *Trade-off:* async refund means the guest sees "cancelled, refund in 3-5 days" rather than instant credit, standard industry behaviour, avoids blocking the cancel path on PSP (payment service provider) latency.
 
 <details>
 <summary>Go deeper, cancellation policy enforcement (IC depth, optional)</summary>
@@ -317,7 +317,7 @@ The function is pure and deterministic given policy + timestamps, safe to run in
 
 **Where I'd delegate:**
 
-- **Payment / PCI:** *"The payments team owns the PSP integration behind `charge(idempotencyKey, amount, token)`, my prior is tokenised cards, async capture on confirm, and automatic reversal on cancellation. They own SLA and compliance."*
+- **Payment / PCI:** *"The payments team owns the PSP integration behind `charge(idempotencyKey, amount, token)`, my prior is tokenised cards, async capture on confirm, and automatic reversal on cancellation. They own SLA (service-level agreement) and compliance."*
 - **Yield management / overbooking calibration:** *"The revenue-management team owns the model that sets `overbook_buffer`; the system provides the knob and a stream of booking velocity events. I'd ask them to define acceptable walk rates as a contractual SLA."*
 - **Fraud:** *"Trust-and-safety owns bot-driven fake-booking detection (holds as inventory lock attacks). My prior is rate-limiting holds per user + IP and flagging anomalous hold patterns, they own the scoring model."*
 

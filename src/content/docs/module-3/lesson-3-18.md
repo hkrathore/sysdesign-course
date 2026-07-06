@@ -29,9 +29,9 @@ Microservices buy exactly four things, and you should be able to name which one 
 1. **Independent deployability.** Each service ships on its own cadence. A checkout team deploys 20 times a day without a search-team release train. This is the single biggest reason large orgs adopt them, and it is really an **org-throughput** decision, not a technical one.
 2. **Team autonomy.** A "two-pizza team" (roughly 6 to 8 people, the Amazon heuristic) owns a service end to end, its language, its schema, its on-call. Coordination cost across teams drops.
 3. **Fault isolation.** A memory leak in the recommendations service degrades recommendations, not payments, *if* you wire the resilience patterns below. Without them you get the opposite (see the distributed monolith).
-4. **Independent scaling and tech heterogeneity.** Scale the 50k-QPS feed service to 200 nodes while the 100-QPS admin service runs on 2, and let the ML team use Python while payments stays on the JVM.
+4. **Independent scaling and tech heterogeneity.** Scale the 50k-QPS (queries per second) feed service to 200 nodes while the 100-QPS admin service runs on 2, and let the ML team use Python while payments stays on the JVM.
 
-Against that, the **distributed-systems tax** is real and permanent: a call that was a ~100 ns in-process function is now a ~0.5 to 1 ms network round trip (a ~1000x latency jump and a new failure mode), you lose local ACID transactions across services, and you take on service discovery, distributed tracing, versioned contracts, and a much harder debugging story (no single stack trace).
+Against that, the **distributed-systems tax** is real and permanent: a call that was a ~100 ns in-process function is now a ~0.5 to 1 ms network round trip (a ~1000x latency jump and a new failure mode), you lose local ACID (atomicity, consistency, isolation, durability) transactions across services, and you take on service discovery, distributed tracing, versioned contracts, and a much harder debugging story (no single stack trace).
 
 The Director-altitude default is therefore **monolith-first**, or more precisely a **modular monolith**: one deployable, but with hard internal module boundaries and separate schemas per module, so the seams are visible before you pay to make them physical. Amazon, Netflix, and Shopify all began as monoliths and extracted services when a specific module's deploy cadence, scaling profile, or team ownership demanded it. Splitting on day one, before you understand the domain, is how you draw the boundaries in the wrong place and pay the tax with none of the benefit. The rejected alternative, "microservices from the start for a 5-person startup," buys distributed-systems complexity to solve an org-scaling problem you do not yet have.
 
@@ -48,7 +48,7 @@ This is the decision that makes or breaks the architecture, and it is a **domain
 
 - **Ubiquitous language + bounded context:** map where the same word carries different meanings. Each distinct meaning is a candidate context. A **context map** documents the relationships (upstream/downstream, shared kernel, anti-corruption layer).
 - **Aggregates** are the transactional unit *inside* a service: a cluster of objects (e.g. `Order` + its `LineItems`) that must stay consistent together and are always saved atomically. Aggregate boundaries often reveal service boundaries, one service typically owns one or a few aggregates.
-- **Anti-corruption layer (ACL):** when a new service must talk to a legacy or third-party model, an ACL translates the foreign model into your domain's language so the mess does not leak across the boundary.
+- **Anti-corruption layer (ACL (access control list)):** when a new service must talk to a legacy or third-party model, an ACL translates the foreign model into your domain's language so the mess does not leak across the boundary.
 - **Event storming** is the practical workshop technique: put every domain event on a wall in time order, cluster them, and the clusters surface the bounded contexts and their commands/events.
 
 </details>

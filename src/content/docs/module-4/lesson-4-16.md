@@ -6,8 +6,8 @@ sidebar:
 ---
 
 ### Learning objectives
-- Run the full **RESHADED** spine on a problem where the bottleneck is not storage or network I/O but **GPU compute and HBM** - an inversion that changes which numbers matter.
-- **Estimate** the headline figure - **output tokens/sec across the fleet** - from DAU and tokens-per-response, then convert it to a **GPU/node count and a cost floor** ($/GPU-hour, $/1M tokens).
+- Run the full **RESHADED** spine on a problem where the bottleneck is not storage or network I/O but **GPU compute and HBM** (high-bandwidth memory) - an inversion that changes which numbers matter.
+- **Estimate** the headline figure - **output tokens/sec across the fleet** - from DAU (daily active users) and tokens-per-response, then convert it to a **GPU/node count and a cost floor** ($/GPU-hour, $/1M tokens).
 - Explain why the **KV-cache** bounds batch size (and therefore throughput), and why **continuous (in-flight) batching** is the single biggest utilization lever - each against its rejected alternative.
 - Design the **SSE token-streaming** path, the **request queue / admission control**, model/version routing, context-length limits, and **token-based rate-limiting** - and articulate the **TTFT-vs-throughput** trade that governs the whole system.
 - Operate at **Director altitude**: GPUs are the budget; name the autoscaling cold-start problem, and delegate the inference engine and the model-quality eval.
@@ -27,11 +27,11 @@ That asymmetry - **a cheap parallel read (prefill) feeding a slow sequential gen
 3. The system **routes** to the correct **model and version** and **enforces context-length limits**.
 4. The system **rate-limits / meters** usage per API key - measured in **tokens**, not just requests - with quotas and tiered priority.
 
-**Explicitly CUT (scoping *is* the signal):** model training/fine-tuning, RLHF, the data pipeline, the model architecture itself, multimodal input, tool-calling orchestration, RAG, safety/moderation classifiers, and the chat UI. I scope to **API → queue/admission → GPU inference (batching + KV-cache) → token streaming**, plus routing, limits, autoscaling, and cost - and I say so out loud.
+**Explicitly CUT (scoping *is* the signal):** model training/fine-tuning, RLHF (reinforcement learning from human feedback), the data pipeline, the model architecture itself, multimodal input, tool-calling orchestration, RAG (retrieval-augmented generation), safety/moderation classifiers, and the chat UI. I scope to **API → queue/admission → GPU inference (batching + KV-cache) → token streaming**, plus routing, limits, autoscaling, and cost - and I say so out loud.
 
 **Clarifying questions (with assumptions):**
 - *Which model size?* → a **~70B-parameter** model on a **2-GPU node** (it doesn't fit on one - derived in E). Model size is the biggest cost driver, so I pin it.
-- *What latency does the user feel?* → two distinct SLOs: **TTFT (time-to-first-token) < ~1 s p95** and **ITL (inter-token latency) ~30-50 ms** (~20-30 tokens/sec, faster than a person reads). Two budgets, not one latency number.
+- *What latency does the user feel?* → two distinct SLOs (service-level objectives): **TTFT (time-to-first-token) < ~1 s p95** and **ITL (inter-token latency) ~30-50 ms** (~20-30 tokens/sec, faster than a person reads). Two budgets, not one latency number.
 - *Typical lengths?* → **~1,000 input tokens, ~500 output tokens** per response - this sets the prefill-vs-decode balance.
 - *Consistency/durability?* → generation is **best-effort and idempotent on retry**; conversation history persists durably, **off the inference hot path**.
 
@@ -61,7 +61,7 @@ That asymmetry - **a cheap parallel read (prefill) feeding a slow sequential gen
 - A **70B** model in fp16 is `70B × 2 B =` **140 GB of weights** - does **not** fit one 80 GB H100. So the **serving unit = one node = 2× H100 = 160 GB HBM**, tensor-parallel (TP=2). Every number below is **per node**. (The consistency trap: size "per GPU" when the model needs two and your fleet count and cost are off by 2×.)
 
 **KV-cache - why it bounds the batch (the heart of the estimate):**
-The KV-cache stores attention keys/values for every token already seen, so generating token *N+1* doesn't re-read tokens 1..*N* - and it lives in HBM next to the weights. For a 70B model the result is **~320 KB/token with GQA** (the modern default), i.e. **~1.3 GB per 4K-token sequence**. At fp16 weights (140 GB) only ~20 GB of HBM is left → **~15 concurrent sequences - too few to keep the GPUs busy**. **Quantization + paging + GQA together grow the batch ~15 → ~65 sequences**, which is what saturates the node. This is a real decision with a rejected alternative (fp16 quality purity), eval-gated - see S and Trade-offs.
+The KV-cache stores attention keys/values for every token already seen, so generating token *N+1* doesn't re-read tokens 1..*N* - and it lives in HBM next to the weights. For a 70B model the result is **~320 KB/token with GQA** (grouped-query attention) (the modern default), i.e. **~1.3 GB per 4K-token sequence**. At fp16 weights (140 GB) only ~20 GB of HBM is left → **~15 concurrent sequences - too few to keep the GPUs busy**. **Quantization + paging + GQA together grow the batch ~15 → ~65 sequences**, which is what saturates the node. This is a real decision with a rejected alternative (fp16 quality purity), eval-gated - see S and Trade-offs.
 
 <details>
 <summary>Go deeper, KV-cache byte math, MHA vs GQA (IC depth, optional)</summary>
@@ -97,7 +97,7 @@ The binding resource is **GPU HBM**, not disk - so the S step is about *what liv
 
 **1. The KV-cache (ephemeral, in HBM, the real "hot store").**
 - *Access pattern:* written every decode step for every in-flight sequence, read on every subsequent step, discarded on completion; ~1.3 GB per 4K sequence; never leaves the GPU.
-- *Choice:* **KV lives in HBM, paged on demand (PagedAttention, vLLM); the batch is the bounded resource.** Its layout *is* the throughput lever.
+- *Choice:* **KV (key-value) lives in HBM, paged on demand (PagedAttention, vLLM); the batch is the bounded resource.** Its layout *is* the throughput lever.
 - *Rejected:* contiguous per-sequence KV allocation - it reserves for the *max* sequence length up front, so a 4K-capacity slot holding a 200-token reply wastes ~95% of its memory to fragmentation. HBM is the scarce resource; fragmentation is pure waste of it.
 
 <details>
@@ -285,7 +285,7 @@ One client firing 100K-token prompts can monopolize KV and decode cycles - a hot
 
 ### What interviewers probe here (Director altitude)
 
-- **"What's the bottleneck resource, and what's the relevant 'skew'?"** - *Strong:* **GPU compute + HBM**, not disk/network; the skew is **prefill (cheap parallel burst) vs decode (slow sequential, ~30-50 ms/token)**, and **KV-cache memory caps the batch** → caps throughput. *Red flag:* reaching for a read:write ratio and a giant read cache, as if this were a CRUD app.
+- **"What's the bottleneck resource, and what's the relevant 'skew'?"** - *Strong:* **GPU compute + HBM**, not disk/network; the skew is **prefill (cheap parallel burst) vs decode (slow sequential, ~30-50 ms/token)**, and **KV-cache memory caps the batch** → caps throughput. *Red flag:* reaching for a read:write ratio and a giant read cache, as if this were a CRUD (create, read, update, delete) app.
 - **"Walk me through continuous batching and why it matters."** - *Strong:* static batching waits on the longest generation while finished sequences hold KV slots; continuous batching admits/evicts at per-token granularity, lifting utilization 2-4× - the single biggest cost lever. *Red flag:* "just send bigger batches" with no awareness of the variable-length problem or the TTFT cost.
 - **"Estimate the GPU count and cost per million tokens."** - *Strong:* derives output-token rate from DAU (~1.7M/s, ~10M peak), pins the **serving unit** (2-GPU node for 70B), divides by per-node throughput (~2,000 tok/s) → **~1,000-4,500 nodes**, lands the **~$0.85/1M floor**, and names the **peak-vs-average gap** as the budget. *Red flag:* sizes "per GPU" when the model needs two, or quotes numbers with no formula.
 - **"How do you autoscale GPUs that cost this much?"** - *Strong:* scale on **queue depth**, keep a **warm pool**, **never scale to zero** (weights take minutes), absorb spikes with queue + backpressure - and names the warm-pool idle cost as the explicit $/responsiveness trade. *Red flag:* "autoscale on CPU" or "scale to zero off-peak."
@@ -297,7 +297,7 @@ One client firing 100K-token prompts can monopolize KV and decode cycles - a hot
 
 - **Treating it like a CRUD/read-heavy service.** The bottleneck is GPU HBM + compute; the asymmetry is prefill vs decode. Mis-framing this mis-sizes everything.
 - **Sizing "per GPU" for a model that needs several.** 70B fp16 = 140 GB > 80 GB HBM → 2 GPUs/node; ignore it and the fleet and cost are 2× wrong.
-- **Forgetting the KV-cache bounds the batch.** Throughput is capped by HBM, not raw FLOPs - which is *why* quantization, PagedAttention, and GQA matter. And static batching leaves the GPU idle on the longest sequence; continuous batching is the default.
+- **Forgetting the KV-cache bounds the batch.** Throughput is capped by HBM, not raw FLOPs (floating-point operations) - which is *why* quantization, PagedAttention, and GQA matter. And static batching leaves the GPU idle on the longest sequence; continuous batching is the default.
 - **Request-count rate limits only.** A request can be 50 or 50,000 tokens - meter by **tokens (TPM)** or huge requests starve the fleet; cap `max_tokens` and context, since unbounded generation = unbounded KV growth.
 - **Scaling GPUs to zero / reacting in seconds.** Weights take minutes to load - warm pool, queue-depth scaling, never to zero for an active model.
 

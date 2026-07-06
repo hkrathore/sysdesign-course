@@ -5,7 +5,7 @@ sidebar:
   order: 11
 ---
 
-> **The whimsical framing is the test.** Anyone with an OTA prep answer can recite "canary, then waves." The question forces you to reason from first principles under constraints you've never memorized: 1.3-second one-way signal delay, intermittent Earth contact windows, machines you can never physically touch. A junior answer copies an Android rollout playbook. A **Director answer** defines what "bricked" means for this fleet, quantifies the blast radius at each wave size, places abort gates where they can actually stop a cascade, and explains how to recover a stuck 10% cohort when you can't drive to the data center. The real skill on display: **attacking an unfamiliar problem by naming constraints, deriving invariants, and building a staged plan**. Every real fleet problem, IoT sensors, self-driving vehicles, k8s node pools, Android updates, has a version of this same tension.
+> **The whimsical framing is the test.** Anyone with an OTA (over-the-air) prep answer can recite "canary, then waves." The question forces you to reason from first principles under constraints you've never memorized: 1.3-second one-way signal delay, intermittent Earth contact windows, machines you can never physically touch. A junior answer copies an Android rollout playbook. A **Director answer** defines what "bricked" means for this fleet, quantifies the blast radius at each wave size, places abort gates where they can actually stop a cascade, and explains how to recover a stuck 10% cohort when you can't drive to the data center. The real skill on display: **attacking an unfamiliar problem by naming constraints, deriving invariants, and building a staged plan**. Every real fleet problem, IoT sensors, self-driving vehicles, k8s node pools, Android updates, has a version of this same tension.
 
 ### Learning objectives
 - Apply the **constraints-first habit** to a novel problem: name every physical and operational constraint before drawing a single box.
@@ -220,13 +220,13 @@ Two dominant watchdog patterns, each with different guarantees:
 **Scenario B, degraded connectivity (5% fleet reachable per day):** orchestrator tracks "last reachable," prioritizes assignment to machines with upcoming windows, flags machines STALE after N days (hardware issue, not software). Rollout stretches; that is correct behavior.
 
 **Scenario C, multi-region/multi-product fleets (the real-world generalization):**
-The moon scenario is an extreme version of every embedded/IoT fleet problem: vehicle OTA (intermittent cellular = contact windows), Android OTA (A/B partition + staged rollout pause = watchdog + INCONCLUSIVE gate), AWS EC2 host upgrades (AZ blast-radius budget = wave ceiling). The constraints differ in degree, not in kind.
+The moon scenario is an extreme version of every embedded/IoT fleet problem: vehicle OTA (intermittent cellular = contact windows), Android OTA (A/B partition + staged rollout pause = watchdog + INCONCLUSIVE gate), AWS EC2 host upgrades (AZ (availability zone) blast-radius budget = wave ceiling). The constraints differ in degree, not in kind.
 
 **Hardest trade-off to defend:**
 The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The defense is: **your observation latency is determined by the contact window, not by your impatience**. A gate soak shorter than one full observation cycle means you are promoting waves based on partial data, the machines that happened to have a contact window, not the machines that had a problem. The gate soak is a signal quality guarantee, not bureaucratic caution.
 
 **Where I'd delegate:**
-- *Watchdog firmware + slot protection:* firmware team owns dual-partition layout and boot-confirmation protocol; my invariant is "slot A write-locked after confirmation, slot 0 factory-reset capable"; I want timing benchmarked on the slowest hardware SKU.
+- *Watchdog firmware + slot protection:* firmware team owns dual-partition layout and boot-confirmation protocol; my invariant is "slot A write-locked after confirmation, slot 0 factory-reset capable"; I want timing benchmarked on the slowest hardware SKU (stock-keeping unit).
 - *Relay capacity:* relay team owns the bandwidth ceiling; my wave size and download-time math scales proportionally with it.
 - *Health check suite:* safety team defines HEALTHY per machine type; my update controller invokes a standardized binary with a pass/fail exit code.
 
@@ -275,7 +275,7 @@ The 24-hour gate soak with no auto-promotion on INCONCLUSIVE feels slow. The def
 
 **Q2. How does the design change with continuous telemetry (no contact windows)?**
 
-> *Model:* Gate soak shrinks from 24h to minutes; INCONCLUSIVE goes away (silence is immediately a network alert, not an ambiguous state); you can auto-ramp (1% → 10% → 100% with SLO-breach halt). Blast-radius invariant stays identical; the feedback loop compresses. This is Android staged rollouts and AWS host fleet upgrades, same wave structure, tighter timing. Moon is the degenerate case with the slowest possible feedback loop.
+> *Model:* Gate soak shrinks from 24h to minutes; INCONCLUSIVE goes away (silence is immediately a network alert, not an ambiguous state); you can auto-ramp (1% → 10% → 100% with SLO-breach (SLO = service-level objective) halt). Blast-radius invariant stays identical; the feedback loop compresses. This is Android staged rollouts and AWS host fleet upgrades, same wave structure, tighter timing. Moon is the degenerate case with the slowest possible feedback loop.
 
 **Q3. Operations wants to compress gate soaks to 4 hours for an urgent security patch. Do you agree?**
 

@@ -6,7 +6,7 @@ sidebar:
 ---
 
 ### Learning objectives
-- Separate the **SLI / SLO / SLA triple** crisply: the indicator is the measurement, the objective is the internal target you defend, the agreement is the external contract with penalties, and the SLO must be **stricter than the SLA** so you have margin before money changes hands.
+- Separate the **SLI (service-level indicator) / SLO (service-level objective) / SLA triple** crisply: the indicator is the measurement, the objective is the internal target you defend, the agreement is the external contract with penalties, and the SLO must be **stricter than the SLA** so you have margin before money changes hands.
 - Choose **user-centric SLIs**, availability, latency, correctness, freshness, measured **at the user, not the server**, and reject server-side proxies that read green while customers are in pain.
 - State the **error budget** as *(1 − SLO)* and use it as **permission to ship**: under budget, release freely; over budget, the policy halts feature work until reliability is repaid.
 - Design **multi-window, multi-burn-rate alerting** so a fast burn pages a human in minutes and a slow burn opens a ticket, and reject naive thresholds that page on every blip and train people to ignore the pager.
@@ -86,7 +86,7 @@ The Director move is **matching SLO tightness to the requirement and value of th
 
 ### What interviewers probe here
 - **"How do you decide what to alert on, and how do you keep the pager from becoming noise?"** *Strong signal:* alert on user-centric SLIs via multi-window burn-rate, a fast burn pages and a slow burn tickets, so what wakes someone is governed by how fast the budget drains, not by every blip. *Red flag:* "alert on every metric over a threshold", the alert-fatigue trap, where the one alert that mattered is buried under self-healing noise.
-- **"The product team wants to ship faster, SRE wants more stability. How do you settle it?"** *Strong signal:* the error budget is the arbiter, under budget the team ships freely, over budget a written freeze policy redirects effort to reliability, so the decision is data, agreed in advance, not politics. *Red flag:* "we'll balance it case by case", which means the loudest stakeholder wins and the fight reruns every quarter.
+- **"The product team wants to ship faster, SRE (site reliability engineering) wants more stability. How do you settle it?"** *Strong signal:* the error budget is the arbiter, under budget the team ships freely, over budget a written freeze policy redirects effort to reliability, so the decision is data, agreed in advance, not politics. *Red flag:* "we'll balance it case by case", which means the loudest stakeholder wins and the fight reruns every quarter.
 - **"What availability target should this service have?"** *Strong signal:* derives the SLO from the requirement and the cost of nines (each ~10×), sets the SLO stricter than any SLA for buffer, and refuses to chase 100% because it's infinite cost and zero shipping. *Red flag:* "as high as possible" or a reflexive "four nines" with no requirement and no awareness that the extra nine buys minutes/month at 10× the cost.
 - **"Your dashboards are all green but customers are complaining. What went wrong?"** *Strong signal:* the SLIs are measured server-side, not at the user, so they miss edge/CDN/client failures, the fix is to measure as close to the user as possible (edge, RUM) and add correctness/freshness SLIs, not just box-health. *Red flag:* trusts the green dashboard and looks for the problem elsewhere, the server-health-proxy trap.
 

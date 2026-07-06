@@ -9,7 +9,7 @@ sidebar:
 - Describe an LLM at **architecture altitude**: a frozen, **stochastic, stateless, token-metered** next-token predictor you *compose*, not train, and say what each of those four words costs you in a design.
 - Reason in **tokens**: estimate token counts, explain why the **context window** is a finite, shared input+output budget, and why "just use a bigger context" is not free.
 - Separate **prefill from decode** and use that split to predict latency, **TTFT** (time to first token) vs **TPOT** (time per output token), and why streaming changes the felt latency without changing the real one.
-- Build the **cost model** from tokens, know that **output is the lever you control**, and that long prompts/RAG context quietly dominate the *input* bill.
+- Build the **cost model** from tokens, know that **output is the lever you control**, and that long prompts/RAG (retrieval-augmented generation) context quietly dominate the *input* bill.
 - Name the **failure modes** a designer must engineer around, hallucination, knowledge cutoff, non-determinism, prompt sensitivity, context overflow, before reaching for any framework.
 
 ### Intuition first
@@ -28,7 +28,7 @@ Four properties of that function drive every architecture decision:
 - **Token-metered.** Cost and the context limit are denominated in tokens, not requests or megabytes. You design in tokens.
 - **Frozen + cut off.** Its knowledge ends at a training cutoff and doesn't update. Anything newer or private must be supplied at call time (→ RAG).
 
-**Tokens are the unit of everything.** Models don't see characters or words; they see **tokens**, subword chunks produced by a byte-pair-encoding tokenizer. A useful back-of-envelope: **~4 characters per token, ~0.75 words per token, so ~750 words ≈ 1,000 tokens.** Code, rare words, and non-English text tokenize less efficiently (more tokens per word). You estimate token budgets the way you estimate QPS and storage elsewhere in this course: roughly, out loud, with stated assumptions. A 20-page document is ~10–12k tokens; a paragraph of chat is ~100–200 tokens; a typical system prompt is a few hundred.
+**Tokens are the unit of everything.** Models don't see characters or words; they see **tokens**, subword chunks produced by a byte-pair-encoding tokenizer. A useful back-of-envelope: **~4 characters per token, ~0.75 words per token, so ~750 words ≈ 1,000 tokens.** Code, rare words, and non-English text tokenize less efficiently (more tokens per word). You estimate token budgets the way you estimate QPS (queries per second) and storage elsewhere in this course: roughly, out loud, with stated assumptions. A 20-page document is ~10–12k tokens; a paragraph of chat is ~100–200 tokens; a typical system prompt is a few hundred.
 
 **The context window is a finite, shared budget, and bigger is not free.** The context window is the maximum number of tokens the model can attend to in one call, **input and output drawn from the same pool.** In 2026 the common working range is **~128k–200k tokens**, with frontier models advertising **1M+**. It is tempting to treat a huge window as "just put everything in," but three costs bite:
 
@@ -45,7 +45,7 @@ So the design question is rarely "how big is the window" but "**what is the smal
 
 That asymmetry is why a model can start answering a short question almost instantly but take seconds to finish a long one, and why a 50-page prompt slows the *first* word but a 2,000-token answer slows *every* word after it. (The serving consequences, batching, the KV cache, GPU economics, come in the inference and LLM-serving lessons.)
 
-**The KV cache is the memory tax that bounds throughput.** To avoid recomputing attention over the whole sequence for every new token, the model caches per-token key/value attention state, the **KV cache**. It is held in fast GPU memory and **grows linearly with sequence length** (prompt + generated so far). It matters to designers for one reason: KV cache competes with model weights for scarce GPU memory, so **long contexts and many concurrent requests fight for the same HBM**, which is what caps batch size and therefore throughput and cost (developed in the inference and LLM-serving lessons).
+**The KV (key-value) cache is the memory tax that bounds throughput.** To avoid recomputing attention over the whole sequence for every new token, the model caches per-token key/value attention state, the **KV cache**. It is held in fast GPU memory and **grows linearly with sequence length** (prompt + generated so far). It matters to designers for one reason: KV cache competes with model weights for scarce GPU memory, so **long contexts and many concurrent requests fight for the same HBM** (high-bandwidth memory), which is what caps batch size and therefore throughput and cost (developed in the inference and LLM-serving lessons).
 
 **The latency model falls straight out of prefill/decode.** Model the user-perceived latency as:
 
@@ -76,7 +76,7 @@ Order-of-magnitude in 2026: frontier-model **output** runs on the order of **sin
 
 - **Tokenization**: BPE merges frequent byte/character pairs into a fixed vocabulary (tens of thousands of tokens). Common English words are often one token; rare words, code symbols, and other scripts split into many. This is why a 1,000-"word" non-English document can cost far more than 1,333 tokens, and why token-counting (not word-counting) is the only reliable budget.
 - **Sampling**: the model outputs a probability distribution (logits → softmax) over the vocabulary; **temperature** flattens (high) or sharpens (low) it, **top-p/top-k** truncate the candidate set. Temperature 0 = greedy (always take the argmax), which *feels* deterministic.
-- **Why even temperature 0 drifts**: floating-point non-associativity across GPU kernels, variable batching, mixture-of-experts routing, and backend version changes can change the argmax tie-breaks. The practical rule for a designer: **never make correctness depend on identical output**, dedup on a stable key and validate structure instead (the same instinct as idempotency in the business-domain HLDs).
+- **Why even temperature 0 drifts**: floating-point non-associativity across GPU kernels, variable batching, mixture-of-experts routing, and backend version changes can change the argmax tie-breaks. The practical rule for a designer: **never make correctness depend on identical output**, dedup on a stable key and validate structure instead (the same instinct as idempotency in the business-domain HLDs (high-level designs)).
 - **Embeddings vs generation**: the same transformer family also produces *embeddings* (a single vector per input) used for search and memory, a different output mode of the same underlying machinery.
 
 </details>

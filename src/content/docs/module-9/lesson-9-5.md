@@ -6,7 +6,7 @@ sidebar:
 ---
 
 ### Learning objectives
-- Lay out the **adaptation spectrum** cheapest/fastest → most expensive — prompt engineering → context engineering / RAG → fine-tuning (LoRA, then full) → continued pretraining — and know that you **climb it only when eval proves the rung below can't hit the bar.**
+- Lay out the **adaptation spectrum** cheapest/fastest → most expensive — prompt engineering → context engineering / RAG (retrieval-augmented generation) → fine-tuning (LoRA, then full) → continued pretraining — and know that you **climb it only when eval proves the rung below can't hit the bar.**
 - Apply the **one decision rule that scores**: fresh/private **facts → RAG**; new **behavior/format/style/skill → fine-tune**; both → RAG **on** a fine-tuned model; lower latency/cost at fixed quality → **distill** into a smaller fine-tune. State the misconception out loud: **fine-tuning teaches behavior, not facts.**
 - Price fine-tuning correctly — **LoRA/PEFT** (small swappable adapter, cheap) vs **full fine-tune** (expensive, one model) — and recognize that the real cost is **data curation + an eval harness + retraining as the base model moves**, not GPU hours.
 - Name the operational tax a Director owns: a fine-tune **locks you to a base-model version**, so every base upgrade is a re-curate-and-retrain project, not a config flip.

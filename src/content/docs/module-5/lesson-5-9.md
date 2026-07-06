@@ -59,7 +59,7 @@ Now the contrast that defines this lesson. WhatsApp is a **switchboard with mail
 
 ## E: Estimation
 
-> The adaptation: **Estimation is the connection-fleet cost math.** The headline isn't QPS, it is *how many connection servers the hot stream demands and what they cost*. That number, not taste, picks the transport.
+> The adaptation: **Estimation is the connection-fleet cost math.** The headline isn't QPS (queries per second), it is *how many connection servers the hot stream demands and what they cost*. That number, not taste, picks the transport.
 
 **Assumptions:** peak ~10M concurrent live viewers platform-wide across many streams; one celebrity stream can hold **5M concurrent**; ~1% of viewers comment, each ~1 comment / 30 s while active; comment payload ~150 B with metadata.
 
@@ -91,7 +91,7 @@ Platform-wide 10M concurrent ÷ 60K ≈ ~170 connection servers (plus headroom �
 ```
 Per server: 60K conns × 20 comments/s × 150 B ≈ 180 MB/s egress
 ```
-~180 MB/s (~1.4 Gbps) sits comfortably within a 10/25 GbE NIC, so **memory binds first**, the per-connection footprint is the lever that sets the bill. Halve it, halve the fleet.
+~180 MB/s (~1.4 Gbps) sits comfortably within a 10/25 GbE NIC (network interface card), so **memory binds first**, the per-connection footprint is the lever that sets the bill. Halve it, halve the fleet.
 
 <details>
 <summary>Go deeper, why ~60K connections/server, and the SSE vs WebSocket footprint (IC depth, optional)</summary>
@@ -278,10 +278,10 @@ A connection-server crash drops ~60K viewers who all reconnect at once.
 - **The transport (SSE)**, defended on cost: read-only push at half WebSocket's footprint roughly halves the fleet. Risk: needing bidirectional later (live reactions), mitigated by keeping posting on a separate cheap POST path.
 - **Sampling vs completeness**, a worse-but-cheaper experience defended with math, the most Director-flavored trade here. Completeness has *negative* marginal value past ~20/s yet *linear* marginal cost.
 
-**What I'd revisit if requirements changed:** durable replayable chat (Twitch VOD-style) adds the archive read path we deferred; threaded replies add causal ordering; live reactions could justify WebSocket for high-engagement viewers.
+**What I'd revisit if requirements changed:** durable replayable chat (Twitch VOD-style (VOD = video on demand)) adds the archive read path we deferred; threaded replies add causal ordering; live reactions could justify WebSocket for high-engagement viewers.
 
 **Where I'd delegate (the explicit Director move):**
-- **Dispatch-tree internals:** *"Realtime-infra owns the fan-out tree and pub/sub plane behind `publish(streamId, sampledComment)`; my prior is a tiered tree with ~tens of fan-out per node, they own the latency SLO and rebalancing."*
+- **Dispatch-tree internals:** *"Realtime-infra owns the fan-out tree and pub/sub plane behind `publish(streamId, sampledComment)`; my prior is a tiered tree with ~tens of fan-out per node, they own the latency SLO (service-level objective) and rebalancing."*
 - **Connection-server tuning:** *"Infra benchmarks max stable connections/server, epoll sizing, TLS-session memory, socket buffers, on real SSE traffic; my prior is ~60K/server memory-bound, and fleet sizing flexes off whatever they prove. I own the architecture; they own the per-node ceiling."*
 - **Toxicity model:** *"Trust-and-safety owns the inline classifier; my prior is a fast score inline plus async human review."* What I keep, no-inbox, SSE-for-cost, the sampling-first ladder, and what I hand off with a stated prior, is the altitude.
 

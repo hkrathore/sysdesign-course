@@ -45,9 +45,9 @@ You are not designing *a* rate limiter - the building-block lesson already built
 
 Enough math to make a defensible call; round hard, state assumptions.
 
-**Decision QPS.** Peak **≈ 1M decisions/s = ≈ 1M writes/s** to the counter store. Counter reads ≈ 0. **Rule reads** are ~1M/s *logically* but served from a per-instance in-memory cache refreshed every ~10 s → single-digit-thousand ops/s to the rules store. Negligible.
+**Decision QPS (queries per second).** Peak **≈ 1M decisions/s = ≈ 1M writes/s** to the counter store. Counter reads ≈ 0. **Rule reads** are ~1M/s *logically* but served from a per-instance in-memory cache refreshed every ~10 s → single-digit-thousand ops/s to the rules store. Negligible.
 
-**Storage - counters.** Token-bucket state per key = two numbers (tokens + last-refill timestamp); assume **~100 B/key** with overhead. 10M keys × 100 B ≈ **~1-2 GB resident**. **Growth is bounded, not cumulative**: counters carry a TTL and expire when their window lapses, so storage tracks the **active keyset**, not time - the opposite of a content/log store. 10× users → ~10-20 GB, still one Redis cluster.
+**Storage - counters.** Token-bucket state per key = two numbers (tokens + last-refill timestamp); assume **~100 B/key** with overhead. 10M keys × 100 B ≈ **~1-2 GB resident**. **Growth is bounded, not cumulative**: counters carry a TTL (time-to-live) and expire when their window lapses, so storage tracks the **active keyset**, not time - the opposite of a content/log store. 10× users → ~10-20 GB, still one Redis cluster.
 
 **Storage - rules.** Thousands of rows × a few hundred bytes = **single-digit MB**. Durable, tiny, read-mostly. Per-instance rule cache: low-MB, fits in-process.
 
@@ -57,7 +57,7 @@ Enough math to make a defensible call; round hard, state assumptions.
 - **Counter store shards from *write* throughput.** Assume **~100k ops/s per Redis node** (stated assumption). 1M ÷ 100k ≈ **~10 shards**. Replicas add **zero throughput** - they are **failover warmth only**. So ~10 primaries + ~10 replicas ≈ 20 nodes; do *not* imply 20 nodes = 20× capacity.
 - **Limiter tier sizes from request rate:** at ~25-50k decisions/s per thin instance (assumption; mostly network-wait), **~20-40 instances**.
 
-**Headline numbers:** ~1M writes/s, ~1-2 GB counter RAM bounded by active keys, ~10 shards + ~10 HA replicas, ~20-40 limiter instances, < 1-2 ms p99 added. Everything hangs on "**it's all writes**."
+**Headline numbers:** ~1M writes/s, ~1-2 GB counter RAM bounded by active keys, ~10 shards + ~10 HA (high availability) replicas, ~20-40 limiter instances, < 1-2 ms p99 added. Everything hangs on "**it's all writes**."
 
 ---
 
@@ -68,7 +68,7 @@ R/E already split the problem; S names the two stores and justifies each.
 **Plane 1 - Counters: in-memory, write-optimized, AP → Redis.**
 - *Access pattern:* ~1M atomic read-modify-writes/s, tiny TTL-bounded state, best-effort consistency, sub-ms latency.
 - *Why Redis:* in-memory (~0.5-1 ms same-AZ), single-threaded per shard so the token-bucket update runs as **one atomic Lua script - never a separate read then write** (the over-admission race); native TTL; AP-leaning, which is exactly what a best-effort limiter wants.
-- *Rejected - Postgres:* a durable ACID disk store on every request adds milliseconds and pays for durability **wasted** on counters that expire in a minute. Reject on latency + pointless durability.
+- *Rejected - Postgres:* a durable ACID (atomicity, consistency, isolation, durability) disk store on every request adds milliseconds and pays for durability **wasted** on counters that expire in a minute. Reject on latency + pointless durability.
 - *Rejected - a CP/consensus store (etcd, Spanner):* exact enforcement, but quorum latency on every request and lost availability under partition - the limiter becomes slower and more fragile than the service it guards, buying exactness that R declared a non-requirement. Reject on latency + availability for zero benefit.
 
 **Plane 2 - Rules/config: durable, read-mostly → Postgres (or DynamoDB).**
@@ -141,7 +141,7 @@ PUT  /rules/{rule_id}        // upsert: {scope, sustained_rate, burst, window}
 GET  /rules?scope=...         // list/inspect rules
 DELETE /rules/{rule_id}
 ```
-- *Scope* is the composite `{user?, api_key?, route?}`. Writes go to the durable rules store; propagation SLA is "seconds" via the instances' pull cycle. *Rejected - synchronously pushing every rule change to thousands of instances:* a fan-out and consistency problem for staleness the R step already accepted.
+- *Scope* is the composite `{user?, api_key?, route?}`. Writes go to the durable rules store; propagation SLA (service-level agreement) is "seconds" via the instances' pull cycle. *Rejected - synchronously pushing every rule change to thousands of instances:* a fan-out and consistency problem for staleness the R step already accepted.
 
 ---
 
@@ -158,7 +158,7 @@ The Lua script does refill-check-decrement in one critical section: read `{token
 
 </details>
 
-**Rule records (Postgres/DynamoDB) - keyed by scope.** One row per rule: `rule_id` (PK), `scope` (indexed, e.g. `{tier: pro, route: /search}`), `sustained_rate`, `burst`, `window_s`. Rules are **low cardinality** - tiers × routes, a thousand rows covering millions of users; the `user → tier` mapping lives in the identity system. *Rejected - one rule row per user:* explodes a thousand-row table into 10M rows for no benefit.
+**Rule records (Postgres/DynamoDB) - keyed by scope.** One row per rule: `rule_id` (PK (primary key)), `scope` (indexed, e.g. `{tier: pro, route: /search}`), `sustained_rate`, `burst`, `window_s`. Rules are **low cardinality** - tiers × routes, a thousand rows covering millions of users; the `user → tier` mapping lives in the identity system. *Rejected - one rule row per user:* explodes a thousand-row table into 10M rows for no benefit.
 
 **Where data lives:** counters in **Redis RAM** (ephemeral, ~1-2 GB, sharded by limiter key); rules in a **durable store** (tiny, replicated, cached in every instance's RAM).
 
@@ -170,7 +170,7 @@ Re-check against the NFRs and hunt bottlenecks. Each fix names its trade-off.
 
 **Bottleneck 1 - the hot key (the one that doesn't shard).** Per-key limits spread beautifully - but a **single global limit** funnels every request onto **one key → one slot → one shard**. You cannot shard your way out; at 1M/s that shard melts. **Fix - local token-leasing:** each limiter instance **leases a batch of budget** from the central counter ("grant me 500 tokens"), serves requests locally from its lease, and reconciles periodically. One change retires three bottlenecks at once: tail latency (most decisions become in-process), write amplification (one Redis write per lease, not per request), and hot-key concentration. *Trade-off:* you give up **global accuracy and cross-instance fairness** - an instance sitting on an unused lease strands budget another instance needs, and the global limit can drift by the outstanding leased amount. The lease batch size is the dial: smaller → tighter accuracy but more Redis round-trips; larger → lower latency but looser fairness. Precision is the currency, and R said we can spend it. *Alternative - sharded counters:* split the logical counter into K sub-keys, increment one at random, sum to read - tighter global visibility than leasing, at the cost of a K-key read. **Leasing when latency and hot-key relief dominate; sharded counters when global accuracy must stay tight.**
 
-**Bottleneck 2 - tail latency from the Redis hop.** One network round-trip per request puts Redis on the p99 critical path. **Fix:** leasing removes most hops; co-locate Redis same-AZ; optionally a per-instance pre-check that rejects keys already known far over limit without touching Redis. *Trade-off:* the pre-check can be slightly stale - acceptable under best-effort.
+**Bottleneck 2 - tail latency from the Redis hop.** One network round-trip per request puts Redis on the p99 critical path. **Fix:** leasing removes most hops; co-locate Redis same-AZ (availability zone); optionally a per-instance pre-check that rejects keys already known far over limit without touching Redis. *Trade-off:* the pre-check can be slightly stale - acceptable under best-effort.
 
 **Bottleneck 3 - Redis as a single point of failure.** If the counter store is down, naively the whole API is down. **Fix - fail-open** for general traffic (the edge backstops volumetric abuse), **fail-closed** for auth/payment/abuse. *Trade-off:* during an outage, general traffic is briefly unthrottled - deliberately accepted, because the limiter must never down the service it protects. Replica promotion after a primary loss briefly over-admits (async replication lost the last updates) - harmless for best-effort.
 
@@ -186,7 +186,7 @@ Re-check against the NFRs and hunt bottlenecks. Each fix names its trade-off.
 
 **Under a new constraint - global, multi-region active-active.** This is the hardest trade-off and where v1 deliberately stopped. A "1,000/min globally" key cannot make every request cross an ocean to one counter. The pragmatic default is **regional enforcement with async cross-region reconciliation** - effectively leasing extended across regions - accepting transient global over-admission between syncs. Static per-region sub-limits are simpler but strand budget when traffic is skewed; **synchronous global consensus** is rejected outright - cross-region quorum latency per request and lost availability under partition, the same CP rejection from S at higher stakes.
 
-**Where I'd delegate (the Director move).** I would not hand-tune this in the room: *"Have the infra team model the **lease-window-vs-accuracy curve** at our QPS and pick the batch size that meets the fairness SLO at the lowest latency."* My prior is **leasing + per-region async reconciliation**, because it preserves the latency NFR and rate limiting tolerates the approximation - but the exact batch size is a measurement, not a guess.
+**Where I'd delegate (the Director move).** I would not hand-tune this in the room: *"Have the infra team model the **lease-window-vs-accuracy curve** at our QPS and pick the batch size that meets the fairness SLO (service-level objective) at the lowest latency."* My prior is **leasing + per-region async reconciliation**, because it preserves the latency NFR and rate limiting tolerates the approximation - but the exact batch size is a measurement, not a guess.
 
 ---
 

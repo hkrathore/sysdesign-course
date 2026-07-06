@@ -9,7 +9,7 @@ sidebar:
 
 ### Learning objectives
 - Frame any live migration, re-shard, engine swap, vendor exit, as one problem: **keep two systems provably in sync under traffic, then move trust one increment at a time.**
-- Choose between **CDC + backfill** and **application dual-write**, defending the choice on ordering, failure-atomicity, and blast radius.
+- Choose between **CDC (change data capture) + backfill** and **application dual-write**, defending the choice on ordering, failure-atomicity, and blast radius.
 - Prove the data matches with **dark reads and partition checksums** against a quantified mismatch budget.
 - Run the **expand → migrate → contract** ladder: reads ramp before writes flip, reverse replication keeps the old system warm, every phase has abort criteria and one go/no-go owner.
 - Size the **risk window and dual-run cost**, two fleets plus a pipeline ≈ 2× infra spend; the cutover schedule is a budget line you own.
@@ -27,7 +27,7 @@ You're moving a busy restaurant across the street, and it **never closes**. So y
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *What's forcing the move, and by when?* → Write/storage headroom; **~6 months of runway**, which must include the parallel-run, not just the build.
-- *What does "zero downtime" mean?* → No write outage beyond the SLO error budget; latency blips during cutover are negotiable, **data loss and silent corruption are not**.
+- *What does "zero downtime" mean?* → No write outage beyond the SLO (service-level objective) error budget; latency blips during cutover are negotiable, **data loss and silent corruption are not**.
 - *Mutation rate?* → Mostly append, some updates (counters, expiry). Mutation rate decides how hard verification is.
 - *Brief read-only window allowed?* → Assume **no**; if the business later grants 10 minutes, that's a bonus, never the plan.
 
@@ -41,7 +41,7 @@ You're moving a busy restaurant across the street, and it **never closes**. So y
 
 ## E: Estimation
 
-> Adaptation: E sizes the **risk window** (how long are we exposed?) and the **dual-run cost** (what does safety cost per week?), this problem's QPS-and-storage.
+> Adaptation: E sizes the **risk window** (how long are we exposed?) and the **dual-run cost** (what does safety cost per week?), this problem's QPS-and-storage (QPS = queries per second).
 
 **Backfill, the floor of the risk window.** 10 TB at an effective **200 MB/s** (throttled, the source is serving 100K reads/s) is `10 TB ÷ 200 MB/s ≈ 14 hours`. Call it **a day**; plan two with retries.
 
@@ -103,7 +103,7 @@ stateDiagram-v2
 <details>
 <summary>Go deeper, CDC pipeline mechanics and the snapshot-consistency problem (IC depth, optional)</summary>
 
-The classic race: rows changed *during* the snapshot are captured by both the copy and the change stream, in either order. The standard fix: record the log position (LSN/GTID) *before* the snapshot, replay from that position after, and make the apply path idempotent last-writer-wins, UPSERTs keyed on primary key, optionally guarded by a per-row version/timestamp so an older event never clobbers a newer row. Debezium's snapshot modes implement exactly this dance.
+The classic race: rows changed *during* the snapshot are captured by both the copy and the change stream, in either order. The standard fix: record the log position (LSN/GTID (LSN = log sequence number) (global transaction ID)) *before* the snapshot, replay from that position after, and make the apply path idempotent last-writer-wins, UPSERTs keyed on primary key, optionally guarded by a per-row version/timestamp so an older event never clobbers a newer row. Debezium's snapshot modes implement exactly this dance.
 
 Apply-worker requirements: idempotent UPSERTs (the stream is at-least-once, not exactly-once), per-key ordering (partition the Kafka topic by primary key, never round-robin), schema translation in one place, and dead-letter queues for rows that fail translation rather than stalling the stream. Monitor lag end-to-end (source write timestamp vs target apply timestamp), not just consumer offsets.
 

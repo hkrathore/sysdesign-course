@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-> **Why this problem separates Directors from ICs:** the demo is trivial and the production system is brutal, and the gap between them is the entire interview. An autonomous agent that resolves a GitHub issue end-to-end looks like magic for five minutes — then you ship it and discover that a task needing 40 sequential model decisions, each 95% reliable, succeeds about **13% of the time** (0.95⁴⁰), that a stuck agent re-planning in a loop quietly burned **$300 of tokens overnight**, and that "let it run `bash`" is one indirect-prompt-injection away from `rm -rf`. An IC tunes the prompt and the planner. A Director recognizes that **autonomy is the risk**, not the feature, and that the whole job is *bounding the loop*: durable checkpoints so a crash resumes instead of restarting, a sandbox so model-written code can't escape, hard budgets and a kill switch so cost is capped, a verifier so "done" means *tests pass* not *the model says so*, and human gates on the irreversible. Get autonomy wrong and you don't have a bug — you have a runaway process with your credentials and a credit card.
+> **Why this problem separates Directors from ICs (individual contributors):** the demo is trivial and the production system is brutal, and the gap between them is the entire interview. An autonomous agent that resolves a GitHub issue end-to-end looks like magic for five minutes — then you ship it and discover that a task needing 40 sequential model decisions, each 95% reliable, succeeds about **13% of the time** (0.95⁴⁰), that a stuck agent re-planning in a loop quietly burned **$300 of tokens overnight**, and that "let it run `bash`" is one indirect-prompt-injection away from `rm -rf`. An IC tunes the prompt and the planner. A Director recognizes that **autonomy is the risk**, not the feature, and that the whole job is *bounding the loop*: durable checkpoints so a crash resumes instead of restarting, a sandbox so model-written code can't escape, hard budgets and a kill switch so cost is capped, a verifier so "done" means *tests pass* not *the model says so*, and human gates on the irreversible. Get autonomy wrong and you don't have a bug — you have a runaway process with your credentials and a credit card.
 
 ---
 
@@ -15,7 +15,7 @@ sidebar:
 2. Decide **when multi-agent helps and when it hurts**: parallel, independently-verifiable subtasks justify the ~10–15× token multiplier; a single coupled thread of control does not.
 3. Architect a **durable, sandboxed agent runtime** — checkpointed state, isolated tool execution, idempotent side effects — reusing the exactly-once and untrusted-execution machinery from the payments and agent-runtime designs.
 4. Make **cost and safety first-class controls**: per-task token/time/step budgets, a kill switch, least-privilege tools, and human-in-the-loop gates placed by reversibility and blast radius.
-5. Run a **RESHADED spine where the NFRs invert the usual order** — task success rate, bounded cost, and containment dominate; raw QPS is a footnote — and design-evolve toward graduated autonomy.
+5. Run a **RESHADED spine where the NFRs (non-functional requirements) invert the usual order** — task success rate, bounded cost, and containment dominate; raw QPS (queries per second) is a footnote — and design-evolve toward graduated autonomy.
 
 ---
 
@@ -62,7 +62,7 @@ That's exactly the shift an autonomous agent forces. A chatbot that's wrong *say
 | 6 | **Latency** | Minutes-to-hours per task; async by nature — *not* an interactive-latency problem |
 | 7 | **Throughput** | Thousands of concurrent tasks; trivially horizontal — a footnote |
 
-**The inversion, stated explicitly:** unlike the conversational assistant where TTFT and QPS dominate, here a task takes minutes to hours and you run thousands, not millions per second. The scarce things are **a correct outcome, a capped bill, and a contained blast radius.** Every architectural decision flows from NFRs 1–3.
+**The inversion, stated explicitly:** unlike the conversational assistant where TTFT (time to first token) and QPS dominate, here a task takes minutes to hours and you run thousands, not millions per second. The scarce things are **a correct outcome, a capped bill, and a contained blast radius.** Every architectural decision flows from NFRs 1–3.
 
 ---
 
@@ -222,9 +222,9 @@ GET  /v1/tasks/{taskId}/artifacts       -> { diff_url, pr_url | report_url, cost
 
 > The state that makes the system durable, auditable, and cost-bounded. Checkpoint granularity, idempotency, and the budget ledger are the consequential decisions.
 
-**`tasks`** — `task_id` (PK), `goal`, `autonomy_level`, `acceptance_signal`, `status` (PLANNING / RUNNING / AWAITING_APPROVAL / VERIFYING / DONE / FAILED / KILLED), `budget` (JSON), `cost_spent` (JSON ledger), `created_at`. Sharded by `task_id` — tasks are independent, so even distribution beats locality here.
+**`tasks`** — `task_id` (PK (primary key)), `goal`, `autonomy_level`, `acceptance_signal`, `status` (PLANNING / RUNNING / AWAITING_APPROVAL / VERIFYING / DONE / FAILED / KILLED), `budget` (JSON), `cost_spent` (JSON ledger), `created_at`. Sharded by `task_id` — tasks are independent, so even distribution beats locality here.
 
-**`steps`** — append-only, `step_id` (PK), `task_id` (FK), `seq`, `type` (PLAN / TOOL_CALL / OBSERVATION / DECISION / VERIFY / APPROVAL), `input`, `output`, `tokens`, `cost`, `latency_ms`, `checkpoint_ref`, `created_at`. **Append-only** so the trajectory is an immutable audit trail — replayable for debugging and as eval data. This is the same append-only-ledger instinct as payments, applied to agent decisions.
+**`steps`** — append-only, `step_id` (PK), `task_id` (FK (foreign key)), `seq`, `type` (PLAN / TOOL_CALL / OBSERVATION / DECISION / VERIFY / APPROVAL), `input`, `output`, `tokens`, `cost`, `latency_ms`, `checkpoint_ref`, `created_at`. **Append-only** so the trajectory is an immutable audit trail — replayable for debugging and as eval data. This is the same append-only-ledger instinct as payments, applied to agent decisions.
 
 **`tool_calls`** — `call_id` (PK), `step_id`, `tool`, `args_hash`, `idempotency_key`, `result`, `side_effecting` (bool), `status`. The **`idempotency_key`** is load-bearing: side-effecting tool calls (open PR, send email, write to an external system) must be **idempotent** so a durable retry after a crash doesn't double-act — exactly the payments idempotency pattern, now applied to agent actions.
 

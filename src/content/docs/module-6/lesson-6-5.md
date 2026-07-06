@@ -5,12 +5,12 @@ sidebar:
   order: 5
 ---
 
-> **Why this gets asked.** The rate limiter is one of the few problems asked in *both* LLD and HLD rounds, Stripe, Google, Amazon, Meta, and Cloudflare all run it, deliberately probing the seam between the forms. The course covers the distributed half; this is the missing half: **design the `RateLimiter` class**. A junior answer recites token-bucket mechanics. A Director answer treats **algorithm selection as a requirements decision**, puts it behind a **Strategy seam**, gets **per-client concurrency** right without a global lock, and names, unprompted, **where the in-process design stops and 3.10/5.2 begins.** Interviewers ask the climb; have it ready.
+> **Why this gets asked.** The rate limiter is one of the few problems asked in *both* LLD (low-level design) and HLD (high-level design) rounds, Stripe, Google, Amazon, Meta, and Cloudflare all run it, deliberately probing the seam between the forms. The course covers the distributed half; this is the missing half: **design the `RateLimiter` class**. A junior answer recites token-bucket mechanics. A Director answer treats **algorithm selection as a requirements decision**, puts it behind a **Strategy seam**, gets **per-client concurrency** right without a global lock, and names, unprompted, **where the in-process design stops and 3.10/5.2 begins.** Interviewers ask the climb; have it ready.
 
 ### Learning objectives
 - Design the **`RateLimiter` interface and Strategy hierarchy** so token bucket, sliding-window log, and fixed window are interchangeable per rule.
 - Choose the algorithm **per requirement, not by reflex**: burst tolerance, memory per client, the asymmetric cost of a false reject vs a false accept.
-- Make `allowRequest` correct under concurrency with **per-client locking**, naming the global-lock convoy rejected and the CAS delegated.
+- Make `allowRequest` correct under concurrency with **per-client locking**, naming the global-lock convoy rejected and the CAS (compare-and-swap) delegated.
 - Size the per-client **state store** (memory math decides bucket vs log at 1M clients) and bound it with eviction.
 - Deliver the **two-altitude framing**: this class is the in-process half; 3.10/5.2 are the distributed half; the climb between them is the real question.
 
@@ -59,10 +59,10 @@ The LLD question is not "which mechanism is best." It is: **design the turnstile
 
 **Choice: an in-heap concurrent map, `client:resource → StateEntry`** (a `ConcurrentHashMap`), each entry owning its algorithm state *and its own lock*. Lookup is lock-free; mutation locks only the entry.
 
-- *Rejected, Redis in v1:* an intra-AZ round trip is ~0.5-1 ms, **20× the entire 50 µs budget**. Redis answers a *different* requirement (shared state across nodes); it arrives in Design evolution.
+- *Rejected, Redis in v1:* an intra-AZ (availability zone) round trip is ~0.5-1 ms, **20× the entire 50 µs budget**. Redis answers a *different* requirement (shared state across nodes); it arrives in Design evolution.
 - *Rejected, one synchronized global map:* the convoy computed above; it poisons the box's p99.
 
-**The eviction requirement (the leak everyone forgets).** Clients are unbounded, every new API key or IP allocates an entry forever; a scraper cycling IPs is a slow OOM. **Bound the map: TTL expiry of idle entries or an LRU cap.** Trade-off: eviction forgets history, benign for buckets (a fresh client starts full anyway), *not* for the password-attempt log, so **security rules get longer TTLs**. A the distributed-cache building block cache-eviction decision hiding inside a class design.
+**The eviction requirement (the leak everyone forgets).** Clients are unbounded, every new API key or IP allocates an entry forever; a scraper cycling IPs is a slow OOM (out-of-memory). **Bound the map: TTL (time-to-live) expiry of idle entries or an LRU (least recently used) cap.** Trade-off: eviction forgets history, benign for buckets (a fresh client starts full anyway), *not* for the password-attempt log, so **security rules get longer TTLs**. A the distributed-cache building block cache-eviction decision hiding inside a class design.
 
 ---
 
@@ -118,8 +118,8 @@ interface RateLimitStrategy {                           // the Strategy seam
 
 **Design notes (each with its rejected alternative):**
 - **`Decision`, not `boolean`.** The caller needs `Retry-After` and remaining quota for 429 headers; a bare boolean forces a second, racy query. *Rejected: `boolean allow()`*, cleaner-looking, starves the caller.
-- **Time is a parameter.** Inject a **monotonic** clock: wall clock steps backward under NTP and mints free tokens; injection makes boundary tests deterministic. *Rejected: inline wall time*, untestable, subtly wrong.
-- **`tryAcquire` is check-AND-consume in one call.** *Rejected: separate `check()` then `consume()`*, the gap is a TOCTOU race; two threads both pass `check`, both take the last token. The contract must make the race **inexpressible**, the single-atomic-statement instinct, applied to method design.
+- **Time is a parameter.** Inject a **monotonic** clock: wall clock steps backward under NTP (Network Time Protocol) and mints free tokens; injection makes boundary tests deterministic. *Rejected: inline wall time*, untestable, subtly wrong.
+- **`tryAcquire` is check-AND-consume in one call.** *Rejected: separate `check()` then `consume()`*, the gap is a TOCTOU (time-of-check-to-time-of-use) race; two threads both pass `check`, both take the last token. The contract must make the race **inexpressible**, the single-atomic-statement instinct, applied to method design.
 - **`newState` lives on the strategy**, each algorithm owns its state shape; the facade stays ignorant of internals, the property that survives the later move to Redis.
 
 ---
@@ -245,7 +245,7 @@ Facade hot path: `map.computeIfAbsent(key, k -> strategy.newState(rule, now))`, 
 
 ### Common mistakes
 
-- **Leading with an algorithm instead of the interface.** Refill math before any contract exists reads as IC reflex. Interface, seam, state, the algorithm is a plug-in.
+- **Leading with an algorithm instead of the interface.** Refill math before any contract exists reads as IC (individual contributor) reflex. Interface, seam, state, the algorithm is a plug-in.
 - **`check()` and `consume()` as separate methods.** The gap is a TOCTOU race the interface invites. One atomic call, make the race inexpressible.
 - **One global lock.** Correct, and it convoys the box at scale; per-client locks cost 16 B per entry. Quantify, don't assert.
 - **An unbounded client map.** Every new API key allocates state forever; a key-cycling scraper is a slow OOM. TTL eviction is part of the design.

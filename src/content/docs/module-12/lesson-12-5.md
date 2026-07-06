@@ -6,7 +6,7 @@ sidebar:
 ---
 
 ### Learning objectives
-- Run the **RESHADED** spine on a multi-tenant SaaS platform where the decisive requirements are non-functional: **tenant isolation** (no cross-tenant leak), **noisy-neighbor fairness**, per-tenant **SLA tiers**, **data residency**, and **cost density / margin**, not the feature list.
+- Run the **RESHADED** spine on a multi-tenant SaaS platform where the decisive requirements are non-functional: **tenant isolation** (no cross-tenant leak), **noisy-neighbor fairness**, per-tenant **SLA (service-level agreement) tiers**, **data residency**, and **cost density / margin**, not the feature list.
 - Choose a **tenancy model per tier** on the silo / bridge / pool spectrum: **pooled shared-schema + row-level security (RLS)** as the dense default for the long tail, **siloed database-per-tenant** for the enterprise tier, and defend each against the alternative.
 - Reason in numbers a Director can stand behind: **~100k tenants** on a **power-law** distribution (top 1% hold ~55% of users), **~5M seats**, **~30k req/s** peak, and the **density math**, thousands of tenants per pooled shard, one enterprise per silo, cost-per-tenant, and gross margin.
 - Make the crux the **Evaluation** step: prove cross-tenant leak is impossible by construction, contain a noisy neighbor, place a giant tenant vs the long tail, survive an onboarding spike, and get **per-tenant backup/restore and metering** right.
@@ -28,7 +28,7 @@ Two failures dominate everything else. The first is a **keycard that opens the w
 **Clarifying questions (and assumed answers):**
 - *What is the app?* A **B2B workflow / CRM** (Asana / Jira / Salesforce shape): projects, records, tasks, per-tenant users and admins. The app logic is not the interesting part; **tenancy** is.
 - *Who are the tenants?* From **self-serve SMBs** (a 10-person startup swiping a card) to **regulated enterprises** (a bank demanding a dedicated database, in-region data, its own encryption key). One model cannot serve both, which forces **tiering**.
-- *Custom domains / SSO?* **Yes**, enterprises get `acme.app.com`, SAML/OIDC SSO, and custom fields / workflows. Customization is per-tenant config, not per-tenant code forks.
+- *Custom domains / SSO (single sign-on)?* **Yes**, enterprises get `acme.app.com`, SAML/OIDC (OpenID Connect) SSO, and custom fields / workflows. Customization is per-tenant config, not per-tenant code forks.
 - *Billing?* **Per-seat by default**, with **usage metering** for consumption features (API calls, storage, AI). Metering feeds invoices, so its accuracy is revenue-critical.
 - *Residency?* **Yes for enterprise**, EU tenant data physically stays in the EU. This forces **per-region data planes** later.
 
@@ -144,7 +144,7 @@ flowchart LR
   CP --> PRV[Provisioning worker<br/>async, queue-backed]
 ```
 
-**Happy path, a user at tenant `acme` opens a project:** the client hits `acme.app.com` (or sends an API key) with a **JWT carrying `tenant_id` and roles**. The **gateway** authenticates, extracts the tenant, checks the **control plane's routing map** to find which **cell / data plane** owns `acme`, and enforces `acme`'s **per-tenant rate limit** (a Redis token bucket keyed by tenant). The request lands on the **stateless app tier**, which **binds the tenant to the request** by setting the Postgres session variable `app.tenant_id` before any query runs. Every read is then RLS-scoped in the engine; every cache read/write uses a `tenant_id`-prefixed key; every emitted metric and log line is tagged with the tenant. The app reads the project from `acme`'s pooled shard (or its silo DB) and returns it.
+**Happy path, a user at tenant `acme` opens a project:** the client hits `acme.app.com` (or sends an API key) with a **JWT (JSON Web Token) carrying `tenant_id` and roles**. The **gateway** authenticates, extracts the tenant, checks the **control plane's routing map** to find which **cell / data plane** owns `acme`, and enforces `acme`'s **per-tenant rate limit** (a Redis token bucket keyed by tenant). The request lands on the **stateless app tier**, which **binds the tenant to the request** by setting the Postgres session variable `app.tenant_id` before any query runs. Every read is then RLS-scoped in the engine; every cache read/write uses a `tenant_id`-prefixed key; every emitted metric and log line is tagged with the tenant. The app reads the project from `acme`'s pooled shard (or its silo DB) and returns it.
 
 **Provisioning path (control plane, off the hot path):** signup calls the control plane, which writes a tenant row, assigns a **cell**, and enqueues async provisioning. A **pooled** tenant is ready in milliseconds (insert a row, RLS handles the rest); a **silo** tenant needs a database, so the control plane draws from a **pre-warmed pool of empty DBs** and configures it. Provisioning is **queue-backed and idempotent**, never inline on a request.
 
@@ -163,7 +163,7 @@ POST /v1/tasks           { project_id, title, assignee, custom_fields{} }
 GET  /v1/records/{id}                  # RLS returns 404 if the record belongs to another tenant
 POST /v1/users           { email, role }   # tenant-admin scope required
 ```
-Auth: a per-tenant **OIDC/SAML SSO** for enterprises (their IdP), tenant-scoped **JWTs** carrying `tenant_id` + `roles`, or scoped **API keys** for programmatic access. The gateway validates the token and stamps the tenant; the app enforces **RBAC within the tenant** on top.
+Auth: a per-tenant **OIDC/SAML (Security Assertion Markup Language) SSO** for enterprises (their IdP), tenant-scoped **JWTs** carrying `tenant_id` + `roles`, or scoped **API keys** for programmatic access. The gateway validates the token and stamps the tenant; the app enforces **RBAC (role-based access control) within the tenant** on top.
 
 **Control-plane provisioning / admin API (setup, not latency-critical).** Separate auth (ops or tenant-owner scope), separate service:
 ```
@@ -220,13 +220,13 @@ flowchart TB
 
 ### E - Evaluation
 
-This is the crux of the whole design. Stress it against the NFRs, fix each bottleneck, and name the trade.
+This is the crux of the whole design. Stress it against the NFRs (non-functional requirements), fix each bottleneck, and name the trade.
 
 **Bottleneck 1, cross-tenant leak (the existential one).** A single missing `tenant_id` filter, a shared cache key, or a search query without the tenant predicate leaks one tenant's data to another. **Fix, defense in depth:** (a) a repository/ORM layer that is **always tenant-scoped**, (b) **Postgres RLS with FORCE** as the backstop for the query that forgets, (c) `tenant_id` in **every** Redis key and Elasticsearch filter, (d) **canary tenants** and automated tests that assert a cross-tenant query returns empty, run in CI and continuously in prod. *Trade:* RLS adds roughly **5 to 15% query overhead** and complicates pooling (the session var must reset per checkout). That overhead is cheap insurance against the one failure that cannot be un-happened; the alternative, trusting discipline, is rejected.
 
 **Bottleneck 2, the noisy neighbor.** One tenant runs a giant report, a bulk import, or an abusive API loop and starves its shard, so every co-tenant's p99 spikes. **Fix:** **per-tenant rate limits** (Redis token bucket keyed by tenant, limits set by plan tier), **per-tenant connection quotas**, a **`statement_timeout`** to kill runaway queries, and a **separate connection pool / worker tier for background jobs** so bulk work never competes with interactive reads. Repeat offenders or genuinely heavy tenants get **flagged for migration to a silo**. *Trade:* rate limits can throttle a legitimately busy tenant, mitigated with tier-based limits and short burst allowances; the alternative, no limits, lets one tenant's runaway query become everyone's outage.
 
-**Bottleneck 3, the giant enterprise vs the long tail.** An 80,000-user tenant dropped onto a pooled shard with 5,000 SMBs dominates it and violates their SLA. **Fix, density-aware placement:** big tenants are **provisioned straight to a silo (or their own shard)**; the control plane watches usage counters and **auto-flags a tenant for migration** when it crosses a threshold (users, QPS, or storage). *Trade:* thresholds need tuning and migration is real work (Design evolution), but the alternative, one model for all, either over-provisions the pool to survive the whale or lets the whale wreck the pool.
+**Bottleneck 3, the giant enterprise vs the long tail.** An 80,000-user tenant dropped onto a pooled shard with 5,000 SMBs dominates it and violates their SLA. **Fix, density-aware placement:** big tenants are **provisioned straight to a silo (or their own shard)**; the control plane watches usage counters and **auto-flags a tenant for migration** when it crosses a threshold (users, QPS (queries per second), or storage). *Trade:* thresholds need tuning and migration is real work (Design evolution), but the alternative, one model for all, either over-provisions the pool to survive the whale or lets the whale wreck the pool.
 
 **Bottleneck 4, an onboarding spike.** A viral signup surge, or an enterprise rolling out 50,000 seats in a day, overwhelms provisioning. **Fix:** provisioning is **async and queue-backed** on the control plane, pooled tenants provision in milliseconds (a row), and silo tenants draw from a **pre-warmed pool of empty databases** so nobody waits minutes for a DB to spin up. *Trade:* the warm pool costs money sitting idle; size it from historical signup rate, an on-call and finance line item, not a guess.
 
@@ -242,11 +242,11 @@ This is the crux of the whole design. Stress it against the NFRs, fix each bottl
 
 Scale the design under the new constraints an enterprise business puts on it.
 
-**A dedicated-silo enterprise tier.** As deals demand physical isolation, per-tenant restore, custom SLAs, VPC peering, and **BYOK** (customer-managed KMS keys), the enterprise tier moves fully to **database-per-tenant** or a dedicated single-tenant stack. *Trade:* margin per unit drops, but the deal size justifies it and, crucially, **isolation is the feature that closes the deal**, so the platform must support a pooled long tail *and* a siloed head without forking the codebase. The cost is operational: N enterprise databases to patch, monitor, and back up, which forces **fleet automation** (the control plane becomes the hard part of the system).
+**A dedicated-silo enterprise tier.** As deals demand physical isolation, per-tenant restore, custom SLAs, VPC peering, and **BYOK** (bring your own key) (customer-managed KMS keys), the enterprise tier moves fully to **database-per-tenant** or a dedicated single-tenant stack. *Trade:* margin per unit drops, but the deal size justifies it and, crucially, **isolation is the feature that closes the deal**, so the platform must support a pooled long tail *and* a siloed head without forking the codebase. The cost is operational: N enterprise databases to patch, monitor, and back up, which forces **fleet automation** (the control plane becomes the hard part of the system).
 
-**Per-region data planes for residency.** EU tenant data must physically stay in the EU (GDPR, Schrems II), and other regions follow. The **control plane stays global** (tenant registry, routing, billing), but **tenant data planes are pinned to a home region**, so a request routes to the tenant's region and the data never leaves it. *Trade:* a global enterprise with EU and US offices needs either a data plane per region or accepts a single home region; cross-region features get harder. The split, global control / regional data, is what keeps one logical product legally sellable everywhere.
+**Per-region data planes for residency.** EU tenant data must physically stay in the EU (GDPR (General Data Protection Regulation), Schrems II), and other regions follow. The **control plane stays global** (tenant registry, routing, billing), but **tenant data planes are pinned to a home region**, so a request routes to the tenant's region and the data never leaves it. *Trade:* a global enterprise with EU and US offices needs either a data plane per region or accepts a single home region; cross-region features get harder. The split, global control / regional data, is what keeps one logical product legally sellable everywhere.
 
-**Usage-based billing.** The market shifts from pure per-seat toward **consumption pricing** (API calls, storage, AI tokens). This promotes the **metering pipeline from a reporting nicety to revenue-critical infrastructure**: Kafka + idempotent aggregation + reconciliation now directly determine the invoice. *Trade:* revenue becomes less predictable but aligns price with value; the engineering cost is that a metering bug is now a **finance incident**, so it earns real SLOs and reconciliation.
+**Usage-based billing.** The market shifts from pure per-seat toward **consumption pricing** (API calls, storage, AI tokens). This promotes the **metering pipeline from a reporting nicety to revenue-critical infrastructure**: Kafka + idempotent aggregation + reconciliation now directly determine the invoice. *Trade:* revenue becomes less predictable but aligns price with value; the engineering cost is that a metering bug is now a **finance incident**, so it earns real SLOs (service-level objectives) and reconciliation.
 
 **Tenant self-service.** Let tenant admins provision workspaces, invite users, buy seats, and configure SSO without sales or ops in the loop, via control-plane self-serve APIs and an admin console. *Trade:* it slashes cost-to-serve on the long tail but needs guardrails (trial-abuse and fraud detection on free signups), which the control plane owns.
 
@@ -254,7 +254,7 @@ Scale the design under the new constraints an enterprise business puts on it.
 
 **Where I would delegate, with stated priors:**
 - *Storage/DBA:* benchmark **tenants-per-pooled-shard density** and **RLS overhead** for p99; my prior is ~5,000 SMB tenants/shard and ~10% RLS cost, but I want it measured before we commit the margin model.
-- *Security:* own the **cross-tenant isolation pen-test** and **per-tenant BYOK/KMS**; my job is an architecture where a leak is impossible by construction, theirs is to try to break it.
+- *Security:* own the **cross-tenant isolation pen-test** and **per-tenant BYOK/KMS** (key management service); my job is an architecture where a leak is impossible by construction, theirs is to try to break it.
 - *Billing/RevOps:* **Stripe integration and metering reconciliation**; my job is a durable, idempotent event pipeline, theirs is invoice correctness.
 
 ---

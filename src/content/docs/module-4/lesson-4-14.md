@@ -7,8 +7,8 @@ sidebar:
 
 ### Learning objectives
 - Run the full **RESHADED** spine on a problem whose crux is **contention, not a read:write ratio** - steady-state traffic is boring; the entire design exists for a single-event **flash crowd**.
-- Prevent **oversell** with an **atomic seat-state transition** (`AVAILABLE -> HELD(ttl) -> SOLD`), choosing optimistic CAS over pessimistic locking against the contention shape.
-- Design **TTL holds** with **lazy-expiry** reclaim, and place the payment flow so a slow processor never causes an oversell.
+- Prevent **oversell** with an **atomic seat-state transition** (`AVAILABLE -> HELD(ttl) -> SOLD`), choosing optimistic CAS (compare-and-swap) over pessimistic locking against the contention shape.
+- Design **TTL (time-to-live) holds** with **lazy-expiry** reclaim, and place the payment flow so a slow processor never causes an oversell.
 - See the virtual waiting room's real job: not fairness garnish but the **device that caps the admitted rate**, bounding the per-event write rate so the strongly-consistent inventory shard survives.
 - Draw the **strong-vs-eventual boundary** exactly where money and seats demand strong - and operate at Director altitude: quantify the cost, delegate payments/PCI and fraud.
 
@@ -55,9 +55,9 @@ That asymmetry is the opposite of the read-heavy, cache-everything intuition fro
 
 > Enough math to make a defensible call. The headline isn't an average; it's the **flash spike** and the **admission rate** that tames it.
 
-**Assumptions:** 500K events on sale; ~5K avg seats/event; 10M DAU browsing ~20 pages/day; ~1M tickets sold/day; 10-min hold TTL.
+**Assumptions:** 500K events on sale; ~5K avg seats/event; 10M DAU (daily active users) browsing ~20 pages/day; ~1M tickets sold/day; 10-min hold TTL.
 
-**Steady browse QPS:** `10M × 20 ÷ 86,400 ≈ 2.3K reads/s`, peak ~5× → **~12K reads/s.** A cached catalog/search tier eats this.
+**Steady browse QPS (queries per second):** `10M × 20 ÷ 86,400 ≈ 2.3K reads/s`, peak ~5× → **~12K reads/s.** A cached catalog/search tier eats this.
 
 **Steady booking QPS:** `1M ÷ 86,400 ≈ 12 writes/s`; even a 10× peak is **~115 writes/s** - *tiny*. Which is exactly why "just use one Postgres" feels fine and then dies on the flash sale.
 
@@ -85,7 +85,7 @@ That asymmetry is the opposite of the read-heavy, cache-everything intuition fro
 **1. Seat inventory + orders + payment state (strongly consistent, write-contended).**
 - *Access pattern:* atomically flip a seat `AVAILABLE -> HELD` (one winner under contention); multi-seat purchases **all-or-nothing**; orders durable and linearizable. Volume small (~1.5 TB), correctness absolute.
 - *Choice:* a **relational/NewSQL transactional store** - **Postgres/MySQL sharded by `event_id`**, or CockroachDB/Spanner. The pattern needs exactly what relational stores do best: **row-level atomic conditional updates** and **multi-row transactions** (adjacent seats).
-- *Rejected - eventually-consistent KV/wide-column (Cassandra LWW) as inventory truth:* last-write-wins can **oversell** - two replicas accept the same seat and converge too late. DynamoDB's conditional writes make a *single-seat* design defensible, but multi-seat atomicity wants real transactions. Choose the store that makes the invariant cheap to hold, not the one that scales easiest for data we don't have much of.
+- *Rejected - eventually-consistent KV/wide-column (KV = key-value) (Cassandra LWW) as inventory truth:* last-write-wins can **oversell** - two replicas accept the same seat and converge too late. DynamoDB's conditional writes make a *single-seat* design defensible, but multi-seat atomicity wants real transactions. Choose the store that makes the invariant cheap to hold, not the one that scales easiest for data we don't have much of.
 
 **2. Event catalog + search (read-heavy, AP).**
 - *Choice:* **Elasticsearch/OpenSearch** for full-text + faceted search, fronted by Redis/CDN. Staleness of seconds is invisible.
@@ -220,7 +220,7 @@ DELETE /v1/holds/{holdId}                        -> 204
 </details>
 
 **Partition / shard key = `event_id`. The load-bearing decision - and it cuts both ways.**
-- *Why it's right:* the two hot operations - render a seat map, transact over adjacent seats - are both **scoped to one event**. Event-sharding colocates an event's seats and orders on **one shard**: no cross-shard 2PC, no scatter-gather; order + inventory commit together.
+- *Why it's right:* the two hot operations - render a seat map, transact over adjacent seats - are both **scoped to one event**. Event-sharding colocates an event's seats and orders on **one shard**: no cross-shard 2PC (two-phase commit), no scatter-gather; order + inventory commit together.
 - *Why it looks like a disaster - and isn't:* one mega-event's entire inventory on one shard is a textbook **hot shard** under a 33K/s crowd. **The waiting room is precisely what rescues this**: capping admission to ~2K/s bounds the write rate onto that shard. *The shard key and the queue are co-designed* - event-sharding is only viable **because** the queue caps the per-event rate. Name that link; it's the heart of the problem.
 - *Rejected: shard by `seat_id` hash.* It would scatter a hot event's writes evenly - but it **shatters multi-seat atomicity**: 4 adjacent seats now span 4 shards → a **distributed transaction (2PC) on the hottest path**. Shard key buys transaction locality; the queue buys rate control - a different tool for each problem.
 
@@ -257,7 +257,7 @@ A fan holds 2 seats and closes the tab; without expiry those seats are dead inve
 
 **Bottleneck 4 - the payment race (slow PSP vs the TTL).**
 Payment succeeds just as the hold expires - you might sell a seat you already resold.
-*Fixes:* (a) **TTL sized far above worst-case PSP latency** (10 min ≫ seconds); (b) **idempotent purchase** (unique key) so retries don't double-charge; (c) at `HELD -> SOLD`, **re-assert the hold in the same transaction** (`WHERE hold_id=? AND status='HELD' AND expires_at>now()`) - if it expired and was resold, the conversion fails and triggers an automatic refund/reconcile (rare); (d) **delegate payments + PCI** behind a clean interface. *Trade-off:* a generous TTL locks abandoned seats longer - accepted to make the race vanishingly rare.
+*Fixes:* (a) **TTL sized far above worst-case PSP (payment service provider) latency** (10 min ≫ seconds); (b) **idempotent purchase** (unique key) so retries don't double-charge; (c) at `HELD -> SOLD`, **re-assert the hold in the same transaction** (`WHERE hold_id=? AND status='HELD' AND expires_at>now()`) - if it expired and was resold, the conversion fails and triggers an automatic refund/reconcile (rare); (d) **delegate payments + PCI** behind a clean interface. *Trade-off:* a generous TTL locks abandoned seats longer - accepted to make the race vanishingly rare.
 
 **Bottleneck 5 - the waiting room as a single point / fairness + abuse.**
 If the queue dies, the gate fails open (stampede) or closed (no sales).
@@ -283,7 +283,7 @@ If the queue dies, the gate fails open (stampede) or closed (no sales).
 **What I'd revisit if requirements changed:** resale/transfers add an ownership-and-provenance layer (a design of its own); airline-style controlled oversell would invert the invariant and relax the CP core; dynamic pricing would split price from seat-state to avoid contention on the same row.
 
 **Where I'd delegate (the explicit Director move):**
-- **Payments/PCI:** *"The payments team owns the PSP integration behind `charge(idempotencyKey, amount, token)`; my prior is tokenized cards + idempotent capture with async reconcile for the rare post-expiry race - they own the SLA and compliance surface."*
+- **Payments/PCI:** *"The payments team owns the PSP integration behind `charge(idempotencyKey, amount, token)`; my prior is tokenized cards + idempotent capture with async reconcile for the rare post-expiry race - they own the SLA (service-level agreement) and compliance surface."*
 - **Fraud/anti-scalper:** *"Trust-and-safety owns bot detection and verified-fan gating; my prior is pre-registration tokens plus behavioral scoring at the queue."*
 - **The store bake-off:** *"Storage benchmarks sharded Postgres vs CockroachDB/Spanner on our seat-claim contention and multi-seat p99 under a simulated on-sale; my prior is sharded Postgres for operational familiarity, escalating only if cross-shard transactions become common."* What I keep - the strong/eventual boundary, queue-as-rate-limiter, the atomic claim - and what I hand off, with a stated prior, is the altitude.
 

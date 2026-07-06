@@ -47,7 +47,7 @@ The decision rule that scores points: *reversible + low-impact → automate; irr
 
 The kill chain has five links; you only need to break one, and the robust breaks are the last two:
 
-1. **Untrusted content enters context** — a retrieved doc, tool result, web page, or user field. *Hard to prevent* (it's the whole point of RAG/agents).
+1. **Untrusted content enters context** — a retrieved doc, tool result, web page, or user field. *Hard to prevent* (it's the whole point of RAG/agents (RAG = retrieval-augmented generation)).
 2. **The model interprets it as an instruction** — no reliable separator exists between data and instructions in a prompt. *Partial mitigations only* (delimiters, instruction-hierarchy training, "the following is untrusted data" framing — all bypassable).
 3. **The model emits a tool call** — function calling makes this one token away.
 4. **Authorization** — *robust break:* the credential the tool holds is scoped so the requested action is simply outside it (least privilege). The call fails at the resource, not the model.

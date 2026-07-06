@@ -5,16 +5,16 @@ sidebar:
   order: 8
 ---
 
-> **Why this problem separates Directors from ICs:** the trap is treating this as "one AI pipeline." It is two systems with *opposite* binding constraints wearing one product skin. The live-captions path is a **latency** problem — a continuous GPU stream pipeline that must emit words within a second of them being spoken. The notes path is a **context-window and cost** problem — summarizing a transcript that does not fit in a single prompt, without inventing action items nobody agreed to. Bolt on top a requirement most candidates never raise unprompted — **you are recording humans, often in two-party-consent jurisdictions** — and the design lives or dies on a consent-and-retention model, not on tokens/sec. A candidate who draws one box labeled "LLM" has already failed. The Director move is to split the workloads on the first whiteboard stroke, size each independently, and name consent as a hard requirement before the interviewer has to.
+> **Why this problem separates Directors from ICs (individual contributors):** the trap is treating this as "one AI pipeline." It is two systems with *opposite* binding constraints wearing one product skin. The live-captions path is a **latency** problem — a continuous GPU stream pipeline that must emit words within a second of them being spoken. The notes path is a **context-window and cost** problem — summarizing a transcript that does not fit in a single prompt, without inventing action items nobody agreed to. Bolt on top a requirement most candidates never raise unprompted — **you are recording humans, often in two-party-consent jurisdictions** — and the design lives or dies on a consent-and-retention model, not on tokens/sec. A candidate who draws one box labeled "LLM" has already failed. The Director move is to split the workloads on the first whiteboard stroke, size each independently, and name consent as a hard requirement before the interviewer has to.
 
 ---
 
 ### Learning objectives
 
 1. Decompose the system into **two independently-scaled paths** — real-time streaming ASR/diarization and batch summarization — and justify why they cannot share one design.
-2. Size the **streaming ASR GPU fleet** (the dominant real-time cost) and the **summarization token bill** (the dominant batch cost) as two separate estimation lines.
+2. Size the **streaming ASR (automatic speech recognition) GPU fleet** (the dominant real-time cost) and the **summarization token bill** (the dominant batch cost) as two separate estimation lines.
 3. Design **long-transcript summarization that exceeds the context window** with map-reduce / hierarchical reduction, and defend it against naive one-shot stuffing.
-4. Treat **recording consent, PII, retention, and residency as first-class NFRs** with a concrete mechanism, not a compliance footnote.
+4. Treat **recording consent, PII (personally identifiable information), retention, and residency as first-class NFRs** (non-functional requirements) with a concrete mechanism, not a compliance footnote.
 5. Run a **RESHADED spine** where the back-end steps (Evaluation, Design evolution) carry the answer: faithfulness of summaries, WER under real conditions, and the evolution into an action-taking agent.
 
 ---
@@ -37,7 +37,7 @@ Those are your two subsystems. The stenographer is a **streaming, latency-bound 
 - *Do we need to know who said what?* → **Yes — speaker diarization.** Action items are worthless without an owner ("*someone* will follow up" is noise).
 - *Where does the audio come from?* → **A meeting platform / bot or client SDK** streams audio to us. We don't own the video conferencing; we ingest its audio.
 - *Consent model?* → **We must capture and enforce recording consent**, and operate in two-party-consent jurisdictions. First-class requirement, not deferred.
-- *Search across past meetings?* → **Yes.** "What did we decide about pricing last quarter?" → RAG over the transcript corpus.
+- *Search across past meetings?* → **Yes.** "What did we decide about pricing last quarter?" → RAG (retrieval-augmented generation) over the transcript corpus.
 - *Multilingual?* → **English first, multilingual as a design-evolution axis**, not v1 scope.
 - *Real-time translation, sentiment, video understanding?* → **Out of scope for v1**, name as evolution.
 
@@ -93,7 +93,7 @@ The two paths fail differently and are tuned differently: the stenographer must 
 
 **3. Summary / action-items store (small, structured, strongly-read).** One record per meeting: summary text, decisions[], action_items[{owner, text, due}]. Small, read by humans and downstream integrations. **Postgres** — it's tiny, relational (action items link to users), and benefits from consistency. 
 
-**4. Vector index for cross-meeting search.** Transcript chunks embedded for RAG. Sharded ANN index (HNSW), **filtered by the requesting user's access tags at query time** so search never crosses a permission boundary. **Rejected:** keyword-only search — misses paraphrased questions ("what did we agree on for the launch" vs the literal words used).
+**4. Vector index for cross-meeting search.** Transcript chunks embedded for RAG. Sharded ANN (approximate nearest neighbor) index (HNSW), **filtered by the requesting user's access tags at query time** so search never crosses a permission boundary. **Rejected:** keyword-only search — misses paraphrased questions ("what did we agree on for the launch" vs the literal words used).
 
 **5. Consent & metadata store (authoritative, audited).** Per-meeting: participant list, consent state per participant, jurisdiction, retention class, residency region. Strongly consistent, **append-only audit trail** of consent events — because this is the record you produce in a dispute. **Postgres**, co-located with the access model.
 
@@ -203,7 +203,7 @@ DELETE /v1/meetings/{id}                  # honor deletion / retention expiry; t
 
 **`transcript_segments`** — partition key `meeting_id`, clustering key `start_ts`. Columns: `speaker_id`, `text`, `end_ts`, `confidence`, `is_final`. Clustering by timestamp gives ordered single-meeting reads in one partition. Speaker attribution lives here because every downstream owner-of-action-item depends on it.
 
-**`meetings`** — `meeting_id` (PK), `owner_id`, `participants[]`, `started_at`, `ended_at`, `jurisdiction`, `retention_class`, `residency_region`, `status`. The retention/residency fields drive lifecycle and where data physically lives.
+**`meetings`** — `meeting_id` (PK (primary key)), `owner_id`, `participants[]`, `started_at`, `ended_at`, `jurisdiction`, `retention_class`, `residency_region`, `status`. The retention/residency fields drive lifecycle and where data physically lives.
 
 **`summaries`** — `meeting_id` (PK), `summary`, `decisions[]`, `action_items[{owner_id, text, due, source_segment_ts}]`, `model_version`, `generated_at`. **Every action item carries a `source_segment_ts`** — a citation back into the transcript, so a disputed "action item" is verifiable and not a hallucination (this is the faithfulness hook).
 
@@ -241,7 +241,7 @@ A 2-hour meeting (~20K+ tokens) summarized naively in one prompt is both expensi
 
 **Failure 1 — caption lag / the latency budget.** If ASR buffers for context to improve accuracy, captions fall behind and the stenographer fails. Mitigation: **streaming ASR that emits partials** and revises them, trading a little early-word accuracy for immediacy; size the GPU fleet to the concurrent-meeting peak so requests aren't queued. The trade-off named: partials occasionally "flicker" as they're revised — acceptable, and far better than a 10-second lag.
 
-**Failure 2 — accuracy (WER) under real conditions.** Demo audio is clean; real meetings have accents, crosstalk, domain jargon ("our SKU-7 migration"), and bad mics. Mitigations: domain-term biasing / custom vocabulary, per-customer acoustic adaptation, and **surfacing low-confidence segments** rather than hiding them. WER is the metric; track it on a representative eval set, not on clean audio. Delegate model tuning ("I'd have the speech team benchmark a domain-adapted model vs the base on our worst-WER cohorts; my prior is adaptation pays for itself on jargon-heavy calls").
+**Failure 2 — accuracy (WER) under real conditions.** Demo audio is clean; real meetings have accents, crosstalk, domain jargon ("our SKU-7 (SKU = stock-keeping unit) migration"), and bad mics. Mitigations: domain-term biasing / custom vocabulary, per-customer acoustic adaptation, and **surfacing low-confidence segments** rather than hiding them. WER is the metric; track it on a representative eval set, not on clean audio. Delegate model tuning ("I'd have the speech team benchmark a domain-adapted model vs the base on our worst-WER cohorts; my prior is adaptation pays for itself on jargon-heavy calls").
 
 **Failure 3 — hallucinated decisions/action items (the dangerous one).** A summary that invents "Priya will ship by Friday" when Priya said no such thing is worse than no summary — people act on it. This is a **faithfulness** failure, and it's why every extracted item is citation-grounded and eval-gated against its source segment. Run faithfulness eval as a **ship gate** on any prompt/model change; a silent model update can regress it invisibly.
 

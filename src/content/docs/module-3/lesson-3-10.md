@@ -20,7 +20,7 @@ Now put a thousand of these doors around the world that must enforce **one share
 
 **Why a rate limiter is its own building block - the four jobs.** Every public-facing system needs one, and it earns its place by doing up to four distinct things; name *which* you're invoking, because the limit you pick depends on it:
 
-1. **Protect capacity.** Your service sustains some QPS before it degrades. A limiter sheds load *before* it reaches the bottleneck - the cheap, early guard that keeps a traffic spike or a runaway client from cascading into an outage. This is the load-shedding sibling of the queue's load-leveling: the queue *buffers* work you'll still do; the limiter *rejects* work you won't.
+1. **Protect capacity.** Your service sustains some QPS (queries per second) before it degrades. A limiter sheds load *before* it reaches the bottleneck - the cheap, early guard that keeps a traffic spike or a runaway client from cascading into an outage. This is the load-shedding sibling of the queue's load-leveling: the queue *buffers* work you'll still do; the limiter *rejects* work you won't.
 2. **Fairness / multi-tenancy.** One noisy tenant must not consume the capacity you sold to a thousand quiet ones. A per-tenant limit caps each one's slice so a single client's bug (a retry storm, an infinite loop) can't starve everyone else - the **noisy-neighbor** problem.
 3. **Cost control.** When each request costs real money - an LLM inference at cents per call, a third-party API you pay per request, egress bandwidth - the limiter is a **budget enforcer**. "100 image generations/day on the free tier" is a billing decision implemented as a rate limit.
 4. **Abuse / security.** Throttle credential-stuffing on a login endpoint (say **5 attempts/minute/IP**), scraping, and volumetric DoS at the application layer. Here the limiter is a security control, and - critically - its **failure mode flips** (fail-open vs fail-closed, below).
@@ -51,7 +51,7 @@ The sliding-window counter's estimate: `current_count + previous_count × (1 −
 <details>
 <summary>Go deeper, the two distinct Redis races (IC depth, optional)</summary>
 
-*Race A - `INCR` then `EXPIRE` (the orphaned-key race).* Fixed-window in Redis is `INCR key` then, on first creation, `EXPIRE key 60`. `INCR` itself is atomic - the count is always correct under any concurrency. The race is that `INCR` and `EXPIRE` are two separate commands: if the client crashes between them, the key has the right count but **no TTL** - it never resets, and that user is throttled forever once they hit the limit. Fix: a Lua script, or `SET key 0 EX 60 NX` to seed the TTL atomically. Note: the bug is the lost expiry, not an over-count.
+*Race A - `INCR` then `EXPIRE` (the orphaned-key race).* Fixed-window in Redis is `INCR key` then, on first creation, `EXPIRE key 60`. `INCR` itself is atomic - the count is always correct under any concurrency. The race is that `INCR` and `EXPIRE` are two separate commands: if the client crashes between them, the key has the right count but **no TTL** (time-to-live) - it never resets, and that user is throttled forever once they hit the limit. Fix: a Lua script, or `SET key 0 EX 60 NX` to seed the TTL atomically. Note: the bug is the lost expiry, not an over-count.
 
 *Race B - read-modify-write over-admission.* Token bucket (and sliding-log) need multiple steps; two concurrent requests can both read "1 token left," both pass the check, both decrement → **two admitted against a budget of one**. This is the race that actually lets clients exceed the limit; the fix is the single Lua script.
 
@@ -63,7 +63,7 @@ Conflating these - saying "`INCR` over-counts" (it doesn't) or "the EXPIRE race 
 
 **Where to enforce - edge vs gateway vs service.** Defense in depth; each layer catches what the previous can't:
 
-- **Edge / CDN (e.g. Cloudflare, AWS WAF):** the outermost layer. Catches **volumetric abuse and DoS before it consumes any origin resource or bandwidth** - the cheapest place to drop a flood. Coarse-grained (per-IP, per-region). *Reject here what you never want to pay to receive.*
+- **Edge / CDN (e.g. Cloudflare, AWS WAF (web application firewall)):** the outermost layer. Catches **volumetric abuse and DoS before it consumes any origin resource or bandwidth** - the cheapest place to drop a flood. Coarse-grained (per-IP, per-region). *Reject here what you never want to pay to receive.*
 - **API gateway (e.g. Kong, Envoy):** the **chokepoint where per-API-key / per-user policy lives.** This is where most application rate limiting belongs - it sees the authenticated identity, centralizes policy across all backend services, and keeps the limiter out of application code. The natural home for the Redis-backed token bucket enforcing tiered limits.
 - **Per-service:** the innermost guard, for limits only the service understands (an expensive internal endpoint, a downstream third-party quota you must not exceed).
 
@@ -79,7 +79,7 @@ The strong-signal answer is **not** picking one globally - it's "**fail-open for
 **Per-user / IP / key dimensioning - choosing the limiter's key.** What you count *by* determines what you actually protect:
 
 - **Per API key / account:** the right dimension for **authenticated, paid, multi-tenant** APIs - it enforces the tier you sold and isolates noisy neighbors. The standard SaaS choice.
-- **Per IP:** the only option for **unauthenticated** traffic. But it's blunt: a corporate NAT or mobile carrier puts thousands of real users behind one IP (a strict per-IP limit throttles innocents), while an attacker rotates IPs cheaply to dodge it. Coarse anonymous abuse defense, not precise fairness.
+- **Per IP:** the only option for **unauthenticated** traffic. But it's blunt: a corporate NAT (network address translation) or mobile carrier puts thousands of real users behind one IP (a strict per-IP limit throttles innocents), while an attacker rotates IPs cheaply to dodge it. Coarse anonymous abuse defense, not precise fairness.
 - **Per endpoint / operation, cost-weighted:** a cheap `GET /status` and an expensive `POST /search` shouldn't share one budget - each request consumes tokens proportional to its expense, so the limit reflects actual load.
 - **Global:** one limit across everything, to protect a hard downstream ceiling (a third-party API capped at 10k/s for your whole company). Operationally the dangerous one: a global limit funnels **every request onto one Redis key - one hash slot, one shard - and you cannot shard your way out of a single hot key.** The fixes - sharded sub-counters, or local approximate counters reconciled periodically - are the subject of the distributed-counter building block; here, the signal is *naming* the hot-key ceiling the moment someone asks for a single global limit.
 

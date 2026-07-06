@@ -5,11 +5,11 @@ sidebar:
   order: 10
 ---
 
-> **Attempt the capstone first - this lesson is the debrief, not the spoiler.** This is *exactly* the capstone problem, and the capstone hands you the empty whiteboard and a self-critique loop. Drive it yourself there before reading a worked answer here, or you burn the one chance to feel where your own design breaks. **This gets asked because it is the strongest cross-platform business-domain question on the senior loop**, and because it has a signature trap: convergence correctness (OT/CRDT) is genuinely IC-deep, so candidates either *hand-wave* "we use CRDTs" with no idea why, or *rat-hole* for fifteen minutes deriving transformation functions and never reach a design. **What separates a Director answer:** name all three concurrency strategies, decide one against *this* product's requirements, and **delegate the algorithm internals with a stated prior** - "I'd have the collaboration team prove convergence; my prior is a sequence CRDT for the offline story." Knowing the limit of your own depth, out loud, *is* the scored signal here.
+> **Attempt the capstone first - this lesson is the debrief, not the spoiler.** This is *exactly* the capstone problem, and the capstone hands you the empty whiteboard and a self-critique loop. Drive it yourself there before reading a worked answer here, or you burn the one chance to feel where your own design breaks. **This gets asked because it is the strongest cross-platform business-domain question on the senior loop**, and because it has a signature trap: convergence correctness (OT/CRDT) is genuinely IC-deep, so candidates either *hand-wave* "we use CRDTs (conflict-free replicated data types)" with no idea why, or *rat-hole* for fifteen minutes deriving transformation functions and never reach a design. **What separates a Director answer:** name all three concurrency strategies, decide one against *this* product's requirements, and **delegate the algorithm internals with a stated prior** - "I'd have the collaboration team prove convergence; my prior is a sequence CRDT for the offline story." Knowing the limit of your own depth, out loud, *is* the scored signal here.
 
 ### Learning objectives
 - Run the **RESHADED** spine on a problem whose crux is **convergence correctness**, not a read:write ratio - and quantify the load that actually shapes it (presence dwarfs edits; concurrent editors per doc are *tens*, not thousands).
-- Name the three concurrency-control strategies - **OT, CRDT, locking** - state the pros/cons of each, and **decide one for this product** against requirements, cost, and risk.
+- Name the three concurrency-control strategies - **OT (operational transformation), CRDT, locking** - state the pros/cons of each, and **decide one for this product** against requirements, cost, and risk.
 - Make the **delegation move** the model answer: name the pivotal convergence call, hand the algorithm proof to a specialist *with a stated prior*, and recognize that an honest depth limit is the signal, not a dodge.
 - Carry the **document-representation** decision (op log vs materialized state) through Storage and Data-model, and place the **durable boundary** where it belongs.
 - Fan out **presence/cursors** on a separate, cheap, ephemeral axis - never down the durable edit path.
@@ -55,9 +55,9 @@ That is **convergence**: independent, concurrent, intention-carrying edits must 
 
 ## E - Estimation
 
-> Enough math to make a defensible call. The headline isn't QPS - it's that **edits are rare and small, presence is constant and disposable**.
+> Enough math to make a defensible call. The headline isn't QPS (queries per second) - it's that **edits are rare and small, presence is constant and disposable**.
 
-**Assumptions:** 100M docs; 10M DAU; ~2M docs with an *active* editing session at peak; ~3 concurrent editors per active doc.
+**Assumptions:** 100M docs; 10M DAU (daily active users); ~2M docs with an *active* editing session at peak; ~3 concurrent editors per active doc.
 
 **Concurrent connections (the real scale axis):** `2M active docs × 3 editors ≈ 6M live WebSocket connections` at peak. That - not edit volume - sizes the realtime tier. At ~50K connections/node → **~120 stateful gateway nodes**. The architecture problem is *connection fan-out*, not compute.
 
@@ -79,12 +79,12 @@ That is **convergence**: independent, concurrent, intention-carrying edits must 
 
 **1. The document itself - op log + snapshots (durable, the source of truth).**
 - *Access pattern:* append small ops constantly; load current state on open; reconstruct any historical version. Natural fit: an **append-only op log** plus **periodic materialized snapshots** so opening a doc doesn't replay a million ops.
-- *Choice:* **append-only log sharded by `doc_id`** (Kafka-style log or an LSM store like Cassandra/RocksDB) for ops, plus a blob/KV store (S3 or DynamoDB) for snapshots. Open = latest snapshot + replay the **tail**.
+- *Choice:* **append-only log sharded by `doc_id`** (Kafka-style log or an LSM (log-structured merge) store like Cassandra/RocksDB) for ops, plus a blob/KV (key-value) store (S3 or DynamoDB) for snapshots. Open = latest snapshot + replay the **tail**.
 - *The representation decision, stated:* **op log is truth, snapshot is cache** - *not* materialized state as truth. *Rejected - store only current state:* loses version history, the ability to merge an offline client's old-baseline edits, and the audit trail. The op log *is* the feature; state-only is cheaper but throws away three requirements.
 
 **2. Presence / cursors (ephemeral, best-effort, in-memory).** **In-memory in the gateway**, Redis pub/sub for cross-node fan-out. TTL'd, never durable - cursor-at-412 is worthless 200 ms later. *Rejected - persisting presence:* 30M events/sec with a ~200 ms shelf life would dominate the storage budget for nothing.
 
-**3. Document metadata (title, owner, ACL, snapshot pointers) - small, relational.** A standard relational/KV store keyed by `doc_id`: tiny, read on open, rarely written. Not the interesting part.
+**3. Document metadata (title, owner, ACL (access control list), snapshot pointers) - small, relational.** A standard relational/KV store keyed by `doc_id`: tiny, read on open, rarely written. Not the interesting part.
 
 The op log carries the convergence ops, and **OT vs CRDT changes what each op *is*** - which is why representation and concurrency strategy are decided together, next.
 
@@ -165,7 +165,7 @@ WS   /v1/docs/{docId}/connect
 > **I'd choose a sequence CRDT, and the requirement that decides it is offline editing.** Close a laptop, keep typing, merge cleanly on reconnect is exactly what CRDTs make easy and OT makes painful: OT's central ordering authority means an offline client's stale-baseline ops need careful server-side transformation against everything that happened while it was gone, whereas CRDTs merge regardless of order or coordinator - so offline-then-reconnect is *the same code path* as normal editing. **The trade I accept:** CRDT metadata/memory overhead per element, mitigated by snapshotting and modern libraries. If offline were cut, I'd reconsider OT for smaller payloads - the call hinges on that one requirement.
 
 **The delegation move (the model answer, not a dodge):**
-> **The internals - proving the merge is commutative, tombstone GC, RGA vs Yjs vs Automerge - I'd delegate to the collaboration team to prove with property tests + a fuzzing harness.** My prior is **Yjs** for its mature offline support. I own the *decision and its justification*; I hand off the algorithm proof with a stated prior. **Hand-rolling a CRDT at the whiteboard is the altitude trap** - it signals IC, not Director. Naming the limit of my depth here is the point.
+> **The internals - proving the merge is commutative, tombstone GC (garbage collection), RGA (replicated growable array) vs Yjs vs Automerge - I'd delegate to the collaboration team to prove with property tests + a fuzzing harness.** My prior is **Yjs** for its mature offline support. I own the *decision and its justification*; I hand off the algorithm proof with a stated prior. **Hand-rolling a CRDT at the whiteboard is the altitude trap** - it signals IC (individual contributor), not Director. Naming the limit of my depth here is the point.
 
 **What an op is, given the choice:** under the CRDT the op log stores **CRDT operations** (element insert with stable ID + position; delete as a tombstone), not raw positional inserts; snapshots persist the compacted CRDT state. (Under OT it would store positional ops + server-assigned sequence numbers - a different log shape, which is *why* this decision lives here.)
 
@@ -213,7 +213,7 @@ WS   /v1/docs/{docId}/connect
 
 **At 10× (Figma-scale: 1000s viewing one doc, global editors):**
 - **Split editors from viewers.** Convergence runs over the *editors* (still tens); a 1000-strong **view-only** audience is a **broadcast/CDN fan-out** problem - serve them snapshot+tail, not as CRDT replicas. *Trade-off:* viewers see edits a beat later - fine.
-- **Global editing → regional coordinators.** A single per-doc owner across continents adds RTT per commit. Move to **regional CRDT replicas merging asynchronously** with a designated durable-log writer. *Trade-off:* cross-region convergence is eventually-consistent on the order of inter-region RTT - acceptable; the CRDT still converges.
+- **Global editing → regional coordinators.** A single per-doc owner across continents adds RTT (round-trip time) per commit. Move to **regional CRDT replicas merging asynchronously** with a designated durable-log writer. *Trade-off:* cross-region convergence is eventually-consistent on the order of inter-region RTT - acceptable; the CRDT still converges.
 
 **Hardest trade-offs to defend:**
 - **CRDT vs OT.** Chosen on the offline requirement; I pay CRDT's metadata/memory cost and delegate GC/compaction. Drop offline and OT's smaller payloads might win - requirement-driven, not dogma.

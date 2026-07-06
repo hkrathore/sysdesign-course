@@ -10,7 +10,7 @@ sidebar:
 ### Learning objectives
 - Run the **RESHADED** spine on an **org-plus-architecture** problem where **E becomes the scale of domains, datasets, teams, and access policies** (not QPS), and surface the load-bearing tension: **a governance plane over the lake, and centralized-platform vs federated-mesh as a Conway's-law operating-model choice.**
 - Open with the **"how many domains, and is the central data team the bottleneck?"** clarifying question, and show how the answer flips the operating model between centralized and federated.
-- Design the governance plane, **catalog/discovery, column- and row-level access control with PII tagging and policy-as-code, and column-level lineage**, as a central chokepoint, and reject ungoverned-lake and manual-review with reasons.
+- Design the governance plane, **catalog/discovery, column- and row-level access control with PII (personally identifiable information) tagging and policy-as-code, and column-level lineage**, as a central chokepoint, and reject ungoverned-lake and manual-review with reasons.
 - Define **data products** (domain-owned, with owners, SLAs, schemas, docs) and **data contracts** as the inter-domain interface, and explain **federated computational governance**, global standards enforced by a self-serve platform, local ownership of the data.
 - Name the crossover in numbers (domains, datasets, central-team queue depth, domain-onboarding time) where centralized stops scaling and mesh's complexity becomes worth paying, and **delegate the tooling bake-off and per-domain quality with stated priors.**
 
@@ -36,7 +36,7 @@ I'll design for the **harder, increasingly-standard large-org case: the mesh wit
 **Clarifying questions I'd ask (with assumed answers):**
 - *How many domains/teams and datasets?* → **~30-50 producing domains, low-thousands of datasets/tables**, well past what one central team can model. The central decision.
 - *Is the central team the bottleneck?* → **Yes**, new-dataset publishing and access requests queue **2-6 weeks**; the symptom that justifies federation.
-- *Governance bar?* → **High**, PII/PCI columns, regulated data, column- and row-level access, audit trails, and **GDPR/CCPA lineage** (trace and erase). Table stakes.
+- *Governance bar?* → **High**, PII/PCI columns, regulated data, column- and row-level access, audit trails, and **GDPR/CCPA (California Consumer Privacy Act) lineage** (trace and erase). Table stakes.
 - *Trust bar?* → Consumers must **find** data (search/discovery), **judge** it (owner, freshness, quality, lineage), and **rely** on it (SLAs, contracts). The "can't trust data" half.
 - *What's the storage substrate?* → The **lakehouse** of 14.1 (object storage + Iceberg/Delta + a catalog). This lesson governs and organizes *that*; it does not re-pick storage.
 
@@ -44,20 +44,20 @@ I'll design for the **harder, increasingly-standard large-org case: the mesh wit
 1. **Catalog & discovery**, a searchable inventory of all data: technical metadata (schema, location, format) *and* business metadata (owner, description, domain, sensitivity, SLA), so any analyst finds and judges a dataset without asking a human.
 2. **Access control**, column-level and row-level authorization with PII/sensitive tagging and masking, enforced at a central chokepoint, with audit.
 3. **Lineage**, column-level upstream/downstream lineage for trust ("where did this number come from"), impact analysis ("what breaks if I change this"), and compliance ("every table derived from this user's PII").
-4. **Data products & contracts**, the unit of ownership: a domain-published dataset with an owner, SLA, documented schema, and a **data contract** as the stable interface other domains depend on.
+4. **Data products & contracts**, the unit of ownership: a domain-published dataset with an owner, SLA (service-level agreement), documented schema, and a **data contract** as the stable interface other domains depend on.
 5. **Self-serve platform & federated governance**, infrastructure that lets a domain publish a compliant, cataloged, access-controlled, lineage-tracked data product *without* the central team, with **global standards enforced computationally** by that platform.
 
-**Explicitly CUT (scoping is the signal):** the lakehouse storage internals (the warehouse/lakehouse problem owns format/layout/scan-cost), the ingestion/CDC mechanics that fill it, the BI/ML tools that consume it, and the *people-leadership* of building the data org, hiring, re-org, incentives (that's the domain; I'll name the org *shape* here but not the change-management playbook). I scope to **catalog → access → lineage → data-product/contract model → the federated operating model.**
+**Explicitly CUT (scoping is the signal):** the lakehouse storage internals (the warehouse/lakehouse problem owns format/layout/scan-cost), the ingestion/CDC (change data capture) mechanics that fill it, the BI/ML tools that consume it, and the *people-leadership* of building the data org, hiring, re-org, incentives (that's the domain; I'll name the org *shape* here but not the change-management playbook). I scope to **catalog → access → lineage → data-product/contract model → the federated operating model.**
 
 **Non-functional requirements:**
 - **Discoverability at scale**, a new analyst finds the right trustworthy dataset in **minutes, not by Slack-asking around for days**, across thousands of datasets.
 - **Governance that scales sub-linearly with datasets**, adding a domain or a dataset must **not** add proportional central-team toil; policy is **as-code and automated**, not per-request review.
-- **Compliance-grade access + lineage**, column/row-level enforcement, audit, and lineage complete enough to answer a GDPR erasure or a regulator's "who can see this" in hours.
+- **Compliance-grade access + lineage**, column/row-level enforcement, audit, and lineage complete enough to answer a GDPR (General Data Protection Regulation) erasure or a regulator's "who can see this" in hours.
 - **Domain autonomy with global coherence**, domains ship independently (the mesh promise) while every product is interoperable, discoverable, and policy-compliant (the federation guardrail).
 - **Fast domain onboarding**, a new domain stands up its first governed data product in **days**, via self-serve, not a central-team project.
 - **No new bottleneck**, the governance plane must be a *chokepoint for policy*, not a *queue for humans*; the failure mode is replacing the central modeling bottleneck with a central governance bottleneck.
 
-**The skew, stated:** this is a **discovery-, trust-, and governance-heavy, coordination-bound** problem, not a throughput one. The hard parts are *organizational scaling (Conway), policy-explosion management, lineage capture across heterogeneous engines, and keeping domain quality consistent without a central inspector*, not bytes or QPS. That shapes every downstream choice: automate governance, federate ownership, centralize standards.
+**The skew, stated:** this is a **discovery-, trust-, and governance-heavy, coordination-bound** problem, not a throughput one. The hard parts are *organizational scaling (Conway), policy-explosion management, lineage capture across heterogeneous engines, and keeping domain quality consistent without a central inspector*, not bytes or QPS (queries per second). That shapes every downstream choice: automate governance, federate ownership, centralize standards.
 
 ---
 
@@ -95,7 +95,7 @@ I'll design for the **harder, increasingly-standard large-org case: the mesh wit
 **2. The policy store (access control as data).**
 - *What it holds:* **tag-based, as-code policies** ("role `analyst` may read columns not tagged `pii`; `pii.email` is masked except for role `privacy`; rows are filtered by `region` for regional teams") plus the audit log of every access decision.
 - *Choice:* a **policy engine** (the catalog's native ABAC like Unity Catalog, or OPA / Apache Ranger / a purpose-built engine) evaluating **attribute-based rules against column/row tags** at query time, with decisions logged. Policy lives in **version-controlled code**, reviewed and deployed like software.
-- *Rejected, per-object ACLs (grant-by-grant):* the ~60,000-column surface makes hand-maintained grants drift into chaos and audit-failure within a quarter. *Rejected, app-layer enforcement:* every consuming tool re-implements (and re-bugs) access control; the chokepoint must be *below* the engines, at the catalog.
+- *Rejected, per-object ACLs (access control lists) (grant-by-grant):* the ~60,000-column surface makes hand-maintained grants drift into chaos and audit-failure within a quarter. *Rejected, app-layer enforcement:* every consuming tool re-implements (and re-bugs) access control; the chokepoint must be *below* the engines, at the catalog.
 
 **3. The lineage graph.**
 - *What it holds:* a **column-level directed graph**, node = (dataset, column), edge = a transform that derived one from another, captured automatically from query/job execution.
@@ -212,7 +212,7 @@ ROW FILTER ON TAG 'regional'         FOR ROLE eu_team   USING (region = 'EU'); -
 
 **The governance metadata model:**
 - **Lineage node/edge:** `node = (dataset, column)`; `edge = (from_node, to_node, transform_job, timestamp)`. Column-level, captured from execution. The three queries it must serve, stated as the model's reason to exist: **upstream** (trust), **downstream** (impact-analysis before a breaking change), **transitive closure** (compliance, "everything derived from this PII").
-- **Policy as data:** `(principal/role, action, tag-predicate, effect [allow/mask/row-filter], obligation [audit])`, ABAC rules over tags, not a grant matrix over objects. This is the single most consequential modeling choice for scale: **modeling access as *attributes over tags* makes governance grow sub-linearly with datasets**, whereas modeling it as *grants over objects* makes it grow with datasets × columns × roles and collapses.
+- **Policy as data:** `(principal/role, action, tag-predicate, effect [allow/mask/row-filter], obligation [audit])`, ABAC (attribute-based access control) rules over tags, not a grant matrix over objects. This is the single most consequential modeling choice for scale: **modeling access as *attributes over tags* makes governance grow sub-linearly with datasets**, whereas modeling it as *grants over objects* makes it grow with datasets × columns × roles and collapses.
 - **Audit record:** `(principal, dataset, columns, decision, policy_version, timestamp)`, append-only, the compliance evidence.
 
 *Rejected, modeling a data product as just a database table:* you lose the owner, SLA, contract, and classification, the very things that distinguish a *governed, trustworthy product* from an *anonymous table in the swamp*. The metadata *is* the product. *Rejected, table-level (not column-level) lineage and policy:* "this table is PII" is too coarse, it over-restricts (masking a whole table when one column is sensitive) and fails GDPR's column-precise erasure and the analyst's need to read the 29 non-PII columns. **Column-level granularity is what makes both access and lineage usable**, and it's the modeling decision a Director defends against the simpler table-level shortcut.

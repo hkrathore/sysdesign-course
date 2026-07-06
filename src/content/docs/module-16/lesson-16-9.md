@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-> **This is a named round now.** The documented Stripe EM prompt is *"two of your engineers disagree on architecture, resolve the deadlock"*; Director banks phrase it *"evaluate competing proposals from senior engineers"*; and the standard closer is the 10x / requirements-changed twist. It is not a design question, both proposals are competent, and the interviewer wrote them that way. It scores **how you decide**. Two failure modes, both instant: picking a side in the first five minutes on technical taste ("event-driven is more modern") reads as an IC with a title; refusing to decide ("I'd empower the team to align") reads as a manager who has never carried a one-way door. The Director answer is a **decision process**, extract the shared requirements, agree criteria *before* scoring, classify the door, decide inside a timebox, write the ADR with the dissent recorded, and **name the chosen design's breaking points before the follow-up asks for them**. The verdict matters less than the machinery; run it well and either verdict is defensible.
+> **This is a named round now.** The documented Stripe EM (engineering manager) prompt is *"two of your engineers disagree on architecture, resolve the deadlock"*; Director banks phrase it *"evaluate competing proposals from senior engineers"*; and the standard closer is the 10x / requirements-changed twist. It is not a design question, both proposals are competent, and the interviewer wrote them that way. It scores **how you decide**. Two failure modes, both instant: picking a side in the first five minutes on technical taste ("event-driven is more modern") reads as an IC (individual contributor) with a title; refusing to decide ("I'd empower the team to align") reads as a manager who has never carried a one-way door. The Director answer is a **decision process**, extract the shared requirements, agree criteria *before* scoring, classify the door, decide inside a timebox, write the ADR (architecture decision record) with the dissent recorded, and **name the chosen design's breaking points before the follow-up asks for them**. The verdict matters less than the machinery; run it well and either verdict is defensible.
 
 ### Learning objectives
 - Run an **adapted RESHADED** spine on a decision, not a system: R extracts the one requirement sheet both proposals must serve, E scores cost and risk in numbers, Evaluation becomes the **weighted criteria matrix**, and Design evolution becomes the **10x stress against pre-named breaking points**.
@@ -38,9 +38,9 @@ Both are real architectures running at real companies. That's the point. Now the
 
 **Non-functional, the ones the decision actually turns on:**
 - **Volume:** 600K orders/day ≈ 7/s average, daily peak ~35/s, **Black Friday ~140/s**. Write this on the board, Proposal B's author, asked directly, was sizing for 1,400/s "eventually."
-- **Latency:** checkout confirmation **p99 < 2s**, of which the external PSP eats 300-800ms, the long pole is not ours.
+- **Latency:** checkout confirmation **p99 < 2s**, of which the external PSP (payment service provider) eats 300-800ms, the long pole is not ours.
 - **Correctness:** no double-charge, no oversell, idempotency and a consistent money path are non-negotiable (the same invariant discipline a strongly-consistent core demands).
-- **Team capability, a first-class requirement, not a soft factor:** four teams deep in Postgres/REST; **zero production Kafka experience**; on-call is already stretched. A design the team can't operate at 3 a.m. fails an NFR exactly the way a missed latency budget does.
+- **Team capability, a first-class requirement, not a soft factor:** four teams deep in Postgres/REST; **zero production Kafka experience**; on-call is already stretched. A design the team can't operate at 3 a.m. fails an NFR (non-functional requirement) exactly the way a missed latency budget does.
 - **Evolvability:** 3-year plan says 5-10× order volume and 3+ new consumer teams of order data.
 
 **What R dissolved:** half the fight. A was designing for 140/s now; B was designing for 1,400/s in three years. Both were *right about their own question*. Now there is one question.
@@ -49,7 +49,7 @@ Both are real architectures running at real companies. That's the point. Now the
 
 ## E: Estimation
 
-> **Adaptation, said out loud:** no QPS to derive, E becomes **costing both proposals honestly**, back-of-the-envelope discipline applied to engineering time, run cost, and operational risk. Rough numbers, stated assumptions, no false precision; the matrix in Evaluation consumes these.
+> **Adaptation, said out loud:** no QPS (queries per second) to derive, E becomes **costing both proposals honestly**, back-of-the-envelope discipline applied to engineering time, run cost, and operational risk. Rough numbers, stated assumptions, no false precision; the matrix in Evaluation consumes these.
 
 **Proposal A, synchronous orchestration:**
 - *Build:* 2 engineers × ~6 weeks on the existing stack ≈ **0.25 eng-years (~$60K loaded)**.
@@ -57,7 +57,7 @@ Both are real architectures running at real companies. That's the point. Now the
 - *Throughput sanity:* 140/s peak writing saga state to Postgres is a non-event, a single primary handles thousands of writes/s. At this scale, **neither proposal has a throughput problem; whoever claims otherwise is arguing taste with a capacity costume.** Saying that sentence in the interview is signal.
 
 **Proposal B, event-driven choreography:**
-- *Build:* 4 engineers × ~3.5 months, the pipeline *plus* the platform work (topic design, schema registry, DLQs, replay tooling, consumer scaffolding) ≈ **1.2 eng-years (~$300K)**.
+- *Build:* 4 engineers × ~3.5 months, the pipeline *plus* the platform work (topic design, schema registry, DLQs (dead-letter queues), replay tooling, consumer scaffolding) ≈ **1.2 eng-years (~$300K)**.
 - *Run:* managed Kafka (MSK/Confluent tier) **~$4-6K/month**, plus realistically **0.5-1 FTE of streaming-platform ownership** (~$125-250K/yr), the build-vs-buy rule: the subscription is never the cost; the operating competence is.
 - *Risk premium:* first production Kafka deployment, on the **money path**, under a Black Friday deadline, by a team that has never debugged consumer-group rebalances or event-ordering bugs. Price the first year of incidents honestly: industry pattern for "new paradigm on the critical path" is **2-4 serious incidents in year one**; at ~$50K per revenue-impacting order-path incident, that's a **$100-200K expected risk cost** A doesn't carry.
 
@@ -224,7 +224,7 @@ flowchart LR
 <details>
 <summary>Go deeper, transactional outbox mechanics (IC depth, optional)</summary>
 
-The problem the outbox solves: "write to Postgres AND publish to Kafka" is two systems, no shared transaction, a crash between them either loses the event or emits a phantom. The pattern: in the *same* DB transaction as the state change, insert a row into an `outbox` table (`event_id, aggregate_id, type, payload, created_at, published_at NULL`). A relay (polling `WHERE published_at IS NULL ORDER BY id`, or Debezium-style CDC tailing the WAL) publishes each row to the stream and marks it. Delivery is **at-least-once**, the relay can crash after publish, before mark, so every consumer must be idempotent, keyed on `event_id` (dedupe table or upsert semantics). Ordering: per-aggregate ordering is preserved by partitioning the stream on `aggregate_id` (order ID); cross-aggregate ordering is not promised and shouldn't be relied on. Failure modes to monitor: relay lag (alert on `now() - min(created_at) WHERE published_at IS NULL`), poison events (DLQ after N consumer retries), and outbox-table bloat (prune published rows past a retention window).
+The problem the outbox solves: "write to Postgres AND publish to Kafka" is two systems, no shared transaction, a crash between them either loses the event or emits a phantom. The pattern: in the *same* DB transaction as the state change, insert a row into an `outbox` table (`event_id, aggregate_id, type, payload, created_at, published_at NULL`). A relay (polling `WHERE published_at IS NULL ORDER BY id`, or Debezium-style CDC tailing the WAL (write-ahead log)) publishes each row to the stream and marks it. Delivery is **at-least-once**, the relay can crash after publish, before mark, so every consumer must be idempotent, keyed on `event_id` (dedupe table or upsert semantics). Ordering: per-aggregate ordering is preserved by partitioning the stream on `aggregate_id` (order ID); cross-aggregate ordering is not promised and shouldn't be relied on. Failure modes to monitor: relay lag (alert on `now() - min(created_at) WHERE published_at IS NULL`), poison events (DLQ after N consumer retries), and outbox-table bloat (prune published rows past a retention window).
 
 </details>
 
@@ -242,7 +242,7 @@ The problem the outbox solves: "write to Postgres AND publish to Kafka" is two s
 
 **The other twist, requirements changed, not scaled:** say the company pivots to marketplace (third-party sellers, multi-merchant orders). That breaks a *requirement sheet assumption* (single inventory authority), not a scale number, so the move is back to R, not to the whiteboard: re-run the process, write ADR-031, supersede ADR-014, and say explicitly that the old decision was right *for its context*. Decisions don't age into "wrong"; contexts expire. A Director who defends an expired decision out of authorship pride fails this round in real life, too.
 
-**Where I'd delegate (the explicit Director move):** *"The order-platform lead owns the bake-off between CDC-based and polling-based outbox relays and the managed-stream vendor choice; my prior is CDC via Debezium on the existing Postgres because it adds no write-path latency, they own the operational consequences, so they own the call. I keep the criteria process, the door classification, the timebox, and the tripwire review in the quarterly architecture forum."* Keep the machinery; delegate the components.
+**Where I'd delegate (the explicit Director move):** *"The order-platform lead owns the bake-off between CDC-based and polling-based outbox relays and the managed-stream vendor choice; my prior is CDC (change data capture) via Debezium on the existing Postgres because it adds no write-path latency, they own the operational consequences, so they own the call. I keep the criteria process, the door classification, the timebox, and the tripwire review in the quarterly architecture forum."* Keep the machinery; delegate the components.
 
 ---
 

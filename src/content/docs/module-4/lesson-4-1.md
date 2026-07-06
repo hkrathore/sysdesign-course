@@ -9,7 +9,7 @@ sidebar:
 
 ### Learning objectives
 - Run all **eight RESHADED steps in order**, naming each, and feel where the interview signal actually lives (the back-end E and D steps, not the boxes).
-- Derive the design from **numbers**: turn "read-heavy URL shortener" into QPS, storage, bandwidth, and a cache working set, and let those numbers *make* the decisions.
+- Derive the design from **numbers**: turn "read-heavy URL shortener" into QPS (queries per second), storage, bandwidth, and a cache working set, and let those numbers *make* the decisions.
 - Defend the pivotal call, **short-code generation**, against its two rejected alternatives, and explain why a counter-based **key-generation service** beats hash-and-check.
 - Practise the **Director moves**: tie every decision to a requirement, name the cost/operational dimension, stress your own design for hot keys and single points of failure, and say where you'd delegate a deep-dive.
 
@@ -34,7 +34,7 @@ A URL shortener is, at its core, **a giant dictionary**: you hand it a long, unw
 2. **Redirect:** given a short URL, return the original long URL (an HTTP redirect).
 
 **Stretch (named, then parked, a Director scopes ruthlessly):**
-3. **Custom alias** (`bit.ly/my-brand`). 4. **Expiry / TTL** on a link. 5. **Click analytics** (counts, geo, referrer).
+3. **Custom alias** (`bit.ly/my-brand`). 4. **Expiry / TTL** (time-to-live) on a link. 5. **Click analytics** (counts, geo, referrer).
 
 **Non-functional requirements (this is where the design pressure comes from):**
 - **High availability**, redirect is in the critical path of *someone else's* product; aim for **~99.99%** on reads (~52 min/yr down). A failed redirect is a dead link in an email blast.
@@ -82,7 +82,7 @@ Redirect is a cache-lookup-and-respond, cheap. At ~2k req/s per modest app node,
 
 **The access pattern is the whole argument.** The dominant operation, 99% of traffic, is *"given this short code, give me the long URL."* That is a **single-key point lookup**: no joins, no range scans, no multi-row transactions, no ad-hoc queries. The data is a **flat dictionary keyed by a short string.** When the access pattern is "get the value for this key, billions of times, fast," the answer is a **key-value store.**
 
-**Decision: a horizontally-scalable key-value store**, **DynamoDB** or **Cassandra** (a managed KV/wide-column store). Justification against the data + access pattern: O(1)-ish keyed reads, trivially sharded by the code as partition key, and an **LSM-tree engine** whose write path is cheap, though writes are tiny here so that's a bonus, not the driver. These stores give us the read scale and the horizontal partitioning the estimation said we'd eventually need, with no relational machinery we won't use.
+**Decision: a horizontally-scalable key-value store**, **DynamoDB** or **Cassandra** (a managed KV/wide-column store). Justification against the data + access pattern: O(1)-ish keyed reads, trivially sharded by the code as partition key, and an **LSM-tree (LSM = log-structured merge) engine** whose write path is cheap, though writes are tiny here so that's a bonus, not the driver. These stores give us the read scale and the horizontal partitioning the estimation said we'd eventually need, with no relational machinery we won't use.
 
 **Rejected alternative, a relational database (Postgres/MySQL):** *why considered*, it works, the schema is one table, and at 40 writes/s + a read-replica fan-out it would genuinely cope for a long time. *Why rejected as the primary store*, we get **zero value from its strengths** (joins, transactions, rich secondary indexes, ad-hoc SQL) and pay for them in **harder horizontal scaling**: past one node you're hand-rolling sharding and managing leader-follower failover, whereas a KV store shards by key natively. We're paying for a Swiss-army knife to do one cut. *Caveat I'd state:* for an internal tool at thousands-not-billions scale, **Postgres + read replicas is the right boring choice**, the relational store is only "wrong" at this scale and access shape.
 
@@ -177,7 +177,7 @@ GET /api/v1/urls/{code}/stats
 
 **Bottleneck 2, the Key-Generation Service as a single point of failure.** If every write must phone one counter, that counter's death **stops all creation** (exactly the SPOF + ~10k/s ceiling we flagged for DB auto-increment). *Fix:* the KGS hands out **pre-allocated ranges** (e.g., a block of 1,000 counter values) to each app node; nodes mint locally from their block and only refetch every 1,000th create. Run the KGS itself as a **replicated, range-partitioned** service (or replace it with **Snowflake-style** generation, timestamp+machine+sequence, for *zero* coordination). *Trade-off:* pre-allocated ranges mean **codes aren't strictly sequential and some are wasted** on a node crash (an unused block is lost), a trivial price given `62^7` headroom, bought in exchange for removing per-write coordination *and* the SPOF.
 
-**Bottleneck 3, single points of failure generally.** Stateless app tier behind a load balancer → **N+ nodes, lose one freely.** KV store → **3× replication** across AZs; reads stay available through a node loss. Cache → **clustered/replicated Redis**; on total cache loss the KV store still answers, just hotter (a **thundering-herd** risk on cold start). *Fix for the herd:* **request coalescing / single-flight** on misses (one miss per key fills the cache; concurrent requests for the same key wait) plus gradual cache warm-up. *Trade-off:* coalescing adds a hair of latency on the *first* miss to save the store from a stampede.
+**Bottleneck 3, single points of failure generally.** Stateless app tier behind a load balancer → **N+ nodes, lose one freely.** KV store → **3× replication** across AZs (availability zones); reads stay available through a node loss. Cache → **clustered/replicated Redis**; on total cache loss the KV store still answers, just hotter (a **thundering-herd** risk on cold start). *Fix for the herd:* **request coalescing / single-flight** on misses (one miss per key fills the cache; concurrent requests for the same key wait) plus gradual cache warm-up. *Trade-off:* coalescing adds a hair of latency on the *first* miss to save the store from a stampede.
 
 **Bottleneck 4, tail latency on cache misses.** A miss costs a KV round-trip (~5-10 ms), fine at p99 *if* the hit rate is high. *Fix:* size the cache for the working set (the E step already showed ~50 GB fits), use **read-through with a sane TTL**, and accept that a tiny fraction of reads pay the store latency. *Trade-off:* a bigger cache costs RAM/money, a **cost-vs-tail-latency** dial a Director sets deliberately, not maximally.
 

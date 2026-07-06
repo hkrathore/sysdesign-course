@@ -33,7 +33,7 @@ The Netflix format is Grand Rounds for systems. The panel has read your notes. Y
 
 Write the original requirements *as they were stated when the design locked*, then write them *as you understand them today*. The gap is where the hardest questions live.
 
-**Self-interrogation:** What did you scope out, and do you still agree? Which NFRs, latency budget, availability target, consistency model, were stated explicitly vs. inherited informally? ("We needed it to be fast" is not a requirement; "p99 < 500 ms" is.) Which requirement changed mid-build and how did it affect the design?
+**Self-interrogation:** What did you scope out, and do you still agree? Which NFRs (non-functional requirements), latency budget, availability target, consistency model, were stated explicitly vs. inherited informally? ("We needed it to be fast" is not a requirement; "p99 < 500 ms" is.) Which requirement changed mid-build and how did it affect the design?
 
 **Hostile question:** *"You scoped out multi-region. Two months post-launch the business asked for it. Did you build migration seams, or was it an expensive retrofit?"*
 
@@ -71,7 +71,7 @@ If you don't know a cell, that is itself important to surface, "we didn't instru
 
 > The most common doc mistake is submitting a diagram of the *intended* architecture, not the *actual* architecture. Interviewers probe the delta.
 
-**Before the round:** walk your diagram against the running system; every box that doesn't exist, every arrow that represents an async queue you drew as sync, write it down. Know the SLA and blast radius of every external dependency.
+**Before the round:** walk your diagram against the running system; every box that doesn't exist, every arrow that represents an async queue you drew as sync, write it down. Know the SLA (service-level agreement) and blast radius of every external dependency.
 
 ```mermaid
 flowchart LR
@@ -107,7 +107,7 @@ flowchart LR
 These are the three data model regrets that come up most often in design-doc rounds, with rough migration cost estimates:
 
 **1. Missing a compound index for a common query pattern.**
-Typical cost: 1-2 engineer-days to add the index, plus a table-scan migration that may require a maintenance window on large tables (> 50M rows). If online DDL tools (pt-online-schema-change, gh-ost) were available but not used, say so.
+Typical cost: 1-2 engineer-days to add the index, plus a table-scan migration that may require a maintenance window on large tables (> 50M rows). If online DDL (data definition language) tools (pt-online-schema-change, gh-ost) were available but not used, say so.
 
 **2. Using a natural key (email, username) as a primary key.**
 Typical cost: full table migration to add a surrogate key, update every foreign key reference, and update every API consumer that passed the natural key as a stable ID. On a 10-table schema this is typically 2-4 engineer-weeks plus a coordinated cutover. The trap: natural keys feel convenient at v1 and become anchors at v2.
@@ -187,7 +187,7 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 *Red flag:* "That wasn't in scope" with no engagement with the critique.
 
 **"What breaks first at 10×?"**
-*Strong:* Names a specific component with the load at which it saturates in numbers. "The primary Postgres WAL saturates at ~8× current peak (~160K writes/s); I'd shard by tenant, 10× headroom at the cost of cross-tenant queries becoming scatter-gather." References the partitioning lesson-2.6 without re-teaching.
+*Strong:* Names a specific component with the load at which it saturates in numbers. "The primary Postgres WAL (write-ahead log) saturates at ~8× current peak (~160K writes/s); I'd shard by tenant, 10× headroom at the cost of cross-tenant queries becoming scatter-gather." References the partitioning lesson-2.6 without re-teaching.
 *Red flag:* "We'd scale horizontally", no saturation point, no trade-off.
 
 **"Was this the right investment?"**
@@ -210,15 +210,15 @@ The evaluation step in a live whiteboard round stress-tests a hypothetical desig
 
 **Q1. "Your doc says you chose a monolithic deploy. Six months later you decomposed it. Was the original decision wrong?"**
 
-> *Model answer:* No. Three-engineer team, no service-mesh experience, six-week window, a monolith removed real blockers. At six months: four engineers with microservice experience joined, the load profiles had diverged (ingest 40K events/s vs query 2K QPS steady), two months of observability data made the boundary obvious. The decomposition took three weeks. Starting with microservices would have added six weeks to delivery and drawn the boundary before we had data to draw it correctly, monolith-first made the decomposition faster and lower-risk, not slower.
+> *Model answer:* No. Three-engineer team, no service-mesh experience, six-week window, a monolith removed real blockers. At six months: four engineers with microservice experience joined, the load profiles had diverged (ingest 40K events/s vs query 2K QPS (queries per second) steady), two months of observability data made the boundary obvious. The decomposition took three weeks. Starting with microservices would have added six weeks to delivery and drawn the boundary before we had data to draw it correctly, monolith-first made the decomposition faster and lower-risk, not slower.
 
 **Q2. "You said you'd use a read replica for analytics. Your incident report shows replica lag caused a two-hour reporting outage. What would you do differently?"**
 
-> *Model answer:* Separate analytics and operational read paths entirely, they're different workload tiers. I expected replica lag to stay under 30 seconds; at peak ingest (40K events/s) it hit 12 minutes, breaking a 2-hour reporting SLA. Fix: a dedicated analytics replica with async CDC into a columnar store (Redshift; I'd use BigQuery given our current footprint), two engineer-weeks to migrate. Greenfield, I'd draw that boundary day one: the analytics SLA (fresh within 15 min) stated explicitly, never inherited from the operational replica's lag behavior.
+> *Model answer:* Separate analytics and operational read paths entirely, they're different workload tiers. I expected replica lag to stay under 30 seconds; at peak ingest (40K events/s) it hit 12 minutes, breaking a 2-hour reporting SLA. Fix: a dedicated analytics replica with async CDC (change data capture) into a columnar store (Redshift; I'd use BigQuery given our current footprint), two engineer-weeks to migrate. Greenfield, I'd draw that boundary day one: the analytics SLA (fresh within 15 min) stated explicitly, never inherited from the operational replica's lag behavior.
 
 **Q3. "What was the biggest architectural risk you didn't fix before launch, and why?"**
 
-> *Model answer:* No circuit breaker between the order service and the payment PSP. We had exponential retry backoff but no fallback, a degraded PSP would fan out retries and exhaust the connection pool, taking down unrelated order operations. We knew; we deprioritized it given a 99.95% PSP SLA. Four months post-launch: 45-minute PSP degradation, p99 latency spiked to 30 seconds, ~2% of orders dropped. The circuit breaker took three days to add the following sprint. In retrospect it should have been in the launch definition of done, a 45-minute PSP degradation is not a tail event. The rule I'd enforce: any external dependency on the critical path needs a circuit breaker or explicit degradation mode at launch.
+> *Model answer:* No circuit breaker between the order service and the payment PSP (payment service provider). We had exponential retry backoff but no fallback, a degraded PSP would fan out retries and exhaust the connection pool, taking down unrelated order operations. We knew; we deprioritized it given a 99.95% PSP SLA. Four months post-launch: 45-minute PSP degradation, p99 latency spiked to 30 seconds, ~2% of orders dropped. The circuit breaker took three days to add the following sprint. In retrospect it should have been in the launch definition of done, a 45-minute PSP degradation is not a tail event. The rule I'd enforce: any external dependency on the critical path needs a circuit breaker or explicit degradation mode at launch.
 
 **Q4. "If you had to hand this system to a new team next week, what would they need to know that isn't in the doc?"**
 

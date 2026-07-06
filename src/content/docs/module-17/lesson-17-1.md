@@ -8,14 +8,14 @@ sidebar:
 > **Why this track exists, and why it is not "soft":** You can run RESHADED flawlessly and still fail the loop in the behavioral rounds. At Director and Senior Director, the leadership interview is *not* a vibe check, it is a graded technical assessment of judgment, run by the same Principal/Staff engineers and senior leaders who scored your system design, probing **3-4 levels deep** to dismantle any rehearsed or AI-prepped surface answer. The two house rules from the system-design track carry over verbatim: **quantify everything**, and **every position names its limit and the alternative you rejected**. A philosophy answer with no numbers and no downside is the behavioral equivalent of "it scales horizontally." This lesson sets the altitude and exposes the trap most senior candidates walk into: **answers calibrated to the 2015 growth era that the post-2022 world now actively penalizes.**
 
 ### Learning objectives
-- Distinguish what the **Director leadership round scores** (altitude, currency, probe-survival) from what an **EM loop** scores (individual coaching, sprint mechanics).
+- Distinguish what the **Director leadership round scores** (altitude, currency, probe-survival) from what an **EM (engineering manager) loop** scores (individual coaching, sprint mechanics).
 - Internalize the **six environmental shifts** since 2015 that silently re-grade every answer, and what each one rewards and penalizes *now*.
 - Use the **track map** and a recommended path to sequence your prep.
 - Carry **altitude consistency** from the RESHADED track into behavioral answers: quantify, name the trade-off, name the rejected alternative.
 
 ### Intuition first
 
-Think of your story bank as code you wrote in 2015 and never recompiled. It still runs in your head, clean narrative, confident delivery. But the **grading compiler** was silently upgraded after the 2022 correction: ZIRP ended, founder-mode became a meme, AI ate the assistant layer, and "hire great people and get out of the way" went from wisdom to red flag. Run your old answers through the 2026 compiler and half of them now throw warnings you can't hear, *"empire-building,"* *"abdication,"* *"not operating at level."* The interviewer hears the warning; you hear applause. This track is the recompile pass. Same raw experience, re-graded against the world that exists now.
+Think of your story bank as code you wrote in 2015 and never recompiled. It still runs in your head, clean narrative, confident delivery. But the **grading compiler** was silently upgraded after the 2022 correction: ZIRP (zero interest-rate policy) ended, founder-mode became a meme, AI ate the assistant layer, and "hire great people and get out of the way" went from wisdom to red flag. Run your old answers through the 2026 compiler and half of them now throw warnings you can't hear, *"empire-building,"* *"abdication,"* *"not operating at level."* The interviewer hears the warning; you hear applause. This track is the recompile pass. Same raw experience, re-graded against the world that exists now.
 
 The good news: the *fix* is rarely a new story. It is a reframe, adding the output-per-dollar angle, the tripwire, the "what I told my team," the number you were missing. The work is calibration, not invention.
 
@@ -70,7 +70,7 @@ These are the load-bearing change since 2015. Each one rewards a posture and pen
 - *Rewards:* the **accountable operator**, "I ran a rollout, here's the J-curve and the ROI I defend like a headcount ask."
 - *Penalizes:* "we're still evaluating / I let each team decide" (abdication) **and** "AI made us 10× faster" with no methodology (the Klarna/Salesforce overclaim). Context interviewers carry: 85%+ of engineers use assistants, Pichai's "~75% of new Google code is AI-generated," yet ~51% of leaders believe GenAI is currently net-negative, so **honest J-curve talk scores; breathlessness doesn't.**
 
-**4. RTO / hybrid norms.** Remote-execution literacy is assumed, and the answer is scored on **separating personal preference from organizational stewardship**. The known data point: Amazon's 5-day RTO polled **1.4/5** internally with **91% unhappy**, and regretted attrition concentrated among strong engineers, candidates are expected to know that trade-off math.
+**4. RTO (recovery time objective) / hybrid norms.** Remote-execution literacy is assumed, and the answer is scored on **separating personal preference from organizational stewardship**. The known data point: Amazon's 5-day RTO polled **1.4/5** internally with **91% unhappy**, and regretted attrition concentrated among strong engineers, candidates are expected to know that trade-off math.
 - *Rewards:* a written async operating system (RFCs, decision logs) and a **retention-risk plan for whatever policy the company sets**.
 - *Penalizes:* workplace ideology in *either* direction; "management by walking around."
 
@@ -78,7 +78,7 @@ These are the load-bearing change since 2015. Each one rewards a posture and pen
 - *Rewards:* "Safety protects people who take interpersonal risks, it does **not** protect people *from* performance consequences."
 - *Penalizes:* safety as a synonym for *nice*, with no accountability mechanism attached.
 
-**6. Performance-management tightening.** The clock moved to **weeks, not quarters**. A real, well-run termination is now **table stakes** for Director (Meta's low-performer cuts, Microsoft's PIP-or-severance ultimatum, ~30% rise in formal performance procedures since 2020). And layoff experience moved from rare to near-assumed.
+**6. Performance-management tightening.** The clock moved to **weeks, not quarters**. A real, well-run termination is now **table stakes** for Director (Meta's low-performer cuts, Microsoft's PIP-or-severance (PIP = performance improvement plan) ultimatum, ~30% rise in formal performance procedures since 2020). And layoff experience moved from rare to near-assumed.
 - *Rewards:* decisiveness-with-dignity, early dated feedback, a real process, the call made on time, *and* a raised compassion bar (cold "easy call" answers score worse than they used to).
 - *Penalizes:* "I coach indefinitely; firing is a failure of my leadership" → now reads as **not operating at level**.
 
@@ -103,13 +103,13 @@ Twelve more lessons, in three layers. **Frameworks first, then your story portfo
 | 10.5 | Hiring & the talent bar | Designing the hiring system, not just passing it; AI-era assessment. |
 | 10.6 | Hard people calls | Low performers, PIPs, firing, brilliant jerks, flight risks. |
 | 10.7 | Managing managers & org design | Manager pipelines, span math, succession, skip-levels. |
-| 10.8 | Operating system, delegation & metrics | Cadence, DORA/SPACE/DX Core 4, async-first OS. |
+| 10.8 | Operating system, delegation & metrics | Cadence, DORA/SPACE/DX (DORA = DevOps Research and Assessment) Core 4, async-first OS. |
 | 10.9 | Execution under pressure | Failing projects, incidents, your own bad calls. |
 | 10.10 | Influence & executive communication | Up-chart disagreement, disagree-and-commit, bad-news systems. |
 | 10.11 | Efficiency-era leadership | Layoffs, budget cuts, RTO and other mandates you didn't choose. |
 | 10.12 | AI-era engineering leadership | Rollout ROI, the junior pipeline, both sides of the hiring table. |
 | 10.13 | Company calibration | The *same* story scored at Amazon vs Meta vs Google vs Netflix vs a founder-led startup. |
-| 10.14 | **Demonstrate-don't-describe capstone** | Modern loops replace "tell me your philosophy" with live exercises (critique an OKR, read an org-health survey, deliver hard feedback in roleplay, present a first-90-days plan), plus a self-scoring rubric. |
+| 10.14 | **Demonstrate-don't-describe capstone** | Modern loops replace "tell me your philosophy" with live exercises (critique an OKR (objectives and key results), read an org-health survey, deliver hard feedback in roleplay, present a first-90-days plan), plus a self-scoring rubric. |
 
 **Recommended path.** Do the **frameworks and the story portfolio first, non-negotiable**, they are the RESHADED-spine analog; the nine category lessons are far weaker without an answer shape and a story bank behind them. Then take the category lessons **in your weakest-first order**, not sequentially, most senior candidates are strong on philosophy and execution and thin on the hard people calls and the efficiency/AI canon, which is exactly where the 2026 re-scoring bites hardest. Finish with company calibration to tune for your target company and the capstone to rehearse the live-exercise format under load. If you only have one evening: read this, the frameworks, the story portfolio, and the cheat sheet.
 
@@ -119,7 +119,7 @@ Twelve more lessons, in three layers. **Frameworks first, then your story portfo
 
 The most under-appreciated fact in this whole module: **post-flattening, the same Principal/Staff interviewer often scores both your system-design and your leadership rounds**, and calibrates you *across* them. The two course laws are not a system-design quirk; they are how that interviewer reads *every* answer, and they transfer verbatim:
 
-- **Always quantify.** A behavioral answer with no number is hand-waving. "I turned the team around" is the "it scales" of the leadership round. Bring the metric: *"regretted attrition dropped from ~18% to ~7% over two quarters,"* *"shipped 80% of committed scope after I cut the bottom 20%,"* *"MTTR fell from 45 min to under 10."*
+- **Always quantify.** A behavioral answer with no number is hand-waving. "I turned the team around" is the "it scales" of the leadership round. Bring the metric: *"regretted attrition dropped from ~18% to ~7% over two quarters,"* *"shipped 80% of committed scope after I cut the bottom 20%,"* *"MTTR (mean time to recovery) fell from 45 min to under 10."*
 - **Every position names its limit and the rejected alternative.** Just as no storage choice is presented without a critique, no leadership stance is presented without its downside and the path you didn't take. *"I chose to kill the project rather than push the date, the cost was three months of sunk work and a hard conversation with the VP who sponsored it; the alternative, a heroic crunch, would have shipped a fragile thing we'd pay for in on-call."*
 
 If you nail RESHADED and then give a vague, number-free, no-trade-off behavioral answer, you read as *inconsistent*, strong on the whiteboard, soft on judgment, and that inconsistency is itself a flag. The bar is one bar. (See the system-design rubric these axes mirror, and the org-and-cost reasoning that shows up on both sides of the loop.)

@@ -10,12 +10,12 @@ sidebar:
 ### Learning objectives
 - Run the full **RESHADED** spine on a storage-heavy problem and produce a defensible design in numbers, not adjectives.
 - Justify the **metadata / blob split** against the rejected "everything in one DB" design.
-- Size the system from first principles, **QPS, storage growth, bandwidth, cache working set**, and show the math.
+- Size the system from first principles, **QPS (queries per second), storage growth, bandwidth, cache working set**, and show the math.
 - Design **TTL/expiry** and **one-time burn-after-read** correctly, including the consistency hazard the burn introduces.
 - Identify the real bottlenecks and fix each, **naming the trade-off** every fix makes.
 
 ### Intuition first
-A pasteboard is a **coat check**. You hand over a coat (the paste text) and get back a small numbered ticket (the short link). The cloakroom is two separate things: a tiny, perfectly-accurate **ticket book**, *ticket #4f3A9c → rack 7, expires 6pm, one pickup only*, and a vast **rack of hooks** that just holds coats and knows nothing about tickets or closing time. You'd never write the coat's full description into the ticket book; the book stays small and fast precisely because it holds **pointers, not coats**. Pastebin is that coat check: a small, strongly-consistent **metadata store** (key → where the bytes live, owner, expiry, views remaining) in front of a dumb **blob store** holding the actual text. TTL expires a ticket; "burn after reading" tears the stub out the instant the coat leaves.
+A pasteboard is a **coat check**. You hand over a coat (the paste text) and get back a small numbered ticket (the short link). The cloakroom is two separate things: a tiny, perfectly-accurate **ticket book**, *ticket #4f3A9c → rack 7, expires 6pm, one pickup only*, and a vast **rack of hooks** that just holds coats and knows nothing about tickets or closing time. You'd never write the coat's full description into the ticket book; the book stays small and fast precisely because it holds **pointers, not coats**. Pastebin is that coat check: a small, strongly-consistent **metadata store** (key → where the bytes live, owner, expiry, views remaining) in front of a dumb **blob store** holding the actual text. TTL (time-to-live) expires a ticket; "burn after reading" tears the stub out the instant the coat leaves.
 
 ---
 
@@ -102,7 +102,7 @@ flowchart TD
     style CACHE fill:#e8a13a,color:#000
 ```
 
-**Create.** Client `POST`s the text; the API mints a base62 key, **writes the blob first**, then commits the metadata row (with native TTL set to `expires_at`), and returns `https://pb.io/{key}`. Order matters: a metadata row pointing at a missing blob is a broken paste; an orphaned blob is just garbage the GC reclaims.
+**Create.** Client `POST`s the text; the API mints a base62 key, **writes the blob first**, then commits the metadata row (with native TTL set to `expires_at`), and returns `https://pb.io/{key}`. Order matters: a metadata row pointing at a missing blob is a broken paste; an orphaned blob is just garbage the GC (garbage collection) reclaims.
 
 **Read.** `GET /{key}` hits the **CDN** first, popular pastes never reach origin. On a miss, the API does a metadata lookup, **enforces policy** (expired → `410`; burn → atomic claim, see Evaluation), then fetches the body cache-aside via Redis, falling back to the blob store.
 
@@ -112,7 +112,7 @@ Two background loops keep it honest: **store-native TTL** deletes expired metada
 
 ## A: API design
 
-A small, REST-shaped surface (REST fits resource-oriented CRUD).
+A small, REST-shaped surface (REST fits resource-oriented CRUD (create, read, update, delete)).
 
 ```
 POST /api/v1/pastes
@@ -170,7 +170,7 @@ The detail that decides whether this scales is the **partition key**. Primary ac
 
 ## E: Evaluation
 
-Stress the design against the NFRs; each fix names its trade-off.
+Stress the design against the NFRs (non-functional requirements); each fix names its trade-off.
 
 **Bottleneck 1, the blob round-trip on every read.** A cache-miss read is two hops (metadata + object-store GET), and object-store GETs are metered. **Fix:** Redis cache-aside (~10 GB working set) + CDN; at 99% combined hit ratio origin GETs drop from 12K/s to ~120/s, the `R×(1−h)` math. **Trade:** cache memory and CDN spend, but pastes are **immutable**, so a cached body is *never* wrong; expiry/burn are enforced at the metadata layer. That's why the split is so clean.
 
@@ -189,7 +189,7 @@ Stress the design against the NFRs; each fix names its trade-off.
 
 </details>
 
-**Re-check vs NFRs:** read p99 < 200 ms ✓ (CDN/Redis hits; cold reads add one object-store GET). 99.99% read availability ✓ (stateless API across AZs, AP-leaning KV, CDN `stale-if-error`). Durability ✓ (object store + replicated metadata; blob-before-metadata write order). Cost ✓ (bytes on cheap object storage, CDN offload, tiny metadata store). **No structural SPOF**; key-minting collision retries are bounded by the huge namespace and vanishingly rare.
+**Re-check vs NFRs:** read p99 < 200 ms ✓ (CDN/Redis hits; cold reads add one object-store GET). 99.99% read availability ✓ (stateless API across AZs (availability zones), AP-leaning KV, CDN `stale-if-error`). Durability ✓ (object store + replicated metadata; blob-before-metadata write order). Cost ✓ (bytes on cheap object storage, CDN offload, tiny metadata store). **No structural SPOF** (single point of failure); key-minting collision retries are bounded by the huge namespace and vanishingly rare.
 
 ---
 
@@ -200,7 +200,7 @@ Stress the design against the NFRs; each fix names its trade-off.
 **Hardest trade-offs worth naming aloud:**
 - **Where the policy lives.** Keeping expiry/burn in metadata (not the immutable body) is what lets us cache bodies forever, at the price that **two systems must agree** (live row ⇒ blob exists; dead row ⇒ blob gets GC'd). The one-store alternative is simpler but reintroduces the cost problem the design exists to avoid. Keep the split, pay the GC tax.
 - **Burn consistency.** A strongly-consistent conditional write on an otherwise cache-friendly read path, isolated to burn pastes so normal reads stay cheap. Forcing strong consistency on *all* reads would kill cacheability for a guarantee almost no paste needs.
-- **Abuse at public scale**, rate-limit creation, scan for secrets/malware, honor takedowns, keep unlisted keys unguessable. *Delegate the content-safety pipeline:* "my prior is async scanning with a fast-path block on known-bad hashes; the classifier quality and false-positive budget belong to trust-and-safety, against a takedown SLA I set."
+- **Abuse at public scale**, rate-limit creation, scan for secrets/malware, honor takedowns, keep unlisted keys unguessable. *Delegate the content-safety pipeline:* "my prior is async scanning with a fast-path block on known-bad hashes; the classifier quality and false-positive budget belong to trust-and-safety, against a takedown SLA (service-level agreement) I set."
 
 **What I'd revisit:** the single-region assumption. The CDN already gives **global read latency** (bodies are edge-cacheable), so the cheap win is CDN coverage and **read replicas** of the metadata store, *not* multi-region active-active writes, which drag in conflict resolution for an immutable-data problem that barely needs it. Exhausting caching/replicas before multi-region writes is the Director instinct.
 

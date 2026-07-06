@@ -14,7 +14,7 @@ sidebar:
 1. Define a distributed message queue as a **partitioned, replicated, append-only log**, and explain why one data structure gives you durability, throughput, and replay at once.
 2. Surface the three load-bearing trade-offs, **durability** (`acks`/ISR), **ordering** (per-partition scope), **delivery semantics** (at-most/at-least/exactly-once), as **API contracts the caller chooses**, not internal magic.
 3. Reason about **consumer groups and rebalancing**: how partitions map to consumers, what a rebalance costs, why partition count caps parallelism.
-4. Stress the design at **broker and partition failure**: leader election, **ISR shrink**, and the `acks=all` + `min.insync.replicas` contract that decides whether you lose data or availability.
+4. Stress the design at **broker and partition failure**: leader election, **ISR (in-sync replica) shrink**, and the `acks=all` + `min.insync.replicas` contract that decides whether you lose data or availability.
 5. Operate at Director altitude: decide the contracts, quantify cost, **delegate the log-segment / page-cache internals** with a credible prior.
 
 ---
@@ -39,7 +39,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *Point-to-point queue or pub-sub?* → **Both, via one mechanism**, the log with consumer groups (the queue vs pub-sub distinction; Kafka unifies them).
-- *Durability bar, can we ever drop a message?* → **No silent loss for the durable tier.** Acknowledged writes survive a single-broker failure, the headline NFR.
+- *Durability bar, can we ever drop a message?* → **No silent loss for the durable tier.** Acknowledged writes survive a single-broker failure, the headline NFR (non-functional requirement).
 - *Ordering, global, or per-key?* → **Per-key (per-partition) ordering is the contract.** Global ordering is out of scope (it means one partition = no parallelism).
 - *Delivery semantics?* → **At-least-once by default; exactly-once available** for the paths that pay for it.
 - *Retention, drain-on-read or keep-and-replay?* → **Keep-and-replay** (time/size-bounded). Replay is a first-class feature, not a side effect.
@@ -51,7 +51,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 4. **Consumer groups**: many consumers share a topic's partitions; within a group, a message goes to exactly one member.
 5. **Retention & replay**: messages persist for a configured window; consumers can reset to any offset.
 
-**Explicitly CUT (scoping is the signal):** the exact wire protocol, schema registry, stream-processing layer (Kafka Streams / ksqlDB), tiered cloud storage, cross-cluster replication, ACL/auth internals. I scope to the **broker, the log, partitions, replication, and the consumer-group contract**, and say so.
+**Explicitly CUT (scoping is the signal):** the exact wire protocol, schema registry, stream-processing layer (Kafka Streams / ksqlDB), tiered cloud storage, cross-cluster replication, ACL/auth (ACL = access control list) internals. I scope to the **broker, the log, partitions, replication, and the consumer-group contract**, and say so.
 
 **Non-functional requirements:**
 - **Durability**: acknowledged messages survive one broker loss (RF=3, `acks=all`), traded against write latency.
@@ -67,7 +67,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 
 ## E: Estimation
 
-> Enough math to size the cluster and prove the log is cheap. The headline is that the bottleneck is network and disk *sequential* bandwidth, not IOPS.
+> Enough math to size the cluster and prove the log is cheap. The headline is that the bottleneck is network and disk *sequential* bandwidth, not IOPS (I/O operations per second).
 
 **Assumptions:** 1M messages/s aggregate, ~1 KB average message, replication factor **3**, 7-day retention.
 
@@ -75,7 +75,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 
 **Storage:** `1 GB/s × 86,400 × 7 days × 3 (RF) ≈ 1.8 PB`. Round to **~2 PB**. Large but mundane, bulk sequential disk, the cheapest storage there is.
 
-**Broker count:** one broker sustains ~**1 GB/s** sequential disk and ~10 Gbps NIC, so ~3 GB/s of replicated writes plus consumer fan-out needs **~10 brokers** with headroom for the durable tier. The spend is **disk and network bandwidth**, not CPU.
+**Broker count:** one broker sustains ~**1 GB/s** sequential disk and ~10 Gbps NIC (network interface card), so ~3 GB/s of replicated writes plus consumer fan-out needs **~10 brokers** with headroom for the durable tier. The spend is **disk and network bandwidth**, not CPU.
 
 **Partition count:** if one partition sustains ~10 MB/s, 1 GB/s of ingress needs **~100+ partitions** per high-volume topic, and partition count also sets the **max consumer parallelism** in a group. Over-partitioning costs (open files, longer rebalances), so it's a sized decision, not "crank it up."
 
@@ -92,7 +92,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 **The log itself (the only storage that matters).**
 - *Access pattern:* **append to the tail, scan sequentially from an offset.** Never update in place, never random-read by key, the rare workload where a plain file beats a database.
 - *Choice:* an **append-only log on local disk per partition**, split into segment files, replicated to followers, the queue/log substrate. Sequential writes hit raw disk bandwidth; recent reads hit the **page cache**, not disk.
-- *Rejected, a B-tree / RDBMS as the message store:* it optimizes for random point-reads and in-place updates, paying for an index we never query and write-amplification we don't want. Messages are immutable and read in order; the offset *is* the index. Slower, costlier, solving a problem we don't have.
+- *Rejected, a B-tree / RDBMS (relational database management system) as the message store:* it optimizes for random point-reads and in-place updates, paying for an index we never query and write-amplification we don't want. Messages are immutable and read in order; the offset *is* the index. Slower, costlier, solving a problem we don't have.
 - *Rejected, an in-memory queue (RabbitMQ-style):* loses replay and risks data loss on restart. The whole value proposition is durable replay; RAM-only forfeits it.
 
 **Cluster metadata** (topics, partitions, leaders, ISR membership) lives in a **small strongly-consistent coordination store**, historically ZooKeeper, now Kafka's built-in Raft quorum (KRaft). Tiny (kilobytes) but it must be linearizable: every broker must agree on *who leads partition 7* or risk split-brain.
@@ -219,7 +219,7 @@ The leader for partition 7 crashes mid-stream.
 *Behavior:* the metadata quorum detects it and **elects a new leader from the ISR**, a caught-up replica. Producers and consumers transparently redirect; the gap is a **sub-second election**, not an outage. *What makes this safe:* only an **in-sync** replica can be elected, so the new leader already has every acknowledged message. *Trade-off:* you must wait for an ISR member; allowing "unclean" election of an out-of-sync replica (a config knob) trades **data loss for availability**, a deliberate choice, not a default.
 
 **Bottleneck / failure 2, the ISR shrinks (the subtle one).**
-A follower falls behind (slow disk, GC pause, network) and drops out of the ISR, now 2 replicas, then 1.
+A follower falls behind (slow disk, GC (garbage collection) pause, network) and drops out of the ISR, now 2 replicas, then 1.
 *Behavior:* with `min.insync.replicas=2`, if the ISR shrinks **below 2**, the leader **refuses new `acks=all` writes** rather than acknowledge a write it can't durably replicate. **The durability contract holds the line: unavailability over silent data loss.** *Trade-off, plainly:* `acks=all` + `min.insync.replicas=2` means a topic can become **write-unavailable** during a replica failure, a deliberate **CP-leaning** posture for the durable tier. Lowering the floor to 1 buys availability at the cost of a data-loss window. Naming this knob and its consequence is the strongest signal in this problem.
 
 <details>

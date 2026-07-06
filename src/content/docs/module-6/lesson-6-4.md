@@ -5,13 +5,13 @@ sidebar:
   order: 4
 ---
 
-> **"Design an LRU cache" is the best-evidenced problem still asked at manager and Director level** - it sits in the EM coding banks at Google, Amazon, Microsoft, Meta, and Netflix, often dressed as "a cache with rank-based eviction." The trap: it *looks* like algorithm recall, and a junior answer plays it that way - recite HashMap + doubly-linked list, code it, done. At Director the bar has moved. The interviewer scores whether you design the **interface contract** before the data structure, make eviction **pluggable** (LRU today, LFU or TTL next quarter) without callers noticing, and choose **lock granularity by measurement, not reflex**. The HashMap+DLL trick is one sentence of your answer; the rest is API design.
+> **"Design an LRU (least recently used) cache" is the best-evidenced problem still asked at manager and Director level** - it sits in the EM (engineering manager) coding banks at Google, Amazon, Microsoft, Meta, and Netflix, often dressed as "a cache with rank-based eviction." The trap: it *looks* like algorithm recall, and a junior answer plays it that way - recite HashMap + doubly-linked list, code it, done. At Director the bar has moved. The interviewer scores whether you design the **interface contract** before the data structure, make eviction **pluggable** (LRU today, LFU or TTL next quarter) without callers noticing, and choose **lock granularity by measurement, not reflex**. The HashMap+DLL trick is one sentence of your answer; the rest is API design.
 
 ### Learning objectives
 - Reframe the LRU question from **algorithm recall to interface design**: a `Cache` contract whose eviction behavior is a **Strategy-pluggable policy** (LRU/LFU/TTL), swappable without touching callers.
 - State the **O(1) result** (hash map + doubly-linked recency list) in one sentence and move on - mechanics are delegable; contract decisions are not.
 - Choose **lock granularity** (global vs striped vs read-write) with arithmetic - including the honest admission that **a coarse lock is fine until a measurement says otherwise**.
-- Adapt the **RESHADED spine** to an LLD problem - the letters survive; narrating how each step adapts is itself interview signal.
+- Adapt the **RESHADED spine** to an LLD (low-level design) problem - the letters survive; narrating how each step adapts is itself interview signal.
 - Know **where the LLD answer ends**: two processes sharing the cache puts you in distributed-cache territory, and the distributed-cache deep-dive picks up that thread.
 
 ### Intuition first
@@ -30,7 +30,7 @@ Now the part that matters at this level: management changes the rule - evict the
 - *Thread-safe?* → **Yes**, multiple application threads.
 - *Capacity in entries or bytes?* → **Count for v1, but the interface must admit a byte-weigher** - ops teams budget heap in MB, not entries.
 - *Strict or approximate LRU?* → **Strict for v1**; approximate recency is the standard escape hatch if the lock ever becomes the bottleneck.
-- *Which policies, now and later?* → **LRU now; LFU and TTL must plug in later without changing callers.** This sentence *is* the problem statement.
+- *Which policies, now and later?* → **LRU now; LFU (least frequently used) and TTL (time-to-live) must plug in later without changing callers.** This sentence *is* the problem statement.
 
 **Functional requirements:** (1) `get`/`put`/`remove` in constant time; (2) **bounded capacity** - insert into a full cache evicts exactly one policy-chosen victim; (3) **pluggable eviction** selected at construction, invisible to callers; (4) optional **eviction listener** (callers may need to write back or log); (5) **stats** - hit rate, evictions: you cannot tune what you cannot see.
 
@@ -42,9 +42,9 @@ Now the part that matters at this level: management changes the rule - evict the
 
 ## E - Estimation
 
-> E adapts from planetary QPS to **the three numbers that decide this design**: the caller's ops rate, the entries' memory, and the throughput ceiling of one lock. Ten lines of arithmetic settles debates that otherwise run on vibes.
+> E adapts from planetary QPS (queries per second) to **the three numbers that decide this design**: the caller's ops rate, the entries' memory, and the throughput ceiling of one lock. Ten lines of arithmetic settles debates that otherwise run on vibes.
 
-**Assumptions:** the cache backs a service doing **5K RPS**, ~10 lookups per request; 1M entries max; keys ~50 B, values ~500 B.
+**Assumptions:** the cache backs a service doing **5K RPS** (requests per second), ~10 lookups per request; 1M entries max; keys ~50 B, values ~500 B.
 
 **Ops rate:** `5K × 10 ≈ 50K cache ops/s`, peak ~3× → **~150K ops/s**.
 
@@ -62,7 +62,7 @@ Now the part that matters at this level: management changes the rule - evict the
 
 - **Everything on-heap, two state holders:** the **store** (hash map: key → entry) and the **policy's bookkeeping** (whatever ordering structure the policy maintains). Keeping them separately owned is the extensibility seam - see H.
 - **Capacity by count *and* by weight.** Constructor takes `maxEntries` or `weigher + maxWeight`. *Rejected: count-only* - 1M tiny entries vs 1M 50 KB entries differ by 50 GB.
-- **Rejected: soft/weak references ("let the GC evict").** Zero eviction code, but eviction timing becomes a GC detail: unpredictable hit rates, no policy control, undebuggable. Explicit bounded capacity costs the eviction machinery and buys deterministic behavior.
+- **Rejected: soft/weak references ("let the GC evict").** Zero eviction code, but eviction timing becomes a GC (garbage collection) detail: unpredictable hit rates, no policy control, undebuggable. Explicit bounded capacity costs the eviction machinery and buys deterministic behavior.
 - **Expired-but-unread TTL entries** are a slow leak. Handle with **lazy expiry on access plus a cheap periodic sweep** - the same lazy-reclaim instinct as Ticketmaster's holds: correctness never depends on the sweeper; it only reclaims memory.
 
 ---

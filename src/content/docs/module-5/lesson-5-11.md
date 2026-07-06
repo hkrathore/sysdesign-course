@@ -25,7 +25,7 @@ That is the online judge. A submission is an untrusted machine; the chamber is y
 
 ## R: Requirements
 
-> Pin the scope, and state the load-bearing fact out loud: this is not a CRUD app with a code field. The entire architecture exists to **run adversarial code safely, fast, at burst.**
+> Pin the scope, and state the load-bearing fact out loud: this is not a CRUD (create, read, update, delete) app with a code field. The entire architecture exists to **run adversarial code safely, fast, at burst.**
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *Who writes the code we run?* → **Anonymous, untrusted, sometimes actively malicious** users. This is the whole problem, not "a feature."
@@ -50,7 +50,7 @@ That is the online judge. A submission is an untrusted machine; the chamber is y
 - **Cost-bounded**, judging is **compute-per-execution**; idle warm capacity and per-run overhead are the budget a Director owns.
 - **Fairness**, one user (or one infinite loop) can't monopolize the fleet; contest and practice traffic isolated.
 
-**The skew that matters, stated.** There's no database read:write skew worth designing around, the durable writes are tiny and off the hot path. The asymmetry is **trusted control plane (API, queue, results, ordinary web infra) vs untrusted execution plane (judge workers running adversarial code).** The control plane is a solved problem; the execution plane is the entire question. The scarce resource isn't QPS or storage, it's **warm, isolated capacity to safely execute code**, which is why isolation strategy and burst economics dominate.
+**The skew that matters, stated.** There's no database read:write skew worth designing around, the durable writes are tiny and off the hot path. The asymmetry is **trusted control plane (API, queue, results, ordinary web infra) vs untrusted execution plane (judge workers running adversarial code).** The control plane is a solved problem; the execution plane is the entire question. The scarce resource isn't QPS (queries per second) or storage, it's **warm, isolated capacity to safely execute code**, which is why isolation strategy and burst economics dominate.
 
 ---
 
@@ -161,7 +161,7 @@ GET  /v1/contests/{contestId}/leaderboard  -> 200 { rankings: [...], asOf: <ts> 
 
 > The schema is small and unremarkable, *which is the point.* The hardness is in the execution plane, not the data layer. The load-bearing field is the **resource-limit envelope** on each job.
 
-**`submissions`**, PK `submission_id`, shard key `user_id`; carries `problem_id`, `language`, `source` (or a blob pointer), `contest_id` (nullable), `status`, `submitted_at`.
+**`submissions`**, PK (primary key) `submission_id`, shard key `user_id`; carries `problem_id`, `language`, `source` (or a blob pointer), `contest_id` (nullable), `status`, `submitted_at`.
 
 **`verdicts`**, keyed by `submission_id` (colocated); carries the overall `status`, `passed_tests`/`total_tests`, and a per-test result list (`test_id`, `verdict`, `time_ms`, `mem_kb`), written incrementally as the worker streams results.
 
@@ -207,7 +207,7 @@ The per-test granularity is what enables **fail-fast** (stop after the first non
 
 **Bottleneck 1, sandbox escape (the cardinal security risk).**
 A submission isn't buggy code; it's an exploit aimed at your host kernel. If it escapes, the **blast radius** is everything that worker reaches, other submissions, host credentials, the internal network. The boundary is chosen *by* that radius (three options in the trade-offs table): a **bare process/container** shares the host kernel → radius = the whole host; **gVisor** filters syscalls in userspace to shrink that surface; a **microVM (Firecracker)** gives each run its own guest kernel behind a hardware boundary → radius = one VM, at ~125 ms and lower density.
-*Decision:* **microVMs for public adversarial code** (smallest radius); **gVisor containers** where density/cost dominate and the threat is softer. *Trade:* microVMs cost density and ~125 ms for a dramatically smaller blast radius; bare containers are cheaper but one kernel CVE is catastrophic. The Director answer names each radius and picks against the threat model, it doesn't recite cgroup flags. (Internals delegated, see below.)
+*Decision:* **microVMs for public adversarial code** (smallest radius); **gVisor containers** where density/cost dominate and the threat is softer. *Trade:* microVMs cost density and ~125 ms for a dramatically smaller blast radius; bare containers are cheaper but one kernel CVE (Common Vulnerabilities and Exposures) is catastrophic. The Director answer names each radius and picks against the threat model, it doesn't recite cgroup flags. (Internals delegated, see below.)
 
 <details>
 <summary>Go deeper, microVM vs gVisor mechanics (IC depth, optional)</summary>
@@ -256,7 +256,7 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 - **Hard limits vs false positives**, aggressive CPU/memory caps protect the fleet but can fail a slow-correct solution; tuned per problem, owned by authors.
 
 **Where I'd delegate (the explicit Director move):**
-- **The sandbox internals:** *"Platform-security owns the execution sandbox behind `judge(submission, limits) → verdict`, my prior is Firecracker microVMs for the public adversarial threat model, with seccomp/no-network/read-only-FS hardening and a fresh VM per run; they own the CVE-response SLA. I'm not specifying syscall filters on the whiteboard."*
+- **The sandbox internals:** *"Platform-security owns the execution sandbox behind `judge(submission, limits) → verdict`, my prior is Firecracker microVMs for the public adversarial threat model, with seccomp/no-network/read-only-FS hardening and a fresh VM per run; they own the CVE-response SLA (service-level agreement). I'm not specifying syscall filters on the whiteboard."*
 - **Capacity / spot strategy** is a finance+infra partnership, the warm-pool floor and contest pre-warm schedule are the biggest cost levers. **Per-problem limit tuning** belongs to the content/problem-author team. What I keep, the trusted/untrusted boundary, the blast-radius framing, warm-pool-for-the-spike, async judging, and what I hand off with a stated prior, is the altitude.
 
 ---
@@ -300,7 +300,7 @@ One user firing thousands of submissions could monopolize the fleet and starve e
 > *Model:* By Little's Law, `~550/s × ~10 s ≈ ~5,500 concurrent executions`, higher at `t=0`, I size for *that*, not the ~12/s steady rate. Contests are **scheduled**, so I **pre-warm** the pool ahead of the start rather than rely on reactive autoscaling, which lags by host cold start. The durable queue absorbs the `t=0` peak (429 if truly saturated), and I judge p95 across the 3-minute window, not the literal first second. Workers already hold pre-pulled images and test data, so per-verdict cold start is the sandbox's ~125 ms. Cost is ~700 warm hosts for a ~3-hour window, idle capacity paid for burst readiness.
 
 **Q3. A submission runs an infinite loop. Another allocates 100 GB. Another fork-bombs. How does each get caught?**
-> *Model:* Each is a **verdict, not an outage**, limits live in the job envelope and the sandbox enforces them. The loop trips the **CPU-time limit** → TLE (a wall-clock limit also catches a `sleep` stall that burns no CPU, I need both). The 100 GB hits the **cgroup memory ceiling** → OOM → MLE. The fork bomb hits the **PID limit** → RTE; an output flood hits the **output cap**. Untrusted code *will* try all of these, so limits aren't a safety net, they're the normal control path, producing a clean verdict, never a crashed worker.
+> *Model:* Each is a **verdict, not an outage**, limits live in the job envelope and the sandbox enforces them. The loop trips the **CPU-time limit** → TLE (a wall-clock limit also catches a `sleep` stall that burns no CPU, I need both). The 100 GB hits the **cgroup memory ceiling** → OOM (out-of-memory) → MLE. The fork bomb hits the **PID limit** → RTE; an output flood hits the **output cap**. Untrusted code *will* try all of these, so limits aren't a safety net, they're the normal control path, producing a clean verdict, never a crashed worker.
 
 **Q4. Why async with a durable queue instead of judging synchronously in the request?**
 > *Model:* Synchronous ties the user's connection to a 10 s adversarial execution; at ~1,000/s the spike exhausts the connection pool before any judging happens. So submit returns `202`, writes the submission, enqueues; a worker pool drains the queue and streams the verdict. The queue is **durable** (Kafka/SQS), not in-memory, because a submission is a *contest entry*, losing it on a crash is unacceptable, and durability gives free replay (judging is idempotent on `submission_id`). Only the acknowledgement stays synchronous.

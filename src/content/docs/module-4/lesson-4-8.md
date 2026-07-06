@@ -7,7 +7,7 @@ sidebar:
 
 ### Learning objectives
 - Run the full **RESHADED** spine on a *write-dominated* geospatial problem, and recognize why that inversion (pings in ≫ nearby queries out) flips the read-heavy intuition from Twitter/Instagram.
-- **Estimate** the headline number - **driver-location write QPS** - from active-driver count and ping interval, and show why the *live* index is a RAM/throughput problem, not a storage-capacity one.
+- **Estimate** the headline number - **driver-location write QPS** (queries per second) - from active-driver count and ping interval, and show why the *live* index is a RAM/throughput problem, not a storage-capacity one.
 - Choose a **geospatial index** from the access pattern, and explain why a uniform grid hot-spots in a dense city while an adaptive structure (quadtree / S2 / H3) does not.
 - Design the **nearby-driver query** and the **matching/dispatch** service, then stress the design for hot regions, write amplification, and dispatch failure, fixing each with a named trade-off.
 - Operate at **Director altitude**: tie every choice to a requirement, quantify the cost, and delegate the deep-dives (ETA, the index bake-off) with a stated prior.
@@ -188,7 +188,7 @@ A moving driver crossing a cell boundary must be removed from the old bucket and
 
 **Bottleneck 3 - dispatch as a single point of failure / double-booking.**
 Two riders must not be offered the same car, and a crashed matcher mid-dispatch shouldn't strand a ride.
-*Fix:* matching is **stateless and regionally partitioned**, with a **short TTL'd lock/reservation** on a driver in the in-memory store the instant they're offered - a crashed matcher's lock auto-expires and the driver re-enters the pool. Trade: a lock adds a round-trip and brief driver under-utilization - accepted to prevent double-booking, with the TTL bounding crash damage.
+*Fix:* matching is **stateless and regionally partitioned**, with a **short TTL'd lock/reservation** on a driver in the in-memory store the instant they're offered - a crashed matcher's lock auto-expires and the driver re-enters the pool. Trade: a lock adds a round-trip and brief driver under-utilization - accepted to prevent double-booking, with the TTL (time-to-live) bounding crash damage.
 
 **Re-check vs NFRs:** write availability (202, fire-and-forget, regionally sharded ✓); read latency (one-to-few in-memory shards, bounded buckets → well under 200 ms ✓); eventual consistency / no durability on positions (✓ by design); regional isolation (region = shard ✓); hot-spot survival (adaptive index + replication ✓).
 
@@ -208,7 +208,7 @@ Two riders must not be offered the same car, and a crashed matcher mid-dispatch 
 **What I'd revisit:** whether Redis-geo suffices or a purpose-built in-memory geo-service is warranted - benchmark before committing. Whether trips need a relational store (disputes, accounting) vs wide-column - a data-integrity call, not a scale call.
 
 **Where I'd delegate (the Director move):**
-- **ETA / routing:** the **Maps team owns ETA** behind a clean `etaSeconds(from, to)` interface with its own SLA - real drive-time needs a road graph, live traffic, and models, a discipline I scope out rather than whiteboard. Naming the boundary and the interface is the altitude signal.
+- **ETA / routing:** the **Maps team owns ETA** behind a clean `etaSeconds(from, to)` interface with its own SLA (service-level agreement) - real drive-time needs a road graph, live traffic, and models, a discipline I scope out rather than whiteboard. Naming the boundary and the interface is the altitude signal.
 - **Index bake-off (geohash vs S2 vs H3):** *"I'd have the platform team benchmark bucket-size distribution and query p99 under real density on the top-20 metros; my prior is H3 for the adjacency uniformity, but I want that measured, not asserted."*
 - **Surge/pricing and fraud:** adjacent systems consuming the same location signal; scoped out and delegated.
 

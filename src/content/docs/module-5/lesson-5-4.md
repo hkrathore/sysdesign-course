@@ -5,13 +5,13 @@ sidebar:
   order: 4
 ---
 
-> **Why this gets asked, and what separates a Director answer.** Auction is Ticketmaster's cousin: both are contention problems under a correctness invariant. The difference is the *shape* of contention. Ticketmaster is **33:1 demand on one seat**, a flash crowd, solved with a queue and CAS. Auction is **rolling CAS on a single maximum** with *low per-auction write rate* but **10M simultaneous auctions**, solved with per-auction serialization points and a fan-out tier that scales independently of the core. The Director move is naming that pair, drawing the strong/eventual boundary correctly, and knowing when the math says a global lock is unnecessary. Candidates who conflate auction and seat-reservation, or who reach for a distributed lock before checking the numbers, are immediately recognizable.
+> **Why this gets asked, and what separates a Director answer.** Auction is Ticketmaster's cousin: both are contention problems under a correctness invariant. The difference is the *shape* of contention. Ticketmaster is **33:1 demand on one seat**, a flash crowd, solved with a queue and CAS (compare-and-swap). Auction is **rolling CAS on a single maximum** with *low per-auction write rate* but **10M simultaneous auctions**, solved with per-auction serialization points and a fan-out tier that scales independently of the core. The Director move is naming that pair, drawing the strong/eventual boundary correctly, and knowing when the math says a global lock is unnecessary. Candidates who conflate auction and seat-reservation, or who reach for a distributed lock before checking the numbers, are immediately recognizable.
 
 ---
 
 ### Learning objectives
 
-1. Apply **RESHADED** to a problem where the crux is **compare-and-set on a running maximum** (highest bid) rather than a seat-hold TTL.
+1. Apply **RESHADED** to a problem where the crux is **compare-and-set on a running maximum** (highest bid) rather than a seat-hold TTL (time-to-live).
 2. Articulate the **CAS-on-max vs seat-hold** distinction, the two canonical faces of the contention interview pattern.
 3. Design a **strongly-consistent auction core** (per-auction serialization) decoupled from an **eventually-consistent fan-out tier** (watcher broadcast), with the math that justifies each boundary.
 4. Reason through the **anti-sniping close-time extension** and the **flash-sale variant** (bounded-counter decrement) as design-evolution paragraphs, not standalone designs.
@@ -31,7 +31,7 @@ That asymmetry, a tiny strongly-consistent per-auction core, a large eventually-
 
 ## R: Requirements
 
-> Pin scope before building. The load-bearing fact here is not a global QPS; it is the **per-auction contention shape** and the total **concurrent auction count**.
+> Pin scope before building. The load-bearing fact here is not a global QPS (queries per second); it is the **per-auction contention shape** and the total **concurrent auction count**.
 
 **Clarifying questions (with assumed answers):**
 
@@ -221,7 +221,7 @@ WHERE auction_id = :auction_id
 On success: insert the bid row in the same transaction.
 
 **Shard key = `auction_id`. The load-bearing decision:**
-- *Why it's right:* all operations on an auction, CAS on `current_price`, bid log append, close-time extension, close event, are scoped to one `auction_id`. Sharding by `auction_id` colocates all of them on one shard: no cross-shard 2PC; the CAS, the bid append, and the anti-snipe extension are one local transaction.
+- *Why it's right:* all operations on an auction, CAS on `current_price`, bid log append, close-time extension, close event, are scoped to one `auction_id`. Sharding by `auction_id` colocates all of them on one shard: no cross-shard 2PC (two-phase commit); the CAS, the bid append, and the anti-snipe extension are one local transaction.
 - *Rejected, shard by `bidder_id`:* the CAS on `current_price` needs to own the auction row; distributing by bidder scatters bids for the same auction across shards, forcing distributed transactions for every bid.
 - *Rejected, shard by `category`:* hot categories create hot shards. `auction_id` distributes load uniformly.
 
@@ -287,7 +287,7 @@ Both fail gracefully: the CAS on bid acceptance already checks `close_at > now()
 The bid-acceptance core scales horizontally, each `auction_id` shard is independent; add shards. The fan-out tier scales by adding WebSocket gateway nodes and Notification service consumers. The close scheduler scales by partitioning the sorted set by `auction_id % N` across N Redis nodes. Nothing here is qualitatively different; this is the system's natural scale axis. The operational risk at 10× is **shard rebalancing** during growth, plan for consistent hashing across shard nodes rather than static assignment.
 
 **Flash-sale variant (bounded-counter decrement):**
-A flash sale is not an auction, it is a **fixed inventory sold at a fixed price, first-come-first-served**. The contention shape is Ticketmaster's GA variant: one hot counter per SKU, claimed with a conditional decrement that cannot go below zero: `UPDATE inventory SET qty = qty - 1 WHERE sku_id = ? AND qty > 0`. At extreme concurrency (thousands of requests/s on one SKU), that single row serializes. The fix is a **sharded counter**: split inventory across N shards, decrement a random shard, sum on read. Trade-off: the displayed remaining count is approximate (sum of shards with slight staleness) in exchange for N× write throughput. This is the CAS-on-max/seat-hold/bounded-counter **third face of contention**, name it explicitly as a family.
+A flash sale is not an auction, it is a **fixed inventory sold at a fixed price, first-come-first-served**. The contention shape is Ticketmaster's GA variant: one hot counter per SKU (stock-keeping unit), claimed with a conditional decrement that cannot go below zero: `UPDATE inventory SET qty = qty - 1 WHERE sku_id = ? AND qty > 0`. At extreme concurrency (thousands of requests/s on one SKU), that single row serializes. The fix is a **sharded counter**: split inventory across N shards, decrement a random shard, sum on read. Trade-off: the displayed remaining count is approximate (sum of shards with slight staleness) in exchange for N× write throughput. This is the CAS-on-max/seat-hold/bounded-counter **third face of contention**, name it explicitly as a family.
 
 **The CAS-on-max vs seat-hold contrast (the Director synthesis):**
 Ticketmaster uses a seat-hold TTL, a temporary claim that expires, with `AVAILABLE → HELD(ttl) → SOLD`. Auction uses CAS-on-max, no hold, no TTL on the bid; the high bid is simply replaced atomically when outbid, and the auction closes at a point in time. The underlying DB primitive is the same (conditional update, one winner), but the semantic differs: seats require a *temporary exclusive claim* during payment; bids require a *monotonically advancing maximum with no exclusive claim* (anyone can outbid you at any time). Both are serialized at the row level; neither requires an external lock. Name the pair to show pattern recognition across the module.
@@ -354,7 +354,7 @@ Red flag: sizing a giant database.
 
 **Q2. The Notification service is down for 30 seconds during a hot auction close. What breaks and what doesn't?**
 
-> *Model:* Watchers stop receiving live updates, UX degradation, not a correctness failure. Bid acceptance continues; events accumulate in Kafka (durable, replicated); on recovery the Notification service consumes from its last offset. The auction DB is unaffected; the auction closes at `close_at` as scheduled. Alert on consumer lag; this is a P2 incident (watcher SLA degraded), not P0 (the Bid service and DB are the P0 surface).
+> *Model:* Watchers stop receiving live updates, UX degradation, not a correctness failure. Bid acceptance continues; events accumulate in Kafka (durable, replicated); on recovery the Notification service consumes from its last offset. The auction DB is unaffected; the auction closes at `close_at` as scheduled. Alert on consumer lag; this is a P2 incident (watcher SLA (service-level agreement) degraded), not P0 (the Bid service and DB are the P0 surface).
 
 **Q3. Design the auction-close mechanism for 10M active auctions without a table scan.**
 

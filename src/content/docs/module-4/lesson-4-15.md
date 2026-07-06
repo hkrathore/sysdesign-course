@@ -44,7 +44,7 @@ What this problem tests that the social-feed problems don't: the load isn't a cr
 - **Visibility on the non-event**, a silently missed fire must alarm (the operational NFR a Director owns).
 - **Horizontal scale + tenant isolation.**
 
-**Read:write skew, the wrong lens here.** Status queries are a trickle; the load is **internal and self-generated**: status-transition writes per fire plus the due-poll scanning the store every tick. The dominant cost is **write + scan throughput on the instance table**, not read QPS. That inversion, control plane, not user-facing, is the first thing this problem tests.
+**Read:write skew, the wrong lens here.** Status queries are a trickle; the load is **internal and self-generated**: status-transition writes per fire plus the due-poll scanning the store every tick. The dominant cost is **write + scan throughput on the instance table**, not read QPS (queries per second). That inversion, control plane, not user-facing, is the first thing this problem tests.
 
 ---
 
@@ -80,11 +80,11 @@ Three data classes (the structural primitives, durable-not-RAM, index-over-store
 **1. Job definitions (read-mostly, modest).** Keyed by `job_id`, ~100 GB, low write rate. **Choice: DynamoDB/Cassandra sharded by `job_id`.** *Rejected:* a single relational instance, must shard anyway at 100M rows, and joins buy nothing on opaque payloads.
 
 **2. Job instances / the timer store (the hot path).** The due-poll (`WHERE fire_time ≤ now AND status='scheduled' ORDER BY fire_time LIMIT N FOR UPDATE SKIP LOCKED`) plus per-fire status writes; 10 GB live; must support claim-without-double-claim.
-- **Choice: a relational store with a B-tree on `fire_time`** (Postgres / sharded MySQL/Aurora), **partitioned by `shard_id = hash(job_id)`**. Two reasons: `FOR UPDATE SKIP LOCKED` gives multiple scanners safe, contention-bounded claiming (the primitive Airflow 2.0 HA and Quartz clustering use), and the 10 GB live set keeps the time index RAM-resident. **The durable instance table is the source of truth.**
+- **Choice: a relational store with a B-tree on `fire_time`** (Postgres / sharded MySQL/Aurora), **partitioned by `shard_id = hash(job_id)`**. Two reasons: `FOR UPDATE SKIP LOCKED` gives multiple scanners safe, contention-bounded claiming (the primitive Airflow 2.0 HA (high availability) and Quartz clustering use), and the 10 GB live set keeps the time index RAM-resident. **The durable instance table is the source of truth.**
 - *Optional acceleration:* a **Redis ZSET per shard** scored by `fire_time` as a hot index *over* the table, rebuilt on startup. **Rejected as the only copy:** Redis is AP-leaning, async replication can silently drop a just-written future job. ZSET-as-index, yes; ZSET-as-record, never. A **hierarchical timing wheel** (O(1), Kafka-style) is the move only at Kafka-scale timer counts.
 - *Rejected:* RAM-only timers, the cardinal sin of 3.15.
 
-**3. Run history (the firehose).** Append-only, ~7 TB/yr, read rarely. **Choice: Cassandra/DynamoDB with TTL, rolling to S3/Parquet** after 30-90 days. *Rejected:* history in the relational instance table, it bloats the very table the hot poll scans. **Separate the firehose from the index** (the same metadata/blob discipline as 5.1).
+**3. Run history (the firehose).** Append-only, ~7 TB/yr, read rarely. **Choice: Cassandra/DynamoDB with TTL (time-to-live), rolling to S3/Parquet** after 30-90 days. *Rejected:* history in the relational instance table, it bloats the very table the hot poll scans. **Separate the firehose from the index** (the same metadata/blob discipline as 5.1).
 
 ---
 
@@ -221,18 +221,18 @@ Smearing must be deterministic, not random-per-fire, or catch-up logic re-fires 
 
 **Bottleneck 2, the due-poll hot scan.**
 A single leader range-scanning 100M rows every tick caps the platform at one node's scan + lock throughput.
-*Fix:* **partition the timer space**, P shards by `hash(job_id)`, one owner per shard (per-shard etcd lease), each polling its slice: 16 shards → 16× scan/claim throughput, failures confined to 1/16th. Keep history out of this table so the index stays RAM-resident. **Trade:** rebalancing on churn, a dead owner's shards reassign with a brief per-shard gap. **Rejected:** a single global leader, simplest, but a SPOF whose failover stalls *all* firing. (Decentralized contention, many schedulers racing `SKIP LOCKED` on one store, Airflow-2.0-HA style, is the middle option: no failover gap, but the shared lock is the ceiling. Shard when you must scale past one store; go decentralized when availability beats peak throughput.)
+*Fix:* **partition the timer space**, P shards by `hash(job_id)`, one owner per shard (per-shard etcd lease), each polling its slice: 16 shards → 16× scan/claim throughput, failures confined to 1/16th. Keep history out of this table so the index stays RAM-resident. **Trade:** rebalancing on churn, a dead owner's shards reassign with a brief per-shard gap. **Rejected:** a single global leader, simplest, but a SPOF (single point of failure) whose failover stalls *all* firing. (Decentralized contention, many schedulers racing `SKIP LOCKED` on one store, Airflow-2.0-HA style, is the middle option: no failover gap, but the shared lock is the ceiling. Shard when you must scale past one store; go decentralized when availability beats peak throughput.)
 
 **Bottleneck 3, the leader as a single point + the failover gap + the zombie.**
 A dead shard owner means no fires for up to the **lease TTL** (~10 s); a paused-then-resumed owner can wake believing it still owns the shard and **double-fire**.
-*Fix:* (a) the gap is covered by **catch-up firing**, the new owner re-fires anything due-but-never-enqueued; (b) the zombie is stopped by **epoch fencing**, every enqueue carries the lease epoch and the store rejects stale epochs. Both **delegated**: election and leases to **etcd/ZooKeeper**, never hand-rolled. **Trade:** shorter TTL shrinks the gap but risks false failovers on GC pauses (the same timeout trade as 2.4). You cannot make firing exactly-once-on-time across a death; you choose the gap length and let **idempotency absorb the duplicates**.
+*Fix:* (a) the gap is covered by **catch-up firing**, the new owner re-fires anything due-but-never-enqueued; (b) the zombie is stopped by **epoch fencing**, every enqueue carries the lease epoch and the store rejects stale epochs. Both **delegated**: election and leases to **etcd/ZooKeeper**, never hand-rolled. **Trade:** shorter TTL shrinks the gap but risks false failovers on GC (garbage collection) pauses (the same timeout trade as 2.4). You cannot make firing exactly-once-on-time across a death; you choose the gap length and let **idempotency absorb the duplicates**.
 
 **Bottleneck 4, duplicate execution (at-least-once on *both* sides).**
 Firing duplicates (catch-up, zombie) and execution duplicates (worker crashes after finishing, before ack → redelivery) are **two independent sources**.
 *Fix:* **idempotency on `(job_id, fire_time)`**, the unique constraint, collapses duplicates from either source to **exactly-once-effect** while the next recurrence stays distinct. **Trade:** one conditional insert per execution, cheap insurance, and the only thing that survives at-least-once on both sides. **Rejected:** chasing true exactly-once delivery, it doesn't exist across failures; pretending it does is the most common altitude miss here.
 
 **Bottleneck 5, write amplification on status churn.**
-Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at the 10K/s peak on a B-tree. *Fix:* keep the hot table lean (no secondary indexes), and **separate the status firehose from the hot table**, history goes to the LSM/TTL store, completed rows are purged promptly. **Rejected:** one fat table holding live instances, full history, and rich indexes, the design grinds at 10K/s.
+Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at the 10K/s peak on a B-tree. *Fix:* keep the hot table lean (no secondary indexes), and **separate the status firehose from the hot table**, history goes to the LSM/TTL (LSM = log-structured merge) store, completed rows are purged promptly. **Rejected:** one fat table holding live instances, full history, and rich indexes, the design grinds at 10K/s.
 
 **Re-check vs NFRs:** durability ✓ (replicated relational truth); no missed must-runs ✓ (catch-up + idempotency); bounded lag ✓ (2 s tick, sharded poll; failover gap named); silent-miss visibility ✓ (monitor + dead-man's switch); scale + isolation ✓ (`hash(job_id)` shards, per-tenant quotas next); midnight herd ✓ (jitter window).
 
@@ -253,10 +253,10 @@ Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at
 - **Single leader vs decentralized vs sharded**, simplicity vs availability (no gap) vs peak throughput; the call follows from whether your pain is the failover gap or the store's lock ceiling.
 - **History retention vs cost vs audit**, resolve by tiering, never by bloating the hot table.
 
-**What I'd revisit:** whether the relational poll suffices, **I'd benchmark the due-poll's lock throughput under real fire rates before committing to the in-memory index**, not assert it. And build-vs-buy on a workflow engine (Temporal/Airflow) if DAG dependencies creep into scope.
+**What I'd revisit:** whether the relational poll suffices, **I'd benchmark the due-poll's lock throughput under real fire rates before committing to the in-memory index**, not assert it. And build-vs-buy on a workflow engine (Temporal/Airflow) if DAG (directed acyclic graph) dependencies creep into scope.
 
 **Where I'd delegate (the Director move):**
-- **Consensus / leader election**, *"etcd or ZooKeeper behind a lease+epoch interface; I will not hand-roll Raft. My prior is etcd for the lighter operational footprint; the platform team owns the consensus SLA and TTL tuning."*
+- **Consensus / leader election**, *"etcd or ZooKeeper behind a lease+epoch interface; I will not hand-roll Raft. My prior is etcd for the lighter operational footprint; the platform team owns the consensus SLA (service-level agreement) and TTL tuning."*
 - **The queue / executor substrate**, *"The consumer side of 3.8, the messaging team owns queue capacity and the lag-keyed worker autoscaler; the scheduler just enqueues `(job_id, fire_time)`."*
 - **Cron parsing & timezone/DST correctness**, deceptively deep; *"a battle-tested library plus a DST edge-case test matrix, not improvised timezone math."*
 

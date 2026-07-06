@@ -40,7 +40,7 @@ These are the widely-cited "Jeff Dean" figures. Exact values have improved (NVMe
 
 1. **Memory is ~5,000× faster than a network round trip → cache aggressively and minimize hops.** Every avoided same-DC round trip is worth ~5,000 memory reads.
 2. **Cross-region is ~150 ms → never put a synchronous cross-region call on the request path.** Replicate data near users; do cross-region work async. One synchronous transatlantic hop blows most user-facing p99 budgets by itself.
-3. **Random disk I/O (~10 ms HDD) is catastrophic on the hot path → batch into sequential I/O.** This is *why* LSM-trees exist (turn random writes into sequential), and why the SSD era reshaped database design.
+3. **Random disk I/O (~10 ms HDD) is catastrophic on the hot path → batch into sequential I/O.** This is *why* LSM-trees (LSM = log-structured merge) exist (turn random writes into sequential), and why the SSD era reshaped database design.
 4. **Sequential >> random, everywhere.** Sequential SSD read of 1 MB (~1 ms) vs. a single random SSD read (~150 µs) means large sequential scans are cheap per byte, design for them.
 
 **Tail-latency amplification, the senior insight.** Your service's p99 is assembled from your *dependencies'* p99s. If a single user request fans out to **100 leaf services in parallel**, and each has just a **1% chance** of a slow (p99) response, then the probability the request waits on *at least one* slow leaf is:

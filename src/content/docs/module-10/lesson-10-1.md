@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> **Why this problem separates Directors from ICs:** the throughput is a rounding error — tens of queries per second across a 50,000-person company is nothing for any serving stack — so a candidate who spends the round sharding the query path has misread the problem. The system lives or dies on four things the model cannot fix: **retrieval quality**, **grounding and citations**, **freshness**, and the one that ends the interview if you miss it — **per-user access control**. A frontier model sitting on bad retrieval produces a fluent, well-cited, *wrong* answer. The same model with no permission filter produces a fluent, well-cited answer built on a salary spreadsheet the asker was never allowed to open. Both failures look identical to the user: confident and authoritative. A Director must own the truth that **the model is the cheap, swappable part; the retrieval pipeline and its guardrails are the asset.** This is the applied walkthrough of the RAG building block — read that first; here we run it end-to-end through RESHADED.
+> **Why this problem separates Directors from ICs (individual contributors):** the throughput is a rounding error — tens of queries per second across a 50,000-person company is nothing for any serving stack — so a candidate who spends the round sharding the query path has misread the problem. The system lives or dies on four things the model cannot fix: **retrieval quality**, **grounding and citations**, **freshness**, and the one that ends the interview if you miss it — **per-user access control**. A frontier model sitting on bad retrieval produces a fluent, well-cited, *wrong* answer. The same model with no permission filter produces a fluent, well-cited answer built on a salary spreadsheet the asker was never allowed to open. Both failures look identical to the user: confident and authoritative. A Director must own the truth that **the model is the cheap, swappable part; the retrieval pipeline and its guardrails are the asset.** This is the applied walkthrough of the RAG (retrieval-augmented generation) building block — read that first; here we run it end-to-end through RESHADED.
 
 ---
 
@@ -15,7 +15,7 @@ sidebar:
 2. Design the **two pipelines** — ingestion (connectors → parse → chunk → embed → index) and query (embed → hybrid retrieve → ACL pre-filter → rerank → assemble → generate with citations → "I don't know" guard) — and name what each stage prevents.
 3. Make **per-chunk access control load-bearing**: enforce it at retrieval as a *pre-filter*, and defend why post-filtering is a breach waiting to happen.
 4. Treat **evaluation as the gate**: separate retrieval metrics (recall/precision@k) from generation metrics (faithfulness, answer relevance), and refuse to ship without it.
-5. Run a **RESHADED spine with inverted NFR priority** — faithfulness and access correctness dominate; latency and cost are constraints, not the point — and design-evolve toward query rewriting, multi-hop, and GraphRAG.
+5. Run a **RESHADED spine with inverted NFR (non-functional requirement) priority** — faithfulness and access correctness dominate; latency and cost are constraints, not the point — and design-evolve toward query rewriting, multi-hop, and GraphRAG.
 
 ---
 
@@ -40,14 +40,14 @@ Imagine a brand-new research librarian on their first day at a giant law firm. A
 
 **Functional requirements:**
 
-1. **Ingest** from many sources via connectors, incrementally, capturing per-chunk **ACL metadata** and handling deletes (tombstones).
+1. **Ingest** from many sources via connectors, incrementally, capturing per-chunk **ACL (access control list) metadata** and handling deletes (tombstones).
 2. **Ask** a natural-language question and get an answer.
 3. **Cite** every answer with links to the exact source chunks used.
 4. **Respect per-user permissions** on every retrieval — no leak, ever.
 5. **Say "I don't know"** (abstain) when retrieval returns nothing relevant, rather than hallucinate.
 6. Capture **feedback** (thumbs up/down, "this is wrong/forbidden") to drive the eval set.
 
-**Explicitly cut:** training/fine-tuning the base model, the chat UI itself, document authoring, full DLP/redaction tooling, cross-language translation. I name these and say "delegated" or "separate service."
+**Explicitly cut:** training/fine-tuning the base model, the chat UI itself, document authoring, full DLP/redaction (DLP = data loss prevention) tooling, cross-language translation. I name these and say "delegated" or "separate service."
 
 **Non-functional requirements, priority order:**
 
@@ -71,7 +71,7 @@ Imagine a brand-new research librarian on their first day at a giant law firm. A
 **Assumptions:** 5–10M documents; average ~10 chunks/doc → **~50M chunks**; embedding dimension 1024; 50–500 queries/second peak; daily document churn ~1–2%.
 
 **Embedding storage (the number that drives the store choice):**
-`50M chunks × 1024 dims × 4 bytes (float32) ≈ 200 GB` of raw vectors. An HNSW index adds graph-link overhead (~1.5–2×) → **~300–400 GB of RAM** to serve in-memory. That is real money and a genuine fork in the road. Two outs: **product quantization (PQ)** compresses vectors ~8–16× → ~15–25 GB at a small recall cost, or **disk-backed ANN (DiskANN-style)** trades a little latency for far less RAM. Plus the chunk *text* and metadata: `50M × ~1 KB ≈ 50 GB`, kept in a row store / object store, not in the vector index.
+`50M chunks × 1024 dims × 4 bytes (float32) ≈ 200 GB` of raw vectors. An HNSW (Hierarchical Navigable Small World) index adds graph-link overhead (~1.5–2×) → **~300–400 GB of RAM** to serve in-memory. That is real money and a genuine fork in the road. Two outs: **product quantization (PQ)** compresses vectors ~8–16× → ~15–25 GB at a small recall cost, or **disk-backed ANN (approximate nearest neighbor) (DiskANN-style)** trades a little latency for far less RAM. Plus the chunk *text* and metadata: `50M × ~1 KB ≈ 50 GB`, kept in a row store / object store, not in the vector index.
 
 **Query-time cost (per question):**
 1 query embedding (~$0.00002), one ANN lookup (single-digit ms), a reranker pass over ~50–100 candidates (~tens of ms on a cross-encoder), then the LLM call. Generation dominates both latency and dollars: ~3–6K context tokens in + ~300–500 out. At, say, $3/$15 per 1M tokens → **~$0.02–0.03 per answer**. At 100M queries/year that is **~$2–3M/year in generation alone** — the line item a Director defends, and the reason context size and caching matter.
@@ -92,7 +92,7 @@ Initial embed of 50M chunks at ~$0.02 per 1M tokens, ~200 tokens/chunk → `50M 
 - **Choice — and the build-vs-buy fork:**
   - **pgvector (Postgres)** if the corpus and team are modest and operational simplicity wins: one database for vectors, chunk text, and ACL metadata, with real `WHERE` clauses for pre-filtering. Ceiling: HNSW in Postgres strains past tens of millions of vectors and the filtered-ANN path is less mature.
   - **OpenSearch / Elasticsearch kNN** if you also want first-class **hybrid (BM25 + vector)** search and you already run it — one engine for lexical + semantic + filters.
-  - **Dedicated vector DB (e.g., a managed Pinecone/Weaviate-class service)** at 50M+ chunks with strict latency SLAs and filtered ANN — purpose-built, but a new vendor, new failure mode, and per-vector cost.
+  - **Dedicated vector DB (e.g., a managed Pinecone/Weaviate-class service)** at 50M+ chunks with strict latency SLAs (service-level agreements) and filtered ANN — purpose-built, but a new vendor, new failure mode, and per-vector cost.
 - **Rejected — a raw FAISS/HNSW library you operate yourself:** great recall, but you inherit sharding, replication, filtered search, and incremental updates as homework. For an enterprise platform I delegate that to a managed kNN engine unless scale or cost forces the build (prior: buy first, build only if the bill or SLA proves it). See the embeddings & vector-search lesson for the internals behind this choice.
 
 **2. Source-document object store.** Original PDFs/docs/HTML for re-parsing, re-chunking on model upgrades, and citation deep-links. **Choice — S3/object storage.** Cheap, durable, append-with-versioning; never the live query path.
@@ -206,7 +206,7 @@ POST /v1/feedback
 
 > The chunk schema is the whole correctness story. `acl_tags[]` and `updated_at` are the two load-bearing fields.
 
-**`chunks`** — primary key `chunk_id`. Columns: `doc_id` (FK), `text`, `embedding` (vector[1024]), `embed_model_version`, `source` (confluence/drive/jira/code/hr), `section`, `updated_at`, **`acl_tags[]`** (array of group/role IDs allowed to read), `tombstoned` (bool). Vector index (HNSW) on `embedding`; filterable index on `acl_tags` and `updated_at` so the **ACL + freshness pre-filter rides the ANN query**. A query never reads a chunk whose `acl_tags` don't intersect the caller's groups.
+**`chunks`** — primary key `chunk_id`. Columns: `doc_id` (FK (foreign key)), `text`, `embedding` (vector[1024]), `embed_model_version`, `source` (confluence/drive/jira/code/hr), `section`, `updated_at`, **`acl_tags[]`** (array of group/role IDs allowed to read), `tombstoned` (bool). Vector index (HNSW) on `embedding`; filterable index on `acl_tags` and `updated_at` so the **ACL + freshness pre-filter rides the ANN query**. A query never reads a chunk whose `acl_tags` don't intersect the caller's groups.
 
 **`documents`** — primary key `doc_id`. Columns: `source`, `source_url`, `title`, `version`, `updated_at`, `acl_tags[]` (document-level, propagated to chunks), `content_ref` (object-store key), `deleted` (bool). On a permission change in the source, re-propagate `acl_tags` to all child chunks; on delete, set `deleted` and tombstone the chunks.
 

@@ -19,7 +19,7 @@ sidebar:
 
 1. **Data model**, relational normalized tables (+ joins) vs document / key-value / wide-column / graph.
 2. **Schema**, enforced *schema-on-write* (rigid, validated up front) vs flexible *schema-on-read* (the app interprets shape; "schemaless" still has a schema, it just lives in your code).
-3. **Consistency & transactions**, classic SQL gives **ACID** with rich multi-row transactions; many NoSQL stores default to **BASE** (basically-available, soft-state, eventual) with limited transaction scope. *This line is blurring:* DynamoDB has transactions; **NewSQL** (Spanner, CockroachDB) delivers ACID *and* horizontal scale.
+3. **Consistency & transactions**, classic SQL gives **ACID** (atomicity, consistency, isolation, durability) with rich multi-row transactions; many NoSQL stores default to **BASE** (basically-available, soft-state, eventual) with limited transaction scope. *This line is blurring:* DynamoDB has transactions; **NewSQL** (Spanner, CockroachDB) delivers ACID *and* horizontal scale.
 4. **Scaling model**, SQL traditionally scales **up** (bigger box) plus read replicas, and sharding is painful because cross-shard joins/transactions are hard; most NoSQL is built to scale **out** horizontally from day one.
 
 **The NoSQL families → use case → named tech:**

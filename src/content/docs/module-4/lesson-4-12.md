@@ -15,7 +15,7 @@ sidebar:
 ### Intuition first
 A web crawler is not a downloader, downloading is the easy 5%. It is a **politeness-constrained breadth-first search over a hostile graph**. Picture a very well-mannered librarian photocopying the entire web. The work itself (fetch, copy, write down the links, fetch those next) is trivial. Three things make it brutal at scale. **Manners**: fire 12,000 requests a second at one server and you've DDoSed it, so you cap yourself at roughly **one request per second per host** and obey `robots.txt`. **Memory**: the web is one giant loop, so before fetching anything you must ask "have I seen this URL?" about **120 billion** discovered links without a disk seek each time. **The web fights back**: infinite calendars, session-id URLs that look new forever, deliberate **spider traps**. So the heart of the system is one component, the **URL frontier**, a sharded, prioritized, politeness-aware to-do list, fronted by a **Bloom filter** that cheaply remembers what you've seen. Everything else is plumbing around that to-do list.
 
-Two framing notes. **One:** a crawler is almost **pure write**, it *produces* a corpus; the only "read" is the downstream indexer consuming it offline in batch. Size for **fetch rate and storage growth**, not query QPS. **Two:** the entire design hangs off one tension, maximize throughput while never violating per-host politeness, and the resolution is **partition the frontier by hostname**, so "1 req/s for this host" is a decision one worker makes alone, with **zero global coordination**.
+Two framing notes. **One:** a crawler is almost **pure write**, it *produces* a corpus; the only "read" is the downstream indexer consuming it offline in batch. Size for **fetch rate and storage growth**, not query QPS (queries per second). **Two:** the entire design hangs off one tension, maximize throughput while never violating per-host politeness, and the resolution is **partition the frontier by hostname**, so "1 req/s for this host" is a decision one worker makes alone, with **zero global coordination**.
 
 ---
 
@@ -69,7 +69,7 @@ Politeness ≤1 req/s/host means throughput is bought entirely with **host-bread
 12k pages/s × 60 links = 720k seen-checks/s (peak ~1.5M/s)
 …but only ~12k/s are new and get enqueued.
 ```
-You **check 720k/s but enqueue only 12k/s**, ~98% of links are already seen. A DB lookup at 720k/s is ~720k random IOPS; the seen-set **must be an in-RAM probabilistic filter**.
+You **check 720k/s but enqueue only 12k/s**, ~98% of links are already seen. A DB lookup at 720k/s is ~720k random IOPS (I/O operations per second); the seen-set **must be an in-RAM probabilistic filter**.
 
 **Seen-set sizing, Bloom vs the rejected exact stores:**
 ```
@@ -93,11 +93,11 @@ The Bloom filter is an **8× RAM saving** over the exact set, bought with ~1% fa
 Four distinct data shapes; conflating them into one database is the classic mistake.
 
 **1. Raw page bodies (~3 PB/crawl).** Enormous write volume, write-once, read-rarely-and-in-batch by the downstream indexer; large immutable blobs keyed by URL/content-hash.
-- **Choice: blob store, S3 (or HDFS/GCS).** Precisely what object storage is for, at $/TB an order of magnitude below a database.
+- **Choice: blob store, S3 (or HDFS/GCS (HDFS = Hadoop Distributed File System)).** Precisely what object storage is for, at $/TB an order of magnitude below a database.
 - **Rejected, any database (SQL or wide-column) for bodies:** databases are built for indexed point/range queries and updates, none of which we need on 100 KB blobs you only ever scan sequentially. *Trade-off:* no per-page query/update, we don't need it.
 
 **2. URL/crawl metadata (~30 TB).** One row per URL (status, fingerprint, last-crawled, next-recrawl, priority); ~12k writes/s; point-lookups plus per-domain scans by the re-crawl scheduler.
-- **Choice: wide-column LSM, Bigtable/Cassandra/HBase** (LSM absorbs the write rate, the indexing lesson), partitioned by domain hash. The crawl's source-of-truth ledger of "what have we seen and when."
+- **Choice: wide-column LSM (log-structured merge), Bigtable/Cassandra/HBase** (LSM absorbs the write rate, the indexing lesson), partitioned by domain hash. The crawl's source-of-truth ledger of "what have we seen and when."
 - **Rejected, Postgres:** a single-leader B-tree store can't absorb 12k+ churning writes/s over tens of billions of rows; we need neither joins nor multi-row transactions. *Trade-off:* lose ad-hoc SQL for linear write scale and partition locality.
 
 **3. The seen-URL set.** ~720k membership checks/s, approximate-OK, must be RAM.
@@ -248,7 +248,7 @@ The frontier *is* the crawl's progress; losing it means re-crawling petabytes. A
 **Where I'd delegate (with a stated prior):**
 - *"Data team: benchmark **SimHash near-dup thresholds** on our corpus, my prior is a Hamming-distance-3 band, but I want the precision/recall curve, because over-aggressive dedup silently drops real pages."*
 - *"Infra: benchmark the **frontier queue**, Kafka vs purpose-built, at 12k ops/s with billions of items; my prior is Kafka for durability + partitioning."*
-- *"A dedicated team owns the **JS-render farm** and the SPA classifier; my job is routing the JS slice to it and keeping the HTML majority cheap."*
+- *"A dedicated team owns the **JS-render farm** and the SPA (single-page application) classifier; my job is routing the JS slice to it and keeping the HTML majority cheap."*
 
 ---
 

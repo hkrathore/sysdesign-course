@@ -9,7 +9,7 @@ sidebar:
 - Contain the **noisy-neighbor problem** in a pooled system: name the **power-law load share** (top 1% of tenants drive ~half the traffic) that makes it inevitable, and defend the fleet with **per-tenant, per-plan rate limits and quotas** (token-bucket keyed by tenant), **fair scheduling**, and a **quarantine** lever, without throttling a growing customer.
 - Design a **billing-grade usage-metering pipeline** (emit, stream, aggregate/rollup, rate) held to billing's own discipline: **idempotent, no double-count, no drop, reconciled**, because a metering error is a revenue or compliance incident.
 - Choose among **seat-based, usage-based, tiered, and hybrid billing**, wire rating, proration, overage, and free tiers into **Stripe**, and decide **soft-warn vs hard-block** at the limit.
-- Tie **QoS tiers** (gold/silver/bronze priority and reserved capacity) and the whole machine back to **unit economics**: per-tenant COGS versus price, and why **flat infinite usage** destroys margin.
+- Tie **QoS tiers** (gold/silver/bronze priority and reserved capacity) and the whole machine back to **unit economics**: per-tenant COGS (cost of goods sold) versus price, and why **flat infinite usage** destroys margin.
 
 ### Intuition first
 A multi-tenant SaaS platform is an **apartment building**, not a row of separate houses.
@@ -88,7 +88,7 @@ Four models, each aligning price to a different value axis:
 
 #### 5. Per-tenant SLAs and QoS tiers
 
-Tiers are how a shared system delivers differentiated service, and they are a monetization lever, not just an ops nicety. Gold/silver/bronze buy different **limits** (higher caps and quotas), **priority** (higher fair-queue weight, so gold keeps its latency under contention), **reserved capacity** (a pool or headroom held for gold so it never queues behind best-effort work), and **SLA and support** (gold 99.95%, bronze best-effort). You enforce it with **priority queues** for async work and **reserved-versus-shared pools** for capacity. The design tension is utilization versus guarantee: reserved capacity can sit idle while bronze is throttled, so you reserve only enough to meet the gold SLA at peak. The point an interviewer wants: **a tier is a promise you can actually enforce**, and something customers pay more for, so it belongs in the pricing conversation, not just the ops one.
+Tiers are how a shared system delivers differentiated service, and they are a monetization lever, not just an ops nicety. Gold/silver/bronze buy different **limits** (higher caps and quotas), **priority** (higher fair-queue weight, so gold keeps its latency under contention), **reserved capacity** (a pool or headroom held for gold so it never queues behind best-effort work), and **SLA (service-level agreement) and support** (gold 99.95%, bronze best-effort). You enforce it with **priority queues** for async work and **reserved-versus-shared pools** for capacity. The design tension is utilization versus guarantee: reserved capacity can sit idle while bronze is throttled, so you reserve only enough to meet the gold SLA at peak. The point an interviewer wants: **a tier is a promise you can actually enforce**, and something customers pay more for, so it belongs in the pricing conversation, not just the ops one.
 
 #### 6. The Director lens: unit economics and metering-to-revenue integrity
 

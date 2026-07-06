@@ -5,7 +5,7 @@ sidebar:
   order: 7
 ---
 
-> **Why this gets asked:** Splitwise is the machine-coding staple of Flipkart/Uber/Swiggy/Ola loops and a common US "design a real product" LLD prompt - the cleanest vehicle for **invariant-first design**. A junior writes `User`, `Expense`, `Split` classes and mutates a balance map. A Director states the invariant first - **all balances sum to zero, always** - builds a structure where violating it is *impossible by construction*, handles money in integer cents with a deterministic remainder rule, and names the min-cash-flow rabbit hole only to **defer it as an optimization**. The separation happens in the first five minutes.
+> **Why this gets asked:** Splitwise is the machine-coding staple of Flipkart/Uber/Swiggy/Ola loops and a common US "design a real product" LLD (low-level design) prompt - the cleanest vehicle for **invariant-first design**. A junior writes `User`, `Expense`, `Split` classes and mutates a balance map. A Director states the invariant first - **all balances sum to zero, always** - builds a structure where violating it is *impossible by construction*, handles money in integer cents with a deterministic remainder rule, and names the min-cash-flow rabbit hole only to **defer it as an optimization**. The separation happens in the first five minutes.
 
 ### Learning objectives
 - Lead with the **invariant**: every expense posts ledger entries summing to zero; balances are **derived views**, never mutable truth - the ledger thinking at LLD scale.
@@ -23,7 +23,7 @@ Two more traps frame the hour. Money: `$20.00 / 3` in floating point is `6.666�
 
 ## R - Requirements
 
-> **LLD adaptation:** in a machine-coding round, R scopes the **object model** and - critically - promotes the **invariants to first-class requirements**. Correctness properties *are* the non-functional requirements here; there is no QPS story to hide behind.
+> **LLD adaptation:** in a machine-coding round, R scopes the **object model** and - critically - promotes the **invariants to first-class requirements**. Correctness properties *are* the non-functional requirements here; there is no QPS (queries per second) story to hide behind.
 
 **Clarifying questions I'd ask (with assumed answers):**
 - *Split types?* → **Equal, exact, percentage** - designed so a fourth (shares/weights) drops in without touching existing code.
@@ -53,13 +53,13 @@ Two more traps frame the hour. Money: `$20.00 / 3` in floating point is `6.666�
 
 > **LLD adaptation:** estimation shrinks to a two-minute proof that **this is not a scale problem** - quantified, so the rest of the hour is spent where the difficulty actually lives: correctness.
 
-**Load:** ~10M MAU × ~5 expenses/month ≈ 50M/month ≈ **20 writes/s** average, ~100/s peak; balance reads ~10× → **~1K reads/s**. A single Postgres yawns at this.
+**Load:** ~10M MAU (monthly active users) × ~5 expenses/month ≈ 50M/month ≈ **20 writes/s** average, ~100/s peak; balance reads ~10× → **~1K reads/s**. A single Postgres yawns at this.
 
 **Storage:** ~700 B/expense (header + ~4 ledger lines) → **~35 GB/year** with indexes. Years of headroom on one primary + replica; sharding is a someday-by-`group_id` footnote.
 
 **The numbers that actually matter are money numbers.** ₹2,000.00 split 3 ways: as floats, `666.67 × 3 = 2000.01` - the books are off by a paisa and the invariant is dead. As integers: `200000 / 3 = 66666` remainder `2` → shares `[66667, 66667, 66666]`. **Two cents must be deliberately assigned by a stated rule.** That arithmetic - not QPS - is this problem's estimation step, and saying so out loud is the altitude signal.
 
-**What estimation decided:** one relational DB, ACID transactions, no distributed-systems machinery - 100% of the design budget goes to the invariant and the object model.
+**What estimation decided:** one relational DB, ACID (atomicity, consistency, isolation, durability) transactions, no distributed-systems machinery - 100% of the design budget goes to the invariant and the object model.
 
 ---
 
@@ -72,8 +72,8 @@ Two more traps frame the hour. Money: `$20.00 / 3` in floating point is `6.666�
 **Balances = a derived view.** `SUM(amount_cents)` grouped by user (and by pair for "who owes whom"), **cached in a `balances` table updated in the same ACID transaction** - but rebuildable from the journal at any time, with a cheap **nightly reconciliation** asserting cache = journal and global sum = 0.
 
 - *Rejected - a mutable pairwise balance map as the truth:* every expense becomes a read-modify-write on N cells; a crash between updates corrupts silently; no audit trail; concurrent adds race. The design most candidates write first - and the one the interviewer is waiting to attack.
-- *Rejected - full event-sourcing/CQRS infrastructure:* Kafka, projections, snapshots - pure ceremony at 20 writes/s. The insight worth keeping: **the journal table already *is* event sourcing at table scale**. Take the idea, skip the infra.
-- *Store:* **Postgres** - the design leans on multi-row ACID transactions, exactly the workload relational stores exist for. A KV store would make us hand-build the atomicity the invariant needs.
+- *Rejected - full event-sourcing/CQRS (command query responsibility segregation) infrastructure:* Kafka, projections, snapshots - pure ceremony at 20 writes/s. The insight worth keeping: **the journal table already *is* event sourcing at table scale**. Take the idea, skip the infra.
+- *Store:* **Postgres** - the design leans on multi-row ACID transactions, exactly the workload relational stores exist for. A KV (key-value) store would make us hand-build the atomicity the invariant needs.
 
 This is the payment-ledger discipline at LLD scale: same invariant, same append-only posture, one process instead of a distributed system.
 
@@ -140,7 +140,7 @@ class ExpenseService {
 
 > **LLD adaptation - and the dominant step.** The spec said it: in this problem, D *is* the design. Everything above exists so these two tables can hold the invariant.
 
-**`expenses`** - immutable header: `expense_id`, `group_id`, `type` (`EXPENSE` / `SETTLEMENT` / `REVERSAL`), `total_cents`, `currency`, `created_by`, `idempotency_key` (**unique** - the exactly-once mechanism), `reverses` (nullable FK).
+**`expenses`** - immutable header: `expense_id`, `group_id`, `type` (`EXPENSE` / `SETTLEMENT` / `REVERSAL`), `total_cents`, `currency`, `created_by`, `idempotency_key` (**unique** - the exactly-once mechanism), `reverses` (nullable FK (foreign key)).
 
 **`ledger_entries`** - the truth: `expense_id`, `user_id`, **`amount_cents` (signed int64)**. Every expense, settlement, and reversal is rows in this one table, netting to **0** per expense.
 
@@ -316,4 +316,4 @@ Production wrinkle: simplification suggestions go stale the moment a new expense
 
 ---
 
-*End of Lesson 6.7. Splitwise is Ticketmaster's quiet sibling: there the invariant was one-seat-one-owner, held by an atomic CAS; here it's books-balance, held by making unbalanced writes structurally impossible. Same lesson at two scales - choose designs where the invariant cannot be violated, then spend a few cheap cycles verifying it anyway.*
+*End of Lesson 6.7. Splitwise is Ticketmaster's quiet sibling: there the invariant was one-seat-one-owner, held by an atomic CAS (compare-and-swap); here it's books-balance, held by making unbalanced writes structurally impossible. Same lesson at two scales - choose designs where the invariant cannot be violated, then spend a few cheap cycles verifying it anyway.*
