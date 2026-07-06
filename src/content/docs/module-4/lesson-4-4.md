@@ -125,7 +125,7 @@ flowchart TD
     style CDN fill:#2b6cb0,color:#fff
 ```
 
-**Upload (write).** Clients **upload bytes direct to object storage** via a presigned URL, app servers never touch the photo (at 150 TB/day they'd be a bandwidth bottleneck), and **async transcode workers** generate renditions off a queue. The user's "post" returns the moment the metadata row commits to Cassandra; in parallel a `post-created` event drives the **fan-out service**, which looks up the author's followers and pushes the post ID into each follower's Redis feed list, for non-celebrity authors (the hybrid split is below).
+**Upload (write).** Clients **upload bytes direct to object storage** via a presigned URL, app servers never touch the photo (at 150 TB/day they'd be a bandwidth bottleneck), and **async transcode workers** generate renditions off a queue. The user's "post" returns the moment the metadata row commits to Cassandra; in parallel a `post-created` event drives the **fan-out service**, which looks up the author's followers and pushes the post ID into each follower's Redis feed list (typesetting the story into each subscriber's edition), for non-celebrity authors (the hybrid split is below).
 
 <details>
 <summary>Go deeper, upload and transcode pipeline mechanics (IC depth, optional)</summary>
@@ -134,7 +134,7 @@ The two-phase upload: client `POST`s intent (content type, size) → API returns
 
 </details>
 
-**Home feed (read).** The feed read service (a) pulls the user's **precomputed list from Redis** (the push portion), (b) **fetches recent posts from the few celebrities the user follows and merges** them (the pull portion), (c) re-scores the merged candidates, and (d) **hydrates** the top ~N IDs into full post objects from Cassandra. The response carries **CDN URLs**; the client fetches bytes from the edge, not from us. List assembly server-side, byte delivery via CDN, that split is what makes p99 ≲ 200 ms feasible at 100:1.
+**Home feed (read).** The feed read service (a) pulls the user's **precomputed list from Redis** (the push portion), (b) **fetches recent posts from the few celebrities the user follows and merges** them (the pull portion, the story fetched off the shelf as the paper opens), (c) re-scores the merged candidates, and (d) **hydrates** the top ~N IDs into full post objects from Cassandra. The response carries **CDN URLs**; the client fetches bytes from the edge, not from us. List assembly server-side, byte delivery via CDN, that split is what makes p99 ≲ 200 ms feasible at 100:1.
 
 ---
 
@@ -194,7 +194,7 @@ The load-bearing summary: `photo_id`/`user_id`/`post_id` partition keys spread p
 
 Stress your own design, an architecture with no self-identified failure modes reads as untested. Each fix names its trade.
 
-**Bottleneck 1, fan-out write amplification (the headline failure).** Average author ~200 followers → ~1,200 uploads/s × 200 ≈ 230k feed inserts/s, absorbable. But a **celebrity post (100M followers) = ~100M feed inserts for one post**, even at 1M inserts/s that's ~100 seconds of fan-out per post, flooding Redis and the workers, and mostly *wasted* (few followers open the app before it's stale).
+**Bottleneck 1, fan-out write amplification (the headline failure).** Average author ~200 followers → ~1,200 uploads/s × 200 ≈ 230k feed inserts/s, absorbable. But a **celebrity post (100M followers) = ~100M feed inserts for one post** (the press melting on a single story), even at 1M inserts/s that's ~100 seconds of fan-out per post, flooding Redis and the workers, and mostly *wasted* (few followers open the app before it's stale).
 > **Fix, the hybrid (push the tail, pull the head).** Threshold at e.g. **>1M followers**. Normal authors fan out on write as designed. Celebrities **don't fan out**, their posts stay in `posts_by_user`, and at **read time** the feed service pulls each followed celebrity's recent posts and merges. **Trade:** every feed read gets slightly more expensive (a handful of extra reads + a merge) in exchange for eliminating the 100M-insert write storm. On a 100:1 read-heavy system you'd normally hate adding read cost, but a user follows only a *few* celebrities, so it's a few extra reads, not hundreds. *This hybrid is the single most important answer in the problem.*
 
 **Bottleneck 2, the celebrity `followers` partition.** The hybrid spares true celebrities from fan-out entirely (their follower lists are never enumerated for push). For big-but-sub-threshold accounts, **fan out asynchronously in parallel batches off Kafka**, many workers drain the list over seconds. **Trade:** seconds of propagation latency for bounded per-worker load, exactly what "feed may be seconds stale" bought us in R.

@@ -81,7 +81,7 @@ Still enormous but now finite, delivered by the fleet, so the fleet is what we s
 
 **Connection-fleet math (the centerpiece, what Estimation decides):**
 
-A connection server holds open sockets and pushes the sampled stream. Capacity is bounded by **memory per connection** and **egress bandwidth**, not CPU.
+A connection server holds open sockets and pushes the sampled stream (each socket one of the stadium's open phone lines). Capacity is bounded by **memory per connection** and **egress bandwidth**, not CPU.
 ```
 Assume ~60K concurrent connections per server (memory-bound; see Go-deeper)
 5M viewers ÷ 60K per server ≈ 84 servers for ONE hot stream
@@ -117,7 +117,7 @@ The 60K figure is a planning prior, not a law: it falls out of (connection memor
 **1. Live comment fan-out state (ephemeral, in-memory, AP).**
 - *Access pattern:* accept a comment, fan it to millions of live sockets within ~2 s, then forget it. No re-read, no history, no per-viewer queue.
 - *Choice:* an **in-memory pub/sub plane**, a topic per live stream (Redis pub/sub or a purpose-built tree) feeding the stateless connection servers. Nothing persisted; a dropped message is fine by design.
-- *Rejected, a durable per-viewer inbox (the WhatsApp model):* messaging persists until the recipient pulls because **a missed message matters**. Here a missed comment is **worthless**, per-viewer queues across 5M viewers would be huge cost for negative value. **The absence of an inbox is the central design decision.**
+- *Rejected, a durable per-viewer inbox (the WhatsApp model):* messaging persists until the recipient pulls because **a missed message matters**. Here a missed comment is **worthless**, per-viewer queues across 5M viewers would be huge cost for negative value. **The absence of an inbox is the central design decision.** (No mailboxes, just the live screen.)
 
 **2. Comment archive (durable, write-path only, AP).**
 - *Access pattern:* append every accepted comment for moderation, audit, and optional replay; never read on the real-time path.
@@ -241,7 +241,7 @@ A single stream is a **hot partition**: one dispatch root cannot push 5M sockets
 
 **Bottleneck 2, raw comment volume exceeds what a human can read.**
 8.5B naive deliveries/s is impossible and useless, nobody reads 1,700/s.
-*Fix, **sampling is the first rung of the degradation ladder**, and it is a feature.* Cap the displayed rate at ~20/s; drop the rest at the sampler, before fan-out, so the cost is paid once, not per-viewer. *Rejected:* delivering everything, pointless and ruinously expensive. *Trade-off:* viewers see a representative subset, invisible to them, enormous cost savings.
+*Fix, **sampling is the first rung of the degradation ladder**, and it is a feature.* Cap the displayed rate at ~20/s; drop the rest at the sampler, before fan-out, so the cost is paid once, not per-viewer. *Rejected:* delivering everything, pointless and ruinously expensive. *Trade-off:* viewers see a representative subset, invisible to them, enormous cost savings (the screen's readable trickle, not the blur).
 
 **Bottleneck 3, fleet overload / connection-server saturation.**
 A bigger-than-expected stream pushes servers past their memory/egress budget.

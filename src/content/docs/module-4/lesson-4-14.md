@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> Ticketmaster is a contention problem, not a scale problem: two million fans converge on 60,000 seats in one second (33:1), while steady state is a sleepy ~115 bookings/sec. The design turns on one pairing: an atomic AVAILABLE -> HELD(ttl) -> SOLD transition, so exactly one claimant wins each seat, plus a waiting room admitting ~2,000/s so the strongly consistent inventory shard survives. The queue does not prevent oversell; the atomic claim does. Everything outside seats, orders, and money stays eventual.
+
 ### Learning objectives
 - Run the full **RESHADED** spine on a problem whose crux is **contention, not a read:write ratio** - steady-state traffic is boring; the entire design exists for a single-event **flash crowd**.
 - Prevent **oversell** with an **atomic seat-state transition** (`AVAILABLE -> HELD(ttl) -> SOLD`), choosing optimistic CAS (compare-and-swap) over pessimistic locking against the contention shape.

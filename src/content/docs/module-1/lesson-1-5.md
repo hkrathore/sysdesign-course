@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> Interviews are scored like incidents: the offer turns on how you recover, not whether you wobble, and a clean recovery reads stronger than a flawless run. There are five ways candidates break (freeze, rabbit hole, ramble, blank number, pushback) and each has a scripted move that itself signals leadership: name the problem out loud, return to the framework, and drive to a decision. Pushback is the one to master: steelman it, then update, defend with reasons, or split the problem, and know what breaks first in your own design.
+
 ### Learning objectives
 - Recognize the five interview failure modes the moment you're in one.
 - Recover from each with a scripted move that *itself* reads as a leadership signal.
@@ -20,7 +22,7 @@ Every senior candidate stumbles, the offer turns on **how you recover, not wheth
 ### Deep explanation: the five interview failure modes and the recovery move
 
 **1. The freeze (blank on where to go next).**
-*Recovery:* fall back to the framework, out loud. "Let me step back to RESHADED, I've done requirements and estimation; the next thing is the high-level components." Buy time legitimately with a clarifying question. The structure is your safety net; saying its name out loud signals method under pressure.
+*Recovery:* fall back to the framework, out loud. "Let me step back to RESHADED, I've done requirements and estimation; the next thing is the high-level components." Buy time legitimately with a clarifying question. The structure is your safety net; saying its name out loud signals method under pressure (the incident commander reaching for the runbook).
 
 **2. The rabbit hole (too deep).**
 *Recovery:* name your own altitude correction. "I'm deeper than this decision warrants. The key point is X; the tuning I'd delegate. Back to the system." Self-correcting altitude is a *positive* signal, not an admission of failure.
@@ -29,7 +31,7 @@ Every senior candidate stumbles, the offer turns on **how you recover, not wheth
 *Recovery:* stop yourself and impose structure. "Let me organize this, there are three components and one hard decision; I'll take them in order." Interviewers forgive a reset far more readily than a meandering monologue.
 
 **4. The blank number (can't recall a figure mid-estimate).**
-*Recovery:* give the method and a bound, never fake precision. "I don't have the exact SSD figure, but it's roughly 100× slower than RAM and 100× faster than HDD seek, call it low-hundreds of microseconds, which is enough to make the call." Reasoning to a bound *is* the skill.
+*Recovery:* give the method and a bound, never fake precision. "I don't have the exact SSD figure, but it's roughly 100× slower than RAM and 100× faster than HDD seek, call it low-hundreds of microseconds, which is enough to make the call." Reasoning to a bound *is* the skill (the same skill incidents demand at 3am).
 
 **5. The pushback (interviewer challenges your choice).**
 *Recovery:* treat it as a gift. Steelman their point first, "that's fair, the cost of my approach is…", then either **update** ("you're right, I'll switch to…") or **defend with reasons** ("I'll hold the line because, given the read-heavy requirement, the staleness is acceptable and the simplicity is worth it"). Both disagree-and-commit and reasoned defense are strong; defensiveness and instant capitulation are both weak. *Note:* pushback is often a probe, not a correction, they want to see how you reason, not necessarily that you were wrong.
@@ -67,7 +69,7 @@ flowchart TD
 
 *Weak (capitulate):* "Good point, I'll remove the cache." *Weak (defensive):* "No, caches are standard."
 
-*Strong:* "Fair challenge, for *displayed* stock, a few seconds of staleness is fine, so I'll keep the read cache there. But the **purchase path** can't be stale, so the decrement goes straight to the source of truth with a conditional/atomic check, and I'll reconcile the cache on write. So: cache the browse path, never the commit path. The trade-off is two read paths to maintain, which I accept to protect correctness where it matters.", You steelmanned, split the problem by consistency need, decided, and named the cost. That single exchange can carry an interview.
+*Strong:* "Fair challenge, for *displayed* stock, a few seconds of staleness is fine, so I'll keep the read cache there. But the **purchase path** can't be stale, so the decrement goes straight to the source of truth with a conditional/atomic check, and I'll reconcile the cache on write. So: cache the browse path, never the commit path. The trade-off is two read paths to maintain, which I accept to protect correctness where it matters.", You steelmanned, split the problem by consistency need, decided, and named the cost. That single exchange can carry an interview (incident command, demonstrated live).
 
 ### Trade-offs table: responding to pushback
 | Response | Pro | Con | Use when… |

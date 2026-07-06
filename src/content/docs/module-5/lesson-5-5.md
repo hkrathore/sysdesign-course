@@ -71,7 +71,7 @@ Each order generates ~8 state transitions (placed, accepted, prep-started, ready
 ~500K active couriers globally, pinging every 5 s → `500K ÷ 5 = 100K writes/s`. Peak at 8× → **~200K location writes/s** in aggregate (but geographically sharded, a US-East metro shard sees ~5-10K/s). This is the same pattern as proximity matching; I won't re-teach the geospatial index design.
 
 **Restaurant-prep wait and fleet sizing:**
-Avg prep time 18 min; target courier arrival = food-ready time. Courier transit to restaurant averages ~8 min → dispatch ~10 min after order placed. If we dispatch at order placement instead (naive), the courier waits ~10 min at the restaurant: at peak, `460 orders/s × 10 min × 1 courier/order = 276,000 courier-minutes/hour` wasted, roughly **4,600 idle courier-hours/hour** at peak. At a $15/hr courier cost that is **$69K/hour in idle cost at peak**, per metro at scale. This is why prep-time-aware dispatch is a business decision, not an engineering nicety.
+Avg prep time 18 min; target courier arrival = food-ready time. Courier transit to restaurant averages ~8 min → dispatch ~10 min after order placed. If we dispatch at order placement instead (naive), the courier waits ~10 min at the restaurant (the driver idling while the cook chops onions): at peak, `460 orders/s × 10 min × 1 courier/order = 276,000 courier-minutes/hour` wasted, roughly **4,600 idle courier-hours/hour** at peak. At a $15/hr courier cost that is **$69K/hour in idle cost at peak**, per metro at scale. This is why prep-time-aware dispatch is a business decision, not an engineering nicety.
 
 **Storage:**
 - Order table: `5M orders/day × 365 × ~2 KB/order ≈ 3.65 TB/yr`. Shardable; not large.
@@ -164,7 +164,7 @@ flowchart TB
 2. `POST /orders` hits **Order Orchestration**, which writes `PLACED` atomically to the order store and emits an event to Kafka.
 3. Kafka fans out: **Restaurant Service** notifies the restaurant app; **ETA Service** computes an initial estimate.
 4. Restaurant confirms via **Restaurant Service** → Orchestration transitions `PLACED → ACCEPTED → PREP_STARTED` with conditional writes.
-5. **Dispatch Service** subscribes to `PREP_STARTED` and the prep-time estimate; it holds the courier assignment until `estimated_ready_time - courier_travel_time`. At that moment it queries the **Location Service** for nearby available couriers (the geo-query), assigns the best match, and transitions `COURIER_ASSIGNED`.
+5. **Dispatch Service** subscribes to `PREP_STARTED` and the prep-time estimate; it holds the courier assignment until `estimated_ready_time - courier_travel_time` (timing the driver to the cook's finish). At that moment it queries the **Location Service** for nearby available couriers (the geo-query), assigns the best match, and transitions `COURIER_ASSIGNED`.
 6. Courier picks up, marks `PICKED_UP`; delivers, marks `DELIVERED`.
 7. `DELIVERED` transition writes an idempotency-keyed entry to the **Payment Ledger**, triggering the three-way split.
 8. **Notification Service** fans out status updates to eater, restaurant, and courier at each transition.
@@ -299,7 +299,7 @@ The decision to delegate: "I'd have the ML platform team own the prep-time estim
 
 **Bottleneck 2, the restaurant-prep wait and courier idle cost.**
 
-Quantified in E: naive dispatch wastes ~$69K/hr in idle courier cost at scale. The delayed-dispatch mechanism (fire at `estimated_ready_at - travel_time`) requires the dispatch service to hold a pending assignment in a durable scheduled queue (Redis sorted set + Kafka for durability). Trade-off: delayed dispatch adds latency to the `COURIER_ASSIGNED` transition, if the restaurant marks `READY` earlier than estimated, the courier has not yet been dispatched and there is a brief pickup delay. Fix: subscribe to `READY_FOR_PICKUP` in addition to the timer; dispatch immediately on early-ready. Rejected alternative: always dispatch at `ACCEPTED`, maximizes courier availability at restaurant but burns idle time; at DoorDash scale the cost is material.
+Quantified in E: naive dispatch wastes ~$69K/hr in idle courier cost at scale. The delayed-dispatch mechanism (fire at `estimated_ready_at - travel_time`) requires the dispatch service to hold a pending assignment in a durable scheduled queue (Redis sorted set + Kafka for durability). Trade-off: delayed dispatch adds latency to the `COURIER_ASSIGNED` transition, if the restaurant marks `READY` earlier than estimated, the courier has not yet been dispatched and there is a brief pickup delay (the food cooling on the counter). Fix: subscribe to `READY_FOR_PICKUP` in addition to the timer; dispatch immediately on early-ready. Rejected alternative: always dispatch at `ACCEPTED`, maximizes courier availability at restaurant but burns idle time; at DoorDash scale the cost is material.
 
 **Bottleneck 3, three-way payment split reliability.**
 

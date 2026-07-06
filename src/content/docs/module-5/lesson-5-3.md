@@ -147,11 +147,11 @@ flowchart TB
 
 **Happy path, search to booking:**
 
-1. Guest searches "Paris, 2 adults, June 14-17" → **Search service** queries Elasticsearch for matching properties, joins with Cassandra availability counts (all three dates must have `available_count > 0`), returns results with prices. Redis caches hot properties.
+1. Guest searches "Paris, 2 adults, June 14-17" → **Search service** queries Elasticsearch for matching properties, joins with Cassandra availability counts (all three dates must have `available_count > 0`), returns results with prices (the clerk's glance at the ledger). Redis caches hot properties.
 2. Guest selects a property → **Hold service** writes a hold record to Redis (TTL 10 min) and tentatively reserves via the Booking service (decrements a `held_count` in Postgres, not the confirmed count). The availability index is not yet updated, holds are optimistic.
 3. Guest completes checkout → **Booking service** runs an atomic transaction: confirm the held_count → `confirmed_count` decrement, write the `reservations` row, call payment, commit. On success, emits a Kafka event.
 4. **Kafka fan-out** asynchronously updates Cassandra availability counts and the Elasticsearch index, eventual update within seconds.
-5. If the hold expires (Redis TTL fires), the `held_count` is returned to `available_count` in Postgres, and a Kafka event re-increments the Cassandra index.
+5. If the hold expires (Redis TTL fires), the `held_count` is returned to `available_count` in Postgres (the clerk erasing the pencilled name), and a Kafka event re-increments the Cassandra index.
 
 **The shape to notice:** the read firehose (search, browse) never touches Postgres. The eventual/strong boundary is drawn at the Booking service, the only path that crosses into the CP core.
 
@@ -213,7 +213,7 @@ PUT /v1/properties/{propertyId}/inventory
 
 **Booking store (Postgres, sharded by `property_id`):**
 
-- **`inventory`**, primary key `(property_id, room_type_id, date)`. Columns: `physical_count`, `overbook_buffer`, `confirmed_count`, `held_count`. The invariant: `confirmed_count + held_count <= physical_count + overbook_buffer`. All updates run as `UPDATE ... WHERE confirmed_count + held_count + 1 <= physical_count + overbook_buffer`, the overbooking policy is encoded directly in the constraint.
+- **`inventory`**, primary key `(property_id, room_type_id, date)`. Columns: `physical_count`, `overbook_buffer`, `confirmed_count`, `held_count`. The invariant: `confirmed_count + held_count <= physical_count + overbook_buffer`. All updates run as `UPDATE ... WHERE confirmed_count + held_count + 1 <= physical_count + overbook_buffer`, the overbooking policy is encoded directly in the constraint (the clerk selling past the count, betting on no-shows).
 - **`reservations`**, primary key `reservation_id`; foreign key `property_id` (colocation with inventory on the same shard). Columns: user, room_type, checkin, checkout, status (`HELD`/`CONFIRMED`/`CANCELLED`), `idempotency_key` (unique index), `created_at`, `expires_at`.
 
 **Partition key = `property_id`. The load-bearing decision:**

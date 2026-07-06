@@ -5,6 +5,8 @@ sidebar:
   order: 13
 ---
 
+> A notification system is a write and fan-out pipeline, not a read system: one internal event explodes into thousands of per-user, per-channel sends handed to third-party gateways (APNs, Twilio, SES) you do not control and cannot trust to stay up. The one decision the design turns on is the queue: a Kafka buffer that decouples bursty ingest from flaky delivery, so a dead gateway stalls only its own channel. Promise at-least-once plus idempotent dedup, never exactly-once. The headline number is cost: SMS is 3% of 1B sends/day and ~$82M/year.
+
 ### Learning objectives
 - Run the full **RESHADED** spine on a **write- and fan-out-dominated** problem, the mirror image of read-heavy systems like typeahead or feeds.
 - Justify a **queue-decoupled, per-channel worker pipeline** as the answer to "delivery depends on third-party gateways I do not control and cannot trust to be up."

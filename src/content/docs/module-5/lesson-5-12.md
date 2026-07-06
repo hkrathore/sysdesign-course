@@ -63,7 +63,7 @@ That asymmetry inverts the read-heavy, cache-everything social-feed problems: he
 
 **Assumptions:** 10,000 hosts; ~1,000 active series/host; 10-second resolution; raw retention 14 days; downsampled 13 months; raw sample compresses to **~1.5 bytes**.
 
-**Active series (the cardinality budget, the headline):** `10,000 hosts × 1,000 = 10,000,000 active series.` Ten million series sizes memory, because each carries an in-memory index entry plus write buffer (low-KB of RAM each). **This, not samples/sec, is what makes a TSDB node fall over**, and it's the number a careless label multiplies.
+**Active series (the cardinality budget, the headline):** `10,000 hosts × 1,000 = 10,000,000 active series.` Ten million series sizes memory, because each carries an in-memory index entry plus write buffer (low-KB of RAM each). **This, not samples/sec, is what makes a TSDB node fall over**, and it's the number a careless label multiplies (the meter count, not the wattage).
 
 **Ingest rate (the write budget):** `10M ÷ 10 s = 1,000,000 samples/sec`, sustained, forever. At ~1.5 B that's only ~1.5 MB/s of bytes, but a million append-*ops*/sec is the firehose the engine must absorb without backpressuring the fleet. Note the two budgets are different: write rate and active-series count are governed by different things.
 
@@ -71,7 +71,7 @@ That asymmetry inverts the read-heavy, cache-everything social-feed problems: he
 
 **The downsampling win (why tiers exist):** 10-second resolution for 13 months would be `1M/s × 86,400 × 395 × 1.5 B ≈ 51 TB ×3 ≈ 150 TB`, and nobody queries year-old data at 10-second granularity. **Roll up to 1-minute after 14 days (6× fewer samples), 1-hour after 60 days (360× fewer).** The 13-month tier collapses to **single-digit TB**, a **30-360× reduction**, losing only sub-minute detail on old data, which is for trends, not forensics.
 
-**The cardinality bomb:** add one unbounded label, `user_id`, ~1,000 distinct users seen per host, and active series jumps to `10M × 1,000 = 10 billion`, ingest to 1B/s, the index to **terabytes of RAM you don't have**. The system doesn't degrade, it dies. **This is why cardinality is the cost function and why governing it is a Director responsibility, not the on-call engineer's**.
+**The cardinality bomb:** add one unbounded label, `user_id`, ~1,000 distinct users seen per host, and active series jumps to `10M × 1,000 = 10 billion`, ingest to 1B/s, the index to **terabytes of RAM you don't have**. The system doesn't degrade, it dies (a new meter minted per kilowatt-hour). **This is why cardinality is the cost function and why governing it is a Director responsibility, not the on-call engineer's**.
 
 **The SaaS framing (sets up build-vs-buy):** Datadog/New Relic bill **per custom metric = per unique series**, plus per-host. Ten million series is a **multi-million/yr** bill; a `user_id` blowup makes it nine figures overnight. **The same cardinality number that sizes our RAM sizes the vendor's invoice**, which is why the build-vs-buy crossover turns on it.
 
@@ -132,7 +132,7 @@ flowchart TB
 
 **Happy path, compressed:** each host's agent emits ~1,000 series; the **collector tier** (one we own) is where **cardinality control** happens, dropping unbounded labels and enforcing per-tenant caps *before* anything is stored. Samples flow to the **ingest service** and the **sharded TSDB** (sharded by series), updating the **in-memory series index**. Background **downsample jobs** roll raw 10-second data into 1-minute and 1-hour aggregates and push old tiers to **object storage**, expiring per retention. Two independent reads sit on top: the **query service** serves dashboards (picking the resolution tier by range), and the **alert evaluator** runs **burn-rate rules** continuously, paging on fast burn, ticketing on slow burn. Rule/SLO state lives in a small strong store.
 
-**The shape to notice:** the **write path and the two read paths are separate systems**. Ingest is sized for a million append-ops/sec and must never block the fleet (AP); the read paths serve dashboards and rules off downsampled tiers. Conflating them, serving dashboards off the raw firehose, is the classic failure.
+**The shape to notice:** the **write path and the two read paths are separate systems**. Ingest is sized for a million append-ops/sec and must never block the fleet (AP); the read paths serve dashboards and rules off downsampled tiers. Conflating them, serving dashboards off the raw firehose, is the classic failure (reading every live meter to answer one billing question).
 
 ---
 

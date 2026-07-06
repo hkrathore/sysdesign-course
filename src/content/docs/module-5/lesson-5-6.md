@@ -83,7 +83,7 @@ A 1 ms order-to-acknowledgement budget: network ingress ~50-200 µs; risk pre-ch
 **1. The order journal (write-ahead log, the source of truth).**
 
 - *Access pattern:* sequential append at every order event; read sequentially during replay; random-access rare (single-order lookup for cancel). Throughput: ~50M events/day, burst ~50K events/sec per symbol group.
-- *Choice:* a **purpose-built append-only log**, either a local NVMe WAL (Kafka-style segment files, or a custom ring-buffer journal replicated to a standby) or **Apache Kafka** with a dedicated exchange-internal topic per symbol. The journal is the single source of truth; everything else is derived.
+- *Choice:* a **purpose-built append-only log**, either a local NVMe WAL (Kafka-style segment files, or a custom ring-buffer journal replicated to a standby) or **Apache Kafka** with a dedicated exchange-internal topic per symbol. The journal is the single source of truth; everything else is derived (the auctioneer's perfect ledger).
 - *Rejected, a general-purpose RDBMS (relational database management system) as the journal:* row-level locking and MVCC (multi-version concurrency control) overhead add latency on the write path. The engine needs sequential-append semantics, not random-update transactions.
 - *Rejected, an in-memory-only structure with no journal:* unrecoverable on crash; fails the audit NFR. A matching engine without a durable journal is a liability, not a design.
 
@@ -137,7 +137,7 @@ flowchart TB
 1. A broker submits a limit order to the **Order Gateway**, which validates message format, applies basic rate-limit and position pre-checks, and assigns a microsecond timestamp.
 2. The **Sequencer** assigns a monotonically increasing global sequence number, the total order of all events. This is the key to determinism: sequence number assignment is the single serialization point.
 3. The sequenced event is appended to the **Order Journal** (durable).
-4. The **Matching Engine** consumes the event from the journal in sequence-number order. It is single-threaded: one event at a time, no locks, no shared state with other symbol engines. It updates the in-memory order book, matches if a crossing quote exists, and emits fill events back to the journal.
+4. The **Matching Engine** consumes the event from the journal in sequence-number order. It is single-threaded: one event at a time, no locks, no shared state with other symbol engines (one auctioneer, alone in his room). It updates the in-memory order book, matches if a crossing quote exists, and emits fill events back to the journal.
 5. Fill events are read by the **Fanout tier**, which dispatches execution reports to the submitting broker and publishes market-data updates (top-of-book change, trade print) to subscribers.
 
 **The critical design choice, the Sequencer.** All scaling approaches must preserve a total order per symbol. For a multi-symbol exchange, the sequencer assigns a global sequence number across all symbols; each per-symbol engine filters to its own events by symbol ID, keeping each engine single-threaded and independent while giving the journal a unified replay record. *Rejected: letting each engine assign its own sequence numbers*, cross-symbol audit becomes impossible and reconstruction of "what happened at 09:30:00.000123" requires reconciling N independent clocks.
@@ -268,7 +268,7 @@ If the matching engine for a symbol crashes, that symbol halts.
 
 AAPL or BTC may see 10× the order rate of median symbols; a single core for the hottest name can saturate.
 
-*Fix:* **symbol grouping by volume tier.** Assign each engine thread a group of symbols whose combined peak rate fits one core's budget (~100-200K events/sec for a tight C++ loop). Re-balance daily based on prior-day volume; hot outliers (index rebalance, earnings) get a dedicated engine. *Trade-off:* engine failure now affects a symbol group, size groups to bound the blast radius (max ~20 symbols/engine).
+*Fix:* **symbol grouping by volume tier.** Assign each engine thread a group of symbols whose combined peak rate fits one core's budget (~100-200K events/sec for a tight C++ loop). Re-balance daily based on prior-day volume; hot outliers (index rebalance, earnings) get a dedicated engine (an auctioneer all to themselves). *Trade-off:* engine failure now affects a symbol group, size groups to bound the blast radius (max ~20 symbols/engine).
 
 ---
 

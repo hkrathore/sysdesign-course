@@ -6,6 +6,8 @@ sidebar:
 ---
 import CachingStrategiesSimulator from '@components/widgets/CachingStrategiesSimulator.jsx';
 
+> How services talk and where state lives are the two decisions that set your system's shape. API style is chosen by the consumer, REST for cacheable public reach, gRPC between services you own, GraphQL when many clients want different slices, and sync vs async is coupling, not syntax: a five-hop synchronous chain of 99.9% services is ~99.5% available. The scaling move is a stateless app tier with session in Redis: pay a ~1 ms hop so any node serves any request and capacity grows by adding identical boxes.
+
 ### Learning objectives
 - Contrast the three dominant API styles (**REST**, **RPC/gRPC**, and **GraphQL**) on coupling, over-/under-fetching, streaming, tooling, and browser support, and choose one from the *consumer* and *team-boundary*, not from fashion.
 - Distinguish **synchronous** (request-response) from **asynchronous** (message/event) communication as a **coupling decision**, not a syntax one, and name what each costs.
@@ -39,7 +41,7 @@ All three styles move bytes between a caller and a callee. They differ in **who 
 
 - **HTTP caching breaks.** Everything is one `POST` to one URL, so REST's free CDN/proxy `GET` caching evaporates; you rebuild caching at the resolver layer or with persisted queries.
 - **Naive resolvers fan out a query per field** (the N+1 problem); batch with DataLoader.
-- **Arbitrary query complexity is an availability and cost risk.** A deeply nested query can melt your DB, so you need depth/complexity limits, and you've moved real engineering effort server-side.
+- **Arbitrary query complexity is an availability and cost risk.** A deeply nested query can melt your DB (the table-sized plate), so you need depth/complexity limits, and you've moved real engineering effort server-side.
 
 GraphQL shines when **many heterogeneous clients** (iOS, Android, web, partners) each need a *different slice* of the same graph and you don't want a bespoke endpoint per screen.
 
@@ -70,7 +72,7 @@ A service is **stateful** if it keeps client-session state (who you are, your ca
 **Why this decides horizontal scalability, with the math.** Suppose you need to serve **30,000 QPS** (queries per second) and one app node handles **3,000 QPS** (the kind of estimate you'd produce in the E step), so you want **10 nodes** behind a load balancer.
 
 - **Stateful (in-memory sessions):** user U's session lives only on node 3, so the load balancer must send every U request back there: **sticky sessions**. Consequences: **uneven load** (hot users pin to a few nodes), **opaque scaling** (node 11 only helps *new* sessions), **node death loses state** (carts emptied, users logged out), and **disruptive deploys** (rolling a node drops its sessions). You've made each node *special*, and special things don't scale linearly.
-- **Stateless (externalized session):** move the session into a **shared, fast store**, **Redis** (the key-value family): a session token keys a small blob, sub-millisecond reads, TTL (time-to-live) expiry built in. Now **any** node serves **any** request; the LB runs plain round-robin, load spreads evenly, **adding node 11 instantly takes its share**, a dead node takes zero state with it, deploys are trivial. You scale by **adding identical, disposable nodes**, the definition of horizontal scale.
+- **Stateless (externalized session):** move the session into a **shared, fast store**, **Redis** (the key-value family): a session token keys a small blob, sub-millisecond reads, TTL (time-to-live) expiry built in. Now **any** node serves **any** request (any cashier serves you); the LB runs plain round-robin, load spreads evenly, **adding node 11 instantly takes its share**, a dead node takes zero state with it, deploys are trivial. You scale by **adding identical, disposable nodes**, the definition of horizontal scale.
 
 The trade you're making by externalizing: you've added a **network hop to Redis on every request** (~1 ms, vs ~100 ns for in-process memory, four orders of magnitude, per the latency-numbers lesson) and made Redis a dependency you must make **highly available** (it's now in the critical path, so replicate it and plan failover, the replication lesson). That is a deliberate, almost always correct trade: a 1 ms session lookup to buy linear, resilient scaling and painless deploys. The rejected alternative, sticky sessions, is acceptable only as a *short-term bridge* for an app that can't yet externalize, and you should name it as debt.
 
@@ -78,7 +80,7 @@ A subtlety worth stating at altitude: "stateless" means the **app tier** is stat
 
 #### 4. How caching completes the stateless story
 
-Once the app tier is stateless, **the shared tiers it leans on (database and cache) become the scaling bottleneck and the latency floor.** Caching is the lever: Redis/Memcached in front of Postgres lets ten stateless nodes serve a hot key from a ~1 ms cache hit instead of hammering the database with ~10 ms reads. At a **90% hit rate** you've cut origin load 10x and dropped p50 read latency from ~10 ms toward ~1 ms, the single highest-leverage move for a read-heavy system. This is also where the **Bloom-filter guard** from the trade-off-tools lesson slots in: a filter of keys-that-exist in front of the cache short-circuits floods of nonexistent-key lookups (cache penetration) before they touch Redis or the database.
+Once the app tier is stateless, **the shared tiers it leans on (database and cache) become the scaling bottleneck and the latency floor.** Caching is the lever: Redis/Memcached in front of Postgres lets ten stateless nodes serve a hot key from a ~1 ms cache hit instead of hammering the database with ~10 ms reads (one fast ledger shared by every cashier). At a **90% hit rate** you've cut origin load 10x and dropped p50 read latency from ~10 ms toward ~1 ms, the single highest-leverage move for a read-heavy system. This is also where the **Bloom-filter guard** from the trade-off-tools lesson slots in: a filter of keys-that-exist in front of the cache short-circuits floods of nonexistent-key lookups (cache penetration) before they touch Redis or the database.
 
 But a cache is a **second copy of the truth**, so you must answer: *when the data changes, how do cache and database stay in agreement, and who pays the latency?* This is the consistency-vs-latency tension made concrete at the cache layer. The question has three classic answers on the **write** path, trading **consistency, write latency, and durability** against each other, which is precisely what the simulator below lets you feel.
 

@@ -5,6 +5,8 @@ sidebar:
   order: 1
 ---
 
+> Every request pays a toll sequence before your code even runs: DNS lookup, TCP handshake, TLS handshake, each a round trip, and a cross-region round trip costs ~150 ms. The whole lesson turns on one placement decision: where you terminate those handshakes and who fronts your servers, a **forward proxy** speaking for clients or a **reverse proxy** (plus LB, gateway, CDN) speaking for you. And the trap: DNS is a cached, eventually-consistent control plane, so a TTL of 30-60 s bounds how fast a dead region can drain.
+
 ### Learning objectives
 - Trace a request from URL to response at the altitude a Director needs (DNS → TCP/TLS → HTTP), and know where the time goes.
 - Distinguish a **forward proxy** from a **reverse proxy** and state what each buys you.
@@ -21,11 +23,11 @@ The network is a **postal system.** DNS is the *address book*, it turns a human 
 3. **TLS handshake**, ~1 RTT (round-trip time) with TLS 1.3 (down from 2 in TLS 1.2); **0-RTT resumption** for returning clients. On a cross-region path each RTT is ~150 ms, so handshakes alone can dominate first-byte latency.
 4. **HTTP exchange**, HTTP/1.1 (head-of-line blocking per connection) → HTTP/2 (multiplexed streams over one connection) → HTTP/3 (QUIC over UDP, removes TCP head-of-line blocking, faster on lossy/mobile links).
 
-**DNS as a control plane, not just a phonebook.** Record types you should name: A/AAAA (IPv4/IPv6), CNAME (alias), NS, MX. The **TTL trade-off** is the interview point: a *low* TTL means fast failover (you can repoint traffic in seconds) but more lookups and resolver load; a *high* TTL means fewer lookups but **slow propagation** when you need to drain a dead region. **GeoDNS / latency-based routing** steers users to the nearest healthy region; **anycast** advertises one IP from many locations so the network routes to the closest, both are how global services cut RTT and survive regional loss.
+**DNS as a control plane, not just a phonebook.** Record types you should name: A/AAAA (IPv4/IPv6), CNAME (alias), NS, MX. The **TTL trade-off** is the interview point: a *low* TTL means fast failover (you can repoint traffic in seconds) but more lookups and resolver load (every sender re-checks the address book); a *high* TTL means fewer lookups but **slow propagation** when you need to drain a dead region. **GeoDNS / latency-based routing** steers users to the nearest healthy region; **anycast** advertises one IP from many locations so the network routes to the closest, both are how global services cut RTT and survive regional loss.
 
 **Forward vs. reverse proxy:**
 - **Forward proxy**, sits next to the **client**, faces the internet on the client's behalf. Uses: corporate egress control, content filtering, client-side caching, anonymity. The *server* doesn't know the real client.
-- **Reverse proxy**, sits in **front of your servers**, faces clients on the servers' behalf. Uses: load balancing, **TLS termination**, caching, compression, request routing, and security (WAF, a web application firewall; rate limiting; hiding backend topology). The *client* doesn't know which backend served it. Named tech: Nginx, Envoy, HAProxy.
+- **Reverse proxy**, sits in **front of your servers**, faces clients on the servers' behalf. Uses: load balancing, **TLS termination**, caching, compression, request routing, and security (WAF, a web application firewall; rate limiting; hiding backend topology). The *client* doesn't know which backend served it (the mailroom hides the office layout). Named tech: Nginx, Envoy, HAProxy.
 
 **The overlapping front-door family (a Director should disambiguate these cleanly):**
 - **Load balancer**, distributes traffic across backends. **L4** (transport: routes by IP/port, fast, connection-level, no payload inspection) vs **L7** (application: routes by URL/header/cookie, can do sticky sessions, smarter but costlier).
@@ -54,7 +56,7 @@ flowchart LR
 1. **GeoDNS** resolves the Tokyo user to your Asia-Pacific region (or to an anycast IP routed to the nearest PoP, point of presence).
 2. A **CDN edge** in Tokyo serves static assets locally (~10-30 ms) and terminates TLS near the user, so the expensive handshakes don't cross the Pacific.
 3. Dynamic `/api` requests hit a regional **reverse proxy (Envoy)** that terminates TLS, applies rate limiting, and routes to services.
-4. An **L4 LB** spreads connections across stateless app servers.
+4. An **L4 LB** spreads connections across stateless app servers (the mailroom sorting mail to desks).
 5. **Failover:** if the AP region dies, health checks + a *low DNS TTL* (e.g., 30-60 s) repoint traffic to another region within ~1 minute. The Director-level caveat: DNS caching means failover is **not instant**, so for hard SLAs (service-level agreements) you pair it with anycast withdrawal or a global L7 LB that fails over faster than DNS can.
 
 ### Trade-offs table: load balancing layer

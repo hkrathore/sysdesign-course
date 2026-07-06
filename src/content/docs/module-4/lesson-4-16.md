@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> LLM serving inverts every database instinct: the scarce resource is GPU memory (HBM), not disk, and the skew is prefill (one cheap parallel pass) versus decode (one token every 30-50 ms). The KV-cache bounds the batch, so fp8 quantization grows it ~15 to ~65 sequences and continuous batching keeps every slot full. The tension the whole design manages is TTFT versus throughput: snappy first tokens or a packed, cheap fleet. Headline numbers: ~1.7M output tokens/sec from ~1,000 two-GPU nodes at a ~$0.85 per 1M token floor.
+
 ### Learning objectives
 - Run the full **RESHADED** spine on a problem where the bottleneck is not storage or network I/O but **GPU compute and HBM** (high-bandwidth memory) - an inversion that changes which numbers matter.
 - **Estimate** the headline figure - **output tokens/sec across the fleet** - from DAU (daily active users) and tokens-per-response, then convert it to a **GPU/node count and a cost floor** ($/GPU-hour, $/1M tokens).
@@ -46,7 +48,7 @@ That asymmetry - **a cheap parallel read (prefill) feeding a slow sequential gen
 - **Elastic but cold-start-aware** - a node takes **minutes to load weights**; you cannot scale to zero and react instantly.
 - **Cost-bounded** - a per-1M-token floor the business can defend.
 
-**The skew that matters, stated up front.** No read:write database skew - almost no durable write on the hot path. The asymmetry is **prefill vs decode**: 1,000 input tokens processed in one parallel compute burst (prefill - compute-bound, hundreds of ms), then 500 output tokens generated one at a time (decode - memory-bandwidth-bound, ~30-50 ms each, so ~15-25 s of streaming). Decode dominates wall-clock and is where batching pays; prefill dominates the TTFT budget. The resource that saturates first is **GPU HBM** (holding weights *and* KV-cache), not storage or bandwidth.
+**The skew that matters, stated up front.** No read:write database skew - almost no durable write on the hot path. The asymmetry is **prefill vs decode**: 1,000 input tokens processed in one parallel compute burst (prefill - compute-bound, hundreds of ms), then 500 output tokens generated one at a time (decode - memory-bandwidth-bound, ~30-50 ms each, so ~15-25 s of streaming). Decode dominates wall-clock and is where batching pays; prefill dominates the TTFT budget (the chef's single glance vs the word-at-a-time answer). The resource that saturates first is **GPU HBM** (holding weights *and* KV-cache), not storage or bandwidth.
 
 ---
 
@@ -233,10 +235,10 @@ Re-check against the NFRs and break the design on purpose. Five bottlenecks, eac
 
 **Bottleneck 1 - GPU under-utilization from static batching (the central problem).**
 With **static batching**, a batch of *N* runs to completion before the next is admitted. Generations vary wildly in length (20 vs 800 tokens), so the batch is held hostage by the **longest** sequence while finished ones idle in KV slots - utilization craters (often <30%), and at ~$6/node-hour that idle time is the budget bleeding out.
-*Fix - **continuous (in-flight) batching** (vLLM/Orca-style):* the scheduler works at **per-token granularity** - every decode step can evict a finished sequence and admit a waiting one into the freed KV slot. Typically lifts throughput **2-4×** on the same hardware. *Trade:* a far more complex scheduler (interleaving prefill and decode, managing a dynamic batch); accepted because it's the single biggest cost lever in the system. *Rejected:* static batching - simple, but leaves most of the budget idle.
+*Fix - **continuous (in-flight) batching** (vLLM/Orca-style):* the scheduler works at **per-token granularity** - every decode step can evict a finished sequence and admit a waiting one into the freed KV slot (the chef sliding a new order into the freed spot). Typically lifts throughput **2-4×** on the same hardware. *Trade:* a far more complex scheduler (interleaving prefill and decode, managing a dynamic batch); accepted because it's the single biggest cost lever in the system. *Rejected:* static batching - simple, but leaves most of the budget idle.
 
 **Bottleneck 2 - KV-cache exhaustion caps the batch (HBM runs out before compute).**
-At fp16 weights only ~15 sequences fit - memory-bound, not compute-bound, throughput low.
+At fp16 weights only ~15 sequences fit (the prep counter fills before the chef's hands do) - memory-bound, not compute-bound, throughput low.
 *Fix:* the three levers from E - **(a) quantize weights to fp8/int8** (~15 → ~65 sequences), **(b) PagedAttention** (kills fragmentation, ~2-4× effective capacity), **(c) GQA** (~8× smaller KV/token). *Trade:* a small, **eval-gated** accuracy loss and one level of paging indirection - accepted to turn a memory-bound node compute-bound, which is the only way E's numbers hold. *Rejected:* brute-forcing capacity with more/bigger-HBM GPUs - it linearly inflates the most expensive line item; quantization + paging get the capacity nearly free.
 
 **Bottleneck 3 - the TTFT-vs-throughput tension (the trade you must name).**

@@ -90,7 +90,7 @@ The whole design is an **append-only log, split into partitions for throughput, 
 > One data structure does almost everything; pick it for the access pattern, append-and-scan, never random-update.
 
 **The log itself (the only storage that matters).**
-- *Access pattern:* **append to the tail, scan sequentially from an offset.** Never update in place, never random-read by key, the rare workload where a plain file beats a database.
+- *Access pattern:* **append to the tail, scan sequentially from an offset.** Never update in place, never random-read by key, the rare workload where a plain file beats a database (the notebook: append at the bottom, read down the page).
 - *Choice:* an **append-only log on local disk per partition**, split into segment files, replicated to followers, the queue/log substrate. Sequential writes hit raw disk bandwidth; recent reads hit the **page cache**, not disk.
 - *Rejected, a B-tree / RDBMS (relational database management system) as the message store:* it optimizes for random point-reads and in-place updates, paying for an index we never query and write-amplification we don't want. Messages are immutable and read in order; the offset *is* the index. Slower, costlier, solving a problem we don't have.
 - *Rejected, an in-memory queue (RabbitMQ-style):* loses replay and risks data loss on restart. The whole value proposition is durable replay; RAM-only forfeits it.
@@ -170,7 +170,7 @@ seek(partition, offset)          # replay: jump to any retained offset
 
 **Design notes (each with its rejected alternative):**
 - **`acks` is the durability dial, the producer's call, not the cluster's.** `acks=all` + `min.insync.replicas=2` is the no-loss contract; `acks=1` trades a small loss window for latency; `acks=0` is lossy-OK telemetry. *Rejected: a single fixed durability level.* Topics value loss differently; forcing `acks=all` on a metrics firehose burns latency nobody needs.
-- **The partition key *is* the ordering contract.** Same key → same partition → strict order; no key → round-robin → no order. *Rejected: implicit global ordering*, it forces a single partition, capping the topic at one consumer. Ordering is bought with the key, paid for in parallelism (developed in Data model).
+- **The partition key *is* the ordering contract.** Same key → same partition → strict order; no key → round-robin → no order (one table's tickets on one spike). *Rejected: implicit global ordering*, it forces a single partition, capping the topic at one consumer. Ordering is bought with the key, paid for in parallelism (developed in Data model).
 - **Consumers pull; the broker does not push.** *Rejected: broker-push.* Pull lets each consumer read at its own pace, makes replay trivial (just seek), and stops a slow consumer being overwhelmed, the broker tracks no per-consumer in-flight state. Cost: poll latency, which batching hides.
 - **Offset commit is the delivery-semantics lever.** Commit *after* processing → at-least-once (a crash re-delivers); *before* → at-most-once. Exactly-once needs the commit and side-effect **transactional together** (below).
 
@@ -197,7 +197,7 @@ Cost: exactly-once adds latency (transaction coordination) and throughput overhe
 
 **Topic → partition → broker mapping** (metadata): a topic has N partitions; each has one **leader** broker and R−1 **followers**; the **ISR** is the subset currently caught up. This is the linearizable metadata in the KRaft quorum.
 
-**Consumer group state:** per `(groupId, topic, partition)`, the **committed offset**, the next message this group reads. Stored durably in the offsets topic, so a restart resumes exactly where it left off.
+**Consumer group state:** per `(groupId, topic, partition)`, the **committed offset**, the next message this group reads (the cook's remembered line number). Stored durably in the offsets topic, so a restart resumes exactly where it left off.
 
 **The partition-key decision is the single most consequential one in the design.** It determines three things at once:
 - **Ordering scope:** all messages with key K land on one partition, strictly ordered relative to each other. Pick the key = the entity whose order you care about (`user_id`, `order_id`).

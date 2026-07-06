@@ -51,7 +51,7 @@ Enough math to make a defensible call. Round aggressively, state assumptions.
 **Storage, two very different numbers, which is the whole point:**
 - **Blob:** `10M/day × 10 KB = 100 GB/day` → **~37 TB/year**, order **~150-200 TB over 5 years**. Bulk, write-once, immutable.
 - **Metadata:** ~200 B/row (key, owner, timestamps, blob pointer, view counts); round to ~0.5 KB with index overhead → **~5 GB/day, ~10 TB over 5 years**.
-- **The ratio that decides the architecture:** the blob plane is **~20×** the metadata plane by volume, and an individual blob can be **MBs** against a **~200-byte** row, a ~10,000× per-record size gap. Putting a multi-MB body in the same row as its metadata is the mistake the split exists to avoid.
+- **The ratio that decides the architecture:** the blob plane is **~20×** the metadata plane by volume, and an individual blob can be **MBs** against a **~200-byte** row, a ~10,000× per-record size gap. Putting a multi-MB body in the same row as its metadata is the mistake the split exists to avoid (writing the coat into the ticket book).
 
 **Bandwidth.** Read egress: `12K/s × 10 KB ≈ 1 Gbps` average, **~2.4 Gbps peak**, the number that makes a **CDN non-optional**. Write ingest ~1.2 MB/s, ignore it.
 
@@ -74,7 +74,7 @@ Match each dataset to a store, there are two with opposite shapes, and the centr
 **Dataset 2, metadata (key → location + policy).** Tiny rows, must be **strongly consistent** (a create must resolve immediately; a burn must take effect immediately), pure exact-key point lookup. Textbook **KV** shape: **choose DynamoDB / Cassandra**.
 - *Why KV over relational:* O(1) lookups, horizontal scale, **native TTL**, AP-leaning availability for the four-nines read path. A **sharded Postgres** is a defensible alternative if the team runs it well, name the trade (operational familiarity vs effortless horizontal scale), don't pretend KV is the only answer.
 
-**The split, stated as the decision:** metadata in a **strongly-consistent KV** (small, hot, TTL-aware) + bodies in a **dumb object store** (bulk, immutable), with the metadata row holding a **pointer** to the body.
+**The split, stated as the decision:** metadata in a **strongly-consistent KV** (small, hot, TTL-aware) + bodies in a **dumb object store** (bulk, immutable), with the metadata row holding a **pointer** to the body (the ticket book pointing at the rack of hooks).
 
 ---
 
@@ -179,7 +179,7 @@ Stress the design against the NFRs (non-functional requirements); each fix names
 
 **Bottleneck 2, a viral paste hammers one metadata partition.** Classic hot key. **Fix:** it's the same URL for everyone, so the **CDN absorbs it at ~100% edge hit** and Redis takes the metadata lookups that leak through. **Trade:** expiry/burn must be enforced where the CDN can't short-circuit, give public pastes a **short edge TTL** (e.g. 60 s) bounded by `expires_at`, and mark burn/unlisted pastes **non-cacheable** (`Cache-Control: private`). Slightly lower hit ratio on exactly the pastes where correctness matters most.
 
-**Bottleneck 3, burn-after-read is a race.** Two readers open a one-time paste; "read, check, serve, decrement" serves it **twice**. **Fix:** an **atomic conditional claim**, decrement only if `views_remaining > 0` (a conditional write); only the winner serves the body, the loser gets `410`. **Trade:** a strongly-consistent, serialized write on the read path and no CDN caching, isolated to burn pastes only, so the 99% of normal reads stay cheap. (On an eventually-consistent store, burn must use the strongly-consistent read/conditional-write mode, the tunable consistency knob.)
+**Bottleneck 3, burn-after-read is a race.** Two readers open a one-time paste; "read, check, serve, decrement" serves it **twice**. **Fix:** an **atomic conditional claim**, decrement only if `views_remaining > 0` (a conditional write); only the winner serves the body, the loser gets `410` (one reader tears the stub; the other finds it gone). **Trade:** a strongly-consistent, serialized write on the read path and no CDN caching, isolated to burn pastes only, so the 99% of normal reads stay cheap. (On an eventually-consistent store, burn must use the strongly-consistent read/conditional-write mode, the tunable consistency knob.)
 
 **Bottleneck 4, expiry at scale.** With ~18B rows, a cron scanning `expires_at < now` is a non-starter. **Fix:** **store-native TTL deletes in the background, and a lazy check on read enforces correctness immediately**, enforcement is instant, physical deletion is eventual.
 

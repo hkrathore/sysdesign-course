@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> The system-design round is not a quiz, it is a **design review you are asked to chair**, scored on five axes: scoping, estimation, decomposition, **trade-off judgment**, and communication. At Director level the weighting inverts from the IC loop: trade-offs and leadership texture carry the offer, and surplus mechanical depth actively costs you. The whole hour turns on one dial: *does the decision turn on this detail?* Go deeper if yes; state a prior and delegate if no. Both failure modes, too high and too deep, are fatal.
+
 ### Learning objectives
 - Name the 5 axes every system-design interview scores on, and how the weighting shifts for a Director vs. a staff IC (individual contributor).
 - Operate the **altitude dial**, decide in real time when to go deep and when to delegate.
@@ -23,8 +25,8 @@ Every interviewer is scoring some weighted blend of these. The numbers in bracke
 1. **Requirements & scoping** *(heavy)*, Do you clarify before you build? Do you cut scope to a defensible core (3-5 features) instead of trying to boil the ocean?
 2. **Estimation & quantification** *(medium)*, Do you reason in numbers well enough to know whether this fits on 10 servers or 10,000?
 3. **High-level design & decomposition** *(medium)*, Can you break the system into components with clear responsibilities and a clean data flow? Necessary, but has *diminishing returns*, past a point, more boxes is not more signal.
-4. **Trade-off depth & decision-making** *(heaviest)*, Can you name 2-3 viable approaches, state pros/cons, **decide**, and defend the decision against requirements, cost, and risk? This is where the offer is won or lost at Director level.
-5. **Communication & leadership signal** *(heavy)*, Do you drive the conversation, structure your thinking out loud, handle "why not X?" without getting defensive, and know when to say "I'd delegate that benchmark"?
+4. **Trade-off depth & decision-making** *(heaviest)*, Can you name 2-3 viable approaches, state pros/cons, **decide**, and defend the decision against requirements, cost, and risk? This is where the offer is won or lost at Director level (the call when the weather turns).
+5. **Communication & leadership signal** *(heavy)*, Do you drive the conversation (you are chairing the review), structure your thinking out loud, handle "why not X?" without getting defensive, and know when to say "I'd delegate that benchmark"?
 
 **The weighting shift that trips people up:** A staff IC is carried by axes 3 and 4 with *deep* mechanics. A Director is carried by 1, 4, and 5, framing, trade-off judgment, and the leadership texture of how you reason. Deep mechanics on axis 3 are *necessary but not sufficient*, and over-investing there actively costs you ("why is this Director hand-tuning a B-tree?").
 
@@ -60,7 +62,7 @@ A staff-IC opening dives into hash functions. A **Director-altitude** opening so
 
 > "Before I design, three questions. One, is this an internal redirect service or a public product like Bitly, because analytics and abuse-prevention change the architecture? Two, what's the read:write ratio I should assume; I'd expect heavily read-skewed, maybe 100:1, which pushes me toward aggressive caching. Three, what's the availability bar; if it's a 99.99% public service, the redirect path has to survive a region loss. Assuming public product, 100:1 reads, four-nines: my core scope is create-short-URL, redirect, and basic analytics; I'll treat custom aliases and expiry as stretch. Let me size it."
 
-That answer scored axes 1, 2, and 5 in 90 seconds without designing a single component, and it pre-committed the trade-offs that make the rest of the conversation defensible.
+That answer scored axes 1, 2, and 5 in 90 seconds without designing a single component, and it pre-committed the trade-offs that make the rest of the conversation defensible (the chair setting the agenda).
 
 ### Trade-offs table: how to spend a marginal 5 minutes
 | Spend it on… | Pro | Con | Use when… |

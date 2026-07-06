@@ -5,6 +5,8 @@ sidebar:
   order: 18
 ---
 
+> Microservices are an **org chart with an SLA**: you split one deployable into many for independent deploys, team autonomy, and fault isolation, paid for by turning ~100 ns function calls into ~1 ms network hops and losing cross-service ACID. The whole lesson turns on **where the boundary goes**: cut by bounded context and a feature ships by changing one service; cut wrong and you get the **distributed monolith**, all the tax, none of the independence. The default is monolith-first; the write story is sagas plus the outbox, never 2PC.
+
 ### Learning objectives
 - Decide **when microservices earn their cost** and when a modular monolith is the right call, in terms of independent deployability, team autonomy, and fault isolation weighed against the distributed-systems tax.
 - Draw service boundaries from **business capability and bounded context**, not from technical layers or table shapes, and recognize both failure sizes: nano-services and the **distributed monolith**.

@@ -5,6 +5,8 @@ sidebar:
   order: 9
 ---
 
+> Publish-subscribe is broadcast: one publish, and every subscriber gets the full stream, which makes a partitioned log both a queue (one consumer group) and pub-sub (many), the whole distinction being how many independent offsets read the same log. Delivery and ordering rules carry over unchanged: at-least-once plus idempotency, order per key. The cost nobody approves is fan-out amplification: 10k events/s across 5 consumer groups is ~$1,300/month of cross-AZ egress on one topic, and each new subscriber adds its slice invisibly to the producer.
+
 ### Learning objectives
 - Draw the bright line between a **point-to-point queue** (one message → one consumer, work distribution) and **publish-subscribe** (one message → *every* subscriber, broadcast), and explain why the same distributed log can do both.
 - Reason precisely about **topics, subscriptions, and consumer groups**, what gets its own copy of the stream, what shares one, and where the offset lives.

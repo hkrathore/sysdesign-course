@@ -118,7 +118,7 @@ flowchart TB
 
 **Happy path, compressed:** the API authenticates, rate-limits, writes the submission row, **enqueues** the job, and returns `202` instantly, the connection never blocks on execution. The **dispatcher** pulls from the durable queue with fair-share/priority (contest jobs don't starve practice) and hands the job to a **warm worker** that already holds the runtime image and test data locally. The worker spins up an **isolated sandbox** (microVM or container), **no network**, strict **CPU-time / memory / wall-clock limits**, read-only FS, compiles, runs the test cases, captures the verdict, **tears the sandbox down** (fresh per run, no residue), and writes per-test results back. The verdict streams to the user as tests complete.
 
-**The shape to notice:** the load-bearing wall runs between the **trusted control plane** (ordinary, scalable, durable) and the **untrusted execution plane** (the red box, every isolation and resource-limit decision lives here). The queue + warm pool keep work crossing that wall at a rate the execution plane can safely serve.
+**The shape to notice:** the load-bearing wall runs between the **trusted control plane** (ordinary, scalable, durable) and the **untrusted execution plane** (the red box, every isolation and resource-limit decision lives here), the row of blast chambers. The queue + warm pool keep work crossing that wall at a rate the execution plane can safely serve.
 
 ---
 
@@ -206,7 +206,7 @@ The per-test granularity is what enables **fail-fast** (stop after the first non
 > **Spine adaptation:** Evaluation here is an **isolation / blast-radius audit**, not a generic bottleneck hunt. Re-check the NFRs, then break the design on the security and burst dimensions, the two that actually fail. Five failure modes, each fixed with a *named* trade-off.
 
 **Bottleneck 1, sandbox escape (the cardinal security risk).**
-A submission isn't buggy code; it's an exploit aimed at your host kernel. If it escapes, the **blast radius** is everything that worker reaches, other submissions, host credentials, the internal network. The boundary is chosen *by* that radius (three options in the trade-offs table): a **bare process/container** shares the host kernel → radius = the whole host; **gVisor** filters syscalls in userspace to shrink that surface; a **microVM (Firecracker)** gives each run its own guest kernel behind a hardware boundary → radius = one VM, at ~125 ms and lower density.
+A submission isn't buggy code; it's an exploit aimed at your host kernel (the machine rigged to drill into the next lab). If it escapes, the **blast radius** is everything that worker reaches, other submissions, host credentials, the internal network. The boundary is chosen *by* that radius (three options in the trade-offs table): a **bare process/container** shares the host kernel → radius = the whole host; **gVisor** filters syscalls in userspace to shrink that surface; a **microVM (Firecracker)** gives each run its own guest kernel behind a hardware boundary → radius = one VM, at ~125 ms and lower density.
 *Decision:* **microVMs for public adversarial code** (smallest radius); **gVisor containers** where density/cost dominate and the threat is softer. *Trade:* microVMs cost density and ~125 ms for a dramatically smaller blast radius; bare containers are cheaper but one kernel CVE (Common Vulnerabilities and Exposures) is catastrophic. The Director answer names each radius and picks against the threat model, it doesn't recite cgroup flags. (Internals delegated, see below.)
 
 <details>
@@ -226,7 +226,7 @@ A submission isn't buggy code; it's an exploit aimed at your host kernel. If it 
 
 **Bottleneck 3, the runaway submission (infinite loop, fork bomb, memory hog).**
 Untrusted code *will* try to consume the host; without hard limits one submission starves the worker.
-*Fix:* **CPU-time *and* wall-clock limits** (a `sleep` burns no CPU but must still be killed → need both), a **memory ceiling** (cgroup → OOM → MLE), an **output-size cap** (kill a stdout flood), and a **PID limit** (defeat fork bombs). Limits live in the job envelope; a violation is a *verdict* (TLE/MLE), not a crash. *Trade:* aggressive limits can false-positive a slow-but-correct solution, tuned per problem, owned by authors. *Rejected:* wall-clock-only timeouts, they miss a busy loop under the wall limit and are fooled by `sleep`.
+*Fix:* **CPU-time *and* wall-clock limits** (a `sleep` burns no CPU but must still be killed → need both), a **memory ceiling** (cgroup → OOM → MLE), an **output-size cap** (kill a stdout flood), and a **PID limit** (defeat fork bombs). Limits live in the job envelope; a violation is a *verdict* (TLE/MLE), not a crash (the fuse trips, the lab keeps running). *Trade:* aggressive limits can false-positive a slow-but-correct solution, tuned per problem, owned by authors. *Rejected:* wall-clock-only timeouts, they miss a busy loop under the wall limit and are fooled by `sleep`.
 
 **Bottleneck 4, test-case distribution to 700 workers.**
 A scaled-up worker needs the (tens of GB) test data *before* it can judge; pulling it at first-job time stalls the spike.

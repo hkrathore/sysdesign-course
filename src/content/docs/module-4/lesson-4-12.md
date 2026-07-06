@@ -5,6 +5,8 @@ sidebar:
   order: 12
 ---
 
+> A crawler is a politeness-constrained BFS over a hostile graph, not a downloader: the HTTP GET is the easy 5%. The math sets the shape: 30B pages a month is ~12k pages/s, and at ≤1 req/s/host that means ~12,000 hosts crawled in parallel, plus ~720k "have I seen this URL?" checks/s that only a ~120 GB in-RAM Bloom filter can absorb. The one decision everything hangs on: partition the URL frontier by hostname, so politeness is local and needs zero global coordination.
+
 ### Learning objectives
 - Run the **RESHADED** spine on a large-scale web crawler and defend every call against requirements, cost, and risk.
 - Internalize the crux: **the URL frontier** must simultaneously **prioritize**, enforce **politeness (per-host rate-limiting)**, and never re-fetch the billions of URLs already **seen**, cheaply.
@@ -142,9 +144,9 @@ flowchart TD
     style STORE fill:#2b4c7e,color:#fff
 ```
 
-**Happy path, compressed:** the frontier's host-shard locally picks the next *eligible* URL (host out of its 1 s cool-down, highest priority), no global lock, because that shard owns the host. The fetcher checks the per-host `robots.txt` cache (Redis, TTL'd) and the caching async DNS resolver, neither blocks the worker, then GETs ~100 KB. The body is fingerprinted against the **content-seen** set (mirrors, syndication, session-id variants drop here without being stored or re-parsed); new pages go to S3 and the parser, which extracts links. Each link is normalized and run through the **Bloom filter**, ~98% drop as already-seen; the ~2% genuinely new URLs are added to the filter and enqueued into their host-shard and priority band. Separately, the **re-crawl scheduler** reads the ledger and re-injects URLs whose adaptive `next_crawl` time has arrived, that's what keeps the corpus fresh between full passes.
+**Happy path, compressed:** the frontier's host-shard locally picks the next *eligible* URL (host out of its 1 s cool-down, highest priority), no global lock, because that shard owns the host. The fetcher checks the per-host `robots.txt` cache (Redis, TTL'd) and the caching async DNS resolver, neither blocks the worker, then GETs ~100 KB. The body is fingerprinted against the **content-seen** set (mirrors, syndication, session-id variants drop here without being stored or re-parsed); new pages go to S3 and the parser, which extracts links. Each link is normalized and run through the **Bloom filter** (the librarian's have-I-copied-this memory), ~98% drop as already-seen; the ~2% genuinely new URLs are added to the filter and enqueued into their host-shard and priority band. Separately, the **re-crawl scheduler** reads the ledger and re-injects URLs whose adaptive `next_crawl` time has arrived, that's what keeps the corpus fresh between full passes.
 
-**The two design choices that define this diagram:** **(a)** the **frontier is sharded by host**, so politeness is a purely local decision, no global rate-limiter; **(b)** a **RAM Bloom filter sits in front of the frontier**, so the 720k-checks/s dedup never touches disk and only ~12k/s of new URLs hit the queue.
+**The two design choices that define this diagram:** **(a)** the **frontier is sharded by host**, so politeness is a purely local decision (each shard minds its own manners), no global rate-limiter; **(b)** a **RAM Bloom filter sits in front of the frontier**, so the 720k-checks/s dedup never touches disk and only ~12k/s of new URLs hit the queue.
 
 ---
 
@@ -225,7 +227,7 @@ A cold resolve is 50-200 ms of synchronous wait; a worker blocked 100 ms does ~1
 A false positive says "seen" for a never-crawled URL: **FPs drop new pages, coverage loss, never a double-crawl** (Bloom filters have no false negatives). At 120B URLs and 1% FP, that's up to ~1.2B pages wrongly skipped. If coverage is critical, **layer an exact ledger check behind positives**, only ~1% of 720k ≈ 7.2k extra lookups/s, affordable, or raise the bit budget (12 bits/key → ~0.3% FP at ~180 GB). *Trade-off:* exact-behind-positive costs DB load on hits; more bits costs RAM. Tune FP rate against how much coverage loss the product tolerates, fine for a search corpus, not for an archival crawl.
 
 **Bottleneck 4, spider traps and near-duplicate floods.**
-Infinite calendars, session-id URLs, link mazes.
+Infinite calendars, session-id URLs, link mazes (the web fighting back).
 - **Fix (layered):** per-host **budget + depth limit** caps blast radius; **URL normalization** (strip session ids, sort params) collapses trivial variants pre-Bloom; **SimHash content dedup** stops near-identical bodies even when URLs differ; a **trap heuristic** quarantines hosts emitting huge fan-out of near-identical content. *Trade-off:* aggressive dedup risks collapsing genuinely different pages, we tune toward bounded loss, because an unbounded trap can consume the fleet while an incomplete crawl is merely suboptimal.
 
 **Bottleneck 5, losing the frontier (durability).**

@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> Requirements are verbs and adjectives: functional is what the system does, non-functional is how well, and the adjectives are what actually cost money and drive the architecture. Everything turns on one discipline: every requirement must be a number (99.99% is ~53 minutes of downtime a year, latency is a p99, never a mean) and every number must pre-commit a design lever, out loud. The single most architecture-shaping input is the read:write ratio: 100:1 read-heavy buys you a cache; write-heavy buys you a log and LSM storage.
+
 ### Learning objectives
 - Cleanly separate functional (what it does) from non-functional (how well) requirements.
 - Run the clarification dialogue that scopes the entire problem in 2-3 minutes.

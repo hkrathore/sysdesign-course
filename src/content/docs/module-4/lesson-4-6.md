@@ -5,6 +5,8 @@ sidebar:
   order: 6
 ---
 
+> WhatsApp is a **switchboard, not a database**: the message is 200 bytes, the problem is finding which of ~250 gateways holds the recipient's socket among **200M concurrent connections**, and buffering when it holds none. Size for the amplified load, **~6M deliveries/s and ~12M receipts/s**, not the 2.5M-send headline. The design turns on two commitments: **ack-then-route** through a durable queue (always-writable), and **delete-on-delivery** (~5 TB/day transient vs ~7 PB/yr persisted). E2E encryption is the constraint that quietly deletes every feature needing to read content.
+
 ### Learning objectives
 - Run the **RESHADED** spine end-to-end on a real-time messaging system, defending each step against requirements, cost, and risk rather than reciting components.
 - Separate the two hard sub-problems, the **session layer** (mapping a user's device to the gateway holding its socket) and the **router + per-recipient inbox** (durable delivery to an offline phone), and explain why messaging is a **write-fan-out** problem, *unlike* a feed.

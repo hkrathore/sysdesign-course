@@ -5,6 +5,8 @@ sidebar:
   order: 5
 ---
 
+> A CDN buys two things with one mechanism, and they are the same number read two ways: an edge hit serves the user from ~10-50 ms away instead of ~150 ms to origin, and it is a request the origin never sees. Origin load is R × (1 − h), brutally non-linear: a 95% hit ratio means 20× less origin, 99% means 100×, so 90% to 99% is a further 10×. The lesson turns on defending that hit ratio: cache-key hygiene, pull vs push, and versioned URLs over purge.
+
 ### Learning objectives
 - Explain *why* a CDN exists, that it buys two things at once, **user-facing latency** and **origin offload**, and quantify both from the **cache-hit ratio**.
 - Contrast **pull (origin-pull)** and **push** CDNs, and state which content and which operating model each one fits.

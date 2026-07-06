@@ -35,7 +35,7 @@ That is **convergence**: independent, concurrent, intention-carrying edits must 
 **Functional requirements:**
 1. **Open/load** a document and render current state fast.
 2. **Edit** locally with instant echo; **propagate** to all active editors sub-second.
-3. **Converge** concurrent edits into one consistent state - the crux.
+3. **Converge** concurrent edits into one consistent state - the crux (ten markers, one board).
 4. **Presence:** who's here, where their cursor and selection are.
 5. **Offline edit + reconnect merge.**
 6. **Persistence + version history** (snapshots, restore, see-changes-since).
@@ -159,7 +159,7 @@ WS   /v1/docs/{docId}/connect
 
 - **Operational Transformation (OT).** Each op is positional (`insert "x" at 7`); on conflict the server **transforms** one against the other so both apply consistently (two `insert at 7` → one shifts to 8). *Pro:* compact ops, mature (the original Docs/Wave approach). *Con:* the **transformation functions are notoriously hard to get right** across every op-pair, and OT **leans on a central server** to order ops - complicating the offline/peer story.
 
-- **CRDT (Conflict-free Replicated Data Type).** Each element gets a **stable unique ID** and a position from a partial order, so merges are **commutative and associative** - any replica applying the same ops in any order converges, *no transform, no central authority*. *Pro:* converges without a coordinator, strong **offline-first** story, peer-to-peer friendly. *Con:* **metadata overhead** (ID + position per element), tombstones for deletes, historically heavier memory - largely tamed by modern sequence CRDTs (RGA, Yjs, Automerge).
+- **CRDT (Conflict-free Replicated Data Type).** Each element gets a **stable unique ID** and a position from a partial order, so merges are **commutative and associative** - any replica applying the same ops in any order converges, *no transform, no central authority*. *Pro:* converges without a coordinator, strong **offline-first** story, peer-to-peer friendly (everyone writes at once, stick discarded). *Con:* **metadata overhead** (ID + position per element), tombstones for deletes, historically heavier memory - largely tamed by modern sequence CRDTs (RGA, Yjs, Automerge).
 
 **The decision, defended against *this* product's requirements:**
 > **I'd choose a sequence CRDT, and the requirement that decides it is offline editing.** Close a laptop, keep typing, merge cleanly on reconnect is exactly what CRDTs make easy and OT makes painful: OT's central ordering authority means an offline client's stale-baseline ops need careful server-side transformation against everything that happened while it was gone, whereas CRDTs merge regardless of order or coordinator - so offline-then-reconnect is *the same code path* as normal editing. **The trade I accept:** CRDT metadata/memory overhead per element, mitigated by snapshotting and modern libraries. If offline were cut, I'd reconsider OT for smaller payloads - the call hinges on that one requirement.
@@ -189,7 +189,7 @@ WS   /v1/docs/{docId}/connect
 **Re-check vs NFRs:** convergence - CRDT merge (delegated proof); latency - optimistic echo + per-doc broadcast; durability - op log + snapshots; offline/AP - CRDT merges on reconnect; presence - ephemeral channel. Now the bottlenecks.
 
 **Bottleneck 1 - convergence correctness (the cardinal risk, and the delegation move).**
-*Fix:* the **CRDT merge** guarantees a concurrent same-word edit converges identically on both screens by construction (commutative ops, stable IDs). **The Director move:** name this as *the* pivotal call, choose CRDT for the offline requirement, and **delegate the convergence proof** - "the collaboration team owns the implementation and proves convergence with property tests + a multi-client fuzzer; my prior is Yjs." *Rejected:* hand-deriving transforms at the whiteboard - the IC rat-hole this question is built to expose. The honest depth limit *is* the signal.
+*Fix:* the **CRDT merge** guarantees a concurrent same-word edit converges identically on both screens by construction (commutative ops, stable IDs), the whiteboard showing the same sentence to both. **The Director move:** name this as *the* pivotal call, choose CRDT for the offline requirement, and **delegate the convergence proof** - "the collaboration team owns the implementation and proves convergence with property tests + a multi-client fuzzer; my prior is Yjs." *Rejected:* hand-deriving transforms at the whiteboard - the IC rat-hole this question is built to expose. The honest depth limit *is* the signal.
 
 **Bottleneck 2 - the per-doc coordinator as a single point.**
 *Fix:* a **lightweight, sharded** authority - each doc's coordinator is tiny (tens of editors, tiny op rate), so thousands run across the fleet sharded by `doc_id`, with fast failover (re-elect, rehydrate from snapshot + op-log tail). *Trade-off:* a sub-second rehydrate stall on failover - accepted because per-doc state is small. *(With a CRDT the coordinator is "soft" - clients could merge peer-to-peer - but we keep it for durable ordering and broadcast efficiency.)*

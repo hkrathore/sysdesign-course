@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> The home timeline looks read-heavy (5:1) but hides an inversion: **push** (precompute every follower's timeline) turns the backend write-heavy at **~925K inserts/s**, roughly 37 writes per user-facing read. It is still the right default, because pure **pull** costs ~4.6M fetches/s, 5× the work, paid on the latency-critical read. The bargain breaks at the tail: one celebrity tweet is a **100M-write bomb**, so the answer is a hybrid, push the 99.9%, pull the celebrities, and merge by time-sortable `tweet_id` at read time.
+
 ### Learning objectives
 - Run the **RESHADED** spine on the home-timeline problem and come out with a defensible **hybrid fan-out** design, not just "push" or "pull."
 - **Quantify** the central trade: push (fan-out-on-write, ~925K timeline inserts/s) vs pull (fan-out-on-read, ~4.6M tweet-fetches/s), and explain why a **5:1 read-heavy** workload makes push the default.
@@ -133,7 +135,7 @@ flowchart LR
 **Happy path, posting (the write fan-out):**
 1. Client `POST`s a tweet → **Write API** assigns a **Snowflake `tweet_id`**, writes the durable record to the **Tweet store**, and returns ~immediately (the user's post is confirmed before fan-out finishes, fan-out is async).
 2. Write API enqueues a **fan-out job** onto a queue (the messaging-queue building block, durable, decoupled, load-leveled). This is the seam that keeps a celebrity's fan-out from stalling the author's `POST`.
-3. **Fan-out workers** look up the author's **followers** in the graph store and **prepend `tweet_id`** to each follower's list in the **Timeline cache**, *but skip celebrities (pull instead) and skip inactive users* (the two big optimizations, justified in E/Evaluation).
+3. **Fan-out workers** look up the author's **followers** in the graph store and **prepend `tweet_id`** to each follower's list in the **Timeline cache** (the doorstep delivery, one paper per follower), *but skip celebrities (pull instead) and skip inactive users* (the two big optimizations, justified in E/Evaluation).
 
 **Happy path, reading (the read merge):**
 1. Client `GET`s home timeline → **Timeline Read service** fetches the **precomputed ID list** from the Timeline cache (one fast lookup), these are the push-delivered tweets.
@@ -211,10 +213,10 @@ following:{user_id}  → set of followee_ids      # drives PULL/MERGE + dedup
 
 **Bottleneck 1, the celebrity write-amplification bomb (the centerpiece).**
 A push to a 100M-follower account = **100M timeline inserts for one tweet**. At a few such tweets/minute this alone dwarfs the entire 925K/s baseline, creates massive write spikes, and delays *every* author's fan-out behind it.
-- **Fix, hybrid:** accounts above a **celebrity threshold** (say **>1M followers**, or simply the top-N accounts) are **not pushed**. Their tweets are **pulled at read time** and merged. The threshold is a **tunable knob**, and the trade is explicit: **lower threshold → less write amplification but more read-time merge cost** (more accounts pulled per read); **higher threshold → cheaper reads but bigger write spikes**. You tune it from the follower histogram. *Rejected:* pure push (celebrity bomb) and pure pull (4.6M fetches/s, every read pays). Hybrid pays neither extreme.
+- **Fix, hybrid:** accounts above a **celebrity threshold** (say **>1M followers**, or simply the top-N accounts) are **not pushed**. Their tweets are **pulled at read time** and merged (grabbed and printed on the spot, no doorstep visits). The threshold is a **tunable knob**, and the trade is explicit: **lower threshold → less write amplification but more read-time merge cost** (more accounts pulled per read); **higher threshold → cheaper reads but bigger write spikes**. You tune it from the follower histogram. *Rejected:* pure push (celebrity bomb) and pure pull (4.6M fetches/s, every read pays). Hybrid pays neither extreme.
 
 **Bottleneck 2, fanning out to inactive followers (pure waste).**
-60% of registered users are **not DAU**. Pushing a tweet into the timeline of someone who won't open the app for a month is pure write amplification with zero benefit.
+60% of registered users are **not DAU**. Pushing a tweet into the timeline of someone who won't open the app for a month is pure write amplification with zero benefit (papers piling onto a doorstep nobody opens).
 - **Fix, skip inactive users on push; recompute on login.** Fan out only to recently-active followers; when a dormant user returns, **compute their timeline on read** (a one-time pull) and start pushing again. Since most of a popular user's followers are inactive at any moment, this cuts a large fraction of the 80B/day inserts. The trade: **a returning user's first timeline load is slower** (a cold compute) in exchange for not maintaining 500M-200M = 300M dead timelines. *Rejected:* fan out to everyone, pays to maintain timelines nobody reads.
 
 **Bottleneck 3, the read-time merge and pagination (the tail-latency risk).**

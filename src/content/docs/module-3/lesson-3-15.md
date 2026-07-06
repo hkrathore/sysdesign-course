@@ -5,6 +5,8 @@ sidebar:
   order: 15
 ---
 
+> A distributed scheduler is Unix `cron` rebuilt out of three hard problems: a durable timer store, leader election, and at-least-once delivery. The claim the lesson dismantles is "elect a leader and jobs fire exactly once": failover gaps miss, zombie leaders double, queues redeliver; exactly-once firing does not exist. What survives is **exactly-once-effect**: idempotency keyed on `(job_id, scheduled_fire_time)`, the key that tells a retry from a recurrence. At 100M timers, midnight is a failure mode: 3M simultaneous fires against a 50k/s fleet is a 60-second wall you smear with jitter.
+
 ### Learning objectives
 - Decompose a scheduler into two separable concerns, **deciding *when* a job is due** (the scheduler/timer) and **running it reliably** (the executor), routed through a durable queue so you **reuse the messaging-queue machinery** instead of re-deriving it.
 - Reason precisely about the **two "once"s**: leader election dedupes *concurrent fires* but does **not** give exactly-once *firing*; workers run *at-least-once*; the net guarantee customers actually want, **exactly-once-effect**, is **at-least-once everywhere + idempotency keyed on `(job_id, scheduled_fire_time)`**.

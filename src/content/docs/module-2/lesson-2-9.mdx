@@ -6,6 +6,8 @@ sidebar:
 ---
 import BloomFilterVisualizer from '@components/widgets/BloomFilterVisualizer.jsx';
 
+> Three cheap levers that decide expensive fights. A Bloom filter buys a guaranteed-safe "skip this lookup" for ~9.6 bits per element at 1% false positives, ~30× smaller than the keys it guards. Little's Law (concurrency = throughput × latency) explains why a p99 bump collapses a pool that looked nowhere near capacity, and why a 1%-slow backend under 100-way fan-out slows ~63% of requests. And batch vs stream is a freshness question: pay streaming's windowing and state tax only when a requirement says "act within seconds."
+
 ### Learning objectives
 - Explain a **Bloom filter**, probabilistic set membership with **no false negatives** and a **tunable false-positive rate**, size one with the rule of thumb (~9.6 bits/element ≈ 1% FP), and connect it to LSM (log-structured merge) reads and cache/CDN guards.
 - Distinguish **latency** from **throughput**, show why pushing one can hurt the other, and use **Little's Law** (`concurrency = throughput × latency`) and **tail latency (p99/p99.9)** to reason about it.
@@ -46,7 +48,7 @@ For `n` inserted elements, `m` bits, and `k` hashes, the false-positive probabil
 
 </details>
 
-**Concrete sizing (the back-of-envelope an interviewer wants):** **1,000,000 keys** at `p = 1%` → `m ≈ 9.6 Mbit ≈ 1.2 MB`. The actual keys, say 40-byte strings, would be 40 MB, so the filter is **~30× smaller** than the data it guards and lives entirely in RAM. *Trade-off named:* you spend bits to lower `p`; the rejected alternative, an exact hash set, gives `p = 0` but costs the full 40 MB. You pick the Bloom filter precisely when "occasionally do a wasted lookup" is far cheaper than "store the whole set."
+**Concrete sizing (the back-of-envelope an interviewer wants):** **1,000,000 keys** at `p = 1%` → `m ≈ 9.6 Mbit ≈ 1.2 MB`. The actual keys, say 40-byte strings, would be 40 MB, so the filter is **~30× smaller** than the data it guards and lives entirely in RAM. *Trade-off named:* you spend bits to lower `p`; the rejected alternative, an exact hash set, gives `p = 0` but costs the full 40 MB. You pick the Bloom filter precisely when "occasionally do a wasted lookup" is far cheaper than "store the whole set" (the crib-sheet, not the binder).
 
 Insert a few items below and watch the `k` bits light up, then query a word that was **never** inserted, or hit **find a false positive**, to see "definitely absent" flip to "probably present" as the array fills:
 
@@ -62,7 +64,7 @@ Insert a few items below and watch the `k` bits light up, then query a word that
 - **Latency** = time for *one* operation (a single request's round trip). Measured in ms; the thing a *user* feels. (Recall the latency ladder from the latency-numbers lesson, RAM reads in ~100 ns, SSD in ~100 µs, a cross-region RTT (round-trip time) ~150 ms; *where* the work happens sets the floor.)
 - **Throughput** = operations completed *per unit time* (QPS, MB/s). The thing *capacity planning* and *cost* care about.
 
-They are independent axes, and the classic mistake is treating "make it fast" as one goal. **Batching** is the cleanest example of the tension: amortize a fixed per-operation cost over many items and throughput rises, but waiting to fill the batch **adds latency** to the items that arrived first. The same trade recurs everywhere: disk I/O coalescing, TCP's Nagle algorithm, Kafka's `linger.ms`, and GPU request batching in LLM serving (bigger batches = more tokens/sec *and* higher per-request latency). Recognizing that "optimize latency" and "optimize throughput" can be **opposite directions on the same knob** is a senior tell.
+They are independent axes, and the classic mistake is treating "make it fast" as one goal. **Batching** is the cleanest example of the tension: amortize a fixed per-operation cost over many items and throughput rises, but waiting to fill the batch **adds latency** to the items that arrived first (the barista's tray of 12). The same trade recurs everywhere: disk I/O coalescing, TCP's Nagle algorithm, Kafka's `linger.ms`, and GPU request batching in LLM serving (bigger batches = more tokens/sec *and* higher per-request latency). Recognizing that "optimize latency" and "optimize throughput" can be **opposite directions on the same knob** is a senior tell.
 
 **Little's Law, the one formula to bring.** For any stable system, the average number of requests *in flight* (concurrency `L`) equals arrival rate (throughput `λ`) times time in system (latency `W`):
 
@@ -99,7 +101,7 @@ The freshness ladder, with the cost you pay for each rung:
 - **Lambda architecture:** run a **batch layer** (accurate, complete, slow) *and* a **speed/streaming layer** (fast, approximate) in parallel; serve a merge of both. You get correctness *and* freshness, but at the cost of **two codebases computing the same logic in two engines**, which drift and double your maintenance and on-call surface.
 - **Kappa architecture:** **stream-only**. Treat the immutable log (Kafka) as the source of truth; if you need to "reprocess" history (a bug fix, a new metric), you **replay the log** through the same streaming job. One codebase, one engine. The trade: you give up the batch layer's simple, cheap full-history recompute, and replay of a long retention window can be expensive and slow. *Director framing:* Lambda buys correctness-plus-freshness at the price of dual maintenance; Kappa buys operational simplicity at the price of expensive replays and a hard dependency on log retention. You choose Kappa when your logic fits a single streaming model and your replay window is bounded; you keep Lambda (or just plain batch) when full-history recomputation is cheaper or the batch logic genuinely differs.
 
-**The decision rule (say this out loud):** drive it from the **freshness requirement** in the R step. "Results an hour old are fine" (billing, reports, training data) → **batch**: cheaper per unit, far simpler to operate; streaming would buy freshness nobody asked for. "We must act within seconds" (block the fraud *before* settlement, alert *now*) → **stream**: batch's interval is a non-starter no matter how cheap. Many shops run **both**: stream for the live path, batch to recompute the accurate ground truth nightly.
+**The decision rule (say this out loud):** drive it from the **freshness requirement** in the R step. "Results an hour old are fine" (billing, reports, training data) → **batch**: cheaper per unit, far simpler to operate; streaming would buy freshness nobody asked for. "We must act within seconds" (block the fraud *before* settlement, alert *now*) → **stream**: batch's interval is a non-starter no matter how cheap (live CCTV, not the photo lab). Many shops run **both**: stream for the live path, batch to recompute the accurate ground truth nightly.
 
 ### Diagram: Bloom filter as the LSM/cache read guard
 ```mermaid

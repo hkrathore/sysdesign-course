@@ -100,7 +100,7 @@ That asymmetry, a tiny strongly-consistent per-auction core, a large eventually-
 - *Rejected, search off the auction DB:* couples the browse firehose to the CP core.
 
 **3. Watcher notification (eventually consistent, high fan-out).**
-- *Choice:* **Kafka** for bid-event publication; **WebSocket gateway** for last-mile push. The displayed price is a hint; the CAS is the truth.
+- *Choice:* **Kafka** for bid-event publication; **WebSocket gateway** for last-mile push. The displayed price is a hint; the CAS is the truth (the room's scoreboard, not the gavel).
 - *Rejected, synchronous push from bid-acceptance path:* couples bid p99 to an unbounded watcher count.
 
 ---
@@ -221,7 +221,7 @@ WHERE auction_id = :auction_id
 On success: insert the bid row in the same transaction.
 
 **Shard key = `auction_id`. The load-bearing decision:**
-- *Why it's right:* all operations on an auction, CAS on `current_price`, bid log append, close-time extension, close event, are scoped to one `auction_id`. Sharding by `auction_id` colocates all of them on one shard: no cross-shard 2PC (two-phase commit); the CAS, the bid append, and the anti-snipe extension are one local transaction.
+- *Why it's right:* all operations on an auction, CAS on `current_price`, bid log append, close-time extension, close event, are scoped to one `auction_id`. Sharding by `auction_id` colocates all of them on one shard: no cross-shard 2PC (two-phase commit); the CAS, the bid append, and the anti-snipe extension are one local transaction (one auctioneer per item, fully independent).
 - *Rejected, shard by `bidder_id`:* the CAS on `current_price` needs to own the auction row; distributing by bidder scatters bids for the same auction across shards, forcing distributed transactions for every bid.
 - *Rejected, shard by `category`:* hot categories create hot shards. `auction_id` distributes load uniformly.
 
@@ -250,7 +250,7 @@ Implementation detail: the upsert must check the key before the CAS, within the 
 
 **Bottleneck 1, CAS correctness under concurrent bids.**
 Two bidders submit `$110` simultaneously against `current_price = $100`.
-*Fix:* the CAS condition `amount > current_price` with row-level serialization means exactly one UPDATE affects 1 row; the other sees 0 rows → 409 with the current price. *Rejected:* version-check only, a version bump doesn't encode price ordering; a stale-version retry could accept a lower bid after a winning higher bid. The CAS must test both conditions.
+*Fix:* the CAS condition `amount > current_price` with row-level serialization means exactly one UPDATE affects 1 row; the other sees 0 rows → 409 with the current price (the auctioneer advancing the price, never back). *Rejected:* version-check only, a version bump doesn't encode price ordering; a stale-version retry could accept a lower bid after a winning higher bid. The CAS must test both conditions.
 
 **Bottleneck 2, Fan-out on a closing hot auction.**
 1,000 watchers, 20 bids/min ≈ 333 watcher events/s on that auction.

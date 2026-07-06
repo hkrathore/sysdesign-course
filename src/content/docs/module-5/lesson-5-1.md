@@ -150,7 +150,7 @@ flowchart TB
 **Happy path, a charge:**
 
 1. Merchant calls `POST /v1/charges` with an **idempotency key** in the header.
-2. Charge Service checks the idempotency store (Redis → Postgres). If the key exists and the result is final, **return the cached response immediately**, exactly-once enforced at the entry point.
+2. Charge Service checks the idempotency store (Redis → Postgres). If the key exists and the result is final, **return the cached response immediately**, exactly-once enforced at the entry point (the bank handing back the same receipt).
 3. If new: write a `PENDING` idempotency record to Postgres (durably, before any external call).
 4. Call the PSP with its own idempotency key (derived from ours). Network timeout → **retry with the same key**, the PSP deduplicates.
 5. On PSP success: in a **single database transaction**, write the transaction record (`AUTHORIZED`), append two ledger entries (debit buyer account, credit platform suspense), and mark the idempotency record `COMPLETE`. Commit. On failure: mark `FAILED`, return to merchant.
@@ -201,7 +201,7 @@ GET  /v1/ledger/{account_id}?from=&to=&page=  -> 200 { entries:[{entryId,debit,c
 
 **Design notes (each with its rejected alternative):**
 
-- **`Idempotency-Key` is mandatory on all mutating calls, enforced at the gateway.** Rejected: optional header, merchants will forget it on retry logic, and that is when you double-charge. Make it required; return 400 if absent.
+- **`Idempotency-Key` is mandatory on all mutating calls, enforced at the gateway.** Rejected: optional header, merchants will forget it on retry logic, and that is when you double-charge (an ATM retrying without its transaction ID). Make it required; return 400 if absent.
 - **201 vs 200 for idempotent replay.** RFC semantics: first successful call returns 201 Created; an idempotent replay returns 200 with the identical body. This lets clients distinguish "new" from "replayed" without parsing the body.
 - **Auth+capture split.** Hotels, car rentals, and subscription trials pre-authorize but capture later. Capture carries its own idempotency key to prevent double-capture. Rejected: combined auth+capture only, too restrictive for common merchant workflows.
 - **Refund as a new resource, not a DELETE.** Money never goes backwards in the ledger; a refund appends a new credit entry. `DELETE /charges/{id}` would imply the transaction never happened, wrong model, wrong audit trail.
@@ -258,7 +258,7 @@ Now the failure modes.
 
 **Failure 1, Crash between PSP call and DB commit (the most dangerous race).**
 
-PSP authorizes the charge; the service crashes before committing. Merchant retries with the same idempotency key. Service finds the record PENDING, re-calls the PSP with the same derived key; PSP returns the prior result. Service commits and marks COMPLETE. Money moved exactly once. This is why the ordering is load-bearing: **idempotency record to Postgres before PSP call**. Reverse it and you get a window where PSP succeeds but the crash prevents recording it.
+PSP authorizes the charge; the service crashes before committing. Merchant retries with the same idempotency key (the ATM re-submitting the same transaction ID). Service finds the record PENDING, re-calls the PSP with the same derived key; PSP returns the prior result. Service commits and marks COMPLETE. Money moved exactly once. This is why the ordering is load-bearing: **idempotency record to Postgres before PSP call**. Reverse it and you get a window where PSP succeeds but the crash prevents recording it.
 
 **Failure 2, PSP succeeds but the HTTP response is lost (silent success).**
 

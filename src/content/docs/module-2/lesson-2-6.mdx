@@ -6,6 +6,8 @@ sidebar:
 ---
 import ConsistentHashingRing from '@components/widgets/ConsistentHashingRing.jsx';
 
+> Consistent hashing exists to fix one brutal number: under `hash(key) mod N`, adding a single node to a 100-node cluster remaps 99% of keys, a full reshuffle (and, for a cache, a thundering herd) just to gain 1% capacity. The ring makes membership changes local: keys and nodes share one fixed hash space, so a join or leave moves only ~K/N keys. The catches this lesson drills: a plain ring runs ~1.7× lumpy until virtual nodes smooth it to ~1.1×, and the ring balances keyspace, never a single hot key.
+
 ### Learning objectives
 - Explain why `hash(key) mod N` is a rebalancing trap, and quantify how much data moves when `N` changes.
 - Describe the **consistent-hashing ring** and show that a membership change moves only ~**K/N** keys instead of nearly all of them.
@@ -27,13 +29,13 @@ Imagine seating guests at a wedding by a rule: `seat = hash(name) mod (number of
 | 10 → 11 nodes | **90.9%** | 9.1% |
 | 100 → 101 nodes | **99.0%** | 1.0% |
 
-Read the right column: the *minimum* data you must move to rebalance onto one new node out of `N+1` is `1/(N+1)`, about **1%** at 100 nodes. The `mod N` scheme moves **99%**. For a cache, that's a near-total miss storm and a thundering herd onto your database the instant you scale the fleet. For a database, it's shipping nearly the entire dataset across the network to add one box, and cross-node transfer is the expensive tier of the latency hierarchy, so "move 99% vs move 1%" is a real bandwidth-and-hours bill. **This is the problem consistent hashing exists to solve, and it's the first thing to say in the interview.**
+Read the right column: the *minimum* data you must move to rebalance onto one new node out of `N+1` is `1/(N+1)`, about **1%** at 100 nodes. The `mod N` scheme moves **99%** (the whole room reseated to add one table). For a cache, that's a near-total miss storm and a thundering herd onto your database the instant you scale the fleet. For a database, it's shipping nearly the entire dataset across the network to add one box, and cross-node transfer is the expensive tier of the latency hierarchy, so "move 99% vs move 1%" is a real bandwidth-and-hours bill. **This is the problem consistent hashing exists to solve, and it's the first thing to say in the interview.**
 
 **The ring.** Consistent hashing maps both keys and nodes into the *same* fixed hash space, a ring (Cassandra uses a 64-bit token range; Dynamo's paper used MD5's 128-bit space). The space is **independent of how many nodes you have**, that's the trick.
 
 - **Node placement:** hash each node's id to a point on the ring.
 - **Key placement:** hash the key, then **walk clockwise to the first node at or after that point**, that node owns the key.
-- **Add a node:** it takes over only the arc between it and its predecessor, stealing keys from exactly **one** successor. Expected data moved ≈ **K/N**.
+- **Add a node:** it takes over only the arc between it and its predecessor, stealing keys from exactly **one** successor (everyone else keeps their seat). Expected data moved ≈ **K/N**.
 - **Remove a node:** its arc merges into its clockwise successor; only ≈ K/N keys move, to one place.
 
 For replication, you don't stop at the first node, you keep walking clockwise and place the next `RF−1` (replication factor minus one) distinct physical nodes as replicas. Cassandra's `NetworkTopologyStrategy` does exactly this, skipping nodes to land replicas in different racks/AZs (availability zones). The ring isn't just a partitioner; it's also the **replica-placement** function.
@@ -95,7 +97,7 @@ The widget renders a live hash ring. Drag the **node count**: the ring recolors 
 ### Worked example: scaling a Cassandra ring vs resizing a memcached fleet
 **Database (Cassandra), scale-out under load.** A 10-node cluster holding 10 TB is at 75% disk and you add 2 nodes. Because vnodes are scattered across the existing ring, the newcomers each claim ~1/12 of the token space *from many existing nodes at once*; each existing node streams out a thin slice rather than one node dumping everything on one neighbor. Total data moved ≈ `2/12 × 10 TB ≈ 1.7 TB`, in parallel from all 10 sources, versus `mod N`, where 10→12 reshuffles ~83% (≈ 8.3 TB). The Director-altitude point is *operational*: that 1.7 TB stream competes with live traffic for network and disk I/O, so you **throttle streaming** and add nodes one at a time in low-traffic windows, accepting slower, capacity-planned scale-out (hours) to protect the latency SLO (service-level objective). This is also where you say "I'd have the storage team validate streaming throughput and repair time per node", delegating the IC (individual contributor) depth while owning the decision.
 
-**Cache (memcached + Ketama), capacity change.** A memcached fleet fronting your database uses a **Ketama** consistent-hashing client (the de-facto standard, ~160 vnodes per server). Scaling 9 → 10 nodes moves only ~10% of keys, which miss once and refill, a brief, bounded miss bump. With a plain `mod N` client, ~90% of keys would miss simultaneously and **all** of those re-reads slam the database at once: a self-inflicted thundering herd that can take it down precisely when you were adding capacity. The decision, Ketama over `mod N`, is justified by "10% gradual miss bump vs 90% miss storm," and the alternative is rejected for the cache-stampede risk, not on aesthetics.
+**Cache (memcached + Ketama), capacity change.** A memcached fleet fronting your database uses a **Ketama** consistent-hashing client (the de-facto standard, ~160 vnodes per server). Scaling 9 → 10 nodes moves only ~10% of keys (one table's worth of guests reseated), which miss once and refill, a brief, bounded miss bump. With a plain `mod N` client, ~90% of keys would miss simultaneously and **all** of those re-reads slam the database at once: a self-inflicted thundering herd that can take it down precisely when you were adding capacity. The decision, Ketama over `mod N`, is justified by "10% gradual miss bump vs 90% miss storm," and the alternative is rejected for the cache-stampede risk, not on aesthetics.
 
 ### Trade-offs table: how to spread keys across nodes
 | Approach | Movement on Δnode | Load balance | Lookup cost | Use when… |

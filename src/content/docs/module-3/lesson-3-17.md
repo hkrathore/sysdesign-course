@@ -36,8 +36,8 @@ The two paths compute the "same" features from the "same" definitions. When they
 
 A feature store is four things wired together:
 
-- **(a) Offline store** = a warehouse or lake, columnar (Parquet/Delta on S3, BigQuery), holding **full event-time history**. It powers training-set generation and backfills. Optimized for large scans, not point reads: a query is seconds and cheap per GB.
-- **(b) Online store** = a low-latency KV (key-value) (Redis, DynamoDB, Cassandra) holding the **latest** feature values keyed by entity, point-read in single-digit milliseconds. It powers serving, and holds current state (or a short window), not history.
+- **(a) Offline store** = a warehouse or lake, columnar (Parquet/Delta on S3, BigQuery), holding **full event-time history** (the bulk-stocked pantry). It powers training-set generation and backfills. Optimized for large scans, not point reads: a query is seconds and cheap per GB.
+- **(b) Online store** = a low-latency KV (key-value) (Redis, DynamoDB, Cassandra) holding the **latest** feature values keyed by entity, point-read in single-digit milliseconds (the line cook's counter). It powers serving, and holds current state (or a short window), not history.
 - **(c) Registry / metadata** = the single definition of each feature (name, type, owner, freshness SLA (service-level agreement), the transformation), so both paths reference **one** definition instead of two hand-written copies.
 - **(d) Materialization jobs** = push offline-computed feature values into the online store, on a schedule (batch) or continuously (streaming). This is the seam where skew creeps in if the two paths transform data differently.
 
@@ -49,7 +49,7 @@ Real systems: **Feast** (open-source, bring your own stores), **Tecton** (manage
 
 **Skew** is when the model is trained on feature values computed one way and served feature values computed a subtly different way, so the input distribution at serving diverges from training. Quality drops in production while offline metrics look fine.
 
-Where it comes from: a feature like "user's 7-day average order value" is computed in a batch SQL job for training, then **re-implemented in online application code** for serving, with a different window boundary, a different null-handling rule, a different rounding, or a different timezone. Small differences, silent damage.
+Where it comes from: a feature like "user's 7-day average order value" is computed in a batch SQL job for training, then **re-implemented in online application code** for serving, with a different window boundary, a different null-handling rule, a different rounding, or a different timezone. Small differences, silent damage (the dish disappoints and nobody can taste why).
 
 Two fixes, each with a trade:
 

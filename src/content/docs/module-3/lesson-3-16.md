@@ -24,7 +24,7 @@ Two more facts complete the picture. While the night is in progress, any total y
 ### Deep explanation
 
 #### Why one row/key melts: the contention is the point
-A counter is read-modify-write, and every store enforces its atomicity the same way: **every increment serializes on one lock**, one row lock, one single-threaded Redis key, one DynamoDB partition. That serialization is the wall, and it's a **hot-key** problem, not a table problem: other rows scale fine in parallel. **Single-key ceilings range from ~1k increments/sec (a relational row, lock hold time plus commit fsync) to ~100k/sec (a Redis key, pinned to one core on one shard).** A higher ceiling delays the wall; nothing removes it.
+A counter is read-modify-write, and every store enforces its atomicity the same way: **every increment serializes on one lock**, one row lock, one single-threaded Redis key, one DynamoDB partition. That serialization is the wall (the line, not the cashier), and it's a **hot-key** problem, not a table problem: other rows scale fine in parallel. **Single-key ceilings range from ~1k increments/sec (a relational row, lock hold time plus commit fsync) to ~100k/sec (a Redis key, pinned to one core on one shard).** A higher ceiling delays the wall; nothing removes it.
 
 The unifying statement an interviewer wants: **a logical counter is a single point of write serialization, and you cannot scale a single serialization point by adding hardware, you can only scale it by splitting it.** Replication doesn't help: replicas add read copies and durability, not write throughput to the one hot key (in single-leader it makes write latency *worse*).
 
@@ -41,7 +41,7 @@ The unifying statement an interviewer wants: **a logical counter is a single poi
 Replace one logical counter **C** with **N physical sub-counters** `C[0..N-1]`, stored as N separate rows/keys/items:
 
 - **Write (increment):** pick a shard, `shard = random(0, N-1)`, and increment **only that sub-counter**. Each sub-counter sees ~1/N of the traffic; N independent keys means N independent locks/partitions in parallel.
-- **Read (get total):** the logical value is `C = Σ C[i]`, **read all N sub-counters and sum them.** A read now costs **N reads + an add**.
+- **Read (get total):** the logical value is `C = Σ C[i]`, **read all N sub-counters and sum them.** A read now costs **N reads + an add** (the manager walking every till).
 
 That is the entire trade, a clean inversion: **write cost ÷ N, read cost × N.** Choosing N is choosing where on that seesaw to sit, and the right N falls straight out of two requirement numbers:
 
@@ -65,7 +65,7 @@ Two orthogonal axes, and keeping them straight is exactly the precision an inter
 - A **sharded counter is EXACT, but eventually consistent.** `Σ C[i]` is the *correct* number once in-flight increments land; any staleness is **temporal**. At rest it's dead accurate. **A sharded counter is not "approximate."**
 - **HyperLogLog and Count-Min Sketch are PERMANENTLY approximate**, bounded error even fully at rest, traded for orders-of-magnitude less memory. A *different* trade than sharding, motivated by **space**, not write contention.
 
-**HyperLogLog (HLL), distinct/unique counts (cardinality), motivated by memory.** "How many **unique** users viewed this video?" is *not* additive, the same user viewing twice must count once. The exact answer means storing the **set of all distinct user IDs**: 50M viewers × ~8 bytes ≈ **400 MB per video**, multiplied across every video. **HyperLogLog** estimates cardinality from a fixed sketch instead: in Redis (`PFADD`/`PFCOUNT`/`PFMERGE`), an HLL is **at most 12 KB regardless of cardinality** with a **0.81% standard error**, a ~30,000× memory win for a count within ~1% **in both directions**. The classifying point: **HLL is for *distinct* counts, not additive totals**, "unique visitors," not "total likes."
+**HyperLogLog (HLL), distinct/unique counts (cardinality), motivated by memory.** "How many **unique** users viewed this video?" is *not* additive, the same user viewing twice must count once. The exact answer means storing the **set of all distinct user IDs** (the guest book): 50M viewers × ~8 bytes ≈ **400 MB per video**, multiplied across every video. **HyperLogLog** estimates cardinality from a fixed sketch instead: in Redis (`PFADD`/`PFCOUNT`/`PFMERGE`), an HLL is **at most 12 KB regardless of cardinality** with a **0.81% standard error**, a ~30,000× memory win for a count within ~1% **in both directions**. The classifying point: **HLL is for *distinct* counts, not additive totals**, "unique visitors," not "total likes."
 
 **Count-Min Sketch (CMS), per-item frequency and top-K heavy hitters** (trending hashtags, hot URLs, abusive IPs) in fixed sub-linear space. Its critical property, stated precisely: **CMS only ever *over*estimates, never under**, so the estimate is a one-sided upper bound, perfect for "is this *at least* this frequent?" top-K detection where a false-high on a rare key is harmless. **CMS is for *frequencies / top-K*, not totals or cardinality.**
 

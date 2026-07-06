@@ -5,6 +5,8 @@ sidebar:
   order: 3
 ---
 
+> Every index is a bet on which side of the ledger pays: faster reads always cost slower writes and more space. The decision here is between two engines: a **B-tree** edits sorted pages in place (cheap, predictable reads; random-I/O writes) while an **LSM-tree** appends sequentially and cleans up later (cheap writes; reads may check several files, and compaction bills you in background CPU, I/O, and latency spikes). Pick from the read:write ratio: an orders table wants B-tree, a ~700k writes/s metrics flood wants LSM.
+
 ### Learning objectives
 - Explain why indexes exist and the fundamental read / write / space trade-off they impose.
 - Contrast **B-tree** (read-optimized, in-place) with **LSM-tree** (write-optimized, append + compact).
@@ -21,7 +23,7 @@ An index is the **index at the back of a textbook.** Without it you scan every p
 
 **B-tree (and B+tree):** a balanced, sorted tree updated in place. Reads are O(log n), predictable, and excellent for **range queries**; writes pay **random I/O** and write amplification. Used by Postgres, MySQL/InnoDB, most relational engines, read-optimized and operationally mature.
 
-**LSM-tree (Log-Structured Merge):** writes are cheap **sequential appends** (recall: sequential ≫ random), batched in memory and flushed as immutable, sorted **SSTables**. Reads may have to check several files (**read amplification**), mitigated by **Bloom filters**; background **compaction** merges files and discards dead keys. Compaction strategy (size-tiered vs leveled) is a write-vs-read/space knob, name the trade, then hand the tuning to the storage team. Used by Cassandra, RocksDB, LevelDB, HBase, Bigtable, ScyllaDB, write-optimized.
+**LSM-tree (Log-Structured Merge):** writes are cheap **sequential appends** (recall: sequential ≫ random), batched in memory and flushed as immutable, sorted **SSTables** (a stack of sticky notes filed in one go). Reads may have to check several files (**read amplification**), mitigated by **Bloom filters**; background **compaction** merges files and discards dead keys (the batched reorg into the master index). Compaction strategy (size-tiered vs leveled) is a write-vs-read/space knob, name the trade, then hand the tuning to the storage team. Used by Cassandra, RocksDB, LevelDB, HBase, Bigtable, ScyllaDB, write-optimized.
 
 <details>
 <summary>Go deeper, write/read path mechanics and compaction strategies (IC depth, optional)</summary>
@@ -60,7 +62,7 @@ flowchart TD
 ```
 
 ### Worked example: metrics ingestion vs. an orders table
-- **Metrics/time-series ingest** (the estimation lesson's ~700k writes/s example): overwhelmingly write-heavy, append-shaped, reads mostly over recent ranges → **LSM (Cassandra/Bigtable).** Sequential flushes absorb the write flood; Bloom filters keep read amplification in check.
+- **Metrics/time-series ingest** (the estimation lesson's ~700k writes/s example): overwhelmingly write-heavy, append-shaped, reads mostly over recent ranges → **LSM (Cassandra/Bigtable).** Sequential flushes absorb the write flood; Bloom filters keep read amplification in check (fewer note stacks to check).
 - **Orders table** needing multi-row transactions, joins, and ad-hoc reporting → **B-tree (Postgres).** Reads and integrity dominate at modest write rate, in-place updates and rich indexing are exactly what you want.
 
 The decision falls straight out of the **read:write ratio** plus the query shape, which is why you establish those in RESHADED's R step.

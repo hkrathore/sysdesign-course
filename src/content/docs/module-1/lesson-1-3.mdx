@@ -10,6 +10,8 @@ sidebar:
 
 import EstimationCalculator from '@components/widgets/EstimationCalculator.jsx';
 
+> Estimation is a feasibility sniff test: three minutes of arithmetic whose only deliverable is one sentence, does this fit on 10 servers or 10,000? Four numbers in a fixed order: QPS from DAU over ~10⁵ seconds a day, storage from writes (never reads) times payload times replication, bandwidth, then servers from peak QPS over per-server capacity. Round aggressively and state every assumption: off by 2× is fine, off by 100× changes the architecture, and computing 4,629.6 QPS when "~5k" will do is itself an anti-signal.
+
 ### Learning objectives
 - Produce QPS (queries per second), storage, bandwidth, and server-count estimates in under three minutes.
 - Use power-of-ten shortcuts and round aggressively without losing the order of magnitude.
@@ -40,7 +42,7 @@ Estimation is a **feasibility sniff test**, not a spreadsheet. A structural engi
    `egress ≈ read QPS × payload`, `ingress ≈ write QPS × payload`. For media-heavy systems this, not QPS, is often the binding constraint and the dominant cost.
 
 4. **Servers.**
-   `servers ≈ peak QPS ÷ per-server capacity`. This is the number that tells you whether you're building a small fleet or a hyperscale system.
+   `servers ≈ peak QPS ÷ per-server capacity`. This is the number that tells you whether you're building a small fleet or a hyperscale system (the sniff test's verdict).
 
 **Worked numeric example, a Twitter-scale write path (illustrative; assumptions stated):**
 - Assume 200M DAU (daily active users), each posts 2 tweets/day → 400M tweets/day.
@@ -49,7 +51,7 @@ Estimation is a **feasibility sniff test**, not a spreadsheet. A structural engi
 - Storage: 400M tweets × ~300 bytes (text + metadata) ≈ **120 GB/day** → ~44 TB/yr; ×3 replication ≈ **~130 TB/yr** of tweet text. (Media would dwarf this, flag it, don't compute it.)
 - Read fleet: 1.4M/s ÷ ~5k req/s per cache node ≈ **~280 cache nodes** on the read path.
 
-The Director-level point isn't the digits, it's the conclusion: *reads dominate by 100×, so the architecture lives or dies on the read/cache path, and text storage is trivial while media is the real cost.* The math exists to justify that sentence.
+The Director-level point isn't the digits, it's the conclusion: *reads dominate by 100×, so the architecture lives or dies on the read/cache path, and text storage is trivial while media is the real cost.* The math exists to justify that sentence (the engineer's eyeball pass, not the detailed calc).
 
 ### Diagram: estimation pipeline
 ```mermaid

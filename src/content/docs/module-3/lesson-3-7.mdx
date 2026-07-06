@@ -6,6 +6,8 @@ sidebar:
 ---
 import CachingStrategiesSimulator from '@components/widgets/CachingStrategiesSimulator.jsx';
 
+> A distributed cache is a second copy of the truth held in RAM, and it lives or dies on one number: the hit rate. At 50,000 read QPS a 90% hit rate means the database sees 5,000, a 10x cut, at ~1 ms instead of ~10 ms; misses, not hits, size your origin. The decisions are the levers that move that number (eviction, sharding, stampede control) and the boundary: which data you refuse to cache because a stale read is a bug, not a latency win.
+
 ### Learning objectives
 - Size a **distributed cache tier** from a read:write ratio and a target hit rate, and justify *why* a cache is the highest-leverage move for a read-heavy system - in real numbers (QPS shed, latency dropped, origin nodes saved).
 - Choose an **eviction policy** (LRU vs LFU vs TTL) from the access pattern, and reason about its **hit-rate impact**.
@@ -49,7 +51,7 @@ This lesson builds the *fleet* around that recap: eviction, sharding, replicatio
 
 #### Eviction policies and their hit-rate impact
 
-A cache is finite memory; the **working set** almost never fits the whole keyspace. When memory is full, the eviction policy decides what to discard - chosen from the **access pattern**, because it directly moves the hit rate:
+A cache is finite memory; the **working set** almost never fits the whole keyspace. When memory is full, the eviction policy decides what to discard (which plate leaves the lamp) - chosen from the **access pattern**, because it directly moves the hit rate:
 
 - **LRU (least recently used):** captures **temporal locality** (recently used → likely used again). The default, and usually right - sessions, timelines, "recent is hot." Weakness: a **scan** (a backup job walking every key once) floods it with one-hit keys and evicts the genuinely hot set.
 - **LFU (least frequently used):** better when popularity is **stable and skewed** (a Zipfian catalog where the top 1% of items take half the traffic), and scan-resistant - a swept-once key has count 1 and goes first. Weakness: **stale popularity** - yesterday's viral item squats in memory after demand moves on (mitigated by aging counters, which Redis's LFU has).
@@ -68,7 +70,7 @@ The decision rule: **LRU is the safe default; switch to LFU for a stable, skewed
 
 #### Sharding the fleet with consistent hashing
 
-One cache node has a memory ceiling (say **64 GB** usable) and a throughput ceiling; a 500 GB working set or 1M+ QPS needs a **fleet**, and the fleet needs a key→node rule **every client agrees on**, or you cache the same key in five places and serve stale copies.
+One cache node has a memory ceiling (say **64 GB** usable) and a throughput ceiling; a 500 GB working set or 1M+ QPS needs a **fleet**, and the fleet needs a key→node rule **every client agrees on** (every plate needs its home counter), or you cache the same key in five places and serve stale copies.
 
 The naive rule, `hash(key) mod N`, has a fatal property for a cache: change `N` and **almost every key remaps** (~90%+ going 10→11 nodes). Every remapped key is a **miss**, so scaling the fleet flushes the cache and stampedes the origin at the worst moment - you're scaling *because* you're under load. **Consistent hashing** bounds the damage: adding or removing a node moves only ~`1/N` of the keyspace, so a capacity change costs a small, bounded miss blip instead of a full cold-load surge. Virtual nodes smooth the distribution and weight bigger machines.
 
@@ -99,7 +101,7 @@ Two failure modes that bring down "well-cached" systems:
 
 **Cache stampede.** A hot key **expires** (or its shard dies), and the N concurrent requests it was absorbing **simultaneously miss and hit the origin for the same key** - 10,000 identical queries in the expiry instant, against a DB sized for ~1 QPS of real misses. The origin falls over, and the cache can't refill because the origin is down: a self-sustaining outage. Three mitigations, used together:
 
-- **Request coalescing (single-flight):** the first miss takes a short lock, fetches, and populates; concurrent requests **wait for that one fetch**. 10,000 misses collapse to **1** origin read. (Trade: waiters block briefly; give the lock a TTL so a crashed fetcher can't wedge it.)
+- **Request coalescing (single-flight):** the first miss takes a short lock, fetches, and populates; concurrent requests **wait for that one fetch**. 10,000 misses collapse to **1** origin read (one order to the kitchen). (Trade: waiters block briefly; give the lock a TTL so a crashed fetcher can't wedge it.)
 - **TTL jitter:** set TTL to `base ± random` (e.g. `300 s ± 30 s`) so batch-warmed keys never expire in lockstep. (Trade: slightly less predictable freshness; nearly free, always worth it.)
 - **Early / probabilistic refresh:** refresh the hottest keys just *before* expiry so they're never actually cold under load. (Trade: extra recomputes and machinery; reserve for the hottest keys.)
 

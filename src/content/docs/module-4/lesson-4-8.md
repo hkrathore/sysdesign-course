@@ -8,6 +8,8 @@ sidebar:
     variant: tip
 ---
 
+> Uber's proximity service is a **write firehose feeding a tiny local read**: ~1M drivers ping every 4 seconds (~0.5M writes/s) while riders ask "who's near me" only ~20K times/s, a 25:1 write:read inversion of every feed you've designed. The whole live index is ~100 MB and rewritten every 4 seconds, so it lives in RAM with no durability at all. The decision the interview turns on: how you draw the map cells, because a uniform grid melts under a downtown holding 10,000 cabs while suburbs hold three.
+
 ### Learning objectives
 - Run the full **RESHADED** spine on a *write-dominated* geospatial problem, and recognize why that inversion (pings in ≫ nearby queries out) flips the read-heavy intuition from Twitter/Instagram.
 - **Estimate** the headline number - **driver-location write QPS** (queries per second) - from active-driver count and ping interval, and show why the *live* index is a RAM/throughput problem, not a storage-capacity one.
@@ -117,7 +119,7 @@ flowchart TB
     style DB fill:#7a1f1f,color:#fff
 ```
 
-**Happy path, in prose:** drivers ping `updateLocation` every ~4 s; the regional **location service** shard overwrites that driver's position in the **in-memory geo-index**, re-bucketing them if they crossed a cell boundary - fire-and-forget, because it runs 0.5M times/sec. A rider's `requestRide` hits **matching**, which queries the geo-index for the pickup's **cell plus its neighbors** (a driver 50 m away in the adjacent cell must still be found), filters to available drivers, ranks by **ETA** (not straight-line distance - a driver 200 m away across a river is 15 min by road), and **offers** the ride - falling back to the next candidate on decline/timeout, persisting the match to the durable store on accept.
+**Happy path, in prose:** drivers ping `updateLocation` every ~4 s; the regional **location service** shard overwrites that driver's position in the **in-memory geo-index** (a fresh pin dropped on the board), re-bucketing them if they crossed a cell boundary - fire-and-forget, because it runs 0.5M times/sec. A rider's `requestRide` hits **matching**, which queries the geo-index for the pickup's **cell plus its neighbors** (a driver 50 m away in the adjacent cell must still be found), filters to available drivers, ranks by **ETA** (not straight-line distance - a driver 200 m away across a river is 15 min by road), and **offers** the ride - falling back to the next candidate on decline/timeout, persisting the match to the durable store on accept.
 
 The asymmetry is visible in the diagram: the thick, hot edge is **driver → geo-index** (0.5M/s); the rider path is thin and local.
 
@@ -158,7 +160,7 @@ POST /v1/rides/{rideId}/respond
 
 ## D - Data model
 
-**Live position (in-memory):** `driverId → {lat, lng, cellId, status, ts}` plus the bucket map **`cellId` → set of drivers in that cell** - so a nearby query is "read these few cell buckets." In Redis this is a geo sorted-set per region.
+**Live position (in-memory):** `driverId → {lat, lng, cellId, status, ts}` plus the bucket map **`cellId` → set of drivers in that cell** - so a nearby query is "read these few cell buckets" (the rider's square and its neighbors). In Redis this is a geo sorted-set per region.
 
 **Partition / shard key = geographic region (a coarse cell, e.g. city or S2 level-8).** The load-bearing decision: because **matching is always local**, a nearby query hits **one shard**, and a city's traffic is isolated to its shard's blast radius. We **reject sharding by `driverId` hash** - it would scatter one neighborhood's drivers across every shard, turning a single local query into a fleet-wide scatter-gather.
 
@@ -171,7 +173,7 @@ POST /v1/rides/{rideId}/respond
 Re-check against the NFRs and break the design on purpose. Three bottlenecks, each fixed with a *named* trade-off.
 
 **Bottleneck 1 - the dense-city hot spot (the central problem).**
-A **uniform grid** (equal-sized cells, e.g. fixed-precision geohash) *hot-spots* because **driver density is wildly non-uniform**: a downtown cell at rush hour holds 10,000 drivers while a rural cell holds 3. The crowded cell's bucket is huge, its owning shard saturates, and a nearby query there scans thousands of candidates - while 95% of cells sit empty. *Equal-area cells, unequal load* - the grid choice is a **load-balancing** decision, not a geometry detail.
+A **uniform grid** (equal-sized cells, e.g. fixed-precision geohash) *hot-spots* because **driver density is wildly non-uniform**: a downtown cell at rush hour holds 10,000 drivers while a rural cell holds 3 (the downtown square that melts). The crowded cell's bucket is huge, its owning shard saturates, and a nearby query there scans thousands of candidates - while 95% of cells sit empty. *Equal-area cells, unequal load* - the grid choice is a **load-balancing** decision, not a geometry detail.
 
 *Fix - an **adaptive, variable-resolution index** that matches cell size to density:* a **quadtree** (split a cell only when it exceeds a capacity threshold) or a hierarchical cell scheme - Google's **S2** or Uber's production choice **H3**, whose uniform hexagonal neighbors make k-ring "expand the search" queries clean. Trade: more machinery than a flat hash, bought so bucket sizes stay bounded regardless of density. We **reject** the fixed grid (hot-spots) and **reject** shrinking the grid globally (it just trades the dense hot spot for sparse-region read amplification).
 

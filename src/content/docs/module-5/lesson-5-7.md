@@ -131,8 +131,8 @@ flowchart TB
 ```
 
 **Happy path, compressed:** a click hits the **ingest service** (validate, enrich with geo/device, stamp event time), which appends to **Kafka**, partitioned by `campaign_id` (or `ad_id`) so a campaign's events land in order on one partition. From the log, **two consumers fan out**:
-- **The speed path:** a **stream processor** (Flink / Kafka Streams) does windowed aggregation, per-minute counts per campaign and dimension, and writes to the **OLAP store**, which the **dashboard** reads. This is at-least-once and fast; small over/under-counts are tolerated and self-correct.
-- **The truth path:** the same events land in **S3** as retained raw. A periodic **batch job** (hourly/daily) recomputes exact counts over the raw, applying full dedup, late-event inclusion, and fraud filtering, and writes the **billable table**, the source of truth the **billing service** invoices from. The batch also **back-corrects** the OLAP store so the dashboard converges to truth.
+- **The speed path:** a **stream processor** (Flink / Kafka Streams) does windowed aggregation, per-minute counts per campaign and dimension, and writes to the **OLAP store**, which the **dashboard** reads. This is at-least-once and fast; small over/under-counts are tolerated and self-correct (the scoreboard, roughly right all night).
+- **The truth path:** the same events land in **S3** as retained raw. A periodic **batch job** (hourly/daily) recomputes exact counts over the raw, applying full dedup, late-event inclusion, and fraud filtering, and writes the **billable table**, the source of truth the **billing service** invoices from (the end-of-night till reconciliation). The batch also **back-corrects** the OLAP store so the dashboard converges to truth.
 
 **The shape to notice:** the load-bearing wall runs between the **approximate stream (dashboard, speed)** and the **exact batch (billing, truth)**. They share the ingest log but diverge on the correctness contract. This is the **Lambda-style two-path** structure, and whether to collapse it to one path is the central design-evolution argument.
 
@@ -217,7 +217,7 @@ A phone is offline for an hour, then floods in events stamped with old `event_ti
 
 **Bottleneck 3, billing from the approximate stream (the architecture-defining mistake).**
 Someone wires the invoice to the OLAP store because it's already there.
-*Fix:* **never bill from the stream.** Billing reads the **batch billable table only.** The stream is structurally at-least-once and lossy on very-late events; the batch is the source of truth. This separation *is* the design. *Rejected:* a single path serving both, it forces you to either make the stream exactly-once over an unbounded late window (impractical) or accept approximate billing (unacceptable).
+*Fix:* **never bill from the stream.** Billing reads the **batch billable table only** (you don't settle the books from the scoreboard). The stream is structurally at-least-once and lossy on very-late events; the batch is the source of truth. This separation *is* the design. *Rejected:* a single path serving both, it forces you to either make the stream exactly-once over an unbounded late window (impractical) or accept approximate billing (unacceptable).
 
 **Bottleneck 4, ingest firehose / hot campaigns.**
 300k/sec peak, with one viral campaign overloading a single partition.

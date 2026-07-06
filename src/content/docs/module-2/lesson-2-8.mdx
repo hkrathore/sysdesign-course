@@ -6,6 +6,8 @@ sidebar:
 ---
 import QuorumCalculator from '@components/widgets/QuorumCalculator.jsx';
 
+> Consistency is not a property a database has, it's a number you set per operation: out of N replicas, how many must a write touch (W) and a read consult (R). The whole lesson turns on one counting fact, W + R > N forces the read set to overlap the write set, plus its sibling W > N/2, which stops two writes committing on disjoint sets. Same three replicas: the cart runs W=R=1 and stays up through anything; the inventory decrement runs majority and goes unavailable rather than oversell.
+
 ### Learning objectives
 - Place the major **consistency models** on a spectrum, from linearizable down to eventual, plus the session guarantees **read-your-writes** and **monotonic reads**, and say what each costs (callback to the replication-lag anomalies).
 - State the quorum rule **W + R > N**, what it buys, and what it does *not* guarantee.
@@ -53,7 +55,7 @@ Leaderless (Dynamo-style) replication has no single authority. A coordinator wri
 W + R > N
 ```
 
-**What it buys:** whenever the sizes of the write set and the read set sum to more than N, the two sets are forced to share at least one replica, so a read **cannot miss** the latest acknowledged write. That forced overlap is exactly what the widget below visualizes: write set shoved to one end, read set to the other, and the amber overlap cells that survive only when `W + R > N`.
+**What it buys:** whenever the sizes of the write set and the read set sum to more than N, the two sets are forced to share at least one replica (one shared notebook), so a read **cannot miss** the latest acknowledged write. That forced overlap is exactly what the widget below visualizes: write set shoved to one end, read set to the other, and the amber overlap cells that survive only when `W + R > N`.
 
 <details>
 <summary>Go deeper, the pigeonhole derivation (IC depth, optional)</summary>
@@ -62,7 +64,7 @@ There are **N** replica slots. A successful write has durably landed on **at lea
 
 </details>
 
-**One critical caveat, overlap proves presence, not recognition.** The guarantee is that the latest value is *somewhere in the R responses*; it does **not** tell the reader *which* response is newest. The reader needs **version metadata**, a timestamp, logical clock, or **version vector**, to pick the winner. Quorum overlap and conflict-resolution metadata are two separate machines; omitting the second is a classic interview gap.
+**One critical caveat, overlap proves presence, not recognition.** The guarantee is that the latest value is *somewhere in the R responses*; it does **not** tell the reader *which* response is newest. The reader needs **version metadata**, a timestamp, logical clock, or **version vector**, to pick the winner (which notebook is newest). Quorum overlap and conflict-resolution metadata are two separate machines; omitting the second is a classic interview gap.
 
 #### The *second* rule: W > N/2
 
@@ -85,7 +87,7 @@ Setting `W = R = ⌊N/2⌋ + 1` (majority quorum) satisfies **both** at once, wh
 
 Quorums are not free, and the cost is quantifiable:
 
-- **Failure tolerance.** Writes succeed as long as `W` replicas are reachable, so writes tolerate **N − W** failures; reads tolerate **N − R**. With `N=3, W=R=2`: you survive **1** replica down for both reads and writes. Push to `W=3` for cheap `R=1` reads and **any single failure now blocks every write**, you traded write availability for read speed.
+- **Failure tolerance.** Writes succeed as long as `W` replicas are reachable, so writes tolerate **N − W** failures; reads tolerate **N − R**. With `N=3, W=R=2`: you survive **1** replica down for both reads and writes. Push to `W=3` for cheap `R=1` reads and **any single failure now blocks every write** (the one absent assistant), you traded write availability for read speed.
 - **Tail latency.** A quorum operation can't return until its slowest required replica answers, it waits on the **W-th (or R-th) fastest** replica. Raising the quorum means waiting on a slower node, which **lifts p99.** Reusing the numbers for continuity: a local `R=1` read is ~**1-5 ms**; a cross-AZ (availability zone) majority read is ~**5-15 ms**; a cross-region strong read is **tens to hundreds of ms** (each cross-region RTT (round-trip time) ~150 ms). The arithmetic of the quorum is also the arithmetic of your latency budget.
 
 This is the dial the CAP/PACELC lesson promised: cranking `W` and `R` up to satisfy `W + R > N` moves a store's **E** behavior from **EL** (fast, eventual) toward **EC** (consistent, coordinated), the same store, *dragged along the PACELC axis* by these numbers.

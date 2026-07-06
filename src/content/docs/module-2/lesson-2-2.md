@@ -5,6 +5,8 @@ sidebar:
   order: 2
 ---
 
+> "SQL vs. NoSQL" is a false religious war: the real question is which of four axes your workload stresses, data model, schema rigidity, transaction scope, or scale-out. The decision the lesson turns on is when "just use Postgres" stops being the right answer: later than most candidates think, since replicas, partitioning, and JSONB carry it past most products' real needs. Past that limit you pick by access pattern, KV for lookups, wide-column for write floods, document for evolving shapes, graph for traversal, and real systems run several at once.
+
 ### Learning objectives
 - State the *real* axes of difference (data model, consistency/transactions, scaling model, query flexibility), not the myth "SQL doesn't scale."
 - Map the NoSQL families (KV, document, wide-column, graph) to access patterns and named technologies.
@@ -19,7 +21,7 @@ sidebar:
 
 1. **Data model**, relational normalized tables (+ joins) vs document / key-value / wide-column / graph.
 2. **Schema**, enforced *schema-on-write* (rigid, validated up front) vs flexible *schema-on-read* (the app interprets shape; "schemaless" still has a schema, it just lives in your code).
-3. **Consistency & transactions**, classic SQL gives **ACID** (atomicity, consistency, isolation, durability) with rich multi-row transactions; many NoSQL stores default to **BASE** (basically-available, soft-state, eventual) with limited transaction scope. *This line is blurring:* DynamoDB has transactions; **NewSQL** (Spanner, CockroachDB) delivers ACID *and* horizontal scale.
+3. **Consistency & transactions**, classic SQL gives **ACID** (atomicity, consistency, isolation, durability) with rich multi-row transactions (the notary's all-or-nothing guarantee); many NoSQL stores default to **BASE** (basically-available, soft-state, eventual) with limited transaction scope. *This line is blurring:* DynamoDB has transactions; **NewSQL** (Spanner, CockroachDB) delivers ACID *and* horizontal scale.
 4. **Scaling model**, SQL traditionally scales **up** (bigger box) plus read replicas, and sharding is painful because cross-shard joins/transactions are hard; most NoSQL is built to scale **out** horizontally from day one.
 
 **The NoSQL families → use case → named tech:**
@@ -38,7 +40,7 @@ sidebar:
 - Queries that are fundamentally about *relationships and traversal* → **graph**.
 - Need both scale and ACID → **NewSQL (Spanner/CockroachDB)** or **sharded SQL (Vitess)**.
 
-**The Director-level nuance, and the strongest signal here:** "Just use Postgres" is correct far more often than candidates assume. Modern Postgres scales further than its reputation (read replicas, declarative partitioning, `JSONB` for document-style flexibility, logical replication), and premature NoSQL adoption *gives away* transactions and ad-hoc query power you will miss, and pushes consistency/joins into application code.
+**The Director-level nuance, and the strongest signal here:** "Just use Postgres" is correct far more often than candidates assume. Modern Postgres scales further than its reputation (read replicas, declarative partitioning, `JSONB` for document-style flexibility, logical replication), and premature NoSQL adoption *gives away* transactions and ad-hoc query power you will miss, and pushes consistency/joins into application code (your app becomes the notary).
 
 The mature move is to **choose by access pattern and consistency need**, and to treat the database choice as reversible-with-cost rather than dogma. Real systems practice **polyglot persistence**: relational for core entities, blob for media, KV for cache, wide-column for feeds.
 
@@ -61,7 +63,7 @@ flowchart TD
 ### Worked example: picking stores for a photo-sharing app (polyglot)
 - **User accounts, follows, auth** → relational (Postgres, or Vitess-sharded MySQL at FB/IG scale): needs integrity, the social graph has real relational queries, and transactions matter for account state.
 - **Photo binaries** → **blob store (S3)** + CDN, never the database; DBs are terrible at large opaque bytes.
-- **Photo metadata + home feed** → **wide-column (Cassandra)** or precomputed **KV**: write-heavy, partition by user, tunable consistency, eventual is fine for feeds.
+- **Photo metadata + home feed** → **wide-column (Cassandra)** or precomputed **KV**: write-heavy, partition by user, tunable consistency, eventual is fine for feeds (the columnar warehouse absorbing append floods).
 - **Hot read cache** → **Redis** for sessions and hot timelines.
 
 Justify each by access pattern + consistency need. The signal isn't picking one database, it's recognizing that *different data has different needs* and matching deliberately.

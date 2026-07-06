@@ -41,7 +41,7 @@ What this problem tests that the social-feed problems don't: the load isn't a cr
 - *Multi-tenant?* → **Yes**, per-tenant isolation/quotas later; one tenant's 50M-job backfill must not starve another's billing.
 
 **Non-functional requirements:**
-- **Durability is the headline NFR.** A job set for next Tuesday fires next Tuesday even if every scheduler process is replaced twice. Timers live in a **replicated store, never RAM-only**.
+- **Durability is the headline NFR.** A job set for next Tuesday fires next Tuesday even if every scheduler process is replaced twice. Timers live in a **replicated store, never RAM-only** (the ledger in permanent ink).
 - **At-least-once execution, no missed must-run jobs**, de-duplicated to exactly-once-effect.
 - **Bounded firing lag**, p99 within a few seconds of `fire_time`; the failover gap (≈ lease TTL) is the named exception, covered by catch-up.
 - **Visibility on the non-event**, a silently missed fire must alarm (the operational NFR a Director owns).
@@ -120,7 +120,7 @@ flowchart TB
     style LEASE fill:#e8a13a,color:#000
 ```
 
-**Happy path, compressed:** register writes the definition plus one instance row (`status='scheduled'`, `shard_id = hash(job_id) % P`). Each shard's single **owner** (etcd lease + epoch) runs the ~2 s due-poll, claims a batch under `FOR UPDATE SKIP LOCKED`, flips rows to `enqueued`, and puts `run(job_id, fire_time)`, **stamped with its lease epoch**, on the durable queue, writing the next instance row for recurring jobs. Workers pull with all of the machinery (visibility timeout, acks, backoff + jitter, DLQ); the **first action is the idempotency guard**, `INSERT INTO job_runs(job_id, fire_time) … ON CONFLICT DO NOTHING`, so redeliveries and catch-up duplicates collapse to one effect. A **missed-fire monitor** alarms on expected-vs-actual fire time, and a **dead-man's switch** pages when a critical job's success ping never arrives, a job that *didn't* fire is otherwise silent.
+**Happy path, compressed:** register writes the definition plus one instance row (`status='scheduled'`, `shard_id = hash(job_id) % P`). Each shard's single **owner** (etcd lease + epoch) runs the ~2 s due-poll (the dispatcher's finger down the ledger), claims a batch under `FOR UPDATE SKIP LOCKED`, flips rows to `enqueued`, and puts `run(job_id, fire_time)`, **stamped with its lease epoch**, on the durable queue, writing the next instance row for recurring jobs. Workers pull with all of the machinery (visibility timeout, acks, backoff + jitter, DLQ); the **first action is the idempotency guard**, `INSERT INTO job_runs(job_id, fire_time) … ON CONFLICT DO NOTHING`, so redeliveries and catch-up duplicates collapse to one effect. A **missed-fire monitor** alarms on expected-vs-actual fire time, and a **dead-man's switch** pages when a critical job's success ping never arrives, a job that *didn't* fire is otherwise silent.
 
 The split is the design choice: the scheduler plane only moves jobs `scheduled → enqueued`; the queue + worker plane owns execution. Slow jobs back up in the queue (loud, autoscaled on lag) and **never stall the clock**.
 
@@ -232,7 +232,7 @@ A dead shard owner means no fires for up to the **lease TTL** (~10 s); a paused-
 
 **Bottleneck 4, duplicate execution (at-least-once on *both* sides).**
 Firing duplicates (catch-up, zombie) and execution duplicates (worker crashes after finishing, before ack → redelivery) are **two independent sources**.
-*Fix:* **idempotency on `(job_id, fire_time)`**, the unique constraint, collapses duplicates from either source to **exactly-once-effect** while the next recurrence stays distinct. **Trade:** one conditional insert per execution, cheap insurance, and the only thing that survives at-least-once on both sides. **Rejected:** chasing true exactly-once delivery, it doesn't exist across failures; pretending it does is the most common altitude miss here.
+*Fix:* **idempotency on `(job_id, fire_time)`**, the unique constraint, collapses duplicates from either source to **exactly-once-effect** (the warehouse refusing a duplicate-stamped parcel) while the next recurrence stays distinct. **Trade:** one conditional insert per execution, cheap insurance, and the only thing that survives at-least-once on both sides. **Rejected:** chasing true exactly-once delivery, it doesn't exist across failures; pretending it does is the most common altitude miss here.
 
 **Bottleneck 5, write amplification on status churn.**
 Each fire writes the instance row 3-4 times plus a history row, ~50K writes/s at the 10K/s peak on a B-tree. *Fix:* keep the hot table lean (no secondary indexes), and **separate the status firehose from the hot table**, history goes to the LSM/TTL (LSM = log-structured merge) store, completed rows are purged promptly. **Rejected:** one fat table holding live instances, full history, and rich indexes, the design grinds at 10K/s.
