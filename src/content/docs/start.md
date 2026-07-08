@@ -72,11 +72,11 @@ Because of this, the course foregrounds the **trade-offs table** and RESHADED's 
 
 ## 4. The other half of the loop: leadership (Module 17)
 
-At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority**, far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is a full track: **Module 17, Leadership**, sixteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 17.2 generalizes it into the **four answer shapes**, STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
+At Director/Senior Director level, interviewers test **how you move people, make hard calls with incomplete information, and influence without authority**, far more than whether you can shard a counter. That round is roughly **40% of the decision**, and it is a full track: **Module 17, Leadership**, eighteen lessons built the same way as the design track (quantify everything; every position names its limit and the alternative). S·T·A·R·L (Situation → Tension → Action → Result → **Learning**) is the behavioral analog of RESHADED, and Lesson 17.2 generalizes it into the **four answer shapes**, STAR-L for past events, a clarify-principles-options-decide structure for hypotheticals, Position-Mechanism-Number-Limit for philosophy questions, SCQA for exec comms.
 
 The track's defining promise is **currency**: every category lesson carries an explicit *2015-vs-2026* calibration, because the answers that won offers a decade ago (servant-leadership labels, "hire great people and get out of the way," coach-a-low-performer-forever) now read as out of level in a post-founder-mode, post-ZIRP, AI-era, hybrid world.
 
-**Recommendation:** spend serious time building a **quantified, probe-resistant story portfolio** (Lesson 17.3) covering the mandatory slots interviewers check, an up-chart disagreement you won *and* one you lost and committed to, a termination you ran, a layoff or hard constraint you owned, a decision you got wrong, an incident you commanded. Drill it against the **probe simulator** (17.2) until each story survives three levels of follow-up, then run the **sixty-question bank** (17.16), real questions from 2024-26 big-tech and founder loops, none repeated from the category lessons, as your sparring reps. Finish by pressure-testing your real stories against the matrix out loud, with a peer, a coach, or an AI interviewer playing the three-levels-deep prober.
+**Recommendation:** spend serious time building a **quantified, probe-resistant story portfolio** (Lesson 17.3) covering the mandatory slots interviewers check, an up-chart disagreement you won *and* one you lost and committed to, a termination you ran, a layoff or hard constraint you owned, a decision you got wrong, an incident you commanded. Drill it against the **probe simulator** (17.2) until each story survives three levels of follow-up, then run the **sixty-question bank** (17.16), real questions from 2024-26 big-tech and founder loops, none repeated from the category lessons, as your sparring reps. Round out with the two format lessons most loops now include: the **written round** (17.17, the one-pager, the 30-60-90, and the Q&A defense) and the **reverse interview and offer stage** (17.18, your questions as scored signal, leveling, and the close). Finish by pressure-testing your real stories against the matrix out loud, with a peer, a coach, or an AI interviewer playing the three-levels-deep prober.
 
 ---
 
@@ -119,7 +119,7 @@ Built as self-contained React artifacts, no network calls, at the module where e
 
 ## 7. Director's Fast Path
 
-An honest accounting: the full course is **~820k words across 18 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
+An honest accounting: the full course is **~860k words across 18 modules**, far more than you can or should read end-to-end on a 2-week runway. Trying to is itself a triage failure. Here is the triage.
 
 > **Navigate it from the sidebar:** every lesson on the unconditional path below, plus each specialized track's spine lesson(s), carries a **Fast** badge in the left sidebar, so you can walk the fast track without coming back to this page. Cheat sheets carry no badge because *all* of them are on the path.
 
@@ -128,7 +128,7 @@ An honest accounting: the full course is **~820k words across 18 modules**, far 
 - **Lesson 4.1**, the complete RESHADED walkthrough (TinyURL); it's the template every other Module 4 problem reuses.
 - **Module 18**, the capstone plus the red-flags/strong-signals rubric. Read the rubric *before* your first mock.
 - **All cheat sheets**, they're the spaced-repetition layer; re-skim daily.
-- **Deep-read these Module 4 problems**, the clusters that show up most in Director loops: **4.2-4.5** (Pastebin, rate limiter, Instagram, Twitter/feed), **4.7** (Typeahead), **4.8** (Uber/proximity), and **4.14-4.16** (Ticketmaster, job scheduler, LLM serving).
+- **Deep-read these Module 4 problems**, the clusters that show up most in Director loops: **4.2-4.5** (Pastebin, rate limiter, Instagram, Twitter/feed), **4.7** (Typeahead), **4.8** (Uber/proximity), and **4.14-4.16** (Ticketmaster, job scheduler, LLM serving). Then drill **4.19, the Opening Bank**: fifty unseen prompts, each answered to a 90-second RESHADED opening, the recognition-speed rep the walkthroughs can't give you.
 
 **Crux-only: 4.9-4.13** (Dropbox, YouTube, Maps, web crawler, notifications, rarer in Director loops). Read each one's crux row in the Module 4 cheat sheet and rehearse defending it out loud; open the full lesson only where the defense doesn't come.
 
