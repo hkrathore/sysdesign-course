@@ -185,7 +185,7 @@ Visual style for widgets: **theme-aware — must match the selected Starlight li
 
 Provenance note: 8.10, 8.11, 9.1–9.6 were authored on Sonnet (validated template, spot-checked); everything else in 7–10 on Opus. Modules 11–12 were authored by Opus background subagents from a detailed per-lesson spec, then spot-checked (deep reads of 11.1/11.3/11.12/12.1; structure + fact + cross-ref checks across the rest). Modules 13–14 were authored the same way: anchors 13.1 + 14.1 hand-written by Opus to set the voice bar, the remaining 17 lessons + 2 cheat sheets by Opus background subagents from detailed per-lesson specs, then em-dash density normalized to the house comma-style via a deterministic word-count-preserving transform, and spot-checked (deep read of 13.4; structure + cross-ref checks across the rest). Site is **197 pages, builds clean** (local build needs Node ≥22.12 — repo uses node@22). Modules 11 (Client & Mobile) and 12 (Multi-Tenancy & SaaS) were added in the July 2026 pass by 12 concurrent Opus subagents from per-lesson specs, then verified (structure, 0 em-dashes, build) and spot-checked; a few lessons ran slightly over the §7 word budget and were trimmed back.
 
-**Remaining (optional):** personalized leadership story-bank working session (extract the user's real stories against the 10.3 matrix); a few Module 8 lessons (8.8, 8.9) run ~6k words, slightly over budget — trim if revisited.
+**Remaining (optional):** a few Module 8 lessons (8.8, 8.9) run ~6k words, slightly over budget — trim if revisited. (A leadership story-bank working session remains available as a *conversation* activity, but it is personal prep, not course content — see the voice rule in §11.)
 
 ## 10. How to generate the next lesson (procedure for Claude Code)
 
@@ -206,4 +206,5 @@ Provenance note: 8.10, 8.11, 9.1–9.6 were authored on Sonnet (validated templa
 - Is "what interviewers probe" pitched at Director altitude, not IC trivia?
 - Is the analogy genuinely illuminating, placed before the jargon?
 - No filler, no marketing tone, no repetition with earlier lessons.
+- **The course is a public artifact for any learner (July 2026 rule): never personalize course content.** Second-person instructional voice ("you", "your stories") is correct; author-to-reader offers ("we can run a session", "ask me"), references to a specific user, or content tailored to one person's situation are not. Personal prep happens in conversation, never on the site.
 - All widget content original; no copyrighted text, lyrics, or article reproduction.
