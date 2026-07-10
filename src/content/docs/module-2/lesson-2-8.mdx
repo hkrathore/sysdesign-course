@@ -96,6 +96,10 @@ This is the dial the CAP/PACELC lesson promised: cranking `W` and `R` up to sati
 
 A **strict** quorum talks to the key's **home replicas**, the N nodes that own that key's slice of the ring, and **refuses the write** when W of them are unreachable (the CP move). A **sloppy** quorum instead accepts the write on the first N *reachable* nodes, even if some aren't home replicas; the stand-ins store a **hint** and forward the write home when the owner recovers (**hinted handoff**), which is how Dynamo/Cassandra stay write-available through failures.
 
+![Two panels: under a strict quorum, with two of the three home replicas unreachable a W=2 write is refused; under a sloppy quorum the write is accepted on healthy replica A plus stand-in node D, which stores a hint and replays the write to home replica B when it recovers](../../../assets/images/module-2/sloppy-quorum-hinted-handoff.png)
+
+*Sloppy quorum keeps accepting writes by parking them on a stand-in with a hint; until handoff replays them home, the overlap guarantee is suspended.*
+
 **The trade, in one line: a sloppy quorum buys write availability by suspending the `W + R > N` guarantee, a home-set read can miss the write until hinted handoff completes.** Right call for a feed or cart write (a brief recency gap is invisible); wrong call for a balance decrement that must read-its-own-write immediately. The rejected alternative, strict quorum, preserves recency but refuses writes during the failure. Naming this trade is the most-missed nuance on the topic.
 
 ### Diagram: the quorum decision and where the guarantee lives

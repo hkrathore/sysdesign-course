@@ -23,6 +23,10 @@ The network is a **postal system.** DNS is the *address book*, it turns a human 
 3. **TLS handshake**, ~1 RTT (round-trip time) with TLS 1.3 (down from 2 in TLS 1.2); **0-RTT resumption** for returning clients. On a cross-region path each RTT is ~150 ms, so handshakes alone can dominate first-byte latency.
 4. **HTTP exchange**, HTTP/1.1 (head-of-line blocking per connection) → HTTP/2 (multiplexed streams over one connection) → HTTP/3 (QUIC over UDP, removes TCP head-of-line blocking, faster on lossy/mobile links).
 
+![Timeline comparing connection setup costs: a cold cross-region connection pays DNS, then one round trip each for TCP, TLS 1.3, and the HTTP request, reaching first byte at roughly 450 ms; a warm connection pays one round trip; an edge-terminated connection completes handshakes in 10-30 ms near the user](../../../assets/images/module-2/connection-tax.png)
+
+*The connection tax: a cold cross-region connection pays three ~150 ms round trips before first byte, a warm one pays one, and edge termination shrinks the handshakes to ~10-30 ms.*
+
 **DNS as a control plane, not just a phonebook.** Record types you should name: A/AAAA (IPv4/IPv6), CNAME (alias), NS, MX. The **TTL trade-off** is the interview point: a *low* TTL means fast failover (you can repoint traffic in seconds) but more lookups and resolver load (every sender re-checks the address book); a *high* TTL means fewer lookups but **slow propagation** when you need to drain a dead region. **GeoDNS / latency-based routing** steers users to the nearest healthy region; **anycast** advertises one IP from many locations so the network routes to the closest, both are how global services cut RTT and survive regional loss.
 
 **Forward vs. reverse proxy:**

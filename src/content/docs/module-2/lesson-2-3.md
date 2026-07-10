@@ -25,6 +25,10 @@ An index is the **index at the back of a textbook.** Without it you scan every p
 
 **LSM-tree (Log-Structured Merge):** writes are cheap **sequential appends** (recall: sequential ≫ random), batched in memory and flushed as immutable, sorted **SSTables** (a stack of sticky notes filed in one go). Reads may have to check several files (**read amplification**), mitigated by **Bloom filters**; background **compaction** merges files and discards dead keys (the batched reorg into the master index). Compaction strategy (size-tiered vs leveled) is a write-vs-read/space knob, name the trade, then hand the tuning to the storage team. Used by Cassandra, RocksDB, LevelDB, HBase, Bigtable, ScyllaDB, write-optimized.
 
+![Side-by-side anatomy of the two engines: a B-tree of sorted pages edited in place with a WAL, linked leaves serving range scans; and an LSM tree where writes append to a WAL plus in-memory memtable, flush as immutable SSTables carrying Bloom filters, and background compaction merges files while reads check newest to oldest](../../../assets/images/module-2/btree-vs-lsm.png)
+
+*The anatomy behind the trade: B-trees edit sorted pages in place (cheap reads, random-I/O writes); LSM appends and defers ordering to compaction (cheap sequential writes, amplified reads).*
+
 <details>
 <summary>Go deeper, write/read path mechanics and compaction strategies (IC depth, optional)</summary>
 
