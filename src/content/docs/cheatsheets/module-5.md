@@ -1,6 +1,6 @@
 ---
 title: "Module 5 - Business-Domain Problems Cheat Sheet"
-description: "The load-bearing decision and canonical one-line answer for all 14 business-domain problems, money, marketplaces, streaming, and the single-component deep dive, on one page."
+description: "The load-bearing decision and canonical one-line answer for all 15 business-domain problems, money, marketplaces, streaming, and the single-component deep dive, on one page."
 sidebar:
   order: 5
 ---
@@ -13,7 +13,7 @@ sidebar:
 
 ---
 
-## The 14 cruxes (memorize the right column)
+## The 15 cruxes (memorize the right column)
 
 | # | Problem | The load-bearing decision | Canonical Director answer |
 |---|---|---|---|
@@ -31,6 +31,7 @@ sidebar:
 | 5.12 | **Metrics & Monitoring** | Write rate, or cardinality? | **Cardinality is the cost function**, active series = hosts × series/host (10K×1K = **10M**); one unbounded label (`user_id`) → billions (extinction). Separate write firehose (AP) from read/alert. Retention tiers cut storage 30-360×. Close on build-vs-buy crossover. |
 | 5.13 | **Design Kafka** | Where do durability/ordering/delivery knobs sit? | **Partitioned, replicated, append-only log; ordering is per-partition ONLY** (the key sets partition + ordering scope). Durability = `acks=all` + ISR + `min.insync.replicas`. At-least-once + downstream idempotency. Delegate segments/page-cache/zero-copy; keep the contracts. |
 | 5.14 | **Distributed Cache / KV** | Eventual + read-repair, or strong quorum? | **Per-request tunable** (Dynamo insight): eventual+read-repair for look-aside cache, strong quorum (W+R>N) for source-of-truth KV, same cluster. Consistent hashing + vnodes (never `mod N`). **Name the 3 failure modes: hot keys, thundering herd, resharding.** Cost = RAM × RF. |
+| 5.15 | **Review Keyword Search** | Is this even a distributed system? | **Do the arithmetic first: 100M × 10 words = 1B postings ≈ 4 GB raw ≈ 1 GB compressed + ~5 GB docs = one machine, 3 replicas, no sharding.** Requirement is **boolean AND, no ranking** (strips TF/positions/phrases). Correct typos at **query time** vs the 2.6 MB dictionary, never at index time. Intersect **rarest-first**. Read-only deletes segments/refresh/merges/consistency entirely. |
 
 ---
 
@@ -44,6 +45,7 @@ sidebar:
 | **Connection state at extreme fan-out** (the fleet is the cost) | Live comments, Docs presence | Storage/QPS is trivial; the memory-bound socket fleet dominates cost → transport choice (SSE vs WS) is a budget decision. Degradation is a spec. |
 | **Cardinality / streaming volume** | Metrics, Ad clicks, Top-K, Kafka | The cost function is *number of series* or *exactly-once over a firehose*, not the write rate. Speed-vs-truth split; retention tiers; approximate where exact isn't paid for. |
 | **Untrusted execution + burst** | Online judge | Skew is trusted control plane vs untrusted execution plane. Isolation by blast radius; pre-warm for scheduled spikes. Generalizes to CI/FaaS/agent sandboxes. |
+| **None of the above, the working set is small** (the scale illusion) | Review keyword search | Do the arithmetic *before* the architecture: 1B postings ≈ 1 GB compressed, so replicate one in-memory artifact instead of sharding. Read-only removes the write path and the consistency model entirely. |
 
 ---
 
@@ -80,6 +82,7 @@ sidebar:
 | Metrics | **active series = 10K hosts × 1K series = 10M** (the cost function) · ~1M samples/s firehose · retention tiers (10 s→1 m→1 h) cut storage **30-360×** · build-vs-buy flips ~$4-5M/yr (~2× team cost) |
 | Kafka | ~1 GB/s sequential → **~10 brokers** · ~2 PB at 7-day retention · **ordering per-partition only** · RF=3, `min.insync.replicas`=2 · sub-second ISR leader election, no acknowledged loss |
 | Cache / KV | ~1 TB working set ×3 RF = **~4 TB RAM, ~20 nodes** · cost **~$20-30K/mo** (RAM × RF is the dial) · p99 <1 ms intra-AZ · one hot key at 2M reads/s is the problem, not 2M total |
+| Review Search | **1B postings** (100M × 10 words) × 4 B = **4 GB raw → ~1-1.5 GB compressed** · dictionary **2.6 MB** (130k terms) · docs ~5 GB · **~7 GB total = one box, 3 replicas, ~$1K/mo** · ~2 cores at 1K QPS · `the` in ~60M docs (Zipf head is the cost) |
 
 ---
 
@@ -108,4 +111,4 @@ sidebar:
 
 ---
 
-> **Spaced-repetition recap:** 14 problems, 14 cruxes. **Money triad** (Payments, Wallet, Ad-billing) = idempotency key (written before the external call) + immutable ledger (debits=credits, append-only) + reconciliation as architecture; integers for money. **Contention via CAS not locks** = Hotel (count-decrement + overbooking knob), Auction (CAS-on-max, no lock). **Do-NOT-distribute** = Exchange (single-threaded engine per symbol) + Docs (CRDT, delegate the proof). **Speed-vs-truth split** = Ad clicks (ask billing-or-analytics, two paths one firehose) + Top-K (CMS vs exact recompute). **The fleet/cardinality is the cost** = Live comments (SSE over WS, degradation ladder) + Metrics (cardinality = cost function, retention tiers). **Component-round gates** = Kafka (ordering per-partition only, delegate the storage engine) + Cache/KV (per-request tunable consistency, name hot-key/herd/resharding, cost = RAM × RF). Always: classify the binding constraint first (correctness / contention / serialization / fan-out / cardinality), CAS over locks, name the trade + rejected alternative, price the cost line, and **keep the policy while delegating the mechanism with a stated prior.**
+> **Spaced-repetition recap:** 15 problems, 15 cruxes. **Money triad** (Payments, Wallet, Ad-billing) = idempotency key (written before the external call) + immutable ledger (debits=credits, append-only) + reconciliation as architecture; integers for money. **Contention via CAS not locks** = Hotel (count-decrement + overbooking knob), Auction (CAS-on-max, no lock). **Do-NOT-distribute** = Exchange (single-threaded engine per symbol) + Docs (CRDT, delegate the proof). **Speed-vs-truth split** = Ad clicks (ask billing-or-analytics, two paths one firehose) + Top-K (CMS vs exact recompute). **The fleet/cardinality is the cost** = Live comments (SSE over WS, degradation ladder) + Metrics (cardinality = cost function, retention tiers). **Component-round gates** = Kafka (ordering per-partition only, delegate the storage engine) + Cache/KV (per-request tunable consistency, name hot-key/herd/resharding, cost = RAM × RF). **Scale illusion** = Review Search (1B postings ≈ 1 GB compressed, so one box + replicas, not a cluster; boolean AND with no ranking; correct at query time). Always: classify the binding constraint first (correctness / contention / serialization / fan-out / cardinality), CAS over locks, name the trade + rejected alternative, price the cost line, and **keep the policy while delegating the mechanism with a stated prior.**
